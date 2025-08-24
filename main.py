@@ -20,7 +20,7 @@ app = FastAPI()
 # Allow requests from WordPress
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # replace "*" with ["https://your-wordpress-site.com"] in production
+    allow_origins=["*"],  # or ["https://your-wordpress-site.com"]
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
