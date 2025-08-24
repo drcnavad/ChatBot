@@ -20,19 +20,20 @@ app = FastAPI()
 # CORS for your WordPress site
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # replace "*" with ["https://your-wordpress-site.com"] in production
+    allow_origins=["*"],  # Replace "*" with ["https://your-wordpress-site.com"] in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Simple in-memory conversation store (per session if needed)
-conversations = {}
-
 @app.get("/")
 def root():
     return {"status": "FastAPI running!", "note": "Chat endpoint is /chat (POST only)"}
 
+# Session-based conversation store
+sessions = {}
+
+# WooCommerce order status
 def get_order_status(order_number):
     url = f"{WC_SITE}/wp-json/wc/v3/orders/{order_number}"
     resp = requests.get(url, auth=(WC_KEY, WC_SECRET))
@@ -41,6 +42,7 @@ def get_order_status(order_number):
         return f"Your order #{order_number} is currently '{order['status']}'."
     return f"Sorry, I could not find order #{order_number}."
 
+# WooCommerce product search
 def get_products(keyword):
     url = f"{WC_SITE}/wp-json/wc/v3/products"
     params = {"search": keyword}
@@ -57,6 +59,7 @@ def get_products(keyword):
         return result
     return []
 
+# LLaMA query
 def query_llama(messages):
     try:
         response = requests.post(
@@ -76,32 +79,48 @@ def query_llama(messages):
     except:
         return {"reply": "Sorry, I couldn't process your request."}
 
+# Chat endpoint
 @app.post("/chat")
 async def chat(request: Request):
     data = await request.json()
     user_message = data.get("message", "")
+    session_id = data.get("session_id", "default")
 
-    # Order status
+    if session_id not in sessions:
+        sessions[session_id] = []
+
+    # Append user message to session
+    sessions[session_id].append({"role": "user", "content": user_message})
+
+    # 1️⃣ Order status
     if "order" in user_message.lower() or "track" in user_message.lower():
         match = re.search(r'\b\d{3,10}\b', user_message)
         if match:
             order_number = match.group()
-            return {"reply": get_order_status(order_number)}
+            reply_text = get_order_status(order_number)
+            sessions[session_id].append({"role": "assistant", "content": reply_text})
+            return {"reply": reply_text}
         else:
-            return {"reply": "Please provide your order number to check status."}
+            reply_text = "Please provide your order number to check status."
+            sessions[session_id].append({"role": "assistant", "content": reply_text})
+            return {"reply": reply_text}
 
-    # Product search
+    # 2️⃣ Product search
     product_keywords = ["product", "cable", "charger", "phone", "accessory"]
     if any(word in user_message.lower() for word in product_keywords):
         products = get_products(user_message)
         if products:
+            # Store bot reply as product list
+            sessions[session_id].append({"role": "assistant", "content": str(products)})
             return products
         else:
-            return {"reply": f"Sorry, no products found for '{user_message}'."}
+            reply_text = f"Sorry, no products found for '{user_message}'."
+            sessions[session_id].append({"role": "assistant", "content": reply_text})
+            return {"reply": reply_text}
 
-    # LLaMA fallback (chat)
-    messages = [
-        {"role": "system", "content": "You are a helpful shopping assistant."},
-        {"role": "user", "content": user_message}
-    ]
-    return query_llama(messages)
+    # 3️⃣ Fallback to LLaMA
+    llama_response = query_llama(sessions[session_id])
+    # Append bot reply to session
+    if "reply" in llama_response:
+        sessions[session_id].append({"role": "assistant", "content": llama_response["reply"]})
+    return llama_response
