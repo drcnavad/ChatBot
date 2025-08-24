@@ -3,6 +3,9 @@ import requests
 from dotenv import load_dotenv
 import os
 
+
+
+
 # Load .env automatically
 load_dotenv()
 
@@ -10,6 +13,15 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 app = FastAPI()
+
+# 👇 Add this right after creating the app
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # or replace "*" with ["https://your-wordpress-site.com"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Root GET route for health check
 @app.get("/")
