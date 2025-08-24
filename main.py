@@ -4,8 +4,9 @@ import requests
 from dotenv import load_dotenv
 import os
 import re
+import json
 
-# Load .env
+# Load environment variables
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -16,7 +17,7 @@ WC_SECRET = os.getenv("WC_SECRET")
 
 app = FastAPI()
 
-# Enable CORS for WordPress
+# Allow requests from WordPress
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # replace "*" with ["https://your-wordpress-site.com"] in production
@@ -29,25 +30,7 @@ app.add_middleware(
 def root():
     return {"status": "FastAPI running!", "note": "Chat endpoint is /chat (POST only)"}
 
-def get_products(keyword=None):
-    url = f"{WC_SITE}/wp-json/wc/v3/products"
-    params = {}
-    if keyword:
-        params["search"] = keyword  # filter products by keyword
-    resp = requests.get(url, auth=(WC_KEY, WC_SECRET), params=params)
-    if resp.status_code == 200:
-        products = resp.json()
-        # Convert to format for chat widget
-        result = []
-        for p in products:
-            result.append({
-                "title": p["name"],
-                "image": p["images"][0]["src"] if p.get("images") else "",
-                "price": p["price_html"] if "price_html" in p else p["price"]
-            })
-        return result
-    return []
-
+# WooCommerce order status
 def get_order_status(order_number):
     url = f"{WC_SITE}/wp-json/wc/v3/orders/{order_number}"
     resp = requests.get(url, auth=(WC_KEY, WC_SECRET))
@@ -55,79 +38,73 @@ def get_order_status(order_number):
         order = resp.json()
         return f"Your order #{order_number} is currently '{order['status']}'."
     else:
-        return "Sorry, I could not find your order. Please check the number."
+        return f"Sorry, I could not find your order #{order_number}."
 
+# WooCommerce product search
+def get_products(keyword):
+    url = f"{WC_SITE}/wp-json/wc/v3/products"
+    params = {"search": keyword}
+    resp = requests.get(url, auth=(WC_KEY, WC_SECRET), params=params)
+    if resp.status_code == 200:
+        products = resp.json()
+        result = []
+        for p in products:
+            result.append({
+                "title": p["name"],
+                "image": p["images"][0]["src"] if p.get("images") else "",
+                "price": p.get("price_html", p.get("price", "N/A"))
+            })
+        return result
+    return []
+
+# Query LLaMA via Groq
 def query_llama(user_message):
-    response = requests.post(
-        GROQ_URL,
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-        json={
-            "model": "llama3-70b-8192",
-            "messages": [
-                {
-                    "role": "system",
-                    "content": """
-                    You are a helpful shopping assistant.
-                    If user asks for product suggestions, return JSON array format:
-                    [
-                        {"title": "Product Name", "image": "https://link-to-image", "price": "$XX.XX"},
-                        {"title": "Another Product", "image": "https://link-to-image", "price": "$YY.YY"}
-                    ]
-                    For FAQs or general chat, return JSON object:
-                    {"reply": "Your text response here"}
-                    Do NOT include any explanations outside JSON.
-                    """
-                },
-                {"role": "user", "content": user_message}
-            ]
-        }
-    )
-
     try:
+        response = requests.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json={
+                "model": "llama3-70b-8192",
+                "messages": [
+                    {"role": "system",
+                     "content": "You are a helpful shopping assistant. Return structured JSON only."},
+                    {"role": "user", "content": user_message}
+                ]
+            }
+        )
         data = response.json()
-        content = data.choices[0].message.content
+        content = data["choices"][0]["message"]["content"]
         try:
-            return JSON_parse_safe(content)
+            return json.loads(content)
         except:
             return {"reply": content}
-    except Exception as e:
+    except:
         return {"reply": "Sorry, I couldn't process your request."}
 
-def JSON_parse_safe(content):
-    import json
-    try:
-        return json.loads(content)
-    except:
-        return {"reply": content}
-
+# Chat endpoint
 @app.post("/chat")
 async def chat(request: Request):
     data = await request.json()
     user_message = data.get("message", "")
 
-    # Check if the user is asking about order status
+    # 1️⃣ Check for order status request
     if "order" in user_message.lower() or "track" in user_message.lower():
-        match = re.search(r'\b\d{3,10}\b', user_message)  # extract order number
+        match = re.search(r'\b\d{3,10}\b', user_message)
         if match:
             order_number = match.group()
-            bot_reply = get_order_status(order_number)
-            return {"reply": bot_reply}
+            return {"reply": get_order_status(order_number)}
         else:
             return {"reply": "Please provide your order number so I can check it."}
-        
-    # Detect if user is asking for product list
-     # 1️⃣ Detect if message is about products
-    product_keywords = ["product", "cable", "charger", "phone", "accessory", "phone accessories"]  # add more if needed
-    
+
+    # 2️⃣ Check for product search
+    product_keywords = ["product", "cable", "charger", "phone", "accessory"]
     if any(word in user_message.lower() for word in product_keywords):
-        keyword = user_message  # use the whole message as search keyword
+        keyword = user_message  # use entire message as search keyword
         products = get_products(keyword)
         if products:
-            return products  # send product array to frontend
+            return products  # return array of products
         else:
             return {"reply": f"Sorry, no products found for '{keyword}'."}
 
-
-    # For everything else, query LLaMA
-    bot_reply = query_llama(user_message)
-    return bot_reply
+    # 3️⃣ Fallback to LLaMA/Groq for general chat
+    return query_llama(user_message)
