@@ -3,19 +3,23 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 from dotenv import load_dotenv
 import os
+import re
 
-# Load .env automatically
+# Load .env
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+WC_SITE = os.getenv("WC_SITE")
+WC_KEY = os.getenv("WC_KEY")
+WC_SECRET = os.getenv("WC_SECRET")
 
 app = FastAPI()
 
-# Enable CORS so your WordPress site can call the API
+# Enable CORS for WordPress
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # for testing, allow all; later replace "*" with ["https://your-wordpress-site.com"]
+    allow_origins=["*"],  # replace "*" with ["https://your-wordpress-site.com"] in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -25,12 +29,16 @@ app.add_middleware(
 def root():
     return {"status": "FastAPI running!", "note": "Chat endpoint is /chat (POST only)"}
 
-@app.post("/chat")
-async def chat(request: Request):
-    data = await request.json()
-    user_message = data.get("message", "")
+def get_order_status(order_number):
+    url = f"{WC_SITE}/wp-json/wc/v3/orders/{order_number}"
+    resp = requests.get(url, auth=(WC_KEY, WC_SECRET))
+    if resp.status_code == 200:
+        order = resp.json()
+        return f"Your order #{order_number} is currently '{order['status']}'."
+    else:
+        return "Sorry, I could not find your order. Please check the number."
 
-    # Call Groq API
+def query_llama(user_message):
     response = requests.post(
         GROQ_URL,
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
@@ -41,18 +49,14 @@ async def chat(request: Request):
                     "role": "system",
                     "content": """
                     You are a helpful shopping assistant.
-                    
-                    - If user asks for product suggestions, return JSON array format:
-                      [
+                    If user asks for product suggestions, return JSON array format:
+                    [
                         {"title": "Product Name", "image": "https://link-to-image", "price": "$XX.XX"},
                         {"title": "Another Product", "image": "https://link-to-image", "price": "$YY.YY"}
-                      ]
-                    
-                    - If user asks for anything else (like greetings, questions, order status, etc.),
-                      return JSON object format:
-                      {"reply": "Your text response here"}
-                      
-                    Do NOT include explanations outside JSON. Only valid JSON output is allowed.
+                    ]
+                    For FAQs or general chat, return JSON object:
+                    {"reply": "Your text response here"}
+                    Do NOT include any explanations outside JSON.
                     """
                 },
                 {"role": "user", "content": user_message}
@@ -61,6 +65,37 @@ async def chat(request: Request):
     )
 
     try:
-        return response.json()
+        data = response.json()
+        content = data.choices[0].message.content
+        try:
+            return JSON_parse_safe(content)
+        except:
+            return {"reply": content}
     except Exception as e:
-        return {"reply": "Sorry, I couldn't process the request.", "error": str(e)}
+        return {"reply": "Sorry, I couldn't process your request."}
+
+def JSON_parse_safe(content):
+    import json
+    try:
+        return json.loads(content)
+    except:
+        return {"reply": content}
+
+@app.post("/chat")
+async def chat(request: Request):
+    data = await request.json()
+    user_message = data.get("message", "")
+
+    # Check if the user is asking about order status
+    if "order" in user_message.lower() or "track" in user_message.lower():
+        match = re.search(r'\b\d{3,10}\b', user_message)  # extract order number
+        if match:
+            order_number = match.group()
+            bot_reply = get_order_status(order_number)
+            return {"reply": bot_reply}
+        else:
+            return {"reply": "Please provide your order number so I can check it."}
+
+    # For everything else, query LLaMA
+    bot_reply = query_llama(user_message)
+    return bot_reply
