@@ -29,6 +29,25 @@ app.add_middleware(
 def root():
     return {"status": "FastAPI running!", "note": "Chat endpoint is /chat (POST only)"}
 
+def get_products(keyword=None):
+    url = f"{WC_SITE}/wp-json/wc/v3/products"
+    params = {}
+    if keyword:
+        params["search"] = keyword  # filter products by keyword
+    resp = requests.get(url, auth=(WC_KEY, WC_SECRET), params=params)
+    if resp.status_code == 200:
+        products = resp.json()
+        # Convert to format for chat widget
+        result = []
+        for p in products:
+            result.append({
+                "title": p["name"],
+                "image": p["images"][0]["src"] if p.get("images") else "",
+                "price": p["price_html"] if "price_html" in p else p["price"]
+            })
+        return result
+    return []
+
 def get_order_status(order_number):
     url = f"{WC_SITE}/wp-json/wc/v3/orders/{order_number}"
     resp = requests.get(url, auth=(WC_KEY, WC_SECRET))
@@ -95,6 +114,19 @@ async def chat(request: Request):
             return {"reply": bot_reply}
         else:
             return {"reply": "Please provide your order number so I can check it."}
+        
+    # Detect if user is asking for product list
+     # 1️⃣ Detect if message is about products
+    product_keywords = ["product", "cable", "charger", "phone", "accessory", "phone accessories"]  # add more if needed
+    
+    if any(word in user_message.lower() for word in product_keywords):
+        keyword = user_message  # use the whole message as search keyword
+        products = get_products(keyword)
+        if products:
+            return products  # send product array to frontend
+        else:
+            return {"reply": f"Sorry, no products found for '{keyword}'."}
+
 
     # For everything else, query LLaMA
     bot_reply = query_llama(user_message)
