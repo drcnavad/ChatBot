@@ -117,7 +117,7 @@ def generate_ai_summary(ticker, stock_data, df):
                     "In a new paragraph, ending statement must include a bullish or bearish recommendation with reasoning starting with: AI Opinion: ")},
             {"role": "user",
             "content": (
-                    "Analyze stock data. Focus on Signal, Moving Averages, RSI, MACD, Balance Sheet Score, and Trend Analysis."
+                    "Analyze stock data. Focus on Signal, Moving Averages, Balance Sheet Score, and Trend Analysis."
                     "Balance Sheet Score ranges from -15 (worst) to 15 (best)."
                     "Complete the analysis with a bullish or bearish recommendation with reasoning."
                     f"{context}")}
