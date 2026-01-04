@@ -24,47 +24,103 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def build_trend_deltas(df, ticker, windows=(14, 50, 200)):
+    """
+    Build compact trend-difference rows for LLM context.
+    Returns a list of dicts, one per window.
+    """
+    recent = df[df["Symbol"] == ticker].sort_values("Date")
+    latest = recent.iloc[-1]
+
+    rows = []
+
+    for w in windows:
+        if len(recent) < w:
+            continue
+
+        past = recent.iloc[-w]
+
+        row = {
+            "window_days": w,
+            "price_change_pct": round(
+                (latest["Close"] / past["Close"] - 1) * 100, 2
+            ),
+            "rsi_change": round(
+                latest["RSI Options Rate"] - past["RSI Options Rate"], 2
+            ),
+            "macd_change": round(
+                latest["macd"] - past["macd"], 4
+            ),
+            "ma30_diff_pct": round(
+                (latest["Close"] - latest["ma_30"]) / latest["ma_30"] * 100, 2
+            ),
+            "ma200_diff_pct": round(
+                (latest["Close"] - latest["ma_200"]) / latest["ma_200"] * 100, 2
+            ),
+            "above_ma200_days_pct": round(
+                (recent.tail(w)["Close"] > recent.tail(w)["ma_200"]).mean() * 100, 1
+            )
+        }
+
+        rows.append(row)
+
+    return rows
+
+
+def format_trend_rows(trend_rows):
+    text = "Trend Deltas:\n"
+    for r in trend_rows:
+        text += (
+            f"Last {r['window_days']} days: "
+            f"Price {r['price_change_pct']}%, "
+            f"RSI change {r['rsi_change']}, "
+            f"MACD change {r['macd_change']}, "
+            f"Price vs MA30 {r['ma30_diff_pct']}%, "
+            f"Price vs MA200 {r['ma200_diff_pct']}%, "
+            f"Above MA200 {r['above_ma200_days_pct']}% of days\n"
+        )
+    return text
+
 # st.text("Using model: meta-llama/Meta-Llama-3-8B-Instruct")
 
-def generate_ai_summary(ticker, stock_data):
+def generate_ai_summary(ticker, stock_data, df):
     """Generate AI summary using Hugging Face Llama-3 model"""
     try:
         client = InferenceClient(token=HF_TOKEN)
 
         context = f"""Stock: {ticker}
-Date: {stock_data['Date'].strftime('%Y-%m-%d')}
-Price: ${stock_data['Close']:.2f}
-Signal: {stock_data['final_trade']}
-Combined Score: {stock_data['combined_signal']:.2f}
-RSI: {stock_data.get('RSI Options Rate', 'N/A')}
-MACD: {stock_data.get('macd', 'N/A')}
-MA 30: ${stock_data.get('ma_30', 'N/A')}
-MA 50: ${stock_data.get('ma_50', 'N/A')}
-MA 100: ${stock_data.get('ma_100', 'N/A')}
-MA 200: ${stock_data.get('ma_200', 'N/A')}
-Balance Sheet Score: {stock_data.get('Fundamental_Weight', 'N/A')}
-"""
+                    Date: {stock_data['Date'].strftime('%Y-%m-%d')}
+                    Price: ${stock_data['Close']:.2f}
+                    Signal: {stock_data['final_trade']}
+                    Combined Score: {stock_data['combined_signal']:.2f}
+                    RSI: {stock_data.get('RSI Options Rate', 'N/A')}
+                    MACD: {stock_data.get('macd', 'N/A')}
+                    MA 30: ${stock_data.get('ma_30', 'N/A')}
+                    MA 50: ${stock_data.get('ma_50', 'N/A')}
+                    MA 100: ${stock_data.get('ma_100', 'N/A')}
+                    MA 200: ${stock_data.get('ma_200', 'N/A')}
+                    Balance Sheet Score: {stock_data.get('Fundamental_Weight', 'N/A')}
+                    """
+        # Add trend analysis to context
+        trend_rows = build_trend_deltas(df, ticker, windows=(14, 50, 200))
+        trend_text = format_trend_rows(trend_rows)
+
+        context += f"\n{trend_text}"
+
 
         messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a financial advisor. Respond in 4 bullet points and each bullet point must be on a new line. Keep numbers and units intact." 
+            {"role": "system",
+            "content": ("You are a financial advisor. Respond in 4 bullet points and each bullet point must be on a new line. Keep numbers and units intact." 
                     "Each bullet point must be on a new line. Do not split words. Do not use dashes." 
                     "Always double check below or above context for the stock price. example: The Moving Averages analysis shows that MA 10, MA 30, MA 100, and MA 200 are below the current price, and MA 50 is above the current price. This suggests a short-term bullish trend and a long-term bearish trend."
                     "Make sure words are not broken up."
-                    "In a new paragraph, ending statement must include a bullish or bearish recommendation with reasoning starting with: AI Opinion: "
-                )
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Analyze stock data. Focus on Signal, Moving Averages, RSI, MACD, and Balance Sheet Score."
+                    "In a new paragraph, ending statement must include a bullish or bearish recommendation with reasoning starting with: AI Opinion: ")},
+            {"role": "user",
+            "content": (
+                    "Analyze stock data. Focus on Signal, Moving Averages, RSI, MACD, Balance Sheet Score, and Trend Analysis."
                     "Balance Sheet Score ranges from -15 (worst) to 15 (best)."
                     "Complete the analysis with a bullish or bearish recommendation with reasoning."
-                    f"{context}"
-                )
-            }
+                    f"{context}")}
         ]
 
         response = client.chat_completion(
@@ -231,7 +287,7 @@ if df is not None:
         if not ticker_data.empty:
             latest = ticker_data.sort_values('Date', ascending=False).iloc[0]
             with st.spinner(f"Generating AI summary for {ticker}..."):
-                summary = generate_ai_summary(ticker, latest)
+                summary = generate_ai_summary(ticker, latest, df)
             
             with st.expander(f"🤖 AI Summary for {ticker}", expanded=True):
                 st.markdown(summary)
