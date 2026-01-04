@@ -90,15 +90,15 @@ def generate_ai_summary(ticker, stock_data, df):
 
         context = f"""Stock: {ticker}
                     Date: {stock_data['Date'].strftime('%Y-%m-%d')}
-                    Price: ${stock_data['Close']:.2f}
-                    Signal: {stock_data['final_trade']}
-                    Combined Score: {stock_data['combined_signal']:.2f}
+                    Price: {stock_data['Close']:.2f}
+                    Technical Score: {stock_data['combined_signal']:.2f}
                     RSI: {stock_data.get('RSI Options Rate', 'N/A')}
                     MACD: {stock_data.get('macd', 'N/A')}
-                    MA 30: ${stock_data.get('ma_30', 'N/A')}
-                    MA 50: ${stock_data.get('ma_50', 'N/A')}
-                    MA 100: ${stock_data.get('ma_100', 'N/A')}
-                    MA 200: ${stock_data.get('ma_200', 'N/A')}
+                    MA 10: {stock_data.get('ma_10', 'N/A')}
+                    MA 30: {stock_data.get('ma_30', 'N/A')}
+                    MA 50: {stock_data.get('ma_50', 'N/A')}
+                    MA 100: {stock_data.get('ma_100', 'N/A')}
+                    MA 200: {stock_data.get('ma_200', 'N/A')}
                     Balance Sheet Score: {stock_data.get('Fundamental_Weight', 'N/A')}
                     """
         # Add trend analysis to context
@@ -109,19 +109,28 @@ def generate_ai_summary(ticker, stock_data, df):
 
 
         messages = [
-            {"role": "system",
-            "content": ("You are a financial advisor. Respond in 4 bullet points and each bullet point must be on a new line. Keep numbers and units intact." 
-                    "Each bullet point must be on a new line. Do not split words. Do not use dashes." 
-                    "Always double check below or above context for the stock price. example: The Moving Averages analysis shows that MA 10, MA 30, MA 100, and MA 200 are below the current price, and MA 50 is above the current price. This suggests a short-term bullish trend and a long-term bearish trend."
-                    "Make sure words are not broken up."
-                    "In a new paragraph, ending statement must include a bullish or bearish recommendation with reasoning starting with: AI Opinion: ")},
-            {"role": "user",
+        {
+            "role": "system",
             "content": (
-                    "Analyze stock data. Focus on Signal, Moving Averages, Balance Sheet Score, and Trend Analysis."
-                    "Balance Sheet Score ranges from -15 (worst) to 15 (best)."
-                    "Complete the analysis with a bullish or bearish recommendation with reasoning."
-                    f"{context}")}
-        ]
+                "You are a financial advisor. Respond in 4 bullet points and each bullet point must be on a new line. "
+                "Keep numbers and units intact. Each bullet point must be on a new line. Do not split words. "
+                "Make sure words are not broken up."
+
+                "IMPORTANT MOVING AVERAGE RULE: "
+                "When comparing the current stock price to any moving average MA10 MA30 MA50 MA100 MA200 you MUST convert and compare the NUMERIC values before stating the trend. "
+            )
+        },
+        {
+            "role": "user",
+            "content": (
+                "Analyze stock data. Focus on Trend, Moving Averages, and Balance Sheet Score analysis. "
+                "Balance Sheet Score ranges from -15 worst to 15 best. "
+                "Complete the analysis with a mandatory AI recommendation for bullish or bearish prediction with reasoning. "
+                f"{context}"
+            )
+        }
+    ]
+
 
         response = client.chat_completion(
             model="meta-llama/Meta-Llama-3-8B-Instruct",
