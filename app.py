@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from huggingface_hub import InferenceClient
 from dotenv import load_dotenv
+import re
 
 st.text("Using model: meta-llama/Meta-Llama-3-8B-Instruct")
 
@@ -72,7 +73,7 @@ Balance Sheet Score: {stock_data.get('Fundamental_Weight', 'N/A')}
         response = client.chat_completion(
             model="meta-llama/Meta-Llama-3-8B-Instruct",
             messages=messages,
-            max_tokens=300,
+            max_tokens=400,
             temperature=0.3
         )
 
