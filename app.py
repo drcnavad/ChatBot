@@ -7,9 +7,6 @@ from plotly.subplots import make_subplots
 from huggingface_hub import InferenceClient
 from dotenv import load_dotenv
 import re
-
-st.text("Using model: meta-llama/Meta-Llama-3-8B-Instruct")
-
 # Load environment variables from .env file
 load_dotenv()
 
@@ -27,9 +24,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-
-from huggingface_hub import InferenceClient
-import re
+st.text("Using model: meta-llama/Meta-Llama-3-8B-Instruct")
 
 def generate_ai_summary(ticker, stock_data):
     """Generate AI summary using Hugging Face Llama-3 model"""
@@ -54,9 +49,11 @@ Balance Sheet Score: {stock_data.get('Fundamental_Weight', 'N/A')}
             {
                 "role": "system",
                 "content": (
-                    "You are a financial advisor. Provide only 4 bullet points. "
-                    "Each point must be on a new line."
-                    "The last bullet must include a bullish or bearish recommendation with reasoning."
+                    "You are a financial advisor. Respond in 4 bullet points. Keep numbers and units intact." 
+                    "Do not split words. Each bullet on a new line." 
+                    "Always double check below or above context for the stock price. example: The Moving Averages analysis shows that MA 10, MA 30, MA 100, and MA 200 are below the current price, and MA 50 is above the current price. This suggests a short-term bullish trend and a long-term bearish trend."
+                    "Make sure words are not broken up."
+                    "The last bullet must include a bullish or bearish recommendation with reasoning starting with: AI Opinion: ."
                 )
             },
             {
@@ -74,13 +71,13 @@ Balance Sheet Score: {stock_data.get('Fundamental_Weight', 'N/A')}
             model="meta-llama/Meta-Llama-3-8B-Instruct",
             messages=messages,
             max_tokens=400,
-            temperature=0.3
+            temperature=0.2
         )
 
-        summary = response.choices[0].message.content.strip()
+        summary_raw = response.choices[0].message.content.strip()
 
         # Clean artifacts just in case
-        summary = re.split(r'\[/?USER\]|Can you|Could you', summary)[0].strip()
+        summary = re.split(r'\[/?USER\]|Can you|Could you', summary_raw)[0].strip()
 
         return summary
 
