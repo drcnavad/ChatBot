@@ -24,7 +24,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.text("Using model: meta-llama/Meta-Llama-3-8B-Instruct")
+# st.text("Using model: meta-llama/Meta-Llama-3-8B-Instruct")
 
 def generate_ai_summary(ticker, stock_data):
     """Generate AI summary using Hugging Face Llama-3 model"""
@@ -49,11 +49,11 @@ Balance Sheet Score: {stock_data.get('Fundamental_Weight', 'N/A')}
             {
                 "role": "system",
                 "content": (
-                    "You are a financial advisor. Respond in 4 bullet points. Keep numbers and units intact." 
-                    "Do not split words. Each bullet on a new line." 
+                    "You are a financial advisor. Respond in 4 bullet points and each bullet point must be on a new line. Keep numbers and units intact." 
+                    "Each bullet point must be on a new line. Do not split words. Do not use dashes." 
                     "Always double check below or above context for the stock price. example: The Moving Averages analysis shows that MA 10, MA 30, MA 100, and MA 200 are below the current price, and MA 50 is above the current price. This suggests a short-term bullish trend and a long-term bearish trend."
                     "Make sure words are not broken up."
-                    "The last bullet must include a bullish or bearish recommendation with reasoning starting with: AI Opinion: ."
+                    "In a new paragraph, ending statement must include a bullish or bearish recommendation with reasoning starting with: AI Opinion: "
                 )
             },
             {
