@@ -95,17 +95,42 @@ def generate_ai_summary(ticker, stock_data, df):
     try:
         client = InferenceClient(token=HF_TOKEN)
 
+        # Calculate differences between current price and moving averages
+        current_price = stock_data['Close']
+        ma_differences = {}
+        ma_percentages = {}
+        
+        for ma_name in ['ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']:
+            ma_value = stock_data.get(ma_name)
+            if pd.notna(ma_value) and ma_value != 0:
+                diff = current_price - ma_value
+                diff_pct = (diff / ma_value) * 100
+                ma_differences[ma_name] = round(diff, 2)
+                ma_percentages[ma_name] = round(diff_pct, 2)
+            else:
+                ma_differences[ma_name] = 'N/A'
+                ma_percentages[ma_name] = 'N/A'
+
+        # Format MA differences for display
+        def format_ma_diff(diff, pct):
+            if diff == 'N/A' or pct == 'N/A':
+                return 'N/A'
+            return f"${diff:.2f} ({pct}%)"
+        
         context = f"""Stock: {ticker}
                     Date: {stock_data['Date'].strftime('%Y-%m-%d')}
-                    Price: {stock_data['Close']:.2f}
+                    Current Price: ${current_price:.2f}
                     Technical Score: {stock_data['combined_signal']:.2f}
                     RSI: {stock_data.get('RSI Options Rate', 'N/A')}
                     MACD: {stock_data.get('macd', 'N/A')}
-                    MA 10: {stock_data.get('ma_10', 'N/A')}
-                    MA 30: {stock_data.get('ma_30', 'N/A')}
-                    MA 50: {stock_data.get('ma_50', 'N/A')}
-                    MA 100: {stock_data.get('ma_100', 'N/A')}
-                    MA 200: {stock_data.get('ma_200', 'N/A')}
+                    
+                    Price vs Moving Averages (Difference):
+                    Price - MA10: {format_ma_diff(ma_differences['ma_10'], ma_percentages['ma_10'])}
+                    Price - MA30: {format_ma_diff(ma_differences['ma_30'], ma_percentages['ma_30'])}
+                    Price - MA50: {format_ma_diff(ma_differences['ma_50'], ma_percentages['ma_50'])}
+                    Price - MA100: {format_ma_diff(ma_differences['ma_100'], ma_percentages['ma_100'])}
+                    Price - MA200: {format_ma_diff(ma_differences['ma_200'], ma_percentages['ma_200'])}
+                    
                     Balance Sheet Score: {stock_data.get('Fundamental_Weight', 'N/A')}
                     """
         # Add trend analysis to context (only filter relevant data for this ticker)
@@ -122,17 +147,23 @@ def generate_ai_summary(ticker, stock_data, df):
             "content": (
                 "You are a financial advisor. Respond in 4 bullet points and each bullet point must be on a new line. "
                 "Keep numbers and units intact. Each bullet point must be on a new line. Do not split words. "
-                "Make sure words are not broken up."
-
-                "IMPORTANT MOVING AVERAGE RULE: "
-                "When comparing the current stock price to any moving average MA10 MA30 MA50 MA100 MA200 you MUST convert and compare the NUMERIC values before stating the trend. "
+                "Make sure words are not broken up. "
+                
+                "MOVING AVERAGE ANALYSIS RULES: "
+                "The data provides Price - MA differences in dollars and percentages. "
+                "Positive difference means price is ABOVE the moving average (bullish). "
+                "Negative difference means price is BELOW the moving average (bearish). "
+                "Use these pre-calculated differences to analyze the trend. "
+                "For example: 'Price - MA50: $5.23 (2.1%)' means current price is $5.23 above MA50, which is 2.1% higher. "
+                "Multiple MAs above price indicates strong bullish trend. Multiple MAs below price indicates bearish trend. "
             )
         },
         {
             "role": "user",
             "content": (
-                "Analyze stock data. Focus on Trend, Moving Averages, and Balance Sheet Score analysis. "
-                "Balance Sheet Score numbers range from -15 worst to 15 best. Ignore it if it's 0."
+                "Analyze stock data. Focus on Trend, Moving Averages (using the provided Price - MA differences), and Balance Sheet Score analysis. "
+                "Balance Sheet Score numbers range from -15 worst to 15 best. Ignore it if it's 0. "
+                "Use the Price - MA differences to determine if the stock is above or below each moving average. "
                 "Complete the analysis with a mandatory AI recommendation for bullish or bearish prediction with reasoning. "
                 f"{context}"
             )
