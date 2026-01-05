@@ -159,21 +159,23 @@ def generate_ai_summary(ticker, stock_data, df):
                 "Keep numbers and units intact. Each bullet point must be on a new line. Do not split words. "
                 "Make sure words are not broken up. "
                 
-                "MOVING AVERAGE ANALYSIS RULES: "
-                "The data provides Price - MA differences in dollars and percentages. "
-                "Positive difference means price is ABOVE the moving average (bullish). "
-                "Negative difference means price is BELOW the moving average (bearish). "
-                "Use these pre-calculated differences to analyze the trend. "
-                "For example: 'Price - MA50: $5.23 (2.1%)' means current price is $5.23 above MA50, which is 2.1% higher. "
-                "Multiple MAs above price indicates strong bullish trend. Multiple MAs below price indicates bearish trend. "
+                "CRITICAL MOVING AVERAGE FORMATTING RULES: "
+                "When mentioning moving averages, use ONLY the percentage value, NOT the dollar amount. "
+                "Format: 'above MA10 (X.XX% higher)' or 'below MA50 (X.XX% lower)'. "
+                "DO NOT write dollar amounts or combine dollar and percentage values. "
+                "DO NOT write 'or' between values. Use only the percentage. "
+                "Example CORRECT: 'above MA10 (3.50% higher), but below MA50 (-3.56% lower)'. "
+                "Example WRONG: '$3.50 or 2.95%' or '3.50or2.95'. "
+                "Positive percentage = above MA (bullish). Negative percentage = below MA (bearish). "
             )
         },
         {
             "role": "user",
             "content": (
-                "Analyze stock data. Focus on Trend, Moving Averages (using the provided Price - MA differences), and Balance Sheet Score analysis. "
+                "Analyze stock data. Focus on Trend, Moving Averages (using ONLY the percentage values from Price - MA differences), and Balance Sheet Score analysis. "
                 "Balance Sheet Score numbers range from -15 worst to 15 best. Ignore it if it's 0. "
-                "Use the Price - MA differences to determine if the stock is above or below each moving average. "
+                "When mentioning moving averages, use ONLY the percentage value (e.g., '3.50% higher' or '-3.56% lower'). "
+                "Do NOT include dollar amounts or write 'or' between values. "
                 "Complete the analysis with a mandatory AI recommendation for bullish or bearish prediction with reasoning. "
                 f"{context}"
             )
