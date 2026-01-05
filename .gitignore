@@ -30,9 +30,17 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Data files (optional - uncomment if you don't want to commit data)
-# Reports/*.csv
-# Reports/*.xlsx
+# Data files - only signal_analysis.csv should be tracked
+Reports/*.csv
+Reports/*.xlsx
+!Reports/signal_analysis.csv
+
+# Backup/duplicate app files
+app2.py
+app_original.py
+alpaca_setup.py
+sector_mapping.py
+signal_analysis_functions.py
 
 # Logs
 *.log
