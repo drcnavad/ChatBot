@@ -149,6 +149,7 @@ def generate_ai_summary(ticker, stock_data, df):
     except Exception as e:
         return f"Error generating summary: {str(e)}"
 
+
 # Load data
 @st.cache_data(ttl=3600)  # Cache for 1 hour, or clear cache in Streamlit Cloud settings
 def load_data():
