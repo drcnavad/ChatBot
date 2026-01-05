@@ -28,10 +28,15 @@ def build_trend_deltas(df, ticker, windows=(3, 5, 14, 50, 100)):
     """
     Build compact trend-difference rows for LLM context.
     Returns a list of dicts, one per window.
+    Optimized to filter once and reuse the filtered dataframe.
     """
+    # Filter once and sort - more efficient than filtering multiple times
     recent = df[df["Symbol"] == ticker].sort_values("Date")
+    
+    if len(recent) == 0:
+        return []
+    
     latest = recent.iloc[-1]
-
     rows = []
 
     for w in windows:
@@ -39,6 +44,8 @@ def build_trend_deltas(df, ticker, windows=(3, 5, 14, 50, 100)):
             continue
 
         past = recent.iloc[-w]
+        # Pre-calculate tail window data to avoid multiple tail() calls
+        tail_data = recent.tail(w)
 
         row = {
             "window_days": w,
@@ -58,7 +65,7 @@ def build_trend_deltas(df, ticker, windows=(3, 5, 14, 50, 100)):
                 (latest["Close"] - latest["ma_200"]) / latest["ma_200"] * 100, 2
             ),
             "above_ma200_days_pct": round(
-                (recent.tail(w)["Close"] > recent.tail(w)["ma_200"]).mean() * 100, 1
+                (tail_data["Close"] > tail_data["ma_200"]).mean() * 100, 1
             )
         }
 
@@ -101,8 +108,9 @@ def generate_ai_summary(ticker, stock_data, df):
                     MA 200: {stock_data.get('ma_200', 'N/A')}
                     Balance Sheet Score: {stock_data.get('Fundamental_Weight', 'N/A')}
                     """
-        # Add trend analysis to context
-        trend_rows = build_trend_deltas(df, ticker, windows=(14, 50, 200))
+        # Add trend analysis to context (only filter relevant data for this ticker)
+        ticker_df = df[df['Symbol'] == ticker].copy()
+        trend_rows = build_trend_deltas(ticker_df, ticker, windows=(14, 50, 200))
         trend_text = format_trend_rows(trend_rows)
 
         context += f"\n{trend_text}"
@@ -150,42 +158,90 @@ def generate_ai_summary(ticker, stock_data, df):
         return f"Error generating summary: {str(e)}"
 
 
-# Load data
-@st.cache_data(ttl=3600)  # Cache for 1 hour, or clear cache in Streamlit Cloud settings
+# Load data with optimized caching and dtype optimization
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def load_data():
-    # Try CSV first (for > 100 symbols), then Excel (for <= 100 symbols)
+    """Load CSV data with optimized memory usage"""
     csv_path = os.path.join("Reports", "signal_analysis.csv")
-    excel_path = os.path.join("Reports", "signal_analysis.xlsx")
     
-    if os.path.exists(csv_path):
-        df = pd.read_csv(csv_path)
-        df['Date'] = pd.to_datetime(df['Date'])
-        print("df loaded from csv")
-        return df
-    elif os.path.exists(excel_path):
-        df = pd.read_excel(excel_path)
-        df['Date'] = pd.to_datetime(df['Date'])
-        print("df loaded from excel")
-        return df
-    else:
-        st.error(f"Data file not found. Expected {csv_path} or {excel_path}")
+    if not os.path.exists(csv_path):
+        st.error(f"Data file not found. Expected {csv_path}")
         return None
+    
+    # Optimize CSV reading with low_memory=False for better performance
+    df = pd.read_csv(csv_path, low_memory=False)
+    df['Date'] = pd.to_datetime(df['Date'])
+    
+    # Optimize numeric columns - downcast float64 to float32 to reduce memory
+    numeric_cols = df.select_dtypes(include=['float64']).columns
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], downcast='float')
+    
+    return df
+
+# Cache latest data processing (expensive operation)
+@st.cache_data(ttl=3600)
+def get_latest_data(df):
+    """Get latest data for each symbol - cached to avoid recomputation"""
+    return df.sort_values('Date', ascending=False).drop_duplicates(subset='Symbol', keep='first')
+
+# Cache top stocks calculation
+@st.cache_data(ttl=3600)
+def get_top_stocks(latest_data, n=100):
+    """Get top N stocks by signal - cached"""
+    top_stocks = latest_data.nlargest(n, 'combined_signal')[['Symbol', 'combined_signal', 'final_trade', 'Close']].copy()
+    return top_stocks.sort_values('combined_signal', ascending=False).reset_index(drop=True)
+
+# Cache min/max values for gauges (expensive computation)
+@st.cache_data(ttl=3600)
+def get_gauge_ranges(df):
+    """Get min/max values for gauge charts - cached"""
+    ranges = {}
+    if 'combined_signal' in df.columns:
+        ranges['combined_signal'] = {
+            'min': float(df['combined_signal'].min()),
+            'max': float(df['combined_signal'].max())
+        }
+    if 'Fundamental_Weight' in df.columns:
+        ranges['Fundamental_Weight'] = {
+            'min': float(df['Fundamental_Weight'].min()),
+            'max': float(df['Fundamental_Weight'].max())
+        }
+    if 'SentimentScore' in df.columns:
+        ranges['SentimentScore'] = {
+            'min': float(df['SentimentScore'].min()),
+            'max': float(df['SentimentScore'].max())
+        }
+    return ranges
+
+# Cache available symbols (expensive operation)
+@st.cache_data(ttl=3600)
+def get_available_symbols(df):
+    """Get available symbols from latest date - cached"""
+    latest_date = df['Date'].max()
+    latest_date_df = df[df['Date'] == latest_date]
+    return sorted(latest_date_df['Symbol'].unique().tolist())
 
 # Main app
 st.title("📈 Stock Signal Lookup")
 st.markdown("Enter a ticker symbol to see the latest trading signal")
 
-df = load_data()
+# Load data (cached) - show loading indicator only on first load
+if 'data_loaded' not in st.session_state:
+    with st.spinner("Loading data... This may take a moment on first load."):
+        df = load_data()
+        st.session_state.data_loaded = True
+else:
+    df = load_data()
 
-# Sidebar with top stocks (always visible)
+# Sidebar with top stocks (lazy loaded)
 with st.sidebar:
     st.header("🏆 Top Stocks by Signal")
     
     if df is not None:
-        # Get latest data for each symbol (most recent date)
-        latest_data = df.sort_values('Date', ascending=False).drop_duplicates(subset='Symbol', keep='first')
-        top_stocks = latest_data.nlargest(100, 'combined_signal')[['Symbol', 'combined_signal', 'final_trade', 'Close']].copy()
-        top_stocks = top_stocks.sort_values('combined_signal', ascending=False).reset_index(drop=True)
+        # Use cached functions for expensive operations
+        latest_data = get_latest_data(df)
+        top_stocks = get_top_stocks(latest_data, n=100)
         
         # Filter by signal
         filter_option = st.selectbox(
@@ -240,10 +296,11 @@ with st.sidebar:
         st.info("Loading data...")
 
 if df is not None:
-    # Get tickers from the most recent date only
-    latest_date = df['Date'].max()
-    latest_date_df = df[df['Date'] == latest_date]
-    available_symbols = sorted(latest_date_df['Symbol'].unique().tolist())
+    # Get tickers from the most recent date only (cached)
+    available_symbols = get_available_symbols(df)
+    
+    # Cache latest_data once to avoid multiple calls
+    latest_data = get_latest_data(df)
     
     # Use selected ticker from sidebar if clicked (before creating columns)
     if 'selected_ticker' in st.session_state and st.session_state.selected_ticker:
@@ -280,9 +337,10 @@ if df is not None:
         # Show ticker symbol and date if ticker is entered
         display_ticker = ticker or (selected_ticker if selected_ticker else '')
         if display_ticker:
-            ticker_data_temp = df[df['Symbol'] == display_ticker].copy()
-            if not ticker_data_temp.empty:
-                latest_temp = ticker_data_temp.sort_values('Date', ascending=False).iloc[0]
+            # Use cached latest_data instead of filtering again
+            ticker_latest = latest_data[latest_data['Symbol'] == display_ticker]
+            if not ticker_latest.empty:
+                latest_temp = ticker_latest.iloc[0]
                 date_str = latest_temp['Date'].strftime("%m/%d/%Y")
                 st.markdown(f"""
                 <div style="font-size: 1.25rem; padding-top: 0.5rem; padding-bottom: 0.5rem;">
@@ -292,9 +350,9 @@ if df is not None:
     
     # Display AI Summary if requested
     if st.session_state.get('generate_summary', False) and ticker:
-        ticker_data = df[df['Symbol'] == ticker].copy()
-        if not ticker_data.empty:
-            latest = ticker_data.sort_values('Date', ascending=False).iloc[0]
+        ticker_data_summary = df[df['Symbol'] == ticker].copy()
+        if not ticker_data_summary.empty:
+            latest = ticker_data_summary.nlargest(1, 'Date').iloc[0]
             with st.spinner(f"Generating AI summary for {ticker}..."):
                 summary = generate_ai_summary(ticker, latest, df)
             
@@ -304,15 +362,15 @@ if df is not None:
             st.session_state.generate_summary = False  # Reset flag
     
     if ticker:
-        # Filter data for the ticker
+        # Filter data for the ticker (only once)
         ticker_data = df[df['Symbol'] == ticker].copy()
         
         if len(ticker_data) == 0:
             st.warning(f"❌ Ticker '{ticker}' not found in database.")
             st.info(f"Available tickers: {', '.join(available_symbols[:20])}..." if len(available_symbols) > 20 else f"Available tickers: {', '.join(available_symbols)}")
         else:
-            # Get latest data (most recent date)
-            latest = ticker_data.sort_values('Date', ascending=False).iloc[0]
+            # Get latest data (most recent date) - optimized to avoid re-sorting
+            latest = ticker_data.nlargest(1, 'Date').iloc[0]
             
             # Display signal
             signal = latest['final_trade']
@@ -356,19 +414,19 @@ if df is not None:
             # Gauge charts for key metrics
             gauge_col1, gauge_col2, gauge_col3 = st.columns(3)
             
-            # Get min/max values from all data for proper gauge scaling
-            combined_signal_min = df['combined_signal'].min() if 'combined_signal' in df.columns else 0
-            combined_signal_max = df['combined_signal'].max() if 'combined_signal' in df.columns else 100
+            # Get min/max values from cached function (expensive operation)
+            gauge_ranges = get_gauge_ranges(df)
+            
+            combined_signal_min = gauge_ranges.get('combined_signal', {}).get('min', 0)
+            combined_signal_max = gauge_ranges.get('combined_signal', {}).get('max', 100)
             combined_signal_val = float(latest['combined_signal']) if 'combined_signal' in latest.index and pd.notna(latest['combined_signal']) else 0
             
-            fundamental_weight_min = float(df['Fundamental_Weight'].min()) if 'Fundamental_Weight' in df.columns else 0
-            fundamental_weight_max = float(df['Fundamental_Weight'].max()) if 'Fundamental_Weight' in df.columns else 100
-            # Access the value - latest is a Series from iloc[0]
+            fundamental_weight_min = gauge_ranges.get('Fundamental_Weight', {}).get('min', 0)
+            fundamental_weight_max = gauge_ranges.get('Fundamental_Weight', {}).get('max', 100)
             fundamental_weight_val = float(latest['Fundamental_Weight']) if 'Fundamental_Weight' in latest.index and pd.notna(latest['Fundamental_Weight']) else 0
             
-            sentiment_score_min = float(df['SentimentScore'].min()) if 'SentimentScore' in df.columns else -10
-            sentiment_score_max = float(df['SentimentScore'].max()) if 'SentimentScore' in df.columns else 10
-            # Access the value - latest is a Series from iloc[0]
+            sentiment_score_min = gauge_ranges.get('SentimentScore', {}).get('min', -10)
+            sentiment_score_max = gauge_ranges.get('SentimentScore', {}).get('max', 10)
             sentiment_score_val = float(latest['SentimentScore']) if 'SentimentScore' in latest.index and pd.notna(latest['SentimentScore']) else 0
             
             # Gauge 1: Combined Signal
@@ -503,189 +561,192 @@ if df is not None:
                 )
                 st.plotly_chart(fig3, use_container_width=True)
             
-            # Filter to last 1 year of data
+            # Filter to last 1 year of data (optimized - avoid unnecessary copies)
             latest_date = ticker_data['Date'].max()
             one_year_ago = latest_date - pd.Timedelta(days=365)
-            ticker_data_filtered = ticker_data[ticker_data['Date'] >= one_year_ago].copy()
-            ticker_data_sorted = ticker_data_filtered.sort_values('Date', ascending=True).copy()
+            ticker_data_sorted = ticker_data[ticker_data['Date'] >= one_year_ago].sort_values('Date', ascending=True)
             
-            # Charts section - stacked subplots
-            st.markdown("### 📈 Technical Analysis Charts (Last 1 Year)")
-            
-            # Secondary metrics - subheading size (below chart title)
-            col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
-            
-            with col1:
-                ma_10 = latest.get('ma_10', 0)
-                if pd.notna(ma_10):
-                    st.markdown(f'MA 10: ${ma_10:.2f}')
-            
-            with col2:
-                ma_30 = latest.get('ma_30', 0)
-                if pd.notna(ma_30):
-                    st.markdown(f'MA 30: ${ma_30:.2f}')
-            
-            with col3:
-                ma_50 = latest.get('ma_50', 0)
-                if pd.notna(ma_50):
-                    st.markdown(f'MA 50: ${ma_50:.2f}')
-            
-            with col4:
-                ma_100 = latest.get('ma_100', 0)
-                if pd.notna(ma_100):
-                    st.markdown(f'MA 100: ${ma_100:.2f}')
-            
-            with col5:
-                ma_200 = latest.get('ma_200', 0)
-                if pd.notna(ma_200):
-                    st.markdown(f'MA 200: ${ma_200:.2f}')
-            
-            with col6:
-                rsi = latest.get('RSI Options Rate', 0)
-                if pd.notna(rsi):
-                    st.markdown(f'RSI: {rsi:.2f}')
-            
-            # Prepare data
-            price_data = ticker_data_sorted[['Date', 'Close', 'ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']].copy()
-            price_data = price_data.set_index('Date')
-            price_data = price_data.dropna(subset=['Close'])
-            
-            # Create subplots: 3 rows, 1 column
-            fig = make_subplots(
-                rows=3, cols=1,
-                shared_xaxes=True,
-                vertical_spacing=0.05,
-                row_heights=[0.65, 0.175, 0.175],
-                subplot_titles=('Price and Moving Averages', 'RSI', 'MACD')
-            )
-            
-            # Row 1: Price and Moving Averages
-            fig.add_trace(go.Scatter(
-                x=price_data.index,
-                y=price_data['Close'],
-                name='Close',
-                line=dict(color='green', width=3),
-                mode='lines'
-            ), row=1, col=1)
-            
-            if 'ma_10' in price_data.columns:
-                fig.add_trace(go.Scatter(
-                    x=price_data.index,
-                    y=price_data['ma_10'],
-                    name='MA 10',
-                    line=dict(color='rgba(255, 140, 0, 0.6)', width=0.8),
-                    mode='lines',
-                    showlegend=True
-                ), row=1, col=1)
-            
-            if 'ma_30' in price_data.columns:
-                fig.add_trace(go.Scatter(
-                    x=price_data.index,
-                    y=price_data['ma_30'],
-                    name='MA 30',
-                    line=dict(color='rgba(255, 0, 0, 0.6)', width=0.8),
-                    mode='lines',
-                    showlegend=True
-                ), row=1, col=1)
-            
-            if 'ma_50' in price_data.columns:
-                fig.add_trace(go.Scatter(
-                    x=price_data.index,
-                    y=price_data['ma_50'],
-                    name='MA 50',
-                    line=dict(color='rgba(0, 0, 255, 0.6)', width=0.8),
-                    mode='lines',
-                    showlegend=True
-                ), row=1, col=1)
-            
-            if 'ma_100' in price_data.columns:
-                fig.add_trace(go.Scatter(
-                    x=price_data.index,
-                    y=price_data['ma_100'],
-                    name='MA 100',
-                    line=dict(color='rgba(0, 128, 0, 0.6)', width=0.8),
-                    mode='lines',
-                    showlegend=True
-                ), row=1, col=1)
-            
-            if 'ma_200' in price_data.columns:
-                fig.add_trace(go.Scatter(
-                    x=price_data.index,
-                    y=price_data['ma_200'],
-                    name='MA 200',
-                    line=dict(color='rgba(128, 128, 128, 0.6)', width=0.8),
-                    mode='lines',
-                    showlegend=True
-                ), row=1, col=1)
-            
-            # Row 2: RSI
-            if 'RSI Options Rate' in ticker_data_sorted.columns:
-                rsi_data = ticker_data_sorted[['Date', 'RSI Options Rate']].copy()
-                rsi_data = rsi_data.set_index('Date')
-                rsi_data = rsi_data.dropna()
+            # Only render charts if we have data
+            if len(ticker_data_sorted) > 0:
+                # Charts section - stacked subplots
+                st.markdown("### 📈 Technical Analysis Charts (Last 1 Year)")
                 
-                fig.add_trace(go.Scatter(
-                    x=rsi_data.index,
-                    y=rsi_data['RSI Options Rate'],
-                    name='RSI',
-                    line=dict(color='orange', width=1.5),
-                    mode='lines',
-                    showlegend=False
-                ), row=2, col=1)
+                # Secondary metrics - subheading size (below chart title)
+                col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
             
-            # Row 3: MACD
-            if 'macd' in ticker_data_sorted.columns and 'MACD Signal' in ticker_data_sorted.columns:
-                macd_data = ticker_data_sorted[['Date', 'macd', 'MACD Signal']].copy()
-                macd_data = macd_data.set_index('Date')
-                macd_data = macd_data.dropna()
+                with col1:
+                    ma_10 = latest.get('ma_10', 0)
+                    if pd.notna(ma_10):
+                        st.markdown(f'MA 10: ${ma_10:.2f}')
                 
-                fig.add_trace(go.Scatter(
-                    x=macd_data.index,
-                    y=macd_data['macd'],
-                    name='MACD',
-                    line=dict(color='red', width=1.5),
-                    mode='lines',
-                    showlegend=False
-                ), row=3, col=1)
+                with col2:
+                    ma_30 = latest.get('ma_30', 0)
+                    if pd.notna(ma_30):
+                        st.markdown(f'MA 30: ${ma_30:.2f}')
                 
+                with col3:
+                    ma_50 = latest.get('ma_50', 0)
+                    if pd.notna(ma_50):
+                        st.markdown(f'MA 50: ${ma_50:.2f}')
+                
+                with col4:
+                    ma_100 = latest.get('ma_100', 0)
+                    if pd.notna(ma_100):
+                        st.markdown(f'MA 100: ${ma_100:.2f}')
+                
+                with col5:
+                    ma_200 = latest.get('ma_200', 0)
+                    if pd.notna(ma_200):
+                        st.markdown(f'MA 200: ${ma_200:.2f}')
+                
+                with col6:
+                    rsi = latest.get('RSI Options Rate', 0)
+                    if pd.notna(rsi):
+                        st.markdown(f'RSI: {rsi:.2f}')
+                
+                # Prepare data
+                price_data = ticker_data_sorted[['Date', 'Close', 'ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']].copy()
+                price_data = price_data.set_index('Date')
+                price_data = price_data.dropna(subset=['Close'])
+                
+                # Create subplots: 3 rows, 1 column
+                fig = make_subplots(
+                    rows=3, cols=1,
+                    shared_xaxes=True,
+                    vertical_spacing=0.05,
+                    row_heights=[0.65, 0.175, 0.175],
+                    subplot_titles=('Price and Moving Averages', 'RSI', 'MACD')
+                )
+                
+                # Row 1: Price and Moving Averages
                 fig.add_trace(go.Scatter(
-                    x=macd_data.index,
-                    y=macd_data['MACD Signal'],
-                    name='MACD Signal',
-                    line=dict(color='skyblue', width=1.5),
-                    mode='lines',
-                    showlegend=False
-                ), row=3, col=1)
-            
-            # Update layout
-            fig.update_layout(
-                height=800,
-                hovermode='x unified',
-                margin=dict(l=0, r=0, t=30, b=10),  # Minimal margins - only bottom for date labels
-                showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                dragmode=False  # Disable drag/zoom on mobile
-            )
-            
-            # Update x-axes (all charts show same dates - months only)
-            fig.update_xaxes(
-                tickformat='%b %Y'  # Show months only (e.g., "Jan 2025")
-            )
-            
-            # Update y-axis labels - removed to increase chart size on mobile
-            fig.update_yaxes(title_text="", row=1, col=1)
-            fig.update_yaxes(title_text="", row=2, col=1)
-            fig.update_yaxes(title_text="", row=3, col=1)
-            
-            st.plotly_chart(
-                fig, 
-                use_container_width=True,
-                config={
-                    'displayModeBar': True,
-                    'displaylogo': False,
-                    'modeBarButtonsToRemove': ['pan2d', 'select2d', 'lasso2d', 'autoScale2d', 'resetScale2d', 'zoomIn2d', 'zoomOut2d'],
-                    'scrollZoom': False,
-                    'doubleClick': 'reset'
-                }
-            )
+                    x=price_data.index,
+                    y=price_data['Close'],
+                    name='Close',
+                    line=dict(color='green', width=3),
+                    mode='lines'
+                ), row=1, col=1)
+                
+                if 'ma_10' in price_data.columns:
+                    fig.add_trace(go.Scatter(
+                        x=price_data.index,
+                        y=price_data['ma_10'],
+                        name='MA 10',
+                        line=dict(color='rgba(255, 140, 0, 0.6)', width=0.8),
+                        mode='lines',
+                        showlegend=True
+                    ), row=1, col=1)
+                
+                if 'ma_30' in price_data.columns:
+                    fig.add_trace(go.Scatter(
+                        x=price_data.index,
+                        y=price_data['ma_30'],
+                        name='MA 30',
+                        line=dict(color='rgba(255, 0, 0, 0.6)', width=0.8),
+                        mode='lines',
+                        showlegend=True
+                    ), row=1, col=1)
+                
+                if 'ma_50' in price_data.columns:
+                    fig.add_trace(go.Scatter(
+                        x=price_data.index,
+                        y=price_data['ma_50'],
+                        name='MA 50',
+                        line=dict(color='rgba(0, 0, 255, 0.6)', width=0.8),
+                        mode='lines',
+                        showlegend=True
+                    ), row=1, col=1)
+                
+                if 'ma_100' in price_data.columns:
+                    fig.add_trace(go.Scatter(
+                        x=price_data.index,
+                        y=price_data['ma_100'],
+                        name='MA 100',
+                        line=dict(color='rgba(0, 128, 0, 0.6)', width=0.8),
+                        mode='lines',
+                        showlegend=True
+                    ), row=1, col=1)
+                
+                if 'ma_200' in price_data.columns:
+                    fig.add_trace(go.Scatter(
+                        x=price_data.index,
+                        y=price_data['ma_200'],
+                        name='MA 200',
+                        line=dict(color='rgba(128, 128, 128, 0.6)', width=0.8),
+                        mode='lines',
+                        showlegend=True
+                    ), row=1, col=1)
+                
+                # Row 2: RSI
+                if 'RSI Options Rate' in ticker_data_sorted.columns:
+                    rsi_data = ticker_data_sorted[['Date', 'RSI Options Rate']].copy()
+                    rsi_data = rsi_data.set_index('Date')
+                    rsi_data = rsi_data.dropna()
+                    
+                    fig.add_trace(go.Scatter(
+                        x=rsi_data.index,
+                        y=rsi_data['RSI Options Rate'],
+                        name='RSI',
+                        line=dict(color='orange', width=1.5),
+                        mode='lines',
+                        showlegend=False
+                    ), row=2, col=1)
+                
+                # Row 3: MACD
+                if 'macd' in ticker_data_sorted.columns and 'MACD Signal' in ticker_data_sorted.columns:
+                    macd_data = ticker_data_sorted[['Date', 'macd', 'MACD Signal']].copy()
+                    macd_data = macd_data.set_index('Date')
+                    macd_data = macd_data.dropna()
+                    
+                    fig.add_trace(go.Scatter(
+                        x=macd_data.index,
+                        y=macd_data['macd'],
+                        name='MACD',
+                        line=dict(color='red', width=1.5),
+                        mode='lines',
+                        showlegend=False
+                    ), row=3, col=1)
+                    
+                    fig.add_trace(go.Scatter(
+                        x=macd_data.index,
+                        y=macd_data['MACD Signal'],
+                        name='MACD Signal',
+                        line=dict(color='skyblue', width=1.5),
+                        mode='lines',
+                        showlegend=False
+                    ), row=3, col=1)
+                
+                # Update layout
+                fig.update_layout(
+                    height=800,
+                    hovermode='x unified',
+                    margin=dict(l=0, r=0, t=30, b=10),  # Minimal margins - only bottom for date labels
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    dragmode=False  # Disable drag/zoom on mobile
+                )
+                
+                # Update x-axes (all charts show same dates - months only)
+                fig.update_xaxes(
+                    tickformat='%b %Y'  # Show months only (e.g., "Jan 2025")
+                )
+                
+                # Update y-axis labels - removed to increase chart size on mobile
+                fig.update_yaxes(title_text="", row=1, col=1)
+                fig.update_yaxes(title_text="", row=2, col=1)
+                fig.update_yaxes(title_text="", row=3, col=1)
+                
+                st.plotly_chart(
+                    fig, 
+                    use_container_width=True,
+                    config={
+                        'displayModeBar': True,
+                        'displaylogo': False,
+                        'modeBarButtonsToRemove': ['pan2d', 'select2d', 'lasso2d', 'autoScale2d', 'resetScale2d', 'zoomIn2d', 'zoomOut2d'],
+                        'scrollZoom': False,
+                        'doubleClick': 'reset'
+                    }
+                )
+            else:
+                st.warning("No data available for charting.")
 
