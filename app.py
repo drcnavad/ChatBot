@@ -24,7 +24,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-def build_trend_deltas(df, ticker, windows=(14, 50, 200)):
+def build_trend_deltas(df, ticker, windows=(3, 5, 14, 50, 100)):
     """
     Build compact trend-difference rows for LLM context.
     Returns a list of dicts, one per window.
@@ -124,7 +124,7 @@ def generate_ai_summary(ticker, stock_data, df):
             "role": "user",
             "content": (
                 "Analyze stock data. Focus on Trend, Moving Averages, and Balance Sheet Score analysis. "
-                "Balance Sheet Score ranges from -15 worst to 15 best. "
+                "Balance Sheet Score numbers range from -15 worst to 15 best. Ignore it if it's 0."
                 "Complete the analysis with a mandatory AI recommendation for bullish or bearish prediction with reasoning. "
                 f"{context}"
             )

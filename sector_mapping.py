@@ -25,13 +25,14 @@ stock_symbols = ['AAPL', 'ADSK', 'ADBE', 'AMD', 'AMZN', 'ANET', 'APH', 'APP', 'A
 'MSFT', 'MU', 'NBIS', 'NET', 'NFLX', 'NOW', 'NSC', 'NVDA', 'ORCL', 'PANW', 'PAYX', 'PCTY', 
 'PLTR', 'POOL', 'PWR', 'RCL','REGN', 'RTX',
 'SHOP', 'SNOW', 'SOFI', 'SOUN', 'TEAM', 'TEM', 'TMO', 'TMUS', 'TSLA', 'TTD', 'TYL', 'TWLO', 'UBER',
-'UI', 'UNH', 'UPST', 'VEEV', 'VRT', 'WDAY', 'ZS']
+'UI', 'UNH', 'UPST', 'VEEV', 'VRT', 'WDAY', 'ZS', 'GC=F', 'SI=F', 'BTC-USD', 'ETH-USD', 'SOL-USD', "HG=F", "PA=F"]
 
 symbol_sector = {
     'AAPL': 'Technology',
     'AVAV': 'Technology',
     'ADSK': 'Technology',
     'ADBE': 'Technology',
+    'HG=F': 'Commodities',
     'AMD': 'Technology',
     'AMZN': 'Consumer Discretionary',
     'ANET': 'Technology',
@@ -42,6 +43,11 @@ symbol_sector = {
     'AVGO': 'Technology',
     'AXON': 'Industrials',
     'BAC': 'Financials',
+    'BTC-USD': 'Commodities',
+    'SI=F': 'Commodities',
+    'ETH-USD': 'Commodities',
+    'SOL-USD': 'Commodities',
+    'PA=F': 'Commodities',
     'BIIB': 'Health Care',
     'BLK': 'Financials',
     'CDNS': 'Technology',
@@ -127,6 +133,12 @@ symbol_sector = {
 
 symbol_name = {
     'AAPL': 'Apple Inc.',
+    'HG=F': 'Gold',
+    'SI=F': 'Silver',
+    'BTC-USD': 'Bitcoin',
+    'ETH-USD': 'Ethereum',
+    'SOL-USD': 'Solana',
+    'PA=F': 'Palladium',
     'ADSK': 'Autodesk, Inc.',
     'ADBE': 'Adobe Inc.',
     'AMD': 'Advanced Micro Devices, Inc.',
