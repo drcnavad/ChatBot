@@ -56,7 +56,7 @@ def build_trend_deltas(df, ticker, windows=(3, 5, 14, 50, 100)):
                 latest["RSI Options Rate"] - past["RSI Options Rate"], 2
             ),
             "macd_change": round(
-                latest["macd"] - past["macd"], 4
+                latest["macd"] - past["macd"], 2
             ),
             "ma30_diff_pct": round(
                 (latest["Close"] - latest["ma_30"]) / latest["ma_30"] * 100, 2
@@ -65,7 +65,7 @@ def build_trend_deltas(df, ticker, windows=(3, 5, 14, 50, 100)):
                 (latest["Close"] - latest["ma_200"]) / latest["ma_200"] * 100, 2
             ),
             "above_ma200_days_pct": round(
-                (tail_data["Close"] > tail_data["ma_200"]).mean() * 100, 1
+                (tail_data["Close"] > tail_data["ma_200"]).mean() * 100, 2
             )
         }
 
@@ -79,12 +79,12 @@ def format_trend_rows(trend_rows):
     for r in trend_rows:
         text += (
             f"Last {r['window_days']} days: "
-            f"Price {r['price_change_pct']}%, "
-            f"RSI change {r['rsi_change']}, "
-            f"MACD change {r['macd_change']}, "
-            f"Price vs MA30 {r['ma30_diff_pct']}%, "
-            f"Price vs MA200 {r['ma200_diff_pct']}%, "
-            f"Above MA200 {r['above_ma200_days_pct']}% of days\n"
+            f"Price {r['price_change_pct']:.2f}%, "
+            f"RSI change {r['rsi_change']:.2f}, "
+            f"MACD change {r['macd_change']:.2f}, "
+            f"Price vs MA30 {r['ma30_diff_pct']:.2f}%, "
+            f"Price vs MA200 {r['ma200_diff_pct']:.2f}%, "
+            f"Above MA200 {r['above_ma200_days_pct']:.2f}% of days\n"
         )
     return text
 
@@ -111,18 +111,28 @@ def generate_ai_summary(ticker, stock_data, df):
                 ma_differences[ma_name] = 'N/A'
                 ma_percentages[ma_name] = 'N/A'
 
-        # Format MA differences for display
+        # Format MA differences for display (values already rounded to 2 decimals)
         def format_ma_diff(diff, pct):
             if diff == 'N/A' or pct == 'N/A':
                 return 'N/A'
-            return f"${diff:.2f} ({pct}%)"
+            return f"${diff:.2f} ({pct:.2f}%)"
+        
+        # Format numbers to 2 decimals, handle N/A
+        def format_num(value, default='N/A'):
+            if pd.isna(value) or value == 'N/A':
+                return default
+            return f"{float(value):.2f}"
+        
+        rsi_value = stock_data.get('RSI Options Rate')
+        macd_value = stock_data.get('macd')
+        fundamental_weight = stock_data.get('Fundamental_Weight')
         
         context = f"""Stock: {ticker}
                     Date: {stock_data['Date'].strftime('%Y-%m-%d')}
                     Current Price: ${current_price:.2f}
-                    Technical Score: {stock_data['combined_signal']:.2f}
-                    RSI: {stock_data.get('RSI Options Rate', 'N/A')}
-                    MACD: {stock_data.get('macd', 'N/A')}
+                    Technical Score: {format_num(stock_data.get('combined_signal'))}
+                    RSI: {format_num(rsi_value)}
+                    MACD: {format_num(macd_value)}
                     
                     Price vs Moving Averages (Difference):
                     Price - MA10: {format_ma_diff(ma_differences['ma_10'], ma_percentages['ma_10'])}
@@ -131,7 +141,7 @@ def generate_ai_summary(ticker, stock_data, df):
                     Price - MA100: {format_ma_diff(ma_differences['ma_100'], ma_percentages['ma_100'])}
                     Price - MA200: {format_ma_diff(ma_differences['ma_200'], ma_percentages['ma_200'])}
                     
-                    Balance Sheet Score: {stock_data.get('Fundamental_Weight', 'N/A')}
+                    Balance Sheet Score: {format_num(fundamental_weight)}
                     """
         # Add trend analysis to context (only filter relevant data for this ticker)
         ticker_df = df[df['Symbol'] == ticker].copy()
