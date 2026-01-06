@@ -1,28 +1,50 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from huggingface_hub import InferenceClient
 from dotenv import load_dotenv
 import re
+
 # Load environment variables from .env file
 load_dotenv()
 
-# Hugging Face Configuration
-try:
-    HF_TOKEN = st.secrets["HF_TOKEN"]
-except:
-    HF_TOKEN = os.getenv("HF_TOKEN", "")
-
-# Page config
+# Page config (must be first Streamlit command)
 st.set_page_config(
     page_title="Stock Signal Lookup",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Hugging Face Configuration - get token safely
+def get_hf_token():
+    """Get Hugging Face token from secrets or environment variable"""
+    # Try environment variable first (works in all contexts)
+    token = os.getenv("HF_TOKEN", "")
+    
+    # Only try Streamlit secrets if we're in a proper Streamlit context
+    try:
+        # Check if we're in a Streamlit runtime context
+        if hasattr(st, 'secrets'):
+            secrets = getattr(st, 'secrets', None)
+            if secrets is not None:
+                # Use .get() to safely access secrets
+                # Note: This may trigger parsing of secrets.toml, so we catch all exceptions
+                streamlit_token = secrets.get("HF_TOKEN", "")
+                if streamlit_token:
+                    return streamlit_token
+    except Exception:
+        # Catch ALL exceptions including StreamlitSecretNotFoundError, TOML parsing errors, etc.
+        # This ensures the app never crashes due to secrets file issues
+        # Fallback to environment variable
+        pass
+    
+    return token
+
+# Get token (safe for Streamlit Cloud)
+HF_TOKEN = get_hf_token()
 
 def build_trend_deltas(df, ticker, windows=(3, 5, 14, 50, 100)):
     """
@@ -88,7 +110,6 @@ def format_trend_rows(trend_rows):
         )
     return text
 
-# st.text("Using model: meta-llama/Meta-Llama-3-8B-Instruct")
 
 def generate_ai_summary(ticker, stock_data, df):
     """Generate AI summary using Hugging Face Llama-3 model"""
