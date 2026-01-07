@@ -484,18 +484,23 @@ if df is not None:
             combined_signal_min = gauge_ranges.get('combined_signal', {}).get('min', 0)
             combined_signal_max = gauge_ranges.get('combined_signal', {}).get('max', 100)
             combined_signal_val = float(latest['combined_signal']) if 'combined_signal' in latest.index and pd.notna(latest['combined_signal']) else 0
-            
+            combined_signal_mean = df['combined_signal'].mean() #####
+
             fundamental_weight_min = gauge_ranges.get('Fundamental_Weight', {}).get('min', 0)
             fundamental_weight_max = gauge_ranges.get('Fundamental_Weight', {}).get('max', 100)
             fundamental_weight_val = float(latest['Fundamental_Weight']) if 'Fundamental_Weight' in latest.index and pd.notna(latest['Fundamental_Weight']) else 0
-            
+            fundamental_weight_mean = df['Fundamental_Weight'].mean() #####
+
             sentiment_score_min = gauge_ranges.get('SentimentScore', {}).get('min', -10)
             sentiment_score_max = gauge_ranges.get('SentimentScore', {}).get('max', 10)
             sentiment_score_val = float(latest['SentimentScore']) if 'SentimentScore' in latest.index and pd.notna(latest['SentimentScore']) else 0
-            
+            sentiment_score_mean = df['SentimentScore'].mean() #####
+        
+
             # Gauge 1: Combined Signal
             with gauge_col1:
-                combined_signal_mid = (combined_signal_min + combined_signal_max) / 2
+                # combined_signal_mid = (combined_signal_min + combined_signal_max) / 2
+                combined_signal_mid = round(combined_signal_mean, 2)
                 fig1 = go.Figure(go.Indicator(
                     mode = "gauge+number",
                     value = combined_signal_val,
@@ -539,7 +544,8 @@ if df is not None:
             
             # Gauge 2: Balance Sheet
             with gauge_col2:
-                fundamental_weight_mid = (fundamental_weight_min + fundamental_weight_max) / 2
+                # fundamental_weight_mid = (fundamental_weight_min + fundamental_weight_max) / 2
+                fundamental_weight_mid = round(fundamental_weight_mean, 2)
                 fig2 = go.Figure(go.Indicator(
                     mode = "gauge+number",
                     value = fundamental_weight_val,
@@ -583,7 +589,8 @@ if df is not None:
             
             # Gauge 3: News Sentiment
             with gauge_col3:
-                sentiment_score_mid = (sentiment_score_min + sentiment_score_max) / 2
+                # sentiment_score_mid = (sentiment_score_min + sentiment_score_max) / 2
+                sentiment_score_mid = round(sentiment_score_mean, 2)
                 fig3 = go.Figure(go.Indicator(
                     mode = "gauge+number",
                     value = sentiment_score_val,
