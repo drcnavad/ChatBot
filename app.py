@@ -147,6 +147,7 @@ def generate_ai_summary(ticker, stock_data, df):
         rsi_value = stock_data.get('RSI Options Rate')
         macd_value = stock_data.get('macd')
         fundamental_weight = stock_data.get('Fundamental_Weight')
+        sentiment_score = stock_data.get('SentimentScore')
         
         context = f"""Stock: {ticker}
                     Date: {stock_data['Date'].strftime('%Y-%m-%d')}
@@ -163,6 +164,7 @@ def generate_ai_summary(ticker, stock_data, df):
                     Price - MA200: {format_ma_diff(ma_differences['ma_200'], ma_percentages['ma_200'])}
                     
                     Balance Sheet Score: {format_num(fundamental_weight)}
+                    Sentiment Score: {format_num(sentiment_score)}
                     """
         # Add trend analysis to context (only filter relevant data for this ticker)
         ticker_df = df[df['Symbol'] == ticker].copy()
@@ -176,28 +178,25 @@ def generate_ai_summary(ticker, stock_data, df):
         {
             "role": "system",
             "content": (
-                "You are a financial advisor. Respond in 4 bullet points and each bullet point must be on a new line. "
-                "Keep numbers and units intact. Each bullet point must be on a new line. Do not split words. "
-                "Make sure words are not broken up. "
+                "You are a financial advisor. Respond in 4 summary bullet points and each bullet point must be on a new line. "
+                "Keep numbers and units intact. Make sure words are not broken up. "
                 
                 "CRITICAL MOVING AVERAGE FORMATTING RULES: "
-                "When mentioning moving averages, use ONLY the percentage value, NOT the dollar amount. "
-                "Format: 'above MA10 (X.XX% higher)' or 'below MA50 (X.XX% lower)'. "
-                "DO NOT write dollar amounts or combine dollar and percentage values. "
-                "DO NOT write 'or' between values. Use only the percentage. "
-                "Example CORRECT: 'above MA10 (3.50% higher), but below MA50 (-3.56% lower)'. "
-                "Example WRONG: '$3.50 or 2.95%' or '3.50or2.95'. "
-                "Positive percentage = above MA (bullish). Negative percentage = below MA (bearish). "
+                "Positive (Price - MA) percentage = above MA (bullish). Negative (Price - MA) percentage = below MA (bearish)."
+                "When mentioning moving averages, use ONLY the percentage values from Price - MA differences, NOT the dollar amount. "
+                "Format: 'above MA10 (X.XX%)' or 'below MA50 (-X.XX%)'. Do not calculate the percentage value yourself. Use from the data provided. "
+            
             )
         },
         {
             "role": "user",
             "content": (
-                "Analyze stock data. Focus on Trend, Moving Averages (using ONLY the percentage values from Price - MA differences), and Balance Sheet Score analysis. "
-                "Balance Sheet Score numbers range from -15 worst to 15 best. Ignore it if it's 0. "
-                "When mentioning moving averages, use ONLY the percentage value (e.g., '3.50% higher' or '-3.56% lower'). "
-                "Do NOT include dollar amounts or write 'or' between values. "
-                "Complete the analysis with a mandatory AI recommendation for bullish or bearish prediction with reasoning. "
+                "Analyze stock data. Focus on Trend, Balance Sheet Score and News Sentiment score analysis. Do not repeat the same information in different ways. "
+                "Balance sheet score above number 11 is excellent, above 5 is good, above 2 is average, below 2 is bad, and below -5 is very bad."
+                "News Sentiment score of last 14 days above number 7 is excellent, above 4 is good, above 0 is neutral, below -1 is bad, and below -4 is very bad."
+                "Do not confuse for all scores: If the value is positive, it means the price is above the MA, and if the value is negative, it means the price is below the MA."
+                "Doulbe check the values before stating above or below the number"
+                "Conclusion: Complete the analysis with a mandatory AI recommendation for bullish or bearish prediction with reasoning. If there is doubt, suggest hold prediction."
                 f"{context}"
             )
         }
