@@ -12,3 +12,6 @@ newsapi-python>=0.2.7
 finnhub-python>=2.4.0
 transformers>=4.50.0
 torch>=2.0.0
+papermill>=2.5.0
+jupyter>=1.0.0
+pytz>=2024.1
