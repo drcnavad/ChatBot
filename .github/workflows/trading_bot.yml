@@ -100,10 +100,14 @@ jobs:
       - name: Commit and push changes
         if: steps.check_buy_time.outputs.is_buy_time == 'true' || github.event_name == 'workflow_dispatch'
         run: |
-          git add -A
+          # Only add signal_analysis.csv (output from main_signal_analysis.ipynb)
+          # Exclude markdown files and other outputs
+          git add Reports/signal_analysis.csv
+          
+          # Check if there are any changes to commit
           if ! git diff --staged --quiet; then
             git commit -m "Auto-commit: Trading bot executed at $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
             git push
           else
-            echo "No changes to commit"
+            echo "No changes to commit (signal_analysis.csv unchanged)"
           fi

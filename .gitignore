@@ -45,4 +45,8 @@ signal_analysis_functions.py
 # Logs
 *.log
 
+# Documentation/Markdown files (don't push auto-generated docs)
+*.md
+!README.md
+
 
