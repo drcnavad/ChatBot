@@ -52,31 +52,52 @@ jobs:
         run: |
           echo "Current directory: $(pwd)"
           echo "Files in root:"
-          ls -la | head -20
+          ls -la
+          echo ""
           echo "Looking for notebook:"
           find . -name "main_signal_analysis.ipynb" -type f 2>/dev/null || echo "Notebook not found"
+          echo ""
+          echo "Python files:"
+          ls -la *.py 2>/dev/null || echo "No .py files in root"
+          echo ""
+          echo "Checking if notebook exists:"
+          test -f main_signal_analysis.ipynb && echo "✅ main_signal_analysis.ipynb exists" || echo "❌ main_signal_analysis.ipynb NOT found"
+          test -f alpaca_setup.py && echo "✅ alpaca_setup.py exists" || echo "❌ alpaca_setup.py NOT found"
       
       - name: Run signal analysis
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        working-directory: ${{ github.workspace }}
         run: |
           echo "📊 Running signal analysis..."
+          echo "Working directory: $(pwd)"
+          echo "Notebook check:"
+          ls -la main_signal_analysis.ipynb 2>&1 || echo "Notebook not in current dir"
           python run_signal_analysis.py || echo "⚠️ Signal analysis failed, but continuing..."
       
       - name: List Python files for debugging
         run: |
+          echo "Working directory: $(pwd)"
           echo "Python files in root:"
           ls -la *.py 2>/dev/null || echo "No .py files found"
-          echo "Checking for alpaca_setup.py:"
+          echo ""
+          echo "Checking for required files:"
           test -f alpaca_setup.py && echo "✅ Found alpaca_setup.py" || echo "❌ alpaca_setup.py not found"
+          test -f sector_mapping.py && echo "✅ Found sector_mapping.py" || echo "❌ sector_mapping.py not found"
+          test -f signal_analysis_functions.py && echo "✅ Found signal_analysis_functions.py" || echo "❌ signal_analysis_functions.py not found"
+          echo ""
+          echo "Python path check:"
+          python -c "import sys; print('Python path:'); [print(p) for p in sys.path]"
       
       - name: Execute sell orders
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        working-directory: ${{ github.workspace }}
         run: |
           echo "🔴 Executing sell orders..."
+          echo "Working directory: $(pwd)"
           python run_trading_bot.py sell
         continue-on-error: true  # Don't fail workflow if sell orders fail
       
@@ -99,8 +120,10 @@ jobs:
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        working-directory: ${{ github.workspace }}
         run: |
           echo "❌ Cancelling all open orders..."
+          echo "Working directory: $(pwd)"
           python run_trading_bot.py cancel
       
       - name: Execute buy orders
@@ -108,8 +131,10 @@ jobs:
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        working-directory: ${{ github.workspace }}
         run: |
           echo "🟢 Executing buy orders..."
+          echo "Working directory: $(pwd)"
           python run_trading_bot.py buy
       
       - name: Commit and push changes

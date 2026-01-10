@@ -74,25 +74,35 @@ if __name__ == "__main__":
     
     # Try different paths (GitHub Actions uses repository root)
     possible_paths = [
+        os.path.join(cwd, "main_signal_analysis.ipynb"),  # Try CWD first (most common in GitHub Actions)
         os.path.join(script_dir, "main_signal_analysis.ipynb"),
-        os.path.join(cwd, "main_signal_analysis.ipynb"),
         "main_signal_analysis.ipynb",  # Relative to current directory
     ]
+    
+    # Debug output
+    print(f"Current working directory: {cwd}")
+    print(f"Script directory: {script_dir}")
+    print(f"Looking for notebook in:")
+    for path in possible_paths:
+        exists = os.path.exists(path)
+        print(f"  {path} - {'✅ EXISTS' if exists else '❌ NOT FOUND'}")
     
     notebook_path = None
     for path in possible_paths:
         if os.path.exists(path):
-            notebook_path = path
-            print(f"✅ Found notebook at: {notebook_path}")
+            notebook_path = os.path.abspath(path)
+            print(f"\n✅ Found notebook at: {notebook_path}")
             break
     
     if not notebook_path:
-        print(f"❌ Notebook not found. Tried:")
-        for path in possible_paths:
-            print(f"   {path} (exists: {os.path.exists(path)})")
-        print(f"\nCurrent working directory: {cwd}")
-        print(f"Script directory: {script_dir}")
-        print(f"Files in current directory: {os.listdir(cwd)[:10]}")
+        print(f"\n❌ Notebook not found. Tried all paths above.")
+        print(f"\nFiles in current directory:")
+        try:
+            files = os.listdir(cwd)
+            for f in sorted(files)[:20]:
+                print(f"  {f}")
+        except Exception as e:
+            print(f"  Error listing directory: {e}")
         sys.exit(1)
     
     success = run_notebook(notebook_path)

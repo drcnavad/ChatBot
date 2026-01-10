@@ -12,8 +12,22 @@ import pytz
 # Add current directory to path (for GitHub Actions)
 script_dir = os.path.dirname(os.path.abspath(__file__))
 cwd = os.getcwd()
-sys.path.insert(0, script_dir)
-sys.path.insert(0, cwd)  # Also add current working directory
+# Add both script directory and current working directory to path
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+if cwd not in sys.path:
+    sys.path.insert(0, cwd)
+
+# Debug: Print path info (only in GitHub Actions or if DEBUG env var is set)
+if os.getenv("GITHUB_ACTIONS") or os.getenv("DEBUG"):
+    print(f"Python path: {sys.path[:3]}")
+    print(f"Script directory: {script_dir}")
+    print(f"Current working directory: {cwd}")
+    print(f"Looking for alpaca_setup.py in:")
+    for path in [script_dir, cwd]:
+        test_path = os.path.join(path, "alpaca_setup.py")
+        exists = os.path.exists(test_path)
+        print(f"  {test_path} - {'✅ EXISTS' if exists else '❌ NOT FOUND'}")
 
 def setup_environment():
     """Setup environment and import required modules"""
