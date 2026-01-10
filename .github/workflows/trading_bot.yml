@@ -69,14 +69,18 @@ jobs:
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
           cd "${{ github.workspace }}"
           echo "📊 Running signal analysis..."
-          echo "Working directory: $(pwd)"
+          echo "GitHub workspace: ${{ github.workspace }}"
+          echo "Current directory: $(pwd)"
           echo "Notebook check:"
           ls -la main_signal_analysis.ipynb 2>&1 || echo "Notebook not in current dir"
+          echo "Python files check:"
+          ls -la *.py 2>&1 | head -5
           echo "Running from: $(pwd)"
-          python run_signal_analysis.py || echo "⚠️ Signal analysis failed, but continuing..."
+          PYTHONPATH="${{ github.workspace }}:$PYTHONPATH" python run_signal_analysis.py || echo "⚠️ Signal analysis failed, but continuing..."
       
       - name: List Python files for debugging
         run: |
@@ -96,11 +100,15 @@ jobs:
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-        working-directory: ${{ github.workspace }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
+          cd "${{ github.workspace }}"
           echo "🔴 Executing sell orders..."
-          echo "Working directory: $(pwd)"
-          python run_trading_bot.py sell
+          echo "GitHub workspace: ${{ github.workspace }}"
+          echo "Current directory: $(pwd)"
+          echo "Python files check:"
+          ls -la *.py 2>&1 | head -5
+          PYTHONPATH="${{ github.workspace }}:$PYTHONPATH" python run_trading_bot.py sell
         continue-on-error: true  # Don't fail workflow if sell orders fail
       
       - name: Check if buy order time
@@ -122,22 +130,24 @@ jobs:
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-        working-directory: ${{ github.workspace }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
+          cd "${{ github.workspace }}"
           echo "❌ Cancelling all open orders..."
-          echo "Working directory: $(pwd)"
-          python run_trading_bot.py cancel
+          echo "Current directory: $(pwd)"
+          PYTHONPATH="${{ github.workspace }}:$PYTHONPATH" python run_trading_bot.py cancel
       
       - name: Execute buy orders
         if: steps.check_buy_time.outputs.is_buy_time == 'true' || github.event_name == 'workflow_dispatch'
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-        working-directory: ${{ github.workspace }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
+          cd "${{ github.workspace }}"
           echo "🟢 Executing buy orders..."
-          echo "Working directory: $(pwd)"
-          python run_trading_bot.py buy
+          echo "Current directory: $(pwd)"
+          PYTHONPATH="${{ github.workspace }}:$PYTHONPATH" python run_trading_bot.py buy
       
       - name: Commit and push changes
         if: steps.check_buy_time.outputs.is_buy_time == 'true' || github.event_name == 'workflow_dispatch'

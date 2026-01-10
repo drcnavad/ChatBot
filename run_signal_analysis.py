@@ -68,30 +68,26 @@ def run_notebook(notebook_path):
         return False
 
 if __name__ == "__main__":
-    # Get notebook path - try multiple locations
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Get notebook path - use current working directory (should be repository root in GitHub Actions)
     cwd = os.getcwd()
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # In GitHub Actions, the workspace is the repository root
-    # Try repository root first (where the file should be)
-    github_workspace = os.getenv("GITHUB_WORKSPACE", cwd)
-    
-    # Try different paths
+    # In GitHub Actions, we cd to workspace, so cwd should be correct
+    # Try current working directory first (most reliable)
     possible_paths = [
-        os.path.join(github_workspace, "main_signal_analysis.ipynb"),  # GitHub Actions workspace root
-        os.path.join(cwd, "main_signal_analysis.ipynb"),  # Current working directory
-        os.path.join(script_dir, "main_signal_analysis.ipynb"),  # Script directory
+        os.path.join(cwd, "main_signal_analysis.ipynb"),  # Current working directory (repository root)
         "main_signal_analysis.ipynb",  # Relative to current directory
+        os.path.join(script_dir, "main_signal_analysis.ipynb"),  # Script directory
     ]
     
     # Debug output
-    print(f"GitHub workspace (GITHUB_WORKSPACE env): {github_workspace}")
     print(f"Current working directory: {cwd}")
     print(f"Script directory: {script_dir}")
+    print(f"GITHUB_WORKSPACE env: {os.getenv('GITHUB_WORKSPACE', 'Not set')}")
     print(f"Looking for notebook in:")
     for path in possible_paths:
         exists = os.path.exists(path)
-        abs_path = os.path.abspath(path) if os.path.exists(path) else path
+        abs_path = os.path.abspath(path) if path != "main_signal_analysis.ipynb" else os.path.join(cwd, path)
         print(f"  {abs_path} - {'✅ EXISTS' if exists else '❌ NOT FOUND'}")
     
     notebook_path = None
