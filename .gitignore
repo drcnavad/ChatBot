@@ -15,6 +15,7 @@ ENV/
 # Jupyter Notebook
 .ipynb_checkpoints
 *.ipynb
+!main_signal_analysis.ipynb  # Required for GitHub Actions to run
 
 # Environment variables
 .env
@@ -38,9 +39,7 @@ Reports/*.xlsx
 # Backup/duplicate app files
 app2.py
 app_original.py
-alpaca_setup.py
-sector_mapping.py
-signal_analysis_functions.py
+# Note: alpaca_setup.py, sector_mapping.py, signal_analysis_functions.py are needed for GitHub Actions
 
 # Logs
 *.log

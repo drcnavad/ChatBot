@@ -68,6 +68,19 @@ def run_notebook(notebook_path):
         return False
 
 if __name__ == "__main__":
-    notebook_path = os.path.join(os.path.dirname(__file__), "main_signal_analysis.ipynb")
+    # Get notebook path - try relative to script first, then current working directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    notebook_path = os.path.join(script_dir, "main_signal_analysis.ipynb")
+    
+    # If not found, try current working directory (for GitHub Actions)
+    if not os.path.exists(notebook_path):
+        notebook_path = os.path.join(os.getcwd(), "main_signal_analysis.ipynb")
+    
+    if not os.path.exists(notebook_path):
+        print(f"❌ Notebook not found. Tried:")
+        print(f"   {os.path.join(script_dir, 'main_signal_analysis.ipynb')}")
+        print(f"   {os.path.join(os.getcwd(), 'main_signal_analysis.ipynb')}")
+        sys.exit(1)
+    
     success = run_notebook(notebook_path)
     sys.exit(0 if success else 1)
