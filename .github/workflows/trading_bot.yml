@@ -51,36 +51,54 @@ jobs:
       
       - name: List files for debugging
         run: |
+          echo "GitHub workspace: ${{ github.workspace }}"
           echo "Current directory: $(pwd)"
-          echo "Files in root:"
+          echo ""
+          echo "Changing to workspace directory:"
+          cd "${{ github.workspace }}"
+          echo "Now in: $(pwd)"
+          echo ""
+          echo "All files in workspace root:"
           ls -la
           echo ""
-          echo "Looking for notebook:"
-          find . -name "main_signal_analysis.ipynb" -type f 2>/dev/null || echo "Notebook not found"
+          echo "Looking for notebook recursively:"
+          find . -name "main_signal_analysis.ipynb" -type f 2>/dev/null | head -5 || echo "Notebook not found anywhere"
           echo ""
-          echo "Python files:"
-          ls -la *.py 2>/dev/null || echo "No .py files in root"
+          echo "Python files in root:"
+          ls -la *.py 2>/dev/null | head -10 || echo "No .py files in root"
           echo ""
-          echo "Checking if notebook exists:"
-          test -f main_signal_analysis.ipynb && echo "✅ main_signal_analysis.ipynb exists" || echo "❌ main_signal_analysis.ipynb NOT found"
-          test -f alpaca_setup.py && echo "✅ alpaca_setup.py exists" || echo "❌ alpaca_setup.py NOT found"
+          echo "Checking specific files:"
+          test -f main_signal_analysis.ipynb && echo "✅ main_signal_analysis.ipynb exists at $(pwd)/main_signal_analysis.ipynb" || echo "❌ main_signal_analysis.ipynb NOT found"
+          test -f alpaca_setup.py && echo "✅ alpaca_setup.py exists at $(pwd)/alpaca_setup.py" || echo "❌ alpaca_setup.py NOT found"
+          test -f run_signal_analysis.py && echo "✅ run_signal_analysis.py exists" || echo "❌ run_signal_analysis.py NOT found"
+          echo ""
+          echo "Git tracked files (notebook):"
+          git ls-files | grep -i "main_signal" || echo "Notebook not tracked in git"
+          echo ""
+          echo "Git tracked files (Python):"
+          git ls-files | grep "\.py$" | head -10
       
       - name: Run signal analysis
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
+        working-directory: ${{ github.workspace }}
         run: |
-          cd "${{ github.workspace }}"
           echo "📊 Running signal analysis..."
           echo "GitHub workspace: ${{ github.workspace }}"
           echo "Current directory: $(pwd)"
-          echo "Notebook check:"
-          ls -la main_signal_analysis.ipynb 2>&1 || echo "Notebook not in current dir"
-          echo "Python files check:"
-          ls -la *.py 2>&1 | head -5
-          echo "Running from: $(pwd)"
-          PYTHONPATH="${{ github.workspace }}:$PYTHONPATH" python run_signal_analysis.py || echo "⚠️ Signal analysis failed, but continuing..."
+          echo ""
+          echo "Verifying files exist:"
+          ls -la main_signal_analysis.ipynb 2>&1 && echo "✅ Notebook found" || echo "❌ Notebook NOT found"
+          ls -la run_signal_analysis.py 2>&1 && echo "✅ Script found" || echo "❌ Script NOT found"
+          echo ""
+          echo "Python path:"
+          echo "PYTHONPATH=$PYTHONPATH"
+          echo ""
+          echo "Running script:"
+          export PYTHONPATH="${{ github.workspace }}:$PYTHONPATH"
+          python run_signal_analysis.py || echo "⚠️ Signal analysis failed, but continuing..."
       
       - name: List Python files for debugging
         run: |
@@ -101,14 +119,20 @@ jobs:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
+        working-directory: ${{ github.workspace }}
         run: |
-          cd "${{ github.workspace }}"
           echo "🔴 Executing sell orders..."
-          echo "GitHub workspace: ${{ github.workspace }}"
           echo "Current directory: $(pwd)"
-          echo "Python files check:"
-          ls -la *.py 2>&1 | head -5
-          PYTHONPATH="${{ github.workspace }}:$PYTHONPATH" python run_trading_bot.py sell
+          echo ""
+          echo "Verifying files exist:"
+          ls -la alpaca_setup.py 2>&1 && echo "✅ alpaca_setup.py found" || echo "❌ alpaca_setup.py NOT found"
+          ls -la run_trading_bot.py 2>&1 && echo "✅ run_trading_bot.py found" || echo "❌ run_trading_bot.py NOT found"
+          echo ""
+          echo "Python path:"
+          export PYTHONPATH="${{ github.workspace }}:$PYTHONPATH"
+          echo "PYTHONPATH=$PYTHONPATH"
+          echo ""
+          python run_trading_bot.py sell
         continue-on-error: true  # Don't fail workflow if sell orders fail
       
       - name: Check if buy order time
@@ -131,11 +155,12 @@ jobs:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
+        working-directory: ${{ github.workspace }}
         run: |
-          cd "${{ github.workspace }}"
           echo "❌ Cancelling all open orders..."
           echo "Current directory: $(pwd)"
-          PYTHONPATH="${{ github.workspace }}:$PYTHONPATH" python run_trading_bot.py cancel
+          export PYTHONPATH="${{ github.workspace }}:$PYTHONPATH"
+          python run_trading_bot.py cancel
       
       - name: Execute buy orders
         if: steps.check_buy_time.outputs.is_buy_time == 'true' || github.event_name == 'workflow_dispatch'
@@ -143,11 +168,12 @@ jobs:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
+        working-directory: ${{ github.workspace }}
         run: |
-          cd "${{ github.workspace }}"
           echo "🟢 Executing buy orders..."
           echo "Current directory: $(pwd)"
-          PYTHONPATH="${{ github.workspace }}:$PYTHONPATH" python run_trading_bot.py buy
+          export PYTHONPATH="${{ github.workspace }}:$PYTHONPATH"
+          python run_trading_bot.py buy
       
       - name: Commit and push changes
         if: steps.check_buy_time.outputs.is_buy_time == 'true' || github.event_name == 'workflow_dispatch'
