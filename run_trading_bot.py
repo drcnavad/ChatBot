@@ -9,8 +9,11 @@ import os
 from datetime import datetime, timedelta
 import pytz
 
-# Add current directory to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add current directory to path (for GitHub Actions)
+script_dir = os.path.dirname(os.path.abspath(__file__))
+cwd = os.getcwd()
+sys.path.insert(0, script_dir)
+sys.path.insert(0, cwd)  # Also add current working directory
 
 def setup_environment():
     """Setup environment and import required modules"""

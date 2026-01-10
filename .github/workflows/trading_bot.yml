@@ -48,6 +48,14 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
       
+      - name: List files for debugging
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Files in root:"
+          ls -la | head -20
+          echo "Looking for notebook:"
+          find . -name "main_signal_analysis.ipynb" -type f 2>/dev/null || echo "Notebook not found"
+      
       - name: Run signal analysis
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
@@ -55,6 +63,13 @@ jobs:
         run: |
           echo "📊 Running signal analysis..."
           python run_signal_analysis.py || echo "⚠️ Signal analysis failed, but continuing..."
+      
+      - name: List Python files for debugging
+        run: |
+          echo "Python files in root:"
+          ls -la *.py 2>/dev/null || echo "No .py files found"
+          echo "Checking for alpaca_setup.py:"
+          test -f alpaca_setup.py && echo "✅ Found alpaca_setup.py" || echo "❌ alpaca_setup.py not found"
       
       - name: Execute sell orders
         env:
