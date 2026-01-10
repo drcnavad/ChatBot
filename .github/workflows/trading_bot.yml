@@ -31,6 +31,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0  # Fetch all history to ensure all files are available
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -68,12 +69,13 @@ jobs:
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-        working-directory: ${{ github.workspace }}
         run: |
+          cd "${{ github.workspace }}"
           echo "📊 Running signal analysis..."
           echo "Working directory: $(pwd)"
           echo "Notebook check:"
           ls -la main_signal_analysis.ipynb 2>&1 || echo "Notebook not in current dir"
+          echo "Running from: $(pwd)"
           python run_signal_analysis.py || echo "⚠️ Signal analysis failed, but continuing..."
       
       - name: List Python files for debugging
