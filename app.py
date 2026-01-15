@@ -178,26 +178,29 @@ def generate_ai_summary(ticker, stock_data, df):
         {
             "role": "system",
             "content": (
-                "You are a financial advisor. Respond in 4 summary bullet points and each bullet point must be on a new line. "
-                "Keep numbers and units intact. Make sure words are not broken up. "
-                
-                "CRITICAL MOVING AVERAGE FORMATTING RULES: "
-                "Positive (Price - MA) percentage = above MA (bullish). Negative (Price - MA) percentage = below MA (bearish)."
-                "When mentioning moving averages, use ONLY the percentage values from Price - MA differences, NOT the dollar amount. "
-                "Format: 'above MA10 (X.XX%)' or 'below MA50 (-X.XX%)'. Do not calculate the percentage value yourself. Use from the data provided. "
-            
+                "You are a financial advisor. Provide ONLY a concise summary (4-5 sentences) followed by a clear AI recommendation. "
+                "DO NOT list individual metrics, scores, or numbers in your response. "
+                "DO NOT mention specific values like 'Balance Sheet Score: X', 'News Sentiment Score: Y', or 'RSI: Z'. "
+                "Instead, synthesize all the data into a brief, readable summary that considers all factors holistically. "
+                "Keep numbers and units intact when absolutely necessary. Make sure words are not broken up. "
+                "Your output should be brief, precise, and easy to read - focus on the overall picture, not individual data points."
             )
         },
         {
             "role": "user",
             "content": (
-                "Analyze stock data. Focus on Trend, Balance Sheet Score and News Sentiment score analysis. Do not repeat the same information in different ways. "
-                "Balance sheet score above number 11 is excellent, above 5 is good, above 2 is average, below 2 is bad, and below -5 is very bad."
-                "News Sentiment score of last 14 days above number 7 is excellent, above 4 is good, above 0 is neutral, below -1 is bad, and below -4 is very bad."
-                "Do not confuse for all scores: If the value is positive, it means the price is above the MA, and if the value is negative, it means the price is below the MA."
-                "Doulbe check the values before stating above or below the number"
-                "Conclusion: Complete the analysis with a mandatory AI recommendation for bullish or bearish prediction with reasoning. If there is doubt, suggest hold prediction."
-                f"{context}"
+                "Analyze the following stock data comprehensively. Consider ALL factors: "
+                "- Price trends and moving average positions (positive % = above MA/bullish, negative % = below MA/bearish) "
+                "- Balance Sheet Score (above 11=excellent, above 5=good, above 2=average, below 2=bad, below -5=very bad) "
+                "- News Sentiment Score (above 7=excellent, above 4=good, above 0=neutral, below -1=bad, below -4=very bad) "
+                "- Technical indicators (MA, RSI, MACD) and trend deltas "
+                "\n\n"
+                "Provide ONLY: "
+                "1. A concise 4-5 sentence summary synthesizing the key factors (DO NOT list individual metrics or scores) "
+                "2. A clear AI recommendation: BULLISH, BEARISH, or HOLD with brief 1-2 sentences reasoning "
+                "\n\n"
+                "Remember: Do NOT mention specific score values or metrics in your response. Synthesize everything into a holistic view. "
+                f"\n\n{context}"
             )
         }
     ]
@@ -284,6 +287,101 @@ def get_available_symbols(df):
     latest_date = df['Date'].max()
     latest_date_df = df[df['Date'] == latest_date]
     return sorted(latest_date_df['Symbol'].unique().tolist())
+
+# News sentiment summary functions
+@st.cache_data(ttl=3600)
+def load_news_data():
+    """Load news data from CSV - cached"""
+    news_csv = os.path.join("Reports", "news_cleaned_df.csv")
+    if not os.path.exists(news_csv):
+        return None
+    return pd.read_csv(news_csv)
+
+def get_news_by_symbol(news_df, symbol):
+    """Filter news data for a specific stock symbol"""
+    if news_df is None:
+        return pd.DataFrame()
+    return news_df[news_df['symbol'] == symbol.upper()].copy()
+
+def group_news_by_sentiment(df):
+    """Group news into positive and negative based on sentiment_label"""
+    if df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+    positive_news = df[df['sentiment_label'] == 'positive'].copy()
+    negative_news = df[df['sentiment_label'] == 'negative'].copy()
+    return positive_news, negative_news
+
+def format_news_for_llm(df, max_articles=20):
+    """Format news headlines and summaries for LLM input"""
+    if df.empty:
+        return "No news articles available."
+    
+    # Limit to most recent articles
+    df_sorted = df.sort_values('date', ascending=False).head(max_articles)
+    
+    formatted_text = f"Total articles: {len(df_sorted)}\n\n"
+    
+    for article_num, (idx, row) in enumerate(df_sorted.iterrows(), 1):
+        headline = str(row.get('headline', 'N/A'))
+        summary = str(row.get('summary', 'N/A'))
+        date = str(row.get('date', 'N/A'))
+        source = str(row.get('source', 'N/A'))
+        
+        formatted_text += f"Article {article_num}:\n"
+        formatted_text += f"Date: {date}\n"
+        formatted_text += f"Source: {source}\n"
+        formatted_text += f"Headline: {headline}\n"
+        formatted_text += f"Summary: {summary}\n\n"
+    
+    return formatted_text
+
+def generate_news_summary(news_text, sentiment_type, symbol):
+    """Generate AI summary for news articles using Hugging Face Llama-3 model"""
+    if not HF_TOKEN:
+        return "Error: HF_TOKEN not configured"
+    
+    if news_text == "No news articles available.":
+        return "No news articles available for analysis."
+    
+    try:
+        client = InferenceClient(token=HF_TOKEN)
+        
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a financial news analyst. Provide a concise summary of the news articles provided. "
+                    "Focus on key themes, trends, and important information that would be relevant for stock analysis. "
+                    "Respond in 2-4 bullet points, each on a new line. Keep the summary factual and objective. Do not repeat the same information."
+                )
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Analyze the following {sentiment_type} news articles for {symbol} and provide a summary:\n\n"
+                    f"{news_text}\n\n"
+                    f"Provide a concise summary highlighting the main themes and key information from these {sentiment_type} news articles."
+                    f"Make sure that words and numbersare not broken up. Make sure that the summary is not too long. "
+                )
+            }
+        ]
+        
+        response = client.chat_completion(
+            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            messages=messages,
+            max_tokens=500,
+            temperature=0.2
+        )
+        
+        summary_raw = response.choices[0].message.content.strip()
+        
+        # Clean artifacts
+        summary = re.split(r'\[/?USER\]|Can you|Could you', summary_raw)[0].strip()
+        
+        return summary
+    
+    except Exception as e:
+        return f"Error generating summary: {str(e)}"
 
 # Main app
 st.title("📈 Stock Signal Lookup")
@@ -416,11 +514,49 @@ if df is not None:
         ticker_data_summary = df[df['Symbol'] == ticker].copy()
         if not ticker_data_summary.empty:
             latest = ticker_data_summary.nlargest(1, 'Date').iloc[0]
+            
+            # Generate main AI summary
             with st.spinner(f"Generating AI summary for {ticker}..."):
                 summary = generate_ai_summary(ticker, latest, df)
             
             with st.expander(f"🤖 AI Summary for {ticker}", expanded=True):
                 st.markdown(summary)
+            
+            # Generate positive and negative news summaries
+            news_df = load_news_data()
+            if news_df is not None:
+                symbol_news = get_news_by_symbol(news_df, ticker)
+                if not symbol_news.empty:
+                    positive_news, negative_news = group_news_by_sentiment(symbol_news)
+                    
+                    # Create two columns for positive and negative summaries
+                    col_pos, col_neg = st.columns(2)
+                    
+                    with col_pos:
+                        if not positive_news.empty:
+                            with st.spinner(f"Analyzing {len(positive_news)} positive news articles..."):
+                                positive_news_text = format_news_for_llm(positive_news, max_articles=20)
+                                positive_summary = generate_news_summary(positive_news_text, "positive", ticker)
+                            
+                            with st.expander(f"✅ Positive News Summary ({len(positive_news)} articles)", expanded=True):
+                                st.markdown(positive_summary)
+                        else:
+                            st.info("No positive news articles found")
+                    
+                    with col_neg:
+                        if not negative_news.empty:
+                            with st.spinner(f"Analyzing {len(negative_news)} negative news articles..."):
+                                negative_news_text = format_news_for_llm(negative_news, max_articles=20)
+                                negative_summary = generate_news_summary(negative_news_text, "negative", ticker)
+                            
+                            with st.expander(f"❌ Negative News Summary ({len(negative_news)} articles)", expanded=True):
+                                st.markdown(negative_summary)
+                        else:
+                            st.info("No negative news articles found")
+                else:
+                    st.info(f"No news articles found for {ticker}")
+            else:
+                st.warning("News data file not found. Please ensure news_cleaned_df.csv exists in the Reports folder.")
             
             st.session_state.generate_summary = False  # Reset flag
     
