@@ -522,7 +522,7 @@ if df is not None:
             with st.expander(f"🤖 AI Summary for {ticker}", expanded=True):
                 st.markdown(summary)
             
-            # Generate positive and negative news summaries
+            # Generate positive and negative news summaries (only if news file exists)
             news_df = load_news_data()
             if news_df is not None:
                 symbol_news = get_news_by_symbol(news_df, ticker)
@@ -555,8 +555,7 @@ if df is not None:
                             st.info("No negative news articles found")
                 else:
                     st.info(f"No news articles found for {ticker}")
-            else:
-                st.warning("News data file not found. Please ensure news_cleaned_df.csv exists in the Reports folder.")
+            # If news file doesn't exist, silently skip (don't show warning to avoid cluttering UI)
             
             st.session_state.generate_summary = False  # Reset flag
     
