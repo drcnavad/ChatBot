@@ -383,9 +383,18 @@ def generate_news_summary(news_text, sentiment_type, symbol):
     except Exception as e:
         return f"Error generating summary: {str(e)}"
 
-# Main app
-st.title("📈 Stock Signal Lookup")
-st.markdown("Enter a ticker symbol to see the latest trading signal")
+# Main app – header
+st.markdown(
+    """
+    <div style="margin-bottom: 1rem;">
+        <h1 style="margin-bottom: 0.25rem;">📈 Stock Signal Lookup</h1>
+        <p style="color: #555; font-size: 0.95rem; margin-top: 0;">
+            Analyze technical signals, sentiment, and fundamentals for any ticker in your watchlist.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Load data (cached) - show loading indicator only on first load
 if 'data_loaded' not in st.session_state:
@@ -397,7 +406,15 @@ else:
 
 # Sidebar with top stocks (lazy loaded)
 with st.sidebar:
-    st.header("🏆 Top Stocks by Signal")
+    st.markdown(
+        """
+        <h2 style="margin-bottom: 0.25rem;">🏆 Top Stocks by Signal</h2>
+        <p style="color: #777; font-size: 0.85rem; margin-top: 0;">
+            Click a ticker to load its full signal and chart details.
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
     
     if df is not None:
         # Use cached functions for expensive operations
@@ -406,7 +423,7 @@ with st.sidebar:
         
         # Filter by signal
         filter_option = st.selectbox(
-            "Filter by Signal",
+            "Filter by signal",
             ["All", "BUY", "SELL", "HOLD"],
             key="signal_filter"
         )
@@ -443,7 +460,7 @@ with st.sidebar:
             
             # Make it clickable
             if st.button(
-                f"{signal_emoji} {stock['Symbol']} | Score: {stock['combined_signal']:.1f}",
+                f"{signal_emoji} {stock['Symbol']}  ·  {stock['final_trade']}  ·  {stock['combined_signal']:.1f}",
                 key=f"stock_{idx}",
                 use_container_width=True
             ):
@@ -776,60 +793,97 @@ if df is not None:
                 # Charts section - stacked subplots
                 st.markdown("### 📈 Technical Analysis Charts (Last 1 Year)")
                 
-                # Secondary metrics - subheading size (below chart title)
-                col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+                # Secondary metrics - professional display
+                st.markdown("""
+                <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;'>
+                    <div style='display: flex; justify-content: space-around; flex-wrap: wrap; gap: 15px;'>
+                """, unsafe_allow_html=True)
+                
+                col1, col2, col3, col4, col5, col6 = st.columns(6)
             
                 with col1:
                     ma_10 = latest.get('ma_10', 0)
                     if pd.notna(ma_10):
-                        st.markdown(f'MA 10: ${ma_10:.2f}')
+                        st.metric("MA 10", f"${ma_10:.2f}", delta=None)
                 
                 with col2:
                     ma_30 = latest.get('ma_30', 0)
                     if pd.notna(ma_30):
-                        st.markdown(f'MA 30: ${ma_30:.2f}')
+                        st.metric("MA 30", f"${ma_30:.2f}", delta=None)
                 
                 with col3:
                     ma_50 = latest.get('ma_50', 0)
                     if pd.notna(ma_50):
-                        st.markdown(f'MA 50: ${ma_50:.2f}')
+                        st.metric("MA 50", f"${ma_50:.2f}", delta=None)
                 
                 with col4:
                     ma_100 = latest.get('ma_100', 0)
                     if pd.notna(ma_100):
-                        st.markdown(f'MA 100: ${ma_100:.2f}')
+                        st.metric("MA 100", f"${ma_100:.2f}", delta=None)
                 
                 with col5:
                     ma_200 = latest.get('ma_200', 0)
                     if pd.notna(ma_200):
-                        st.markdown(f'MA 200: ${ma_200:.2f}')
+                        st.metric("MA 200", f"${ma_200:.2f}", delta=None)
                 
                 with col6:
                     rsi = latest.get('RSI Options Rate', 0)
                     if pd.notna(rsi):
-                        st.markdown(f'RSI: {rsi:.2f}')
+                        st.metric("RSI", f"{rsi:.2f}", delta=None)
+                
+                st.markdown("</div></div>", unsafe_allow_html=True)
                 
                 # Prepare data
-                price_data = ticker_data_sorted[['Date', 'Close', 'ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']].copy()
+                price_data = ticker_data_sorted[['Date', 'Close', 'ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200', 
+                                                 'combined_signal', 'Buy Streak', 'Sell Streak']].copy()
                 price_data = price_data.set_index('Date')
                 price_data = price_data.dropna(subset=['Close'])
+                # Fill NaN values for signal and streaks with 0
+                price_data['combined_signal'] = price_data['combined_signal'].fillna(0)
+                price_data['Buy Streak'] = price_data['Buy Streak'].fillna(0)
+                price_data['Sell Streak'] = price_data['Sell Streak'].fillna(0)
                 
                 # Create subplots: 3 rows, 1 column
                 fig = make_subplots(
                     rows=3, cols=1,
                     shared_xaxes=True,
-                    vertical_spacing=0.05,
+                    vertical_spacing=0.08,
                     row_heights=[0.65, 0.175, 0.175],
-                    subplot_titles=('Price and Moving Averages', 'RSI', 'MACD')
+                    subplot_titles=(
+                        '<b>Price and Moving Averages</b>',
+                        '<b>RSI (Relative Strength Index)</b>',
+                        '<b>MACD (Moving Average Convergence Divergence)</b>'
+                    )
+                )
+                
+                # Update subplot titles styling
+                fig.update_annotations(
+                    font=dict(size=13, color='#1f1f1f', family='Arial, sans-serif'),
+                    yshift=5
                 )
                 
                 # Row 1: Price and Moving Averages
+                # Create custom hover text with combined signal and streaks
+                hover_text_close = []
+                for idx in price_data.index:
+                    signal_val = price_data.loc[idx, 'combined_signal']
+                    buy_streak = price_data.loc[idx, 'Buy Streak']
+                    sell_streak = price_data.loc[idx, 'Sell Streak']
+                    hover_info = f"Combined Signal: {signal_val:.2f}"
+                    if buy_streak > 0:
+                        hover_info += f"<br>Buy Streak: {int(buy_streak)} days"
+                    if sell_streak > 0:
+                        hover_info += f"<br>Sell Streak: {int(sell_streak)} days"
+                    hover_text_close.append(hover_info)
+                
                 fig.add_trace(go.Scatter(
                     x=price_data.index,
                     y=price_data['Close'],
-                    name='Close',
-                    line=dict(color='green', width=3),
-                    mode='lines'
+                    name='Close Price',
+                    line=dict(color='#0d47a1', width=3),  # Darker blue
+                    mode='lines',
+                    customdata=hover_text_close,
+                    hovertemplate='<b>Close</b><br>$%{y:.2f}<br>%{customdata}<extra></extra>'
                 ), row=1, col=1)
                 
                 if 'ma_10' in price_data.columns:
@@ -837,9 +891,10 @@ if df is not None:
                         x=price_data.index,
                         y=price_data['ma_10'],
                         name='MA 10',
-                        line=dict(color='rgba(255, 140, 0, 0.6)', width=0.8),
+                        line=dict(color='rgba(255, 127, 14, 0.5)', width=1.2),  # Lighter orange
                         mode='lines',
-                        showlegend=True
+                        showlegend=True,
+                        hovertemplate='<b>MA 10</b><br>$%{y:.2f}<extra></extra>'
                     ), row=1, col=1)
                 
                 if 'ma_30' in price_data.columns:
@@ -847,9 +902,10 @@ if df is not None:
                         x=price_data.index,
                         y=price_data['ma_30'],
                         name='MA 30',
-                        line=dict(color='rgba(255, 0, 0, 0.6)', width=0.8),
+                        line=dict(color='rgba(214, 39, 40, 0.5)', width=1.2),  # Lighter red
                         mode='lines',
-                        showlegend=True
+                        showlegend=True,
+                        hovertemplate='<b>MA 30</b><br>$%{y:.2f}<extra></extra>'
                     ), row=1, col=1)
                 
                 if 'ma_50' in price_data.columns:
@@ -857,9 +913,10 @@ if df is not None:
                         x=price_data.index,
                         y=price_data['ma_50'],
                         name='MA 50',
-                        line=dict(color='rgba(0, 0, 255, 0.6)', width=0.8),
+                        line=dict(color='rgba(148, 103, 189, 0.5)', width=1.2),  # Lighter purple
                         mode='lines',
-                        showlegend=True
+                        showlegend=True,
+                        hovertemplate='<b>MA 50</b><br>$%{y:.2f}<extra></extra>'
                     ), row=1, col=1)
                 
                 if 'ma_100' in price_data.columns:
@@ -867,9 +924,10 @@ if df is not None:
                         x=price_data.index,
                         y=price_data['ma_100'],
                         name='MA 100',
-                        line=dict(color='rgba(0, 128, 0, 0.6)', width=0.8),
+                        line=dict(color='rgba(44, 160, 44, 0.5)', width=1.2),  # Lighter green
                         mode='lines',
-                        showlegend=True
+                        showlegend=True,
+                        hovertemplate='<b>MA 100</b><br>$%{y:.2f}<extra></extra>'
                     ), row=1, col=1)
                 
                 if 'ma_200' in price_data.columns:
@@ -877,10 +935,101 @@ if df is not None:
                         x=price_data.index,
                         y=price_data['ma_200'],
                         name='MA 200',
-                        line=dict(color='rgba(128, 128, 128, 0.6)', width=0.8),
+                        line=dict(color='rgba(140, 86, 75, 0.5)', width=1.2),  # Lighter brown
                         mode='lines',
-                        showlegend=True
+                        showlegend=True,
+                        hovertemplate='<b>MA 200</b><br>$%{y:.2f}<extra></extra>'
                     ), row=1, col=1)
+                
+                # Add Buy Streak and Sell Streak indicators at top of price chart
+                if 'Buy Streak' in ticker_data_sorted.columns and 'Sell Streak' in ticker_data_sorted.columns:
+                    # Get max price for placing streak lines at top
+                    max_price = price_data['Close'].max()
+                    min_price = price_data['Close'].min()
+                    price_range = max_price - min_price
+                    top_y_price = max_price + (price_range * 0.05)  # Place lines 5% above max price
+                    
+                    streak_data = ticker_data_sorted[['Date', 'Buy Streak', 'Sell Streak']].copy()
+                    streak_data = streak_data.set_index('Date')
+                    streak_data = streak_data.reindex(price_data.index).fillna(0)
+                    
+                    # Identify continuous Buy Streak periods
+                    buy_active = (streak_data['Buy Streak'] > 0).astype(int)
+                    buy_periods = []
+                    start_idx = None
+                    
+                    for idx, (date, is_active) in enumerate(buy_active.items()):
+                        if is_active == 1 and start_idx is None:
+                            start_idx = idx
+                        elif is_active == 0 and start_idx is not None:
+                            buy_periods.append((streak_data.index[start_idx], streak_data.index[idx-1]))
+                            start_idx = None
+                    if start_idx is not None:
+                        buy_periods.append((streak_data.index[start_idx], streak_data.index[-1]))
+                    
+                    # Identify continuous Sell Streak periods
+                    sell_active = (streak_data['Sell Streak'] > 0).astype(int)
+                    sell_periods = []
+                    start_idx = None
+                    
+                    for idx, (date, is_active) in enumerate(sell_active.items()):
+                        if is_active == 1 and start_idx is None:
+                            start_idx = idx
+                        elif is_active == 0 and start_idx is not None:
+                            sell_periods.append((streak_data.index[start_idx], streak_data.index[idx-1]))
+                            start_idx = None
+                    if start_idx is not None:
+                        sell_periods.append((streak_data.index[start_idx], streak_data.index[-1]))
+                    
+                    # Identify Hold periods (when neither Buy nor Sell streak is active)
+                    hold_active = ((buy_active == 0) & (sell_active == 0)).astype(int)
+                    hold_periods = []
+                    start_idx = None
+                    
+                    for idx, (date, is_active) in enumerate(hold_active.items()):
+                        if is_active == 1 and start_idx is None:
+                            start_idx = idx
+                        elif is_active == 0 and start_idx is not None:
+                            hold_periods.append((streak_data.index[start_idx], streak_data.index[idx-1]))
+                            start_idx = None
+                    if start_idx is not None:
+                        hold_periods.append((streak_data.index[start_idx], streak_data.index[-1]))
+                    
+                    # Add horizontal lines for Buy Streak periods (green)
+                    for start_date, end_date in buy_periods:
+                        fig.add_shape(
+                            type="line",
+                            x0=start_date,
+                            x1=end_date,
+                            y0=top_y_price,
+                            y1=top_y_price,
+                            line=dict(color="#2ca02c", width=3.5),
+                            row=1, col=1
+                        )
+                    
+                    # Add horizontal lines for Sell Streak periods (red)
+                    for start_date, end_date in sell_periods:
+                        fig.add_shape(
+                            type="line",
+                            x0=start_date,
+                            x1=end_date,
+                            y0=top_y_price,
+                            y1=top_y_price,
+                            line=dict(color="#d62728", width=3.5),
+                            row=1, col=1
+                        )
+                    
+                    # Add horizontal lines for Hold periods (yellow-golden, thicker)
+                    for start_date, end_date in hold_periods:
+                        fig.add_shape(
+                            type="line",
+                            x0=start_date,
+                            x1=end_date,
+                            y0=top_y_price,
+                            y1=top_y_price,
+                            line=dict(color="#FFD700", width=4.5),
+                            row=1, col=1
+                        )
                 
                 # Row 2: RSI
                 if 'RSI Options Rate' in ticker_data_sorted.columns:
@@ -892,10 +1041,17 @@ if df is not None:
                         x=rsi_data.index,
                         y=rsi_data['RSI Options Rate'],
                         name='RSI',
-                        line=dict(color='orange', width=1.5),
+                        line=dict(color='#ff7f0e', width=2),
                         mode='lines',
-                        showlegend=False
+                        showlegend=False,
+                        hovertemplate='<b>RSI</b><br>%{y:.2f}<extra></extra>',
+                        fill='tozeroy',
+                        fillcolor='rgba(255, 127, 14, 0.1)'
                     ), row=2, col=1)
+                    
+                    # Add RSI overbought/oversold reference lines
+                    fig.add_hline(y=70, line_dash="dash", line_color="rgba(200, 0, 0, 0.3)", row=2, col=1)
+                    fig.add_hline(y=30, line_dash="dash", line_color="rgba(0, 200, 0, 0.3)", row=2, col=1)
                 
                 # Row 3: MACD
                 if 'macd' in ticker_data_sorted.columns and 'MACD Signal' in ticker_data_sorted.columns:
@@ -907,39 +1063,137 @@ if df is not None:
                         x=macd_data.index,
                         y=macd_data['macd'],
                         name='MACD',
-                        line=dict(color='red', width=1.5),
+                        line=dict(color='#d62728', width=2.5),
                         mode='lines',
-                        showlegend=False
+                        showlegend=False,
+                        hovertemplate='<b>MACD</b><br>%{y:.4f}<extra></extra>'
                     ), row=3, col=1)
                     
                     fig.add_trace(go.Scatter(
                         x=macd_data.index,
                         y=macd_data['MACD Signal'],
                         name='MACD Signal',
-                        line=dict(color='skyblue', width=1.5),
+                        line=dict(color='#1f77b4', width=2.5, dash='dash'),
                         mode='lines',
-                        showlegend=False
+                        showlegend=False,
+                        hovertemplate='<b>MACD Signal</b><br>%{y:.4f}<extra></extra>'
                     ), row=3, col=1)
+                    
+                    # Add zero line
+                    fig.add_hline(y=0, line_dash="dot", line_color="rgba(128, 128, 128, 0.4)", line_width=1, row=3, col=1)
                 
-                # Update layout
+                # Update layout with professional styling
                 fig.update_layout(
-                    height=800,
+                    height=850,
                     hovermode='x unified',
-                    margin=dict(l=0, r=0, t=30, b=10),  # Minimal margins - only bottom for date labels
+                    margin=dict(l=50, r=50, t=120, b=50),  # Increased top margin for legend
+                    plot_bgcolor='rgba(250, 250, 250, 1)',
+                    paper_bgcolor='white',
                     showlegend=True,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    dragmode=False  # Disable drag/zoom on mobile
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.08,  # Position legend higher above the chart
+                        xanchor="center",
+                        x=0.5,
+                        font=dict(size=10, color='#333'),
+                        bgcolor='rgba(255, 255, 255, 0.9)',
+                        bordercolor='rgba(200, 200, 200, 0.5)',
+                        borderwidth=1,
+                        itemwidth=30
+                    ),
+                    font=dict(family="Arial, sans-serif", size=11, color='#333'),
+                    dragmode=False,
+                    hoverlabel=dict(
+                        bgcolor="white",
+                        bordercolor="#333",
+                        font_size=11,
+                        font_family="Arial, sans-serif"
+                    )
                 )
                 
-                # Update x-axes (all charts show same dates - months only)
+                # Update x-axes (all charts show same dates - months only) with crosshair
                 fig.update_xaxes(
-                    tickformat='%b %Y'  # Show months only (e.g., "Jan 2025")
+                    tickformat='%b %Y',
+                    showspikes=True,
+                    spikecolor="#888",
+                    spikesnap="cursor",
+                    spikemode="across",
+                    spikethickness=1,
+                    spikedash="solid",
+                    showgrid=True,
+                    gridcolor='rgba(200, 200, 200, 0.3)',
+                    gridwidth=1,
+                    zeroline=False,
+                    showline=True,
+                    linecolor='rgba(200, 200, 200, 0.5)',
+                    linewidth=1,
+                    tickfont=dict(size=10, color='#666'),
+                    title_font=dict(size=12, color='#333')
                 )
                 
-                # Update y-axis labels - removed to increase chart size on mobile
-                fig.update_yaxes(title_text="", row=1, col=1)
-                fig.update_yaxes(title_text="", row=2, col=1)
-                fig.update_yaxes(title_text="", row=3, col=1)
+                # Update y-axis labels with professional styling
+                fig.update_yaxes(
+                    title_text="Price ($)",
+                    title_font=dict(size=11, color='#333'),
+                    showspikes=True,
+                    spikecolor="#888",
+                    spikesnap="cursor",
+                    spikemode="toaxis",
+                    spikethickness=1,
+                    spikedash="solid",
+                    showgrid=True,
+                    gridcolor='rgba(200, 200, 200, 0.3)',
+                    gridwidth=1,
+                    zeroline=False,
+                    showline=True,
+                    linecolor='rgba(200, 200, 200, 0.5)',
+                    linewidth=1,
+                    tickfont=dict(size=10, color='#666'),
+                    tickformat='$,.0f',
+                    row=1, col=1
+                )
+                fig.update_yaxes(
+                    title_text="RSI",
+                    title_font=dict(size=11, color='#333'),
+                    showspikes=True,
+                    spikecolor="#888",
+                    spikesnap="cursor",
+                    spikemode="toaxis",
+                    spikethickness=1,
+                    spikedash="solid",
+                    showgrid=True,
+                    gridcolor='rgba(200, 200, 200, 0.3)',
+                    gridwidth=1,
+                    zeroline=False,
+                    showline=True,
+                    linecolor='rgba(200, 200, 200, 0.5)',
+                    linewidth=1,
+                    tickfont=dict(size=10, color='#666'),
+                    range=[0, 100],
+                    row=2, col=1
+                )
+                fig.update_yaxes(
+                    title_text="MACD",
+                    title_font=dict(size=11, color='#333'),
+                    showspikes=True,
+                    spikecolor="#888",
+                    spikesnap="cursor",
+                    spikemode="toaxis",
+                    spikethickness=1,
+                    spikedash="solid",
+                    showgrid=True,
+                    gridcolor='rgba(200, 200, 200, 0.3)',
+                    gridwidth=1,
+                    zeroline=True,
+                    zerolinecolor='rgba(128, 128, 128, 0.5)',
+                    zerolinewidth=1,
+                    showline=True,
+                    linecolor='rgba(200, 200, 200, 0.5)',
+                    linewidth=1,
+                    tickfont=dict(size=10, color='#666'),
+                    row=3, col=1
+                )
                 
                 st.plotly_chart(
                     fig, 
