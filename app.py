@@ -288,11 +288,11 @@ def get_gauge_ranges(df):
 # Cache available symbols (expensive operation)
 @st.cache_data(ttl=3600)
 def get_available_symbols(df):
-    """Get available symbols from latest date - cached"""
-    latest_date = df['Date'].max()
-    latest_date_df = df[df['Date'] == latest_date]
+    """Get available symbols from latest data for each symbol (same as get_top_stocks) - cached"""
+    # Use same logic as get_top_stocks - get latest data for each symbol
+    latest_data = df.sort_values('Date', ascending=False).drop_duplicates(subset='Symbol', keep='first')
     # Normalize symbols (uppercase, strip whitespace) for consistent matching
-    symbols = [str(s).strip().upper() for s in latest_date_df['Symbol'].unique().tolist()]
+    symbols = [str(s).strip().upper() for s in latest_data['Symbol'].unique().tolist()]
     return sorted(symbols)
 
 # News sentiment summary functions
@@ -496,26 +496,43 @@ if df is not None:
     latest_data = get_latest_data(df)
     
     # Use selected ticker from sidebar if clicked (before creating columns)
+    selected_ticker = None
     if 'selected_ticker' in st.session_state and st.session_state.selected_ticker:
         selected_ticker = str(st.session_state.selected_ticker).strip().upper()
-        st.session_state.selected_ticker = None  # Reset after use
-        # Update the selectbox key to force refresh
-        if 'ticker_select' in st.session_state:
+        # Verify the ticker exists in available_symbols before setting it
+        if selected_ticker in available_symbols:
             st.session_state.ticker_select = selected_ticker
-    else:
-        selected_ticker = None
+        else:
+            # If ticker not found, keep current selection or use first item
+            if 'ticker_select' not in st.session_state or st.session_state.ticker_select not in available_symbols:
+                st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
+        st.session_state.selected_ticker = None  # Reset after use
     
     # Main content area
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
-        # Determine the index for the selectbox
-        default_index = 0
-        ticker_select_value = st.session_state.get('ticker_select', '') or (selected_ticker if selected_ticker else '')
-        # Normalize ticker_select_value for matching
+        # Get the current value from session state
+        ticker_select_value = st.session_state.get('ticker_select', '')
+        
+        # Normalize and validate ticker_select_value
         if ticker_select_value:
             ticker_select_value = str(ticker_select_value).strip().upper()
-            if ticker_select_value in available_symbols:
-                default_index = available_symbols.index(ticker_select_value)
+            # Verify it's in available_symbols
+            if ticker_select_value not in available_symbols:
+                # If not found, use first item
+                ticker_select_value = available_symbols[0] if available_symbols else ''
+                st.session_state.ticker_select = ticker_select_value
+        else:
+            # No value set, use first item
+            ticker_select_value = available_symbols[0] if available_symbols else ''
+            st.session_state.ticker_select = ticker_select_value
+        
+        # Find index for the selectbox - ensure it's valid
+        try:
+            default_index = available_symbols.index(ticker_select_value)
+        except (ValueError, IndexError):
+            default_index = 0
+            st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
         
         ticker = st.selectbox(
             "Select Ticker Symbol",
