@@ -167,8 +167,9 @@ def generate_ai_summary(ticker, stock_data, df):
                     Sentiment Score: {format_num(sentiment_score)}
                     """
         # Add trend analysis to context (only filter relevant data for this ticker)
-        ticker_df = df[df['Symbol'] == ticker].copy()
-        trend_rows = build_trend_deltas(ticker_df, ticker, windows=(14, 50, 200))
+        ticker_normalized = str(ticker).strip().upper()
+        ticker_df = df[df['Symbol'] == ticker_normalized].copy()
+        trend_rows = build_trend_deltas(ticker_df, ticker_normalized, windows=(14, 50, 200))
         trend_text = format_trend_rows(trend_rows)
 
         context += f"\n{trend_text}"
@@ -236,12 +237,16 @@ def load_data():
     
     # Optimize CSV reading with low_memory=False for better performance
     df = pd.read_csv(csv_path, low_memory=False)
-    df['Date'] = pd.to_datetime(df['Date'])
+    
+    # Ensure proper data types
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+    df['Symbol'] = df['Symbol'].astype(str).str.strip().str.upper()
+    df['final_trade'] = df['final_trade'].astype(str).str.strip()
     
     # Optimize numeric columns - downcast float64 to float32 to reduce memory
     numeric_cols = df.select_dtypes(include=['float64']).columns
     for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], downcast='float')
+        df[col] = pd.to_numeric(df[col], errors='coerce', downcast='float')
     
     return df
 
@@ -515,6 +520,8 @@ if df is not None:
         # Show ticker symbol and date if ticker is entered
         display_ticker = ticker or (selected_ticker if selected_ticker else '')
         if display_ticker:
+            # Normalize ticker
+            display_ticker = str(display_ticker).strip().upper()
             # Use cached latest_data instead of filtering again
             ticker_latest = latest_data[latest_data['Symbol'] == display_ticker]
             if not ticker_latest.empty:
@@ -528,7 +535,8 @@ if df is not None:
     
     # Display AI Summary if requested
     if st.session_state.get('generate_summary', False) and ticker:
-        ticker_data_summary = df[df['Symbol'] == ticker].copy()
+        ticker_normalized = str(ticker).strip().upper() if ticker else None
+        ticker_data_summary = df[df['Symbol'] == ticker_normalized].copy() if ticker_normalized else pd.DataFrame()
         if not ticker_data_summary.empty:
             latest = ticker_data_summary.nlargest(1, 'Date').iloc[0]
             
@@ -577,6 +585,8 @@ if df is not None:
             st.session_state.generate_summary = False  # Reset flag
     
     if ticker:
+        # Normalize ticker (uppercase, strip whitespace)
+        ticker = str(ticker).strip().upper()
         # Filter data for the ticker (only once)
         ticker_data = df[df['Symbol'] == ticker].copy()
         
