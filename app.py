@@ -291,7 +291,9 @@ def get_available_symbols(df):
     """Get available symbols from latest date - cached"""
     latest_date = df['Date'].max()
     latest_date_df = df[df['Date'] == latest_date]
-    return sorted(latest_date_df['Symbol'].unique().tolist())
+    # Normalize symbols (uppercase, strip whitespace) for consistent matching
+    symbols = [str(s).strip().upper() for s in latest_date_df['Symbol'].unique().tolist()]
+    return sorted(symbols)
 
 # News sentiment summary functions
 @st.cache_data(ttl=3600)
@@ -450,13 +452,19 @@ with st.sidebar:
             st.session_state.last_filter = filter_option
             # Auto-select first stock from filtered list
             if len(top_stocks) > 0:
-                st.session_state.selected_ticker = top_stocks.iloc[0]['Symbol']
+                normalized_first = str(top_stocks.iloc[0]['Symbol']).strip().upper()
+                st.session_state.selected_ticker = normalized_first
         
         # Check if current selected ticker is in filtered list, if not, select first one
         current_ticker = st.session_state.get('selected_ticker', '')
-        if current_ticker and len(top_stocks) > 0:
-            if current_ticker not in top_stocks['Symbol'].values:
-                st.session_state.selected_ticker = top_stocks.iloc[0]['Symbol']
+        if current_ticker:
+            current_ticker = str(current_ticker).strip().upper()
+            if len(top_stocks) > 0:
+                # Normalize symbols in top_stocks for comparison
+                top_stocks_symbols = [str(s).strip().upper() for s in top_stocks['Symbol'].values]
+                if current_ticker not in top_stocks_symbols:
+                    normalized_first = str(top_stocks.iloc[0]['Symbol']).strip().upper()
+                    st.session_state.selected_ticker = normalized_first
         
         # Display stocks
         for idx in range(min(st.session_state.show_stocks_count, len(top_stocks))):
@@ -469,7 +477,9 @@ with st.sidebar:
                 key=f"stock_{idx}",
                 use_container_width=True
             ):
-                st.session_state.selected_ticker = stock['Symbol']
+                # Normalize ticker (uppercase, strip whitespace) to ensure consistent matching
+                normalized_symbol = str(stock['Symbol']).strip().upper()
+                st.session_state.selected_ticker = normalized_symbol
         
         # Show more button
         if st.session_state.show_stocks_count < len(top_stocks):
@@ -487,7 +497,7 @@ if df is not None:
     
     # Use selected ticker from sidebar if clicked (before creating columns)
     if 'selected_ticker' in st.session_state and st.session_state.selected_ticker:
-        selected_ticker = st.session_state.selected_ticker
+        selected_ticker = str(st.session_state.selected_ticker).strip().upper()
         st.session_state.selected_ticker = None  # Reset after use
         # Update the selectbox key to force refresh
         if 'ticker_select' in st.session_state:
@@ -501,8 +511,11 @@ if df is not None:
         # Determine the index for the selectbox
         default_index = 0
         ticker_select_value = st.session_state.get('ticker_select', '') or (selected_ticker if selected_ticker else '')
-        if ticker_select_value and ticker_select_value in available_symbols:
-            default_index = available_symbols.index(ticker_select_value)
+        # Normalize ticker_select_value for matching
+        if ticker_select_value:
+            ticker_select_value = str(ticker_select_value).strip().upper()
+            if ticker_select_value in available_symbols:
+                default_index = available_symbols.index(ticker_select_value)
         
         ticker = st.selectbox(
             "Select Ticker Symbol",
