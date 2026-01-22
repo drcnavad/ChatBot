@@ -12,11 +12,235 @@ load_dotenv()
 
 # Page config (must be first Streamlit command)
 st.set_page_config(
-    page_title="Stock Signal Lookup",
+    page_title="Stock Analysis Report",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Custom CSS for professional styling
+st.markdown("""
+<style>
+    /* Main background and text colors */
+    .main .block-container {
+        padding-top: 0 !important;
+        padding-bottom: 2rem;
+    }
+    
+    /* Remove default Streamlit spacing */
+    .stApp > header {
+        padding-top: 0;
+        margin-top: 0;
+    }
+    
+    /* Remove spacing from first element */
+    .main .block-container > div:first-child {
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+    }
+    
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1e3a5f 0%, #2d4a6b 100%);
+    }
+    
+    [data-testid="stSidebar"] .css-1d391kg {
+        color: #ffffff;
+    }
+    
+    [data-testid="stSidebar"] [class*="css"] {
+        color: #e0e0e0;
+    }
+    
+    /* Headers */
+    h1 {
+        color: #1e3a5f;
+        font-weight: 700;
+        border-bottom: 3px solid #4a90e2;
+        padding-bottom: 10px;
+        margin-bottom: 20px;
+    }
+    
+    h2 {
+        color: #2d4a6b;
+        font-weight: 600;
+        margin-top: 30px;
+        margin-bottom: 15px;
+    }
+    
+    h3 {
+        color: #3d5a7b;
+        font-weight: 600;
+        margin-top: 25px;
+        margin-bottom: 12px;
+    }
+    
+    /* Metrics and cards */
+    [data-testid="stMetricValue"] {
+        color: #1e3a5f;
+        font-weight: 700;
+    }
+    
+    [data-testid="stMetricLabel"] {
+        color: #666;
+        font-weight: 500;
+    }
+    
+    /* Buttons */
+    .stButton > button {
+        background: linear-gradient(90deg, #4a90e2 0%, #357abd 100%);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    
+    .stButton > button:hover {
+        background: linear-gradient(90deg, #357abd 0%, #2d6ba3 100%);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(74, 144, 226, 0.3);
+    }
+    
+    /* Sidebar buttons */
+    [data-testid="stSidebar"] .stButton > button {
+        background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%);
+        color: #ffffff;
+        border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 8px;
+        font-weight: 500;
+        padding: 10px;
+        margin-bottom: 8px;
+        transition: all 0.3s ease;
+    }
+    
+    [data-testid="stSidebar"] .stButton > button:hover {
+        background: linear-gradient(135deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.15) 100%);
+        border-color: rgba(255,255,255,0.4);
+        transform: translateX(5px);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    
+    /* Sidebar selectbox */
+    [data-testid="stSidebar"] [data-baseweb="select"] {
+        background-color: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 6px;
+        color: #ffffff;
+    }
+    
+    [data-testid="stSidebar"] [data-baseweb="select"]:hover {
+        background-color: rgba(255,255,255,0.15);
+        border-color: rgba(255,255,255,0.3);
+    }
+    
+    /* Selectbox and inputs */
+    [data-baseweb="select"] {
+        background-color: #f8f9fa;
+        border-radius: 6px;
+    }
+    
+    /* Info boxes */
+    .stInfo {
+        background-color: #e3f2fd;
+        border-left: 4px solid #2196f3;
+        border-radius: 4px;
+    }
+    
+    .stWarning {
+        background-color: #fff3e0;
+        border-left: 4px solid #ff9800;
+        border-radius: 4px;
+    }
+    
+    .stError {
+        background-color: #ffebee;
+        border-left: 4px solid #f44336;
+        border-radius: 4px;
+    }
+    
+    .stSuccess {
+        background-color: #e8f5e9;
+        border-left: 4px solid #4caf50;
+        border-radius: 4px;
+    }
+    
+    /* Expanders */
+    [data-testid="stExpander"] {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        margin-bottom: 10px;
+    }
+    
+    [data-testid="stExpander"] [data-testid="stExpanderHeader"] {
+        background-color: #f1f3f5;
+        border-radius: 8px 8px 0 0;
+        padding: 12px;
+        font-weight: 600;
+        color: #2d4a6b;
+    }
+    
+    /* Tabs */
+    [data-baseweb="tab-list"] {
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        padding: 4px;
+    }
+    
+    [data-baseweb="tab"] {
+        border-radius: 6px;
+        font-weight: 500;
+    }
+    
+    /* Horizontal rules */
+    hr {
+        border: none;
+        height: 2px;
+        background: linear-gradient(90deg, transparent 0%, #dee2e6 50%, transparent 100%);
+        margin: 30px 0;
+    }
+    
+    /* Code blocks */
+    code {
+        background-color: #f1f3f5;
+        color: #d63384;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.9em;
+    }
+    
+    /* Tables */
+    .dataframe {
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Remove default Streamlit branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    /* Custom card styling */
+    .metric-card {
+        background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #dee2e6;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin-bottom: 15px;
+    }
+    
+    /* Chart containers */
+    .js-plotly-plot {
+        border-radius: 8px;
+        background-color: #ffffff;
+        padding: 10px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Hugging Face Configuration - get token safely
 def get_hf_token():
@@ -248,6 +472,10 @@ def load_data():
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce', downcast='float')
     
+    # Ensure is_earnings_date is loaded as integer (don't downcast it)
+    if 'is_earnings_date' in df.columns:
+        df['is_earnings_date'] = pd.to_numeric(df['is_earnings_date'], errors='coerce').fillna(0).astype(int)
+    
     return df
 
 # Cache latest data processing (expensive operation)
@@ -393,9 +621,11 @@ def generate_news_summary(news_text, sentiment_type, symbol):
 # Main app – header
 st.markdown(
     """
-    <div style="margin-bottom: 1rem;">
-        <h1 style="margin-bottom: 0.25rem;">📈 Stock Signal Lookup</h1>
-        <p style="color: #555; font-size: 0.95rem; margin-top: 0;">
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px 30px 30px 30px; border-radius: 12px; margin-bottom: 2rem; margin-top: 0 !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h1 style="color: white; margin-bottom: 0.5rem; margin-top: 0 !important; padding-top: 0 !important; font-size: 2.5rem; font-weight: 700; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">
+            📈 Stock Analysis Report
+        </h1>
+        <p style="color: rgba(255,255,255,0.95); font-size: 1.1rem; margin-top: 0.5rem; font-weight: 300;">
             Analyze technical signals, sentiment, and fundamentals for any ticker in your watchlist.
         </p>
     </div>
@@ -415,10 +645,12 @@ else:
 with st.sidebar:
     st.markdown(
         """
-        <h2 style="margin-bottom: 0.25rem;">🏆 Top Stocks by Signal</h2>
-        <p style="color: #777; font-size: 0.85rem; margin-top: 0;">
-            Click a ticker to load its full signal and chart details.
-        </p>
+        <div style="background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%); padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #4a90e2;">
+            <h2 style="margin-bottom: 0.5rem; color: #ffffff;">🏆 Top Stocks by Signal</h2>
+            <p style="color: rgba(255,255,255,0.9); font-size: 0.9rem; margin-top: 0; font-weight: 400;">
+                Click a ticker to load its full signal and chart details.
+            </p>
+        </div>
         """,
         unsafe_allow_html=True,
     )
@@ -502,11 +734,11 @@ if df is not None:
         # Verify the ticker exists in available_symbols before setting it
         if selected_ticker in available_symbols:
             st.session_state.ticker_select = selected_ticker
-        else:
+    else:
             # If ticker not found, keep current selection or use first item
             if 'ticker_select' not in st.session_state or st.session_state.ticker_select not in available_symbols:
                 st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
-        st.session_state.selected_ticker = None  # Reset after use
+            st.session_state.selected_ticker = None  # Reset after use
     
     # Main content area
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -542,9 +774,10 @@ if df is not None:
         )
     
     with col2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🤖 Generate AI Summary", type="primary"):
+        st.markdown("<div style='padding-top: 1.5rem;'>", unsafe_allow_html=True)
+        if st.button("🤖 Generate AI Signal", type="primary"):
             st.session_state.generate_summary = True
+        st.markdown("</div>", unsafe_allow_html=True)
     
     with col3:
         # Show ticker symbol and date if ticker is entered
@@ -558,7 +791,7 @@ if df is not None:
                 latest_temp = ticker_latest.iloc[0]
                 date_str = latest_temp['Date'].strftime("%m/%d/%Y")
                 st.markdown(f"""
-                <div style="font-size: 1.25rem; padding-top: 0.5rem; padding-bottom: 0.5rem;">
+                <div style="font-size: 1.25rem; padding-top: 1.5rem; padding-bottom: 0.5rem;">
                     <strong>{display_ticker}</strong> | {date_str}
                 </div>
                 """, unsafe_allow_html=True)
@@ -627,27 +860,37 @@ if df is not None:
             # Get latest data (most recent date) - optimized to avoid re-sorting
             latest = ticker_data.nlargest(1, 'Date').iloc[0]
             
-            # Display signal
-            signal = latest['final_trade']
+            # Display signal - map BUY/SELL/HOLD to BULLISH/BEARISH/HOLD
+            signal_raw = latest['final_trade']
+            signal_mapping = {
+                'BUY': 'BULLISH',
+                'SELL': 'BEARISH',
+                'HOLD': 'HOLD'
+            }
+            signal = signal_mapping.get(signal_raw, signal_raw)
+            
             signal_color = {
-                'BUY': '🟢',
-                'SELL': '🔴',
+                'BULLISH': '🟢',
+                'BEARISH': '🔴',
                 'HOLD': '🟡'
             }
             signal_bg = {
-                'BUY': 'background-color: #d4edda; color: #155724;',
-                'SELL': 'background-color: #f8d7da; color: #721c24;',
+                'BULLISH': 'background-color: #d4edda; color: #155724;',
+                'BEARISH': 'background-color: #f8d7da; color: #721c24;',
                 'HOLD': 'background-color: #fff3cd; color: #856404;'
             }
-            
-            st.markdown("---")
             
             # Details - Main metrics (with signal in first column)
             col1, col2, col3, col4, col5, col6 = st.columns([1, 1.2, 1.2, 1, 1, 0.1])
             
             with col1:
+                st.markdown("""
+                <div style="font-size: 0.875rem; color: #666; font-weight: 500; margin-bottom: 4px;">
+                    Technical Signal
+                </div>
+                """, unsafe_allow_html=True)
                 st.markdown(f"""
-                <div style="text-align: center; padding: 10px; border-radius: 5px; {signal_bg.get(signal, '')}">
+                <div style="text-align: center; padding: 8px 12px; border-radius: 8px; {signal_bg.get(signal, '')} box-shadow: 0 2px 4px rgba(0,0,0,0.1); font-size: 0.95rem; line-height: 1.5;">
                     <strong>{signal_color.get(signal, '')} {signal}</strong>
                 </div>
                 """, unsafe_allow_html=True)
@@ -676,18 +919,18 @@ if df is not None:
             combined_signal_max = gauge_ranges.get('combined_signal', {}).get('max', 100)
             combined_signal_val = float(latest['combined_signal']) if 'combined_signal' in latest.index and pd.notna(latest['combined_signal']) else 0
             combined_signal_mean = df['combined_signal'].mean() #####
-
+            
             fundamental_weight_min = gauge_ranges.get('Fundamental_Weight', {}).get('min', 0)
             fundamental_weight_max = gauge_ranges.get('Fundamental_Weight', {}).get('max', 100)
             fundamental_weight_val = float(latest['Fundamental_Weight']) if 'Fundamental_Weight' in latest.index and pd.notna(latest['Fundamental_Weight']) else 0
             fundamental_weight_mean = df['Fundamental_Weight'].mean() #####
-
+            
             sentiment_score_min = gauge_ranges.get('SentimentScore', {}).get('min', -10)
             sentiment_score_max = gauge_ranges.get('SentimentScore', {}).get('max', 10)
             sentiment_score_val = float(latest['SentimentScore']) if 'SentimentScore' in latest.index and pd.notna(latest['SentimentScore']) else 0
             sentiment_score_mean = df['SentimentScore'].mean() #####
         
-
+            
             # Gauge 1: Combined Signal
             with gauge_col1:
                 # combined_signal_mid = (combined_signal_min + combined_signal_max) / 2
@@ -723,7 +966,8 @@ if df is not None:
                 fig1.update_layout(
                     height=200,
                     margin=dict(l=20, r=20, t=40, b=60),
-                    paper_bgcolor="white",
+                    paper_bgcolor="#f8f9fa",
+                    plot_bgcolor="#ffffff",
                     annotations=[dict(
                         x=0.5, y=-0.15,
                         text=f'Current: {combined_signal_val:.2f}',
@@ -768,7 +1012,8 @@ if df is not None:
                 fig2.update_layout(
                     height=200,
                     margin=dict(l=20, r=20, t=40, b=60),
-                    paper_bgcolor="white",
+                    paper_bgcolor="#f8f9fa",
+                    plot_bgcolor="#ffffff",
                     annotations=[dict(
                         x=0.5, y=-0.15,
                         text=f'Current: {fundamental_weight_val:.2f}',
@@ -813,7 +1058,8 @@ if df is not None:
                 fig3.update_layout(
                     height=200,
                     margin=dict(l=20, r=20, t=40, b=60),
-                    paper_bgcolor="white",
+                    paper_bgcolor="#f8f9fa",
+                    plot_bgcolor="#ffffff",
                     annotations=[dict(
                         x=0.5, y=-0.15,
                         text=f'Current: {sentiment_score_val:.2f}',
@@ -828,17 +1074,22 @@ if df is not None:
             one_year_ago = latest_date - pd.Timedelta(days=365)
             ticker_data_sorted = ticker_data[ticker_data['Date'] >= one_year_ago].sort_values('Date', ascending=True)
             
+            # Check if is_earnings_date column exists and has values
+            if 'is_earnings_date' in ticker_data_sorted.columns:
+                earnings_count = ticker_data_sorted['is_earnings_date'].sum()
+            else:
+                earnings_count = 0
+            
             # Only render charts if we have data
             if len(ticker_data_sorted) > 0:
                 # Charts section - stacked subplots
-                st.markdown("### 📈 Technical Analysis Charts (Last 1 Year)")
-                
-                # Secondary metrics - professional display
                 st.markdown("""
-                <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;'>
-                    <div style='display: flex; justify-content: space-around; flex-wrap: wrap; gap: 15px;'>
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; margin: 25px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <h3 style="color: white; margin: 0; font-size: 1.5rem; font-weight: 600;">📈 Technical Analysis Charts (Last 1 Year)</h3>
+                </div>
                 """, unsafe_allow_html=True)
                 
+                # Secondary metrics - display directly without container
                 col1, col2, col3, col4, col5, col6 = st.columns(6)
             
                 with col1:
@@ -871,29 +1122,52 @@ if df is not None:
                     if pd.notna(rsi):
                         st.metric("RSI", f"{rsi:.2f}", delta=None)
                 
-                st.markdown("</div></div>", unsafe_allow_html=True)
-                
-                # Prepare data
-                price_data = ticker_data_sorted[['Date', 'Close', 'ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200', 
-                                                 'combined_signal', 'Buy Streak', 'Sell Streak']].copy()
+                # Prepare data - include is_earnings_date in the initial selection
+                cols_to_select = ['Date', 'Close', 'ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200', 
+                                 'combined_signal', 'Buy Streak', 'Sell Streak']
+                if 'is_earnings_date' in ticker_data_sorted.columns:
+                    cols_to_select.append('is_earnings_date')
+                price_data = ticker_data_sorted[cols_to_select].copy()
                 price_data = price_data.set_index('Date')
                 price_data = price_data.dropna(subset=['Close'])
                 # Fill NaN values for signal and streaks with 0
                 price_data['combined_signal'] = price_data['combined_signal'].fillna(0)
                 price_data['Buy Streak'] = price_data['Buy Streak'].fillna(0)
                 price_data['Sell Streak'] = price_data['Sell Streak'].fillna(0)
+                # Fill NaN values for is_earnings_date with 0 and ensure it's integer
+                if 'is_earnings_date' in price_data.columns:
+                    price_data['is_earnings_date'] = pd.to_numeric(price_data['is_earnings_date'], errors='coerce').fillna(0).astype(int)
                 
-                # Create subplots: 3 rows, 1 column
+                # Check which charts have data
+                has_rsi = 'RSI Options Rate' in ticker_data_sorted.columns and not ticker_data_sorted[['Date', 'RSI Options Rate']].dropna().empty
+                has_macd = ('macd' in ticker_data_sorted.columns and 'MACD Signal' in ticker_data_sorted.columns and 
+                           not ticker_data_sorted[['Date', 'macd', 'MACD Signal']].dropna().empty)
+                
+                # Determine number of rows and heights dynamically
+                num_rows = 1
+                row_heights = [1.0]
+                subplot_titles = ['<b>Price and Moving Averages</b>']
+                
+                if has_rsi:
+                    num_rows += 1
+                    row_heights = [0.65, 0.35]
+                    subplot_titles.append('')
+                
+                if has_macd:
+                    num_rows += 1
+                    if has_rsi:
+                        row_heights = [0.65, 0.175, 0.175]
+                    else:
+                        row_heights = [0.65, 0.35]
+                    subplot_titles.append('')
+                
+                # Create subplots with dynamic rows
                 fig = make_subplots(
-                    rows=3, cols=1,
+                    rows=num_rows, cols=1,
                     shared_xaxes=True,
                     vertical_spacing=0.08,
-                    row_heights=[0.65, 0.175, 0.175],
-                    subplot_titles=(
-                        '<b>Price and Moving Averages</b>',
-                        '<b>RSI (Relative Strength Index)</b>',
-                        '<b>MACD (Moving Average Convergence Divergence)</b>'
-                    )
+                    row_heights=row_heights,
+                    subplot_titles=subplot_titles
                 )
                 
                 # Update subplot titles styling
@@ -925,6 +1199,61 @@ if df is not None:
                     customdata=hover_text_close,
                     hovertemplate='<b>Close</b><br>$%{y:.2f}<br>%{customdata}<extra></extra>'
                 ), row=1, col=1)
+                
+                # Add earnings date markers
+                # First, ensure is_earnings_date is in price_data
+                if 'is_earnings_date' not in price_data.columns and 'is_earnings_date' in ticker_data_sorted.columns:
+                    # Add it from source data
+                    earnings_col = ticker_data_sorted.set_index('Date')['is_earnings_date'].reindex(price_data.index).fillna(0)
+                    price_data['is_earnings_date'] = pd.to_numeric(earnings_col, errors='coerce').fillna(0).astype(int)
+                
+                if 'is_earnings_date' in price_data.columns:
+                    # Ensure it's integer type for comparison
+                    price_data['is_earnings_date'] = pd.to_numeric(price_data['is_earnings_date'], errors='coerce').fillna(0).astype(int)
+                    earnings_dates = price_data[price_data['is_earnings_date'] == 1]
+                    
+                    if len(earnings_dates) > 0:
+                        # Add markers with high visibility - add AFTER close price line so they appear on top
+                        fig.add_trace(go.Scatter(
+                            x=earnings_dates.index,
+                            y=earnings_dates['Close'],
+                            name='Earnings Date',
+                            mode='markers',
+                            marker=dict(
+                                symbol='circle',
+                                size=10,
+                                color='#ff6b35',
+                                line=dict(color='#ff6b35', width=0),
+                                opacity=1.0
+                            ),
+                            hovertemplate='<b>Earnings Date</b><br>$%{y:.2f}<br>%{x|%b %d, %Y}<extra></extra>',
+                            showlegend=True,
+                            legendgroup='earnings'
+                        ), row=1, col=1)
+                else:
+                    if 'is_earnings_date' in ticker_data_sorted.columns:
+                        # Try to add it manually
+                        earnings_col = ticker_data_sorted.set_index('Date')['is_earnings_date'].reindex(price_data.index).fillna(0)
+                        price_data['is_earnings_date'] = pd.to_numeric(earnings_col, errors='coerce').fillna(0).astype(int)
+                        earnings_dates = price_data[price_data['is_earnings_date'] == 1]
+                        
+                        if len(earnings_dates) > 0:
+                            fig.add_trace(go.Scatter(
+                                x=earnings_dates.index,
+                                y=earnings_dates['Close'],
+                                name='Earnings Date',
+                                mode='markers',
+                                marker=dict(
+                                    symbol='circle',
+                                    size=10,
+                                    color='#ff6b35',
+                                    line=dict(color='#ff6b35', width=0),
+                                    opacity=1.0
+                                ),
+                                hovertemplate='<b>Earnings Date</b><br>$%{y:.2f}<br>%{x|%b %d, %Y}<extra></extra>',
+                                showlegend=True,
+                                legendgroup='earnings'
+                            ), row=1, col=1)
                 
                 if 'ma_10' in price_data.columns:
                     fig.add_trace(go.Scatter(
@@ -1071,56 +1400,63 @@ if df is not None:
                             row=1, col=1
                         )
                 
-                # Row 2: RSI
-                if 'RSI Options Rate' in ticker_data_sorted.columns:
+                # Row 2: RSI (only if data exists and row exists)
+                current_row = 2
+                if has_rsi:
                     rsi_data = ticker_data_sorted[['Date', 'RSI Options Rate']].copy()
                     rsi_data = rsi_data.set_index('Date')
                     rsi_data = rsi_data.dropna()
                     
-                    fig.add_trace(go.Scatter(
-                        x=rsi_data.index,
-                        y=rsi_data['RSI Options Rate'],
-                        name='RSI',
-                        line=dict(color='#ff7f0e', width=2),
-                        mode='lines',
-                        showlegend=False,
-                        hovertemplate='<b>RSI</b><br>%{y:.2f}<extra></extra>',
-                        fill='tozeroy',
-                        fillcolor='rgba(255, 127, 14, 0.1)'
-                    ), row=2, col=1)
-                    
-                    # Add RSI overbought/oversold reference lines
-                    fig.add_hline(y=70, line_dash="dash", line_color="rgba(200, 0, 0, 0.3)", row=2, col=1)
-                    fig.add_hline(y=30, line_dash="dash", line_color="rgba(0, 200, 0, 0.3)", row=2, col=1)
+                    if not rsi_data.empty:
+                        fig.add_trace(go.Scatter(
+                            x=rsi_data.index,
+                            y=rsi_data['RSI Options Rate'],
+                            name='RSI',
+                            line=dict(color='#ff7f0e', width=2),
+                            mode='lines',
+                            showlegend=False,
+                            hovertemplate='<b>RSI</b><br>%{y:.2f}<extra></extra>',
+                            fill='tozeroy',
+                            fillcolor='rgba(255, 127, 14, 0.1)'
+                        ), row=current_row, col=1)
+                        
+                        # Add RSI overbought/oversold reference lines
+                        fig.add_hline(y=70, line_dash="dash", line_color="rgba(200, 0, 0, 0.3)", row=current_row, col=1)
+                        fig.add_hline(y=30, line_dash="dash", line_color="rgba(0, 200, 0, 0.3)", row=current_row, col=1)
+                    current_row += 1
+                elif has_macd:
+                    # If no RSI but MACD exists, MACD goes to row 2
+                    current_row = 2
                 
-                # Row 3: MACD
-                if 'macd' in ticker_data_sorted.columns and 'MACD Signal' in ticker_data_sorted.columns:
+                # Row 3: MACD (only if data exists and row exists)
+                if has_macd:
                     macd_data = ticker_data_sorted[['Date', 'macd', 'MACD Signal']].copy()
                     macd_data = macd_data.set_index('Date')
                     macd_data = macd_data.dropna()
                     
-                    fig.add_trace(go.Scatter(
-                        x=macd_data.index,
-                        y=macd_data['macd'],
-                        name='MACD',
-                        line=dict(color='#d62728', width=2.5),
-                        mode='lines',
-                        showlegend=False,
-                        hovertemplate='<b>MACD</b><br>%{y:.4f}<extra></extra>'
-                    ), row=3, col=1)
-                    
-                    fig.add_trace(go.Scatter(
-                        x=macd_data.index,
-                        y=macd_data['MACD Signal'],
-                        name='MACD Signal',
-                        line=dict(color='#1f77b4', width=2.5, dash='dash'),
-                        mode='lines',
-                        showlegend=False,
-                        hovertemplate='<b>MACD Signal</b><br>%{y:.4f}<extra></extra>'
-                    ), row=3, col=1)
-                    
-                    # Add zero line
-                    fig.add_hline(y=0, line_dash="dot", line_color="rgba(128, 128, 128, 0.4)", line_width=1, row=3, col=1)
+                    if not macd_data.empty:
+                        fig.add_trace(go.Scatter(
+                            x=macd_data.index,
+                            y=macd_data['macd'],
+                            name='MACD',
+                            line=dict(color='#d62728', width=2.5),
+                            mode='lines',
+                            showlegend=False,
+                            hovertemplate='<b>MACD</b><br>%{y:.4f}<extra></extra>'
+                        ), row=current_row, col=1)
+                        
+                        fig.add_trace(go.Scatter(
+                            x=macd_data.index,
+                            y=macd_data['MACD Signal'],
+                            name='MACD Signal',
+                            line=dict(color='#1f77b4', width=2.5, dash='dash'),
+                            mode='lines',
+                            showlegend=False,
+                            hovertemplate='<b>MACD Signal</b><br>%{y:.4f}<extra></extra>'
+                        ), row=current_row, col=1)
+                        
+                        # Add zero line
+                        fig.add_hline(y=0, line_dash="dot", line_color="rgba(128, 128, 128, 0.4)", line_width=1, row=current_row, col=1)
                 
                 # Update layout with professional styling
                 fig.update_layout(
