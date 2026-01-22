@@ -27,14 +27,49 @@ st.markdown("""
         padding-bottom: 2rem;
     }
     
-    /* Remove default Streamlit spacing */
+    /* Remove default Streamlit spacing - aggressive targeting */
     .stApp > header {
-        padding-top: 0;
-        margin-top: 0;
+        padding-top: 0 !important;
+        margin-top: 0 !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        display: none !important;
+    }
+    
+    header[data-testid="stHeader"] {
+        display: none !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    
+    /* Remove spacing from main container */
+    .main .block-container {
+        margin-top: 0 !important;
+        padding-top: 0 !important;
     }
     
     /* Remove spacing from first element */
     .main .block-container > div:first-child {
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+    }
+    
+    /* Remove spacing from Streamlit app container */
+    .stApp {
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+    }
+    
+    /* Target Streamlit's decorator/header wrapper */
+    [data-testid="stDecoration"] {
+        display: none !important;
+        height: 0 !important;
+    }
+    
+    /* Remove any top spacing from the viewport */
+    #root > div {
         margin-top: 0 !important;
         padding-top: 0 !important;
     }
@@ -621,12 +656,12 @@ def generate_news_summary(news_text, sentiment_type, symbol):
 # Main app – header
 st.markdown(
     """
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px 30px 30px 30px; border-radius: 12px; margin-bottom: 2rem; margin-top: 0 !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 10px 30px 30px 30px; border-radius: 12px; margin-bottom: 2rem; margin-top: 0 !important; padding-top: 10px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
         <h1 style="color: white; margin-bottom: 0.5rem; margin-top: 0 !important; padding-top: 0 !important; font-size: 2.5rem; font-weight: 700; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">
             📈 Stock Analysis Report
         </h1>
         <p style="color: rgba(255,255,255,0.95); font-size: 1.1rem; margin-top: 0.5rem; font-weight: 300;">
-            Analyze technical signals, sentiment, and fundamentals for any ticker in your watchlist.
+            Technical and AI indicators for select stocks in my watchlist.
         </p>
     </div>
     """,
@@ -663,13 +698,19 @@ with st.sidebar:
         # Filter by signal
         filter_option = st.selectbox(
             "Filter by signal",
-            ["All", "BUY", "SELL", "HOLD"],
+            ["All", "BULLISH", "BEARISH", "HOLD"],
             key="signal_filter"
         )
         
-        # Apply filter
+        # Apply filter - map BULLISH/BEARISH back to BUY/SELL for filtering
         if filter_option != "All":
-            top_stocks = top_stocks[top_stocks['final_trade'] == filter_option].reset_index(drop=True)
+            signal_filter_mapping = {
+                'BULLISH': 'BUY',
+                'BEARISH': 'SELL',
+                'HOLD': 'HOLD'
+            }
+            filter_value = signal_filter_mapping.get(filter_option, filter_option)
+            top_stocks = top_stocks[top_stocks['final_trade'] == filter_value].reset_index(drop=True)
         
         # Initialize session state for showing more stocks
         if 'show_stocks_count' not in st.session_state:
@@ -701,11 +742,18 @@ with st.sidebar:
         # Display stocks
         for idx in range(min(st.session_state.show_stocks_count, len(top_stocks))):
             stock = top_stocks.iloc[idx]
+            # Map BUY/SELL/HOLD to BULLISH/BEARISH/HOLD for display
+            signal_display_mapping = {
+                'BUY': 'BULLISH',
+                'SELL': 'BEARISH',
+                'HOLD': 'HOLD'
+            }
+            signal_display = signal_display_mapping.get(stock['final_trade'], stock['final_trade'])
             signal_emoji = {'BUY': '🟢', 'SELL': '🔴', 'HOLD': '🟡'}.get(stock['final_trade'], '⚪')
             
             # Make it clickable
             if st.button(
-                f"{signal_emoji} {stock['Symbol']}  ·  {stock['final_trade']}  ·  {stock['combined_signal']:.1f}",
+                f"{signal_emoji} {stock['Symbol']}  ·  {signal_display}  ·  {stock['combined_signal']:.1f}",
                 key=f"stock_{idx}",
                 use_container_width=True
             ):
@@ -734,44 +782,40 @@ if df is not None:
         # Verify the ticker exists in available_symbols before setting it
         if selected_ticker in available_symbols:
             st.session_state.ticker_select = selected_ticker
+        st.session_state.selected_ticker = None  # Reset after use
+    
+    # Initialize ticker_select if not set or invalid
+    if 'ticker_select' not in st.session_state:
+        st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
     else:
-            # If ticker not found, keep current selection or use first item
-            if 'ticker_select' not in st.session_state or st.session_state.ticker_select not in available_symbols:
-                st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
-            st.session_state.selected_ticker = None  # Reset after use
+        # Validate current ticker_select value
+        current_ticker = str(st.session_state.ticker_select).strip().upper()
+        if current_ticker not in available_symbols:
+            st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
     
     # Main content area
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
-        # Get the current value from session state
-        ticker_select_value = st.session_state.get('ticker_select', '')
-        
-        # Normalize and validate ticker_select_value
-        if ticker_select_value:
-            ticker_select_value = str(ticker_select_value).strip().upper()
-            # Verify it's in available_symbols
-            if ticker_select_value not in available_symbols:
-                # If not found, use first item
-                ticker_select_value = available_symbols[0] if available_symbols else ''
-                st.session_state.ticker_select = ticker_select_value
-        else:
-            # No value set, use first item
-            ticker_select_value = available_symbols[0] if available_symbols else ''
-            st.session_state.ticker_select = ticker_select_value
+        # Get the current value from session state (before selectbox)
+        ticker_select_value = str(st.session_state.get('ticker_select', '')).strip().upper()
         
         # Find index for the selectbox - ensure it's valid
         try:
-            default_index = available_symbols.index(ticker_select_value)
+            default_index = available_symbols.index(ticker_select_value) if ticker_select_value in available_symbols else 0
         except (ValueError, IndexError):
             default_index = 0
             st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
         
+        # Render selectbox - Streamlit will automatically update st.session_state.ticker_select when user changes selection
         ticker = st.selectbox(
             "Select Ticker Symbol",
             options=available_symbols,
             index=default_index,
             key="ticker_select"
         )
+        
+        # Normalize the selected ticker (Streamlit updates session state automatically via key)
+        ticker = str(ticker).strip().upper()
     
     with col2:
         st.markdown("<div style='padding-top: 1.5rem;'>", unsafe_allow_html=True)
