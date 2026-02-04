@@ -442,7 +442,7 @@ def generate_ai_summary(ticker, stock_data, df):
                 "DO NOT list individual metrics, scores, or numbers in your response. "
                 "DO NOT mention specific values like 'Balance Sheet Score: X', 'News Sentiment Score: Y', or 'RSI: Z'. "
                 "Instead, synthesize all the data into a brief, readable summary that considers all factors holistically. "
-                "Keep numbers and units intact when absolutely necessary. Make sure words are not broken up. "
+                "Keep numbers and units intact when absolutely necessary. Ensure text is clean and readable (no LaTeX/special fonts). "
                 "Your output should be brief, precise, and easy to read - focus on the overall picture, not individual data points."
             )
         },
@@ -630,8 +630,9 @@ def generate_news_summary(news_text, sentiment_type, symbol):
                 "content": (
                     f"Analyze the following {sentiment_type} news articles for {symbol} and provide a summary:\n\n"
                     f"{news_text}\n\n"
-                    f"Provide a concise summary highlighting the main themes and key information from these {sentiment_type} news articles."
-                    f"Make sure that words and numbersare not broken up. Make sure that the summary is not too long. "
+                    f"Provide a concise summary highlighting the main themes and key information from these {sentiment_type} news articles. "
+                    f"Ensure that the text is clean and readable. Do not use LaTeX formatting or special fonts for numbers (e.g. use '100' not '$100$'). "
+                    f"Make sure words are not broken up and sentences are complete."
                 )
             }
         ]
