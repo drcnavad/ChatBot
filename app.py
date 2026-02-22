@@ -15,7 +15,7 @@ st.set_page_config(
     page_title="Stock Analysis Report",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # Custom CSS for professional styling
@@ -74,19 +74,6 @@ st.markdown("""
         padding-top: 0 !important;
     }
     
-    /* Sidebar styling */
-    [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1e3a5f 0%, #2d4a6b 100%);
-    }
-    
-    [data-testid="stSidebar"] .css-1d391kg {
-        color: #ffffff;
-    }
-    
-    [data-testid="stSidebar"] [class*="css"] {
-        color: #e0e0e0;
-    }
-    
     /* Headers */
     h1 {
         color: #1e3a5f;
@@ -135,38 +122,6 @@ st.markdown("""
         background: linear-gradient(90deg, #357abd 0%, #2d6ba3 100%);
         transform: translateY(-2px);
         box-shadow: 0 4px 8px rgba(74, 144, 226, 0.3);
-    }
-    
-    /* Sidebar buttons */
-    [data-testid="stSidebar"] .stButton > button {
-        background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%);
-        color: #ffffff;
-        border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 8px;
-        font-weight: 500;
-        padding: 10px;
-        margin-bottom: 8px;
-        transition: all 0.3s ease;
-    }
-    
-    [data-testid="stSidebar"] .stButton > button:hover {
-        background: linear-gradient(135deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.15) 100%);
-        border-color: rgba(255,255,255,0.4);
-        transform: translateX(5px);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    }
-    
-    /* Sidebar selectbox */
-    [data-testid="stSidebar"] [data-baseweb="select"] {
-        background-color: rgba(255,255,255,0.1);
-        border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 6px;
-        color: #ffffff;
-    }
-    
-    [data-testid="stSidebar"] [data-baseweb="select"]:hover {
-        background-color: rgba(255,255,255,0.15);
-        border-color: rgba(255,255,255,0.3);
     }
     
     /* Selectbox and inputs */
@@ -657,12 +612,12 @@ def generate_news_summary(news_text, sentiment_type, symbol):
 # Main app – header
 st.markdown(
     """
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 10px 30px 30px 30px; border-radius: 12px; margin-bottom: 2rem; margin-top: 0 !important; padding-top: 10px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-        <h1 style="color: white; margin-bottom: 0.5rem; margin-top: 0 !important; padding-top: 0 !important; font-size: 2.5rem; font-weight: 700; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">
-            📈 Stock Analysis Report
+    <div style="background: linear-gradient(135deg, #1e3a5f 0%, #2d5a8f 50%, #3d6a9f 100%); padding: 24px 32px; border-radius: 10px; margin-bottom: 1.5rem; box-shadow: 0 2px 12px rgba(30,58,95,0.25);">
+        <h1 style="color: #fff; margin: 0; font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em;">
+            Stock Analysis Report
         </h1>
-        <p style="color: rgba(255,255,255,0.95); font-size: 1.1rem; margin-top: 0.5rem; font-weight: 300;">
-            Technical and AI indicators for select stocks in my watchlist.
+        <p style="color: rgba(255,255,255,0.85); font-size: 0.95rem; margin: 0.5rem 0 0 0; font-weight: 400;">
+            Technical and fundamental indicators with AI-powered signals
         </p>
     </div>
     """,
@@ -677,113 +632,12 @@ if 'data_loaded' not in st.session_state:
 else:
     df = load_data()
 
-# Sidebar with top stocks (lazy loaded)
-with st.sidebar:
-    st.markdown(
-        """
-        <div style="background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%); padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #4a90e2;">
-            <h2 style="margin-bottom: 0.5rem; color: #ffffff;">🏆 Top Stocks by Signal</h2>
-            <p style="color: rgba(255,255,255,0.9); font-size: 0.9rem; margin-top: 0; font-weight: 400;">
-                Click a ticker to load its full signal and chart details.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    
-    if df is not None:
-        # Use cached functions for expensive operations
-        latest_data = get_latest_data(df)
-        top_stocks = get_top_stocks(latest_data, n=100)
-        
-        # Filter by signal
-        filter_option = st.selectbox(
-            "Filter by signal",
-            ["All", "BULLISH", "BEARISH", "HOLD"],
-            key="signal_filter"
-        )
-        
-        # Apply filter - map BULLISH/BEARISH back to BUY/SELL for filtering
-        if filter_option != "All":
-            signal_filter_mapping = {
-                'BULLISH': 'BUY',
-                'BEARISH': 'SELL',
-                'HOLD': 'HOLD'
-            }
-            filter_value = signal_filter_mapping.get(filter_option, filter_option)
-            top_stocks = top_stocks[top_stocks['final_trade'] == filter_value].reset_index(drop=True)
-        
-        # Initialize session state for showing more stocks
-        if 'show_stocks_count' not in st.session_state:
-            st.session_state.show_stocks_count = 10
-        
-        # Reset count and select first stock when filter changes
-        if 'last_filter' not in st.session_state:
-            st.session_state.last_filter = filter_option
-        
-        if st.session_state.last_filter != filter_option:
-            st.session_state.show_stocks_count = 10
-            st.session_state.last_filter = filter_option
-            # Auto-select first stock from filtered list
-            if len(top_stocks) > 0:
-                normalized_first = str(top_stocks.iloc[0]['Symbol']).strip().upper()
-                st.session_state.selected_ticker = normalized_first
-        
-        # Check if current selected ticker is in filtered list, if not, select first one
-        current_ticker = st.session_state.get('selected_ticker', '')
-        if current_ticker:
-            current_ticker = str(current_ticker).strip().upper()
-            if len(top_stocks) > 0:
-                # Normalize symbols in top_stocks for comparison
-                top_stocks_symbols = [str(s).strip().upper() for s in top_stocks['Symbol'].values]
-                if current_ticker not in top_stocks_symbols:
-                    normalized_first = str(top_stocks.iloc[0]['Symbol']).strip().upper()
-                    st.session_state.selected_ticker = normalized_first
-        
-        # Display stocks
-        for idx in range(min(st.session_state.show_stocks_count, len(top_stocks))):
-            stock = top_stocks.iloc[idx]
-            # Map BUY/SELL/HOLD to BULLISH/BEARISH/HOLD for display
-            signal_display_mapping = {
-                'BUY': 'BULLISH',
-                'SELL': 'BEARISH',
-                'HOLD': 'HOLD'
-            }
-            signal_display = signal_display_mapping.get(stock['final_trade'], stock['final_trade'])
-            signal_emoji = {'BUY': '🟢', 'SELL': '🔴', 'HOLD': '🟡'}.get(stock['final_trade'], '⚪')
-            
-            # Make it clickable
-            if st.button(
-                f"{signal_emoji} {stock['Symbol']}  ·  {signal_display}  ·  {stock['combined_signal']:.1f}",
-                key=f"stock_{idx}",
-                use_container_width=True
-            ):
-                # Normalize ticker (uppercase, strip whitespace) to ensure consistent matching
-                normalized_symbol = str(stock['Symbol']).strip().upper()
-                st.session_state.selected_ticker = normalized_symbol
-        
-        # Show more button
-        if st.session_state.show_stocks_count < len(top_stocks):
-            if st.button("See More", use_container_width=True):
-                st.session_state.show_stocks_count += 10
-    else:
-        st.info("Loading data...")
-
 if df is not None:
     # Get tickers from the most recent date only (cached)
     available_symbols = get_available_symbols(df)
     
     # Cache latest_data once to avoid multiple calls
     latest_data = get_latest_data(df)
-    
-    # Use selected ticker from sidebar if clicked (before creating columns)
-    selected_ticker = None
-    if 'selected_ticker' in st.session_state and st.session_state.selected_ticker:
-        selected_ticker = str(st.session_state.selected_ticker).strip().upper()
-        # Verify the ticker exists in available_symbols before setting it
-        if selected_ticker in available_symbols:
-            st.session_state.ticker_select = selected_ticker
-        st.session_state.selected_ticker = None  # Reset after use
     
     # Initialize ticker_select if not set or invalid
     if 'ticker_select' not in st.session_state:
@@ -794,24 +648,41 @@ if df is not None:
         if current_ticker not in available_symbols:
             st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
     
-    # Main content area
+    # Build stock dropdown: SYMBOL - BULLISH/BEARISH/HOLD - Combined Score, sorted by combined_signal desc
+    top_stocks_main = get_top_stocks(latest_data, n=500)
+    signal_display_mapping = {'BUY': 'BULLISH', 'SELL': 'BEARISH', 'HOLD': 'HOLD'}
+    stock_options = []
+    symbol_to_display = {}
+    for _, row in top_stocks_main.iterrows():
+        sym = str(row['Symbol']).strip().upper()
+        sig = signal_display_mapping.get(row['final_trade'], row['final_trade'])
+        disp = f"{sym} - {sig} - {row['combined_signal']:.1f}"
+        stock_options.append(sym)
+        symbol_to_display[sym] = disp
+    if not stock_options:
+        stock_options = available_symbols
+        symbol_to_display = {s: s for s in (available_symbols or [])}
+    
+    # Main content area - stock selector and controls
+    st.markdown("---")
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         # Get the current value from session state (before selectbox)
         ticker_select_value = str(st.session_state.get('ticker_select', '')).strip().upper()
         
-        # Find index for the selectbox - ensure it's valid
-        try:
-            default_index = available_symbols.index(ticker_select_value) if ticker_select_value in available_symbols else 0
-        except (ValueError, IndexError):
+        # Find index for the selectbox - ensure it's valid (use stock_options which is sorted by combined score)
+        if stock_options and ticker_select_value in stock_options:
+            default_index = stock_options.index(ticker_select_value)
+        else:
             default_index = 0
-            st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
+            st.session_state.ticker_select = stock_options[0] if stock_options else (available_symbols[0] if available_symbols else '')
         
-        # Render selectbox - Streamlit will automatically update st.session_state.ticker_select when user changes selection
+        # Render selectbox - sorted by combined score descending
         ticker = st.selectbox(
-            "Select Ticker Symbol",
-            options=available_symbols,
+            "Select Stock",
+            options=stock_options,
             index=default_index,
+            format_func=lambda x: symbol_to_display.get(x, x),
             key="ticker_select"
         )
         
@@ -826,7 +697,7 @@ if df is not None:
     
     with col3:
         # Show ticker symbol and date if ticker is entered
-        display_ticker = ticker or (selected_ticker if selected_ticker else '')
+        display_ticker = ticker or ''
         if display_ticker:
             # Normalize ticker
             display_ticker = str(display_ticker).strip().upper()
@@ -1129,8 +1000,8 @@ if df is not None:
             if len(ticker_data_sorted) > 0:
                 # Charts section - stacked subplots
                 st.markdown("""
-                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; margin: 25px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                    <h3 style="color: white; margin: 0; font-size: 1.5rem; font-weight: 600;">📈 Technical Analysis Charts (Last 1 Year)</h3>
+                <div style="background: linear-gradient(135deg, #1e3a5f 0%, #2d5a8f 100%); padding: 16px 24px; border-radius: 8px; margin: 24px 0 16px 0; box-shadow: 0 2px 8px rgba(30,58,95,0.2);">
+                    <h3 style="color: #fff; margin: 0; font-size: 1.25rem; font-weight: 600;">Technical Analysis (Last 1 Year)</h3>
                 </div>
                 """, unsafe_allow_html=True)
                 
