@@ -9,6 +9,7 @@ from plotly.subplots import make_subplots
 from huggingface_hub import InferenceClient
 from dotenv import load_dotenv
 import re
+from urllib.parse import quote
 
 # --- App configuration ---
 load_dotenv()
@@ -85,10 +86,6 @@ st.markdown("""
         background: linear-gradient(90deg, #357abd 0%, #2d6ba3 100%);
         transform: translateY(-2px);
         box-shadow: 0 4px 8px rgba(74, 144, 226, 0.3);
-    }
-    [data-baseweb="select"] {
-        background-color: #f8f9fa;
-        border-radius: 6px;
     }
     .stInfo {
         background-color: #e3f2fd;
@@ -167,6 +164,8 @@ st.markdown("""
         padding: 10px;
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
+    .symbol-link { color: #1e3a5f; text-decoration: none; font-weight: 500; }
+    .symbol-link:hover { text-decoration: underline; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -393,7 +392,7 @@ def load_data():
 
 @st.cache_data(ttl=3600)
 def get_latest_data(df):
-    """Get most recent row per symbol (for dropdown and metrics)."""
+    """Get most recent row per symbol."""
     return df.sort_values('Date', ascending=False).drop_duplicates(subset='Symbol', keep='first')
 
 
@@ -429,9 +428,8 @@ def get_gauge_ranges(df):
 @st.cache_data(ttl=3600)
 def get_available_symbols(df):
     """Sorted list of unique symbols from latest data."""
-    latest_data = df.sort_values('Date', ascending=False).drop_duplicates(subset='Symbol', keep='first')
-    symbols = [str(s).strip().upper() for s in latest_data['Symbol'].unique().tolist()]
-    return sorted(symbols)
+    latest_data = get_latest_data(df)
+    return sorted([str(s).strip().upper() for s in latest_data['Symbol'].unique().tolist()])
 
 
 # --- News sentiment helpers ---
@@ -554,7 +552,7 @@ else:
     df = load_data()
 
 if df is not None:
-    # --- Initialize session state and build stock dropdown options ---
+    # --- Initialize session state ---
     available_symbols = get_available_symbols(df)
     latest_data = get_latest_data(df)
     if 'ticker_select' not in st.session_state:
@@ -563,53 +561,35 @@ if df is not None:
         current_ticker = str(st.session_state.ticker_select).strip().upper()
         if current_ticker not in available_symbols:
             st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
-    top_stocks_main = get_top_stocks(latest_data, n=500)
-    signal_display_mapping = {'BUY': 'BULLISH', 'SELL': 'BEARISH', 'HOLD': 'HOLD'}
-    stock_options = []
-    symbol_to_display = {}
-    for _, row in top_stocks_main.iterrows():
-        sym = str(row['Symbol']).strip().upper()
-        sig = signal_display_mapping.get(row['final_trade'], row['final_trade'])
-        disp = f"{sym} - {sig} - {row['combined_signal']:.1f}"
-        stock_options.append(sym)
-        symbol_to_display[sym] = disp
-    if not stock_options:
-        stock_options = available_symbols
-        symbol_to_display = {s: s for s in (available_symbols or [])}
 
-    # --- Top row: stock selector and last updated date ---
+    # Handle click from symbol link (?symbol=AAPL in URL)
+    q_symbol = st.query_params.get("symbol", "").strip().upper()
+    if q_symbol and q_symbol in available_symbols:
+        st.session_state.ticker_select = q_symbol
+        del st.query_params["symbol"]
+
+    top_stocks_main = get_top_stocks(latest_data, n=500)
+
+    # Group by signal (BUY/HOLD/SELL), each sorted by combined_signal descending
+    buy_symbols = top_stocks_main[top_stocks_main['final_trade'] == 'BUY'].sort_values('combined_signal', ascending=False)['Symbol'].str.strip().str.upper().tolist()
+    hold_symbols = top_stocks_main[top_stocks_main['final_trade'] == 'HOLD'].sort_values('combined_signal', ascending=False)['Symbol'].str.strip().str.upper().tolist()
+    sell_symbols = top_stocks_main[top_stocks_main['final_trade'] == 'SELL'].sort_values('combined_signal', ascending=False)['Symbol'].str.strip().str.upper().tolist()
+
+    def make_clickable_list(symbols):
+        return ", ".join(f'<a href="?symbol={quote(s)}" class="symbol-link" target="_top">{s}</a>' for s in symbols)
+
+    # --- Symbol lists by signal (clickable, all symbols, sorted by score descending) ---
     st.markdown("---")
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        ticker_select_value = str(st.session_state.get('ticker_select', '')).strip().upper()
-        if stock_options and ticker_select_value in stock_options:
-            default_index = stock_options.index(ticker_select_value)
-        else:
-            default_index = 0
-            st.session_state.ticker_select = stock_options[0] if stock_options else (available_symbols[0] if available_symbols else '')
-        
-        ticker = st.selectbox(
-            "Select Stock",
-            options=stock_options,
-            index=default_index,
-            format_func=lambda x: symbol_to_display.get(x, x),
-            key="ticker_select"
-        )
-        ticker = str(ticker).strip().upper()
-    
-    with col2:
-        display_ticker = ticker or ''
-        if display_ticker:
-            display_ticker = str(display_ticker).strip().upper()
-            ticker_latest = latest_data[latest_data['Symbol'] == display_ticker]
-            if not ticker_latest.empty:
-                latest_temp = ticker_latest.iloc[0]
-                date_str = latest_temp['Date'].strftime("%m/%d/%Y")
-                st.markdown(f"""
-                <div style="font-size: 1.25rem; padding-top: 1.5rem; padding-bottom: 0.5rem;">
-                    <strong>Last updated:</strong> {date_str}
-                </div>
-                """, unsafe_allow_html=True)
+    last_updated_str = df['Date'].max().strftime("%m/%d/%Y") if not df.empty and pd.notna(df['Date'].max()) else ""
+    with st.expander(f"Stock tickers (click to select). Last updated: {last_updated_str}", expanded=True):
+        if buy_symbols:
+            st.markdown(f"**🟢 BULLISH:** {make_clickable_list(buy_symbols)}", unsafe_allow_html=True)
+        if hold_symbols:
+            st.markdown(f"**🟡 HOLD:** {make_clickable_list(hold_symbols)}", unsafe_allow_html=True)
+        if sell_symbols:
+            st.markdown(f"**🔴 BEARISH:** {make_clickable_list(sell_symbols)}", unsafe_allow_html=True)
+
+    ticker = str(st.session_state.get('ticker_select', available_symbols[0] if available_symbols else '')).strip().upper()
 
     # --- AI Technical Analysis section ---
     st.markdown(f"""
@@ -660,7 +640,6 @@ if df is not None:
 
     # --- Human Technical Analysis section (when ticker selected) ---
     if ticker:
-        ticker = str(ticker).strip().upper()
         ticker_data = df[df['Symbol'] == ticker].copy()
         
         if len(ticker_data) == 0:
@@ -1205,47 +1184,30 @@ if df is not None:
                     tickformat='$,.0f',
                     row=1, col=1
                 )
-                fig.update_yaxes(
-                    title_text="RSI",
-                    title_font=dict(size=11, color='#333'),
-                    showspikes=True,
-                    spikecolor="#888",
-                    spikesnap="cursor",
-                    spikemode="toaxis",
-                    spikethickness=1,
-                    spikedash="solid",
-                    showgrid=True,
-                    gridcolor='rgba(200, 200, 200, 0.3)',
-                    gridwidth=1,
-                    zeroline=False,
-                    showline=True,
-                    linecolor='rgba(200, 200, 200, 0.5)',
-                    linewidth=1,
-                    tickfont=dict(size=10, color='#666'),
-                    range=[0, 100],
-                    row=2, col=1
-                )
-                fig.update_yaxes(
-                    title_text="MACD",
-                    title_font=dict(size=11, color='#333'),
-                    showspikes=True,
-                    spikecolor="#888",
-                    spikesnap="cursor",
-                    spikemode="toaxis",
-                    spikethickness=1,
-                    spikedash="solid",
-                    showgrid=True,
-                    gridcolor='rgba(200, 200, 200, 0.3)',
-                    gridwidth=1,
-                    zeroline=True,
-                    zerolinecolor='rgba(128, 128, 128, 0.5)',
-                    zerolinewidth=1,
-                    showline=True,
-                    linecolor='rgba(200, 200, 200, 0.5)',
-                    linewidth=1,
-                    tickfont=dict(size=10, color='#666'),
-                    row=3, col=1
-                )
+                if has_rsi:
+                    fig.update_yaxes(
+                        title_text="RSI",
+                        title_font=dict(size=11, color='#333'),
+                        showspikes=True, spikecolor="#888", spikesnap="cursor", spikemode="toaxis",
+                        spikethickness=1, spikedash="solid",
+                        showgrid=True, gridcolor='rgba(200, 200, 200, 0.3)', gridwidth=1,
+                        zeroline=False, showline=True, linecolor='rgba(200, 200, 200, 0.5)', linewidth=1,
+                        tickfont=dict(size=10, color='#666'), range=[0, 100],
+                        row=2, col=1
+                    )
+                if has_macd:
+                    macd_row = 3 if has_rsi else 2
+                    fig.update_yaxes(
+                        title_text="MACD",
+                        title_font=dict(size=11, color='#333'),
+                        showspikes=True, spikecolor="#888", spikesnap="cursor", spikemode="toaxis",
+                        spikethickness=1, spikedash="solid",
+                        showgrid=True, gridcolor='rgba(200, 200, 200, 0.3)', gridwidth=1,
+                        zeroline=True, zerolinecolor='rgba(128, 128, 128, 0.5)', zerolinewidth=1,
+                        showline=True, linecolor='rgba(200, 200, 200, 0.5)', linewidth=1,
+                        tickfont=dict(size=10, color='#666'),
+                        row=macd_row, col=1
+                    )
                 st.plotly_chart(
                     fig, 
                     use_container_width=True,
