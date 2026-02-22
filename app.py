@@ -20,10 +20,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- Custom CSS styling ---
+# --- Custom CSS styling (professional dark theme) ---
 st.markdown("""
 <style>
-    .main .block-container { padding-top: 0 !important; padding-bottom: 2rem; margin-top: 0 !important; }
+    .stApp, .main { background-color: #0d1117; }
+    .main .block-container { padding-top: 0 !important; padding-bottom: 2rem; margin-top: 0 !important; background-color: #0d1117; }
     .stApp > header {
         padding-top: 0 !important;
         margin-top: 0 !important;
@@ -48,80 +49,82 @@ st.markdown("""
         padding-top: 0 !important;
     }
     h1 {
-        color: #1e3a5f;
+        color: #e0e0e0;
         font-weight: 700;
-        border-bottom: 3px solid #4a90e2;
+        border-bottom: 2px solid #30363d;
         padding-bottom: 10px;
         margin-bottom: 20px;
     }
     h2 {
-        color: #2d4a6b;
+        color: #e0e0e0;
         font-weight: 600;
         margin-top: 30px;
         margin-bottom: 15px;
     }
     h3 {
-        color: #3d5a7b;
+        color: #d4d4d4;
         font-weight: 600;
         margin-top: 25px;
         margin-bottom: 12px;
     }
     [data-testid="stMetricValue"] {
-        color: #1e3a5f;
-        font-weight: 700;
+        color: #e6edf3;
+        font-weight: 600;
+        font-size: 1.02rem;
     }
     [data-testid="stMetricLabel"] {
-        color: #666;
+        color: #8b949e;
         font-weight: 500;
+        font-size: 0.9rem;
     }
     .stButton > button {
-        background: linear-gradient(90deg, #4a90e2 0%, #357abd 100%);
-        color: white;
-        border: none;
+        background: #238636;
+        color: #ffffff;
+        border: 1px solid #2ea043;
         border-radius: 6px;
         font-weight: 600;
-        transition: all 0.3s ease;
+        transition: all 0.2s ease;
     }
     .stButton > button:hover {
-        background: linear-gradient(90deg, #357abd 0%, #2d6ba3 100%);
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(74, 144, 226, 0.3);
+        background: #2ea043;
+        border-color: #3fb950;
+        box-shadow: 0 0 0 1px #3fb950;
     }
     .stInfo {
-        background-color: #e3f2fd;
-        border-left: 4px solid #2196f3;
-        border-radius: 4px;
+        background-color: #161b22;
+        border-left: 4px solid #58a6ff;
+        border-radius: 6px;
     }
     .stWarning {
-        background-color: #fff3e0;
-        border-left: 4px solid #ff9800;
-        border-radius: 4px;
+        background-color: #1c2128;
+        border-left: 4px solid #d29922;
+        border-radius: 6px;
     }
     .stError {
-        background-color: #ffebee;
-        border-left: 4px solid #f44336;
-        border-radius: 4px;
+        background-color: #1c2128;
+        border-left: 4px solid #f85149;
+        border-radius: 6px;
     }
     .stSuccess {
-        background-color: #e8f5e9;
-        border-left: 4px solid #4caf50;
-        border-radius: 4px;
+        background-color: #161b22;
+        border-left: 4px solid #3fb950;
+        border-radius: 6px;
     }
     [data-testid="stExpander"] {
-        background-color: #f8f9fa;
-        border: 1px solid #dee2e6;
+        background-color: #161b22;
+        border: 1px solid #30363d;
         border-radius: 8px;
         margin-bottom: 10px;
     }
     [data-testid="stExpander"] [data-testid="stExpanderHeader"] {
-        background-color: #f1f3f5;
+        background-color: #21262d;
         border-radius: 8px 8px 0 0;
         padding: 12px;
         font-weight: 600;
-        color: #2d4a6b;
+        color: #e0e0e0;
     }
     [data-baseweb="tab-list"] {
-        background-color: #f8f9fa;
+        background-color: #161b22;
         border-radius: 8px;
         padding: 4px;
     }
@@ -131,13 +134,13 @@ st.markdown("""
     }
     hr {
         border: none;
-        height: 2px;
-        background: linear-gradient(90deg, transparent 0%, #dee2e6 50%, transparent 100%);
+        height: 1px;
+        background: #21262d;
         margin: 30px 0;
     }
     code {
-        background-color: #f1f3f5;
-        color: #d63384;
+        background-color: #21262d;
+        color: #8b949e;
         padding: 2px 6px;
         border-radius: 4px;
         font-size: 0.9em;
@@ -145,27 +148,26 @@ st.markdown("""
     .dataframe {
         border-radius: 8px;
         overflow: hidden;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border: 1px solid #30363d;
     }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     .metric-card {
-        background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+        background: #161b22;
         padding: 20px;
-        border-radius: 10px;
-        border: 1px solid #dee2e6;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border-radius: 8px;
+        border: 1px solid #30363d;
         margin-bottom: 15px;
     }
     .js-plotly-plot {
         border-radius: 8px;
-        background-color: #ffffff;
+        background-color: #161b22;
         padding: 10px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        border: 1px solid #30363d;
     }
-    .symbol-link { color: #1e3a5f; text-decoration: none; font-weight: 500; }
-    .symbol-link:hover { text-decoration: underline; }
+    .symbol-link { color: #58a6ff; text-decoration: none; font-weight: 500; }
+    .symbol-link:hover { color: #79c0ff; text-decoration: underline; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -531,11 +533,11 @@ def generate_news_summary(news_text, sentiment_type, symbol):
 # --- Main UI ---
 st.markdown(
     """
-    <div style="background: linear-gradient(135deg, #1e3a5f 0%, #2d5a8f 50%, #3d6a9f 100%); padding: 24px 32px; border-radius: 10px; margin-bottom: 1.5rem; box-shadow: 0 2px 12px rgba(30,58,95,0.25);">
-        <h1 style="color: #fff; margin: 0; font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em;">
+    <div style="background: rgba(240, 242, 245, 0.75); padding: 24px 32px; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid rgba(222, 226, 230, 0.6);">
+        <h1 style="color: #1a1a1a; margin: 0; font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em;">
             Stock Analysis Report
         </h1>
-        <p style="color: rgba(255,255,255,0.85); font-size: 0.95rem; margin: 0.5rem 0 0 0; font-weight: 400;">
+        <p style="color: #4a4a4a; font-size: 0.95rem; margin: 0.5rem 0 0 0; font-weight: 400;">
             Technical and fundamental indicators with AI-powered signals
         </p>
     </div>
@@ -596,8 +598,8 @@ if df is not None:
 
     # --- AI Technical Analysis section ---
     st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #1e3a5f 0%, #2d5a8f 100%); padding: 16px 24px; border-radius: 8px; margin: 16px 0 16px 0; box-shadow: 0 2px 8px rgba(30,58,95,0.2);">
-        <h3 style="color: #fff; margin: 0; font-size: 1.25rem; font-weight: 600;">AI Technical and News Analysis for {ticker}</h3>
+    <div style="background: rgba(240, 242, 245, 0.75); padding: 16px 24px; border-radius: 8px; margin: 16px 0 16px 0; border: 1px solid rgba(222, 226, 230, 0.6);">
+        <h3 style="color: #1a1a1a; margin: 0; font-size: 1.25rem; font-weight: 600;">AI Technical and News Analysis for {ticker}</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -651,8 +653,8 @@ if df is not None:
         else:
             latest = ticker_data.nlargest(1, 'Date').iloc[0]
             st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #2d5a8f 100%); padding: 16px 24px; border-radius: 8px; margin: 24px 0 16px 0; box-shadow: 0 2px 8px rgba(30,58,95,0.2);">
-                <h3 style="color: #fff; margin: 0; font-size: 1.25rem; font-weight: 600;">Human Technical Analysis for {ticker}</h3>
+            <div style="background: rgba(240, 242, 245, 0.75); padding: 16px 24px; border-radius: 8px; margin: 24px 0 16px 0; border: 1px solid rgba(222, 226, 230, 0.6);">
+                <h3 style="color: #1a1a1a; margin: 0; font-size: 1.25rem; font-weight: 600;">Human Technical Analysis for {ticker}</h3>
             </div>
             """, unsafe_allow_html=True)
 
@@ -671,20 +673,20 @@ if df is not None:
                 'HOLD': '🟡'
             }
             signal_bg = {
-                'BULLISH': 'background-color: #d4edda; color: #155724;',
-                'BEARISH': 'background-color: #f8d7da; color: #721c24;',
-                'HOLD': 'background-color: #fff3cd; color: #856404;'
+                'BULLISH': 'background-color: rgba(35, 134, 54, 0.25); color: #3fb950; border: 1px solid #238636;',
+                'BEARISH': 'background-color: rgba(248, 81, 73, 0.2); color: #f85149; border: 1px solid #da3633;',
+                'HOLD': 'background-color: rgba(210, 153, 34, 0.2); color: #d29922; border: 1px solid #9e6a03;'
             }
             col1, col2, col3, col4, col5 = st.columns([1, 1.2, 1.2, 1, 1])
             
             with col1:
                 st.markdown("""
-                <div style="font-size: 0.875rem; color: #666; font-weight: 500; margin-bottom: 4px;">
+                <div style="font-size: 0.875rem; color: #8b949e; font-weight: 500; margin-bottom: 4px;">
                     Technical Signal
                 </div>
                 """, unsafe_allow_html=True)
                 st.markdown(f"""
-                <div style="text-align: center; padding: 8px 12px; border-radius: 8px; {signal_bg.get(signal, '')} box-shadow: 0 2px 4px rgba(0,0,0,0.1); font-size: 0.95rem; line-height: 1.5;">
+                <div style="text-align: center; padding: 8px 12px; border-radius: 6px; {signal_bg.get(signal, '')} font-size: 0.95rem; line-height: 1.5;">
                     <strong>{signal_color.get(signal, '')} {signal}</strong>
                 </div>
                 """, unsafe_allow_html=True)
@@ -727,21 +729,21 @@ if df is not None:
                     mode = "gauge+number",
                     value = combined_signal_val,
                     domain = {'x': [0, 1], 'y': [0, 0.5]},
-                    title = {'text': "Combined Signal", 'font': {'color': 'black'}},
-                    number = {'font': {'color': 'black'}},
+                    title = {'text': "Combined Signal", 'font': {'color': '#e6edf3'}},
+                    number = {'font': {'color': '#e6edf3'}},
                     gauge = {
                         'axis': {
                             'range': [combined_signal_min, combined_signal_max],
                             'tickmode': 'array',
                             'tickvals': [combined_signal_min, combined_signal_mid, combined_signal_max],
                             'ticktext': [f'Min: {combined_signal_min:.1f}', f'Mid: {combined_signal_mid:.1f}', f'Max: {combined_signal_max:.1f}'],
-                            'tickcolor': 'black',
-                            'tickfont': {'color': 'black'}
+                            'tickcolor': '#8b949e',
+                            'tickfont': {'color': '#8b949e'}
                         },
-                        'bar': {'color': "darkorange"},
+                        'bar': {'color': "#58a6ff"},
                         'steps': [
-                            {'range': [combined_signal_min, combined_signal_val], 'color': "orange"},
-                            {'range': [combined_signal_val, combined_signal_max], 'color': "gray"}
+                            {'range': [combined_signal_min, combined_signal_val], 'color': "#388bfd"},
+                            {'range': [combined_signal_val, combined_signal_max], 'color': "#21262d"}
                         ],
                         'threshold': {
                             'line': {'color': "red", 'width': 4},
@@ -754,13 +756,13 @@ if df is not None:
                 fig1.update_layout(
                     height=200,
                     margin=dict(l=20, r=20, t=40, b=60),
-                    paper_bgcolor="#f8f9fa",
-                    plot_bgcolor="#ffffff",
+                    paper_bgcolor="#161b22",
+                    plot_bgcolor="#161b22",
                     annotations=[dict(
                         x=0.5, y=-0.15,
                         text=f'Current: {combined_signal_val:.2f}',
                         showarrow=False,
-                        font=dict(size=12, color="black")
+                        font=dict(size=12, color="#8b949e")
                     )]
                 )
                 st.plotly_chart(fig1, use_container_width=True)
@@ -770,21 +772,21 @@ if df is not None:
                     mode = "gauge+number",
                     value = fundamental_weight_val,
                     domain = {'x': [0, 1], 'y': [0, 0.5]},
-                    title = {'text': "Balance Sheet", 'font': {'color': 'black'}},
-                    number = {'font': {'color': 'black'}},
+                    title = {'text': "Balance Sheet", 'font': {'color': '#e6edf3'}},
+                    number = {'font': {'color': '#e6edf3'}},
                     gauge = {
                         'axis': {
                             'range': [fundamental_weight_min, fundamental_weight_max],
                             'tickmode': 'array',
                             'tickvals': [fundamental_weight_min, fundamental_weight_mid, fundamental_weight_max],
                             'ticktext': [f'Min: {fundamental_weight_min:.1f}', f'Mid: {fundamental_weight_mid:.1f}', f'Max: {fundamental_weight_max:.1f}'],
-                            'tickcolor': 'black',
-                            'tickfont': {'color': 'black'}
+                            'tickcolor': '#8b949e',
+                            'tickfont': {'color': '#8b949e'}
                         },
-                        'bar': {'color': "darkorange"},
+                        'bar': {'color': "#58a6ff"},
                         'steps': [
-                            {'range': [fundamental_weight_min, fundamental_weight_val], 'color': "orange"},
-                            {'range': [fundamental_weight_val, fundamental_weight_max], 'color': "gray"}
+                            {'range': [fundamental_weight_min, fundamental_weight_val], 'color': "#388bfd"},
+                            {'range': [fundamental_weight_val, fundamental_weight_max], 'color': "#21262d"}
                         ],
                         'threshold': {
                             'line': {'color': "red", 'width': 4},
@@ -797,13 +799,13 @@ if df is not None:
                 fig2.update_layout(
                     height=200,
                     margin=dict(l=20, r=20, t=40, b=60),
-                    paper_bgcolor="#f8f9fa",
-                    plot_bgcolor="#ffffff",
+                    paper_bgcolor="#161b22",
+                    plot_bgcolor="#161b22",
                     annotations=[dict(
                         x=0.5, y=-0.15,
                         text=f'Current: {fundamental_weight_val:.2f}',
                         showarrow=False,
-                        font=dict(size=12, color="black")
+                        font=dict(size=12, color="#8b949e")
                     )]
                 )
                 st.plotly_chart(fig2, use_container_width=True)
@@ -813,21 +815,21 @@ if df is not None:
                     mode = "gauge+number",
                     value = sentiment_score_val,
                     domain = {'x': [0, 1], 'y': [0, 0.5]},
-                    title = {'text': "News Sentiment", 'font': {'color': 'black'}},
-                    number = {'font': {'color': 'black'}},
+                    title = {'text': "News Sentiment", 'font': {'color': '#e6edf3'}},
+                    number = {'font': {'color': '#e6edf3'}},
                     gauge = {
                         'axis': {
                             'range': [sentiment_score_min, sentiment_score_max],
                             'tickmode': 'array',
                             'tickvals': [sentiment_score_min, sentiment_score_mid, sentiment_score_max],
                             'ticktext': [f'Min: {sentiment_score_min:.1f}', f'Mid: {sentiment_score_mid:.1f}', f'Max: {sentiment_score_max:.1f}'],
-                            'tickcolor': 'black',
-                            'tickfont': {'color': 'black'}
+                            'tickcolor': '#8b949e',
+                            'tickfont': {'color': '#8b949e'}
                         },
-                        'bar': {'color': "darkorange"},
+                        'bar': {'color': "#58a6ff"},
                         'steps': [
-                            {'range': [sentiment_score_min, sentiment_score_val], 'color': "orange"},
-                            {'range': [sentiment_score_val, sentiment_score_max], 'color': "gray"}
+                            {'range': [sentiment_score_min, sentiment_score_val], 'color': "#388bfd"},
+                            {'range': [sentiment_score_val, sentiment_score_max], 'color': "#21262d"}
                         ],
                         'threshold': {
                             'line': {'color': "red", 'width': 4},
@@ -840,13 +842,13 @@ if df is not None:
                 fig3.update_layout(
                     height=200,
                     margin=dict(l=20, r=20, t=40, b=60),
-                    paper_bgcolor="#f8f9fa",
-                    plot_bgcolor="#ffffff",
+                    paper_bgcolor="#161b22",
+                    plot_bgcolor="#161b22",
                     annotations=[dict(
                         x=0.5, y=-0.15,
                         text=f'Current: {sentiment_score_val:.2f}',
                         showarrow=False,
-                        font=dict(size=12, color="black")
+                        font=dict(size=12, color="#8b949e")
                     )]
                 )
                 st.plotly_chart(fig3, use_container_width=True)
@@ -928,7 +930,7 @@ if df is not None:
                     subplot_titles=subplot_titles
                 )
                 fig.update_annotations(
-                    font=dict(size=13, color='#1f1f1f', family='Arial, sans-serif'),
+                    font=dict(size=13, color='#e0e0e0', family='Arial, sans-serif'),
                     yshift=5
                 )
 
@@ -948,7 +950,7 @@ if df is not None:
                     x=price_data.index,
                     y=price_data['Close'],
                     name='Close Price',
-                    line=dict(color='#0d47a1', width=3),  # Darker blue
+                    line=dict(color='#c8c8c8', width=3),
                     mode='lines',
                     customdata=hover_text_close,
                     hovertemplate='<b>Close</b><br>$%{y:.2f}<br>%{customdata}<extra></extra>'
@@ -975,18 +977,18 @@ if df is not None:
 
                 # Add moving average lines (MA 10, 30, 50, 100, 200)
                 for ma_name, ma_col, color in [
-                    ('ma_10', 'ma_10', 'rgba(255, 127, 14, 0.5)'),
-                    ('ma_30', 'ma_30', 'rgba(214, 39, 40, 0.5)'),
-                    ('ma_50', 'ma_50', 'rgba(148, 103, 189, 0.5)'),
-                    ('ma_100', 'ma_100', 'rgba(44, 160, 44, 0.5)'),
-                    ('ma_200', 'ma_200', 'rgba(140, 86, 75, 0.5)')
+                    ('ma_10', 'ma_10', '#ff8c00'),
+                    ('ma_30', 'ma_30', '#e74c3c'),
+                    ('ma_50', 'ma_50', '#9b59b6'),
+                    ('ma_100', 'ma_100', '#27ae60'),
+                    ('ma_200', 'ma_200', '#d4a574')
                 ]:
                     if ma_col in price_data.columns:
                         fig.add_trace(go.Scatter(
                             x=price_data.index,
                             y=price_data[ma_col],
                             name=ma_name.upper().replace('_', ' '),
-                            line=dict(color=color, width=1.2),
+                            line=dict(color=color, width=1),
                             mode='lines',
                             showlegend=True,
                             hovertemplate=f'<b>{ma_name.upper().replace("_", " ")}</b><br>$%{{y:.2f}}<extra></extra>'
@@ -1125,8 +1127,8 @@ if df is not None:
                     height=850,
                     hovermode='x unified',
                     margin=dict(l=50, r=50, t=120, b=50),
-                    plot_bgcolor='rgba(250, 250, 250, 1)',
-                    paper_bgcolor='white',
+                    plot_bgcolor='#161b22',
+                    paper_bgcolor='#0d1117',
                     showlegend=True,
                     legend=dict(
                         orientation="h",
@@ -1134,17 +1136,17 @@ if df is not None:
                         y=1.08,
                         xanchor="center",
                         x=0.5,
-                        font=dict(size=10, color='#333'),
-                        bgcolor='rgba(255, 255, 255, 0.9)',
-                        bordercolor='rgba(200, 200, 200, 0.5)',
+                        font=dict(size=10, color='#e6edf3'),
+                        bgcolor='rgba(22, 27, 34, 0.95)',
+                        bordercolor='#30363d',
                         borderwidth=1,
                         itemwidth=30
                     ),
-                    font=dict(family="Arial, sans-serif", size=11, color='#333'),
+                    font=dict(family="Arial, sans-serif", size=11, color='#e6edf3'),
                     dragmode=False,
                     hoverlabel=dict(
-                        bgcolor="white",
-                        bordercolor="#333",
+                        bgcolor="#21262d",
+                        bordercolor="#30363d",
                         font_size=11,
                         font_family="Arial, sans-serif"
                     )
@@ -1152,63 +1154,63 @@ if df is not None:
                 fig.update_xaxes(
                     tickformat='%b %Y',
                     showspikes=True,
-                    spikecolor="#888",
+                    spikecolor="#808080",
                     spikesnap="cursor",
                     spikemode="across",
                     spikethickness=1,
                     spikedash="solid",
                     showgrid=True,
-                    gridcolor='rgba(200, 200, 200, 0.3)',
+                    gridcolor='rgba(48, 54, 61, 0.8)',
                     gridwidth=1,
                     zeroline=False,
                     showline=True,
-                    linecolor='rgba(200, 200, 200, 0.5)',
+                    linecolor='#30363d',
                     linewidth=1,
-                    tickfont=dict(size=10, color='#666'),
-                    title_font=dict(size=12, color='#333')
+                    tickfont=dict(size=10, color='#8b949e'),
+                    title_font=dict(size=12, color='#e6edf3')
                 )
                 fig.update_yaxes(
                     title_text="Price ($)",
-                    title_font=dict(size=11, color='#333'),
+                    title_font=dict(size=11, color='#e6edf3'),
                     showspikes=True,
-                    spikecolor="#888",
+                    spikecolor="#8b949e",
                     spikesnap="cursor",
                     spikemode="toaxis",
                     spikethickness=1,
                     spikedash="solid",
                     showgrid=True,
-                    gridcolor='rgba(200, 200, 200, 0.3)',
+                    gridcolor='rgba(48, 54, 61, 0.8)',
                     gridwidth=1,
                     zeroline=False,
                     showline=True,
-                    linecolor='rgba(200, 200, 200, 0.5)',
+                    linecolor='#30363d',
                     linewidth=1,
-                    tickfont=dict(size=10, color='#666'),
+                    tickfont=dict(size=10, color='#8b949e'),
                     tickformat='$,.0f',
                     row=1, col=1
                 )
                 if has_rsi:
                     fig.update_yaxes(
                         title_text="RSI",
-                        title_font=dict(size=11, color='#333'),
-                        showspikes=True, spikecolor="#888", spikesnap="cursor", spikemode="toaxis",
+                        title_font=dict(size=11, color='#e6edf3'),
+                        showspikes=True, spikecolor="#8b949e", spikesnap="cursor", spikemode="toaxis",
                         spikethickness=1, spikedash="solid",
-                        showgrid=True, gridcolor='rgba(200, 200, 200, 0.3)', gridwidth=1,
-                        zeroline=False, showline=True, linecolor='rgba(200, 200, 200, 0.5)', linewidth=1,
-                        tickfont=dict(size=10, color='#666'), range=[0, 100],
+                        showgrid=True, gridcolor='rgba(48, 54, 61, 0.8)', gridwidth=1,
+                        zeroline=False, showline=True, linecolor='#30363d', linewidth=1,
+                        tickfont=dict(size=10, color='#8b949e'), range=[0, 100],
                         row=2, col=1
                     )
                 if has_macd:
                     macd_row = 3 if has_rsi else 2
                     fig.update_yaxes(
                         title_text="MACD",
-                        title_font=dict(size=11, color='#333'),
-                        showspikes=True, spikecolor="#888", spikesnap="cursor", spikemode="toaxis",
+                        title_font=dict(size=11, color='#e6edf3'),
+                        showspikes=True, spikecolor="#8b949e", spikesnap="cursor", spikemode="toaxis",
                         spikethickness=1, spikedash="solid",
-                        showgrid=True, gridcolor='rgba(200, 200, 200, 0.3)', gridwidth=1,
-                        zeroline=True, zerolinecolor='rgba(128, 128, 128, 0.5)', zerolinewidth=1,
-                        showline=True, linecolor='rgba(200, 200, 200, 0.5)', linewidth=1,
-                        tickfont=dict(size=10, color='#666'),
+                        showgrid=True, gridcolor='rgba(48, 54, 61, 0.8)', gridwidth=1,
+                        zeroline=True, zerolinecolor='#30363d', zerolinewidth=1,
+                        showline=True, linecolor='#30363d', linewidth=1,
+                        tickfont=dict(size=10, color='#8b949e'),
                         row=macd_row, col=1
                     )
                 st.plotly_chart(
