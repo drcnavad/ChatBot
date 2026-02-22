@@ -46,4 +46,6 @@ signal_analysis_functions.py
 # Logs
 *.log
 
-
+# Documentation (don't push)
+docs/
+*.md
