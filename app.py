@@ -563,10 +563,13 @@ if df is not None:
             st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
 
     # Handle click from symbol link (?symbol=AAPL in URL)
-    q_symbol = st.query_params.get("symbol", "").strip().upper()
+    q_symbol = str(st.query_params.get("symbol", "") or "").strip().upper()
     if q_symbol and q_symbol in available_symbols:
         st.session_state.ticker_select = q_symbol
-        del st.query_params["symbol"]
+        try:
+            del st.query_params["symbol"]
+        except Exception:
+            pass
 
     top_stocks_main = get_top_stocks(latest_data, n=500)
 
@@ -576,7 +579,7 @@ if df is not None:
     sell_symbols = top_stocks_main[top_stocks_main['final_trade'] == 'SELL'].sort_values('combined_signal', ascending=False)['Symbol'].str.strip().str.upper().tolist()
 
     def make_clickable_list(symbols):
-        return ", ".join(f'<a href="?symbol={quote(s)}" class="symbol-link" target="_top">{s}</a>' for s in symbols)
+        return ", ".join(f'<a href="?symbol={quote(s)}" class="symbol-link" target="_self">{s}</a>' for s in symbols)
 
     # --- Symbol lists by signal (clickable, all symbols, sorted by score descending) ---
     st.markdown("---")
