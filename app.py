@@ -594,7 +594,7 @@ if df is not None:
     # --- AI Technical Analysis section ---
     st.markdown(f"""
     <div style="background: linear-gradient(135deg, #1e3a5f 0%, #2d5a8f 100%); padding: 16px 24px; border-radius: 8px; margin: 16px 0 16px 0; box-shadow: 0 2px 8px rgba(30,58,95,0.2);">
-        <h3 style="color: #fff; margin: 0; font-size: 1.25rem; font-weight: 600;">AI Technical Analysis for {ticker}</h3>
+        <h3 style="color: #fff; margin: 0; font-size: 1.25rem; font-weight: 600;">AI Technical and News Analysis for {ticker}</h3>
     </div>
     """, unsafe_allow_html=True)
     
