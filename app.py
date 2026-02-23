@@ -20,11 +20,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- Custom CSS styling (professional dark theme) ---
+# --- Custom CSS styling (cream / greyish-white theme) ---
 st.markdown("""
 <style>
-    .stApp, .main { background-color: #0d1117; }
-    .main .block-container { padding-top: 0 !important; padding-bottom: 2rem; margin-top: 0 !important; background-color: #0d1117; }
+    .stApp, .main { background-color: #f8f6f0; }
+    .main .block-container { padding-top: 0 !important; padding-bottom: 2rem; margin-top: 0 !important; background-color: #f8f6f0; }
     .stApp > header {
         padding-top: 0 !important;
         margin-top: 0 !important;
@@ -49,31 +49,31 @@ st.markdown("""
         padding-top: 0 !important;
     }
     h1 {
-        color: #e0e0e0;
-        font-weight: 700;
-        border-bottom: 2px solid #30363d;
+        color: #1f2937;
+        font-weight: 600;
+        border-bottom: 1px solid #e5e7eb;
         padding-bottom: 10px;
         margin-bottom: 20px;
     }
     h2 {
-        color: #e0e0e0;
+        color: #374151;
         font-weight: 600;
         margin-top: 30px;
         margin-bottom: 15px;
     }
     h3 {
-        color: #d4d4d4;
+        color: #4b5563;
         font-weight: 600;
         margin-top: 25px;
         margin-bottom: 12px;
     }
     [data-testid="stMetricValue"] {
-        color: #e6edf3;
+        color: #1f2937;
         font-weight: 600;
         font-size: 1.02rem;
     }
     [data-testid="stMetricLabel"] {
-        color: #8b949e;
+        color: #6b7280;
         font-weight: 500;
         font-size: 0.9rem;
     }
@@ -91,40 +91,40 @@ st.markdown("""
         box-shadow: 0 0 0 1px #3fb950;
     }
     .stInfo {
-        background-color: #161b22;
+        background-color: #faf8f5;
         border-left: 4px solid #58a6ff;
         border-radius: 6px;
     }
     .stWarning {
-        background-color: #1c2128;
+        background-color: #faf8f5;
         border-left: 4px solid #d29922;
         border-radius: 6px;
     }
     .stError {
-        background-color: #1c2128;
+        background-color: #faf8f5;
         border-left: 4px solid #f85149;
         border-radius: 6px;
     }
     .stSuccess {
-        background-color: #161b22;
+        background-color: #faf8f5;
         border-left: 4px solid #3fb950;
         border-radius: 6px;
     }
     [data-testid="stExpander"] {
-        background-color: #161b22;
-        border: 1px solid #30363d;
+        background-color: #faf8f5;
+        border: 1px solid #e8e4dc;
         border-radius: 8px;
         margin-bottom: 10px;
     }
     [data-testid="stExpander"] [data-testid="stExpanderHeader"] {
-        background-color: #21262d;
+        background-color: #f5f3ed;
         border-radius: 8px 8px 0 0;
         padding: 12px;
         font-weight: 600;
-        color: #e0e0e0;
+        color: #374151;
     }
     [data-baseweb="tab-list"] {
-        background-color: #161b22;
+        background-color: #faf8f5;
         border-radius: 8px;
         padding: 4px;
     }
@@ -135,12 +135,12 @@ st.markdown("""
     hr {
         border: none;
         height: 1px;
-        background: #21262d;
+        background: #e8e4dc;
         margin: 30px 0;
     }
     code {
-        background-color: #21262d;
-        color: #8b949e;
+        background-color: #f0ede6;
+        color: #4a4a4a;
         padding: 2px 6px;
         border-radius: 4px;
         font-size: 0.9em;
@@ -148,26 +148,26 @@ st.markdown("""
     .dataframe {
         border-radius: 8px;
         overflow: hidden;
-        border: 1px solid #30363d;
+        border: 1px solid #e8e4dc;
     }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     .metric-card {
-        background: #161b22;
+        background: #faf8f5;
         padding: 20px;
         border-radius: 8px;
-        border: 1px solid #30363d;
+        border: 1px solid #e8e4dc;
         margin-bottom: 15px;
     }
     .js-plotly-plot {
         border-radius: 8px;
-        background-color: #161b22;
+        background-color: #faf8f5;
         padding: 10px;
-        border: 1px solid #30363d;
+        border: 1px solid #e8e4dc;
     }
-    .symbol-link { color: #58a6ff; text-decoration: none; font-weight: 500; }
-    .symbol-link:hover { color: #79c0ff; text-decoration: underline; }
+    .symbol-link { color: #1a73e8; text-decoration: none; font-weight: 500; }
+    .symbol-link:hover { color: #1557b0; text-decoration: underline; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -434,6 +434,39 @@ def get_available_symbols(df):
     return sorted([str(s).strip().upper() for s in latest_data['Symbol'].unique().tolist()])
 
 
+@st.cache_data(ttl=3600)
+def load_company_analysis():
+    """Load complete company analysis Excel (latest quarter sheet)."""
+    xlsx_path = os.path.join("Reports", "complete_company_analysis.xlsx")
+    if not os.path.exists(xlsx_path):
+        return None
+    return pd.read_excel(xlsx_path, sheet_name="2_Latest_Quarter_Complete", engine="openpyxl")
+
+
+def get_company_metrics(ticker, company_df):
+    """Get Fair value, PE, PB, Revenue Growth YoY for ticker from company analysis."""
+    if company_df is None or company_df.empty:
+        return {}
+    sym_col = 'Symbol' if 'Symbol' in company_df.columns else 'symbol'
+    if sym_col not in company_df.columns:
+        return {}
+    row = company_df[company_df[sym_col].astype(str).str.strip().str.upper() == str(ticker).strip().upper()]
+    if row.empty:
+        return {}
+    r = row.iloc[0]
+    metrics = {}
+    for col, key in [
+        ('FairValue_Composite', 'fair_value'),
+        ('PE_Ratio', 'pe_ratio'),
+        ('PB_Ratio', 'pb_ratio'),
+        ('RevenueGrowth_YoY', 'revenue_growth_yoy')
+    ]:
+        if col in r.index and pd.notna(r[col]):
+            val = r[col]
+            metrics[key] = float(val) if isinstance(val, (int, float)) else val
+    return metrics
+
+
 # --- News sentiment helpers ---
 @st.cache_data(ttl=3600)
 def load_news_data():
@@ -533,11 +566,11 @@ def generate_news_summary(news_text, sentiment_type, symbol):
 # --- Main UI ---
 st.markdown(
     """
-    <div style="background: rgba(240, 242, 245, 0.75); padding: 24px 32px; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid rgba(222, 226, 230, 0.6);">
-        <h1 style="color: #1a1a1a; margin: 0; font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em;">
+    <div style="background: rgba(220, 218, 215, 0.9); padding: 24px 32px; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid rgba(180, 178, 175, 0.8);">
+        <h1 style="color: #1f2937; margin: 0; font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em;">
             Stock Analysis Report
         </h1>
-        <p style="color: #4a4a4a; font-size: 0.95rem; margin: 0.5rem 0 0 0; font-weight: 400;">
+        <p style="color: #6b7280; font-size: 0.95rem; margin: 0.5rem 0 0 0; font-weight: 400;">
             Technical and fundamental indicators with AI-powered signals
         </p>
     </div>
@@ -594,12 +627,42 @@ if df is not None:
         if sell_symbols:
             st.markdown(f"**🔴 BEARISH:** {make_clickable_list(sell_symbols)}", unsafe_allow_html=True)
 
+        symbol_data = latest_data.set_index('Symbol')
+        symbol_signal = symbol_data['combined_signal'].to_dict()
+        symbol_streak_label = {}
+        for s in available_symbols:
+            try:
+                buy_streak = int(float(symbol_data.loc[s, 'Buy Streak']) or 0)
+                sell_streak = int(float(symbol_data.loc[s, 'Sell Streak']) or 0)
+                if buy_streak > 0:
+                    symbol_streak_label[s] = f"Buy Streak of {buy_streak} days"
+                elif sell_streak > 0:
+                    symbol_streak_label[s] = f"Sell Streak of {sell_streak} days"
+                else:
+                    symbol_streak_label[s] = "Streak = None"
+            except (KeyError, TypeError, ValueError):
+                symbol_streak_label[s] = "Streak = None"
+        dropdown_options = sorted(available_symbols, key=lambda s: symbol_signal.get(s, 0) or 0, reverse=True)
+        current_ticker = str(st.session_state.get('ticker_select', available_symbols[0] if available_symbols else '')).strip().upper()
+        default_idx = dropdown_options.index(current_ticker) if current_ticker in dropdown_options else 0
+        ticker_col, _ = st.columns([2, 4])
+        with ticker_col:
+            selected = st.selectbox(
+                "Enter stock ticker:",
+                options=dropdown_options,
+                format_func=lambda s: f"{s} : {symbol_streak_label.get(s, 'Streak = None')} (Score = {float(symbol_signal.get(s, 0) or 0):.0f})",
+                index=default_idx,
+                key="ticker_dropdown"
+            )
+        if selected:
+            st.session_state.ticker_select = selected
+
     ticker = str(st.session_state.get('ticker_select', available_symbols[0] if available_symbols else '')).strip().upper()
 
     # --- AI Technical Analysis section ---
     st.markdown(f"""
-    <div style="background: rgba(240, 242, 245, 0.75); padding: 16px 24px; border-radius: 8px; margin: 16px 0 16px 0; border: 1px solid rgba(222, 226, 230, 0.6);">
-        <h3 style="color: #1a1a1a; margin: 0; font-size: 1.25rem; font-weight: 600;">AI Technical and News Analysis for {ticker}</h3>
+    <div style="background: rgba(220, 218, 215, 0.9); padding: 16px 24px; border-radius: 8px; margin: 16px 0 16px 0; border: 1px solid rgba(180, 178, 175, 0.8);">
+        <h3 style="color: #374151; margin: 0; font-size: 1.25rem; font-weight: 600;">AI Technical and News Analysis for {ticker}</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -653,8 +716,8 @@ if df is not None:
         else:
             latest = ticker_data.nlargest(1, 'Date').iloc[0]
             st.markdown(f"""
-            <div style="background: rgba(240, 242, 245, 0.75); padding: 16px 24px; border-radius: 8px; margin: 24px 0 16px 0; border: 1px solid rgba(222, 226, 230, 0.6);">
-                <h3 style="color: #1a1a1a; margin: 0; font-size: 1.25rem; font-weight: 600;">Human Technical Analysis for {ticker}</h3>
+            <div style="background: rgba(220, 218, 215, 0.9); padding: 16px 24px; border-radius: 8px; margin: 24px 0 16px 0; border: 1px solid rgba(180, 178, 175, 0.8);">
+                <h3 style="color: #374151; margin: 0; font-size: 1.25rem; font-weight: 600;">Human Technical Analysis for {ticker}</h3>
             </div>
             """, unsafe_allow_html=True)
 
@@ -673,15 +736,15 @@ if df is not None:
                 'HOLD': '🟡'
             }
             signal_bg = {
-                'BULLISH': 'background-color: rgba(35, 134, 54, 0.25); color: #3fb950; border: 1px solid #238636;',
-                'BEARISH': 'background-color: rgba(248, 81, 73, 0.2); color: #f85149; border: 1px solid #da3633;',
-                'HOLD': 'background-color: rgba(210, 153, 34, 0.2); color: #d29922; border: 1px solid #9e6a03;'
+                'BULLISH': 'background-color: rgba(35, 134, 54, 0.15); color: #1a7f37; border: 1px solid #238636;',
+                'BEARISH': 'background-color: rgba(248, 81, 73, 0.15); color: #c41e3a; border: 1px solid #da3633;',
+                'HOLD': 'background-color: rgba(210, 153, 34, 0.15); color: #9e6a03; border: 1px solid #9e6a03;'
             }
-            col1, col2, col3, col4, col5 = st.columns([1, 1.2, 1.2, 1, 1])
+            col1, col2, col3 = st.columns([1, 1, 1])
             
             with col1:
                 st.markdown("""
-                <div style="font-size: 0.875rem; color: #8b949e; font-weight: 500; margin-bottom: 4px;">
+                <div style="font-size: 0.875rem; color: #6b7280; font-weight: 500; margin-bottom: 4px;">
                     Technical Signal
                 </div>
                 """, unsafe_allow_html=True)
@@ -692,16 +755,10 @@ if df is not None:
                 """, unsafe_allow_html=True)
             
             with col2:
-                st.metric("Current Price", f"${latest['Close']:.2f}")
-            
-            with col3:
-                st.metric("Combined Signal", f"{latest['combined_signal']:.2f}")
-            
-            with col4:
                 buy_streak = latest.get('Buy Streak', 0)
                 st.metric("Buy Streak", f"{int(buy_streak)} days")
             
-            with col5:
+            with col3:
                 sell_streak = latest.get('Sell Streak', 0)
                 st.metric("Sell Streak", f"{int(sell_streak)} days")
 
@@ -729,21 +786,21 @@ if df is not None:
                     mode = "gauge+number",
                     value = combined_signal_val,
                     domain = {'x': [0, 1], 'y': [0, 0.5]},
-                    title = {'text': "Combined Signal", 'font': {'color': '#e6edf3'}},
-                    number = {'font': {'color': '#e6edf3'}},
+                    title = {'text': "Combined Signal", 'font': {'color': '#374151'}},
+                    number = {'font': {'color': '#1f2937'}},
                     gauge = {
                         'axis': {
                             'range': [combined_signal_min, combined_signal_max],
                             'tickmode': 'array',
                             'tickvals': [combined_signal_min, combined_signal_mid, combined_signal_max],
                             'ticktext': [f'Min: {combined_signal_min:.1f}', f'Mid: {combined_signal_mid:.1f}', f'Max: {combined_signal_max:.1f}'],
-                            'tickcolor': '#8b949e',
-                            'tickfont': {'color': '#8b949e'}
+                            'tickcolor': '#6b7280',
+                            'tickfont': {'color': '#6b7280'}
                         },
                         'bar': {'color': "#58a6ff"},
                         'steps': [
                             {'range': [combined_signal_min, combined_signal_val], 'color': "#388bfd"},
-                            {'range': [combined_signal_val, combined_signal_max], 'color': "#21262d"}
+                            {'range': [combined_signal_val, combined_signal_max], 'color': "#e8e4dc"}
                         ],
                         'threshold': {
                             'line': {'color': "red", 'width': 4},
@@ -756,37 +813,49 @@ if df is not None:
                 fig1.update_layout(
                     height=200,
                     margin=dict(l=20, r=20, t=40, b=60),
-                    paper_bgcolor="#161b22",
-                    plot_bgcolor="#161b22",
+                    paper_bgcolor="#faf8f5",
+                    plot_bgcolor="#faf8f5",
                     annotations=[dict(
                         x=0.5, y=-0.15,
                         text=f'Current: {combined_signal_val:.2f}',
                         showarrow=False,
-                        font=dict(size=12, color="#8b949e")
+                        font=dict(size=12, color="#6b7280")
                     )]
                 )
                 st.plotly_chart(fig1, use_container_width=True)
             with gauge_col2:
+                company_df = load_company_analysis()
+                comp = get_company_metrics(ticker, company_df)
+                fv = comp.get('fair_value', 'N/A')
+                pe = comp.get('pe_ratio', 'N/A')
+                pb = comp.get('pb_ratio', 'N/A')
+                rev = comp.get('revenue_growth_yoy', 'N/A')
+                fv_str = f"${fv:.2f}" if isinstance(fv, (int, float)) else str(fv)
+                pe_str = f"{pe:.1f}" if isinstance(pe, (int, float)) else str(pe)
+                pb_str = f"{pb:.2f}" if isinstance(pb, (int, float)) else str(pb)
+                rev_str = f"{rev:.1f}%" if isinstance(rev, (int, float)) else str(rev)
+                metrics_line1 = f"Fair value: {fv_str}, PE ratio: {pe_str}"
+                metrics_line2 = f"PB ratio: {pb_str}, Revenue Growth YoY: {rev_str}"
                 fundamental_weight_mid = round(fundamental_weight_mean, 2)
                 fig2 = go.Figure(go.Indicator(
                     mode = "gauge+number",
                     value = fundamental_weight_val,
                     domain = {'x': [0, 1], 'y': [0, 0.5]},
-                    title = {'text': "Balance Sheet", 'font': {'color': '#e6edf3'}},
-                    number = {'font': {'color': '#e6edf3'}},
+                    title = {'text': "Balance Sheet", 'font': {'color': '#374151'}},
+                    number = {'font': {'color': '#1f2937'}},
                     gauge = {
                         'axis': {
                             'range': [fundamental_weight_min, fundamental_weight_max],
                             'tickmode': 'array',
                             'tickvals': [fundamental_weight_min, fundamental_weight_mid, fundamental_weight_max],
                             'ticktext': [f'Min: {fundamental_weight_min:.1f}', f'Mid: {fundamental_weight_mid:.1f}', f'Max: {fundamental_weight_max:.1f}'],
-                            'tickcolor': '#8b949e',
-                            'tickfont': {'color': '#8b949e'}
+                            'tickcolor': '#6b7280',
+                            'tickfont': {'color': '#6b7280'}
                         },
                         'bar': {'color': "#58a6ff"},
                         'steps': [
                             {'range': [fundamental_weight_min, fundamental_weight_val], 'color': "#388bfd"},
-                            {'range': [fundamental_weight_val, fundamental_weight_max], 'color': "#21262d"}
+                            {'range': [fundamental_weight_val, fundamental_weight_max], 'color': "#e8e4dc"}
                         ],
                         'threshold': {
                             'line': {'color': "red", 'width': 4},
@@ -797,39 +866,43 @@ if df is not None:
                     }
                 ))
                 fig2.update_layout(
-                    height=200,
-                    margin=dict(l=20, r=20, t=40, b=60),
-                    paper_bgcolor="#161b22",
-                    plot_bgcolor="#161b22",
-                    annotations=[dict(
-                        x=0.5, y=-0.15,
-                        text=f'Current: {fundamental_weight_val:.2f}',
-                        showarrow=False,
-                        font=dict(size=12, color="#8b949e")
-                    )]
+                    height=240,
+                    margin=dict(l=20, r=20, t=40, b=85),
+                    paper_bgcolor="#faf8f5",
+                    plot_bgcolor="#faf8f5",
+                    annotations=[
+                        dict(x=0.5, y=-0.12, text=f'Current: {fundamental_weight_val:.2f}', showarrow=False, font=dict(size=12, color="#6b7280")),
+                        dict(x=0.5, y=-0.28, text=metrics_line1, showarrow=False, font=dict(size=11, color="#6b7280")),
+                        dict(x=0.5, y=-0.40, text=metrics_line2, showarrow=False, font=dict(size=11, color="#6b7280"))
+                    ]
                 )
                 st.plotly_chart(fig2, use_container_width=True)
             with gauge_col3:
+                news_df = load_news_data()
+                symbol_news = get_news_by_symbol(news_df, ticker) if news_df is not None else pd.DataFrame()
+                pos_news, neg_news = group_news_by_sentiment(symbol_news) if not symbol_news.empty else (pd.DataFrame(), pd.DataFrame())
+                pos_count = len(pos_news)
+                neg_count = len(neg_news)
                 sentiment_score_mid = round(sentiment_score_mean, 2)
                 fig3 = go.Figure(go.Indicator(
                     mode = "gauge+number",
                     value = sentiment_score_val,
                     domain = {'x': [0, 1], 'y': [0, 0.5]},
-                    title = {'text': "News Sentiment", 'font': {'color': '#e6edf3'}},
-                    number = {'font': {'color': '#e6edf3'}},
+                    title = {'text': "News Sentiment", 'font': {'color': '#374151'}},
+                    number = {'font': {'color': '#1f2937'}},
                     gauge = {
                         'axis': {
                             'range': [sentiment_score_min, sentiment_score_max],
                             'tickmode': 'array',
                             'tickvals': [sentiment_score_min, sentiment_score_mid, sentiment_score_max],
                             'ticktext': [f'Min: {sentiment_score_min:.1f}', f'Mid: {sentiment_score_mid:.1f}', f'Max: {sentiment_score_max:.1f}'],
-                            'tickcolor': '#8b949e',
-                            'tickfont': {'color': '#8b949e'}
+                            'tickcolor': '#6b7280',
+                            'tickfont': {'color': '#6b7280'}
                         },
                         'bar': {'color': "#58a6ff"},
                         'steps': [
                             {'range': [sentiment_score_min, sentiment_score_val], 'color': "#388bfd"},
-                            {'range': [sentiment_score_val, sentiment_score_max], 'color': "#21262d"}
+                            {'range': [sentiment_score_val, sentiment_score_max], 'color': "#e8e4dc"}
                         ],
                         'threshold': {
                             'line': {'color': "red", 'width': 4},
@@ -840,16 +913,14 @@ if df is not None:
                     }
                 ))
                 fig3.update_layout(
-                    height=200,
-                    margin=dict(l=20, r=20, t=40, b=60),
-                    paper_bgcolor="#161b22",
-                    plot_bgcolor="#161b22",
-                    annotations=[dict(
-                        x=0.5, y=-0.15,
-                        text=f'Current: {sentiment_score_val:.2f}',
-                        showarrow=False,
-                        font=dict(size=12, color="#8b949e")
-                    )]
+                    height=220,
+                    margin=dict(l=20, r=20, t=40, b=70),
+                    paper_bgcolor="#faf8f5",
+                    plot_bgcolor="#faf8f5",
+                    annotations=[
+                        dict(x=0.5, y=-0.15, text=f'Current: {sentiment_score_val:.2f}', showarrow=False, font=dict(size=12, color="#6b7280")),
+                        dict(x=0.5, y=-0.32, text=f'Positive: {pos_count}, Negative: {neg_count}', showarrow=False, font=dict(size=13, color="#6b7280"))
+                    ]
                 )
                 st.plotly_chart(fig3, use_container_width=True)
 
@@ -930,7 +1001,7 @@ if df is not None:
                     subplot_titles=subplot_titles
                 )
                 fig.update_annotations(
-                    font=dict(size=13, color='#e0e0e0', family='Arial, sans-serif'),
+                    font=dict(size=13, color='#374151', family='Arial, sans-serif'),
                     yshift=5
                 )
 
@@ -950,7 +1021,7 @@ if df is not None:
                     x=price_data.index,
                     y=price_data['Close'],
                     name='Close Price',
-                    line=dict(color='#c8c8c8', width=3),
+                    line=dict(color='#27ae60', width=2),
                     mode='lines',
                     customdata=hover_text_close,
                     hovertemplate='<b>Close</b><br>$%{y:.2f}<br>%{customdata}<extra></extra>'
@@ -977,11 +1048,11 @@ if df is not None:
 
                 # Add moving average lines (MA 10, 30, 50, 100, 200)
                 for ma_name, ma_col, color in [
-                    ('ma_10', 'ma_10', '#ff8c00'),
+                    ('ma_10', 'ma_10', '#ffd700'),
                     ('ma_30', 'ma_30', '#e74c3c'),
-                    ('ma_50', 'ma_50', '#9b59b6'),
-                    ('ma_100', 'ma_100', '#27ae60'),
-                    ('ma_200', 'ma_200', '#d4a574')
+                    ('ma_50', 'ma_50', '#3498db'),
+                    ('ma_100', 'ma_100', '#8b4513'),
+                    ('ma_200', 'ma_200', '#808080')
                 ]:
                     if ma_col in price_data.columns:
                         fig.add_trace(go.Scatter(
@@ -1105,7 +1176,7 @@ if df is not None:
                             x=macd_data.index,
                             y=macd_data['macd'],
                             name='MACD',
-                            line=dict(color='#d62728', width=2.5),
+                            line=dict(color='#d62728', width=1.8),
                             mode='lines',
                             showlegend=False,
                             hovertemplate='<b>MACD</b><br>%{y:.4f}<extra></extra>'
@@ -1115,7 +1186,7 @@ if df is not None:
                             x=macd_data.index,
                             y=macd_data['MACD Signal'],
                             name='MACD Signal',
-                            line=dict(color='#1f77b4', width=2.5, dash='dash'),
+                            line=dict(color='#1f77b4', width=1.8, dash='dash'),
                             mode='lines',
                             showlegend=False,
                             hovertemplate='<b>MACD Signal</b><br>%{y:.4f}<extra></extra>'
@@ -1127,8 +1198,8 @@ if df is not None:
                     height=850,
                     hovermode='x unified',
                     margin=dict(l=50, r=50, t=120, b=50),
-                    plot_bgcolor='#161b22',
-                    paper_bgcolor='#0d1117',
+                    plot_bgcolor='#faf8f5',
+                    paper_bgcolor='#f8f6f0',
                     showlegend=True,
                     legend=dict(
                         orientation="h",
@@ -1136,17 +1207,17 @@ if df is not None:
                         y=1.08,
                         xanchor="center",
                         x=0.5,
-                        font=dict(size=10, color='#e6edf3'),
-                        bgcolor='rgba(22, 27, 34, 0.95)',
-                        bordercolor='#30363d',
+                        font=dict(size=10, color='#374151'),
+                        bgcolor='rgba(250, 248, 245, 0.95)',
+                        bordercolor='#e8e4dc',
                         borderwidth=1,
                         itemwidth=30
                     ),
-                    font=dict(family="Arial, sans-serif", size=11, color='#e6edf3'),
+                    font=dict(family="Arial, sans-serif", size=11, color='#374151'),
                     dragmode=False,
                     hoverlabel=dict(
-                        bgcolor="#21262d",
-                        bordercolor="#30363d",
+                        bgcolor="#faf8f5",
+                        bordercolor="#e8e4dc",
                         font_size=11,
                         font_family="Arial, sans-serif"
                     )
@@ -1154,63 +1225,63 @@ if df is not None:
                 fig.update_xaxes(
                     tickformat='%b %Y',
                     showspikes=True,
-                    spikecolor="#808080",
+                    spikecolor="#6b7280",
                     spikesnap="cursor",
                     spikemode="across",
                     spikethickness=1,
                     spikedash="solid",
                     showgrid=True,
-                    gridcolor='rgba(48, 54, 61, 0.8)',
+                    gridcolor='rgba(200, 198, 195, 0.35)',
                     gridwidth=1,
                     zeroline=False,
                     showline=True,
-                    linecolor='#30363d',
+                    linecolor='rgba(200, 198, 195, 0.4)',
                     linewidth=1,
-                    tickfont=dict(size=10, color='#8b949e'),
-                    title_font=dict(size=12, color='#e6edf3')
+                    tickfont=dict(size=10, color='#6b7280'),
+                    title_font=dict(size=12, color='#374151')
                 )
                 fig.update_yaxes(
                     title_text="Price ($)",
-                    title_font=dict(size=11, color='#e6edf3'),
+                    title_font=dict(size=11, color='#374151'),
                     showspikes=True,
-                    spikecolor="#8b949e",
+                    spikecolor="#6b7280",
                     spikesnap="cursor",
                     spikemode="toaxis",
                     spikethickness=1,
                     spikedash="solid",
                     showgrid=True,
-                    gridcolor='rgba(48, 54, 61, 0.8)',
+                    gridcolor='rgba(200, 198, 195, 0.35)',
                     gridwidth=1,
                     zeroline=False,
                     showline=True,
-                    linecolor='#30363d',
+                    linecolor='rgba(200, 198, 195, 0.4)',
                     linewidth=1,
-                    tickfont=dict(size=10, color='#8b949e'),
+                    tickfont=dict(size=10, color='#6b7280'),
                     tickformat='$,.0f',
                     row=1, col=1
                 )
                 if has_rsi:
                     fig.update_yaxes(
                         title_text="RSI",
-                        title_font=dict(size=11, color='#e6edf3'),
-                        showspikes=True, spikecolor="#8b949e", spikesnap="cursor", spikemode="toaxis",
+                        title_font=dict(size=11, color='#374151'),
+                        showspikes=True, spikecolor="#6b7280", spikesnap="cursor", spikemode="toaxis",
                         spikethickness=1, spikedash="solid",
-                        showgrid=True, gridcolor='rgba(48, 54, 61, 0.8)', gridwidth=1,
-                        zeroline=False, showline=True, linecolor='#30363d', linewidth=1,
-                        tickfont=dict(size=10, color='#8b949e'), range=[0, 100],
+                        showgrid=True, gridcolor='rgba(200, 198, 195, 0.35)', gridwidth=1,
+                        zeroline=False, showline=True, linecolor='rgba(200, 198, 195, 0.4)', linewidth=1,
+                        tickfont=dict(size=10, color='#6b7280'), range=[0, 100],
                         row=2, col=1
                     )
                 if has_macd:
                     macd_row = 3 if has_rsi else 2
                     fig.update_yaxes(
                         title_text="MACD",
-                        title_font=dict(size=11, color='#e6edf3'),
-                        showspikes=True, spikecolor="#8b949e", spikesnap="cursor", spikemode="toaxis",
+                        title_font=dict(size=11, color='#374151'),
+                        showspikes=True, spikecolor="#6b7280", spikesnap="cursor", spikemode="toaxis",
                         spikethickness=1, spikedash="solid",
-                        showgrid=True, gridcolor='rgba(48, 54, 61, 0.8)', gridwidth=1,
-                        zeroline=True, zerolinecolor='#30363d', zerolinewidth=1,
-                        showline=True, linecolor='#30363d', linewidth=1,
-                        tickfont=dict(size=10, color='#8b949e'),
+                        showgrid=True, gridcolor='rgba(200, 198, 195, 0.35)', gridwidth=1,
+                        zeroline=True, zerolinecolor='rgba(200, 198, 195, 0.4)', zerolinewidth=1,
+                        showline=True, linecolor='rgba(200, 198, 195, 0.4)', linewidth=1,
+                        tickfont=dict(size=10, color='#6b7280'),
                         row=macd_row, col=1
                     )
                 st.plotly_chart(
