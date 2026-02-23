@@ -781,6 +781,13 @@ if df is not None:
             sentiment_score_val = float(latest['SentimentScore']) if 'SentimentScore' in latest.index and pd.notna(latest['SentimentScore']) else 0
             sentiment_score_mean = df['SentimentScore'].mean()
             with gauge_col1:
+                macd_val = latest.get('MACD Signal', None)
+                rsi_val = latest.get('RSI Options Rate', None)
+                sector_val = latest.get('Monthly Return (%)', None)
+                macd_str = f"{float(macd_val):.2f}" if macd_val is not None and pd.notna(macd_val) else "N/A"
+                rsi_str = f"{float(rsi_val):.1f}" if rsi_val is not None and pd.notna(rsi_val) else "N/A"
+                sector_str = f"{float(sector_val):.1f}" if sector_val is not None and pd.notna(sector_val) else "N/A"
+                scores_text = f"MACD: {macd_str}, RSI: {rsi_str}, Sector: {sector_str}"
                 combined_signal_mid = round(combined_signal_mean, 2)
                 fig1 = go.Figure(go.Indicator(
                     mode = "gauge+number",
@@ -811,16 +818,14 @@ if df is not None:
                     }
                 ))
                 fig1.update_layout(
-                    height=200,
-                    margin=dict(l=20, r=20, t=40, b=60),
+                    height=240,
+                    margin=dict(l=20, r=20, t=40, b=85),
                     paper_bgcolor="#faf8f5",
                     plot_bgcolor="#faf8f5",
-                    annotations=[dict(
-                        x=0.5, y=-0.15,
-                        text=f'Current: {combined_signal_val:.2f}',
-                        showarrow=False,
-                        font=dict(size=12, color="#6b7280")
-                    )]
+                    annotations=[
+                        dict(x=0.5, y=-0.12, text=f'Current: {combined_signal_val:.2f}', showarrow=False, font=dict(size=13, color="#6b7280")),
+                        dict(x=0.5, y=-0.32, text=scores_text, showarrow=False, font=dict(size=12, color="#6b7280"))
+                    ]
                 )
                 st.plotly_chart(fig1, use_container_width=True)
             with gauge_col2:
@@ -871,9 +876,9 @@ if df is not None:
                     paper_bgcolor="#faf8f5",
                     plot_bgcolor="#faf8f5",
                     annotations=[
-                        dict(x=0.5, y=-0.12, text=f'Current: {fundamental_weight_val:.2f}', showarrow=False, font=dict(size=12, color="#6b7280")),
-                        dict(x=0.5, y=-0.28, text=metrics_line1, showarrow=False, font=dict(size=11, color="#6b7280")),
-                        dict(x=0.5, y=-0.40, text=metrics_line2, showarrow=False, font=dict(size=11, color="#6b7280"))
+                        dict(x=0.5, y=-0.12, text=f'Current: {fundamental_weight_val:.2f}', showarrow=False, font=dict(size=13, color="#6b7280")),
+                        dict(x=0.5, y=-0.28, text=metrics_line1, showarrow=False, font=dict(size=12, color="#6b7280")),
+                        dict(x=0.5, y=-0.40, text=metrics_line2, showarrow=False, font=dict(size=12, color="#6b7280"))
                     ]
                 )
                 st.plotly_chart(fig2, use_container_width=True)
@@ -913,13 +918,13 @@ if df is not None:
                     }
                 ))
                 fig3.update_layout(
-                    height=220,
-                    margin=dict(l=20, r=20, t=40, b=70),
+                    height=240,
+                    margin=dict(l=20, r=20, t=40, b=85),
                     paper_bgcolor="#faf8f5",
                     plot_bgcolor="#faf8f5",
                     annotations=[
-                        dict(x=0.5, y=-0.15, text=f'Current: {sentiment_score_val:.2f}', showarrow=False, font=dict(size=12, color="#6b7280")),
-                        dict(x=0.5, y=-0.32, text=f'Positive: {pos_count}, Negative: {neg_count}', showarrow=False, font=dict(size=13, color="#6b7280"))
+                        dict(x=0.5, y=-0.15, text=f'Current: {sentiment_score_val:.2f}', showarrow=False, font=dict(size=13, color="#6b7280")),
+                        dict(x=0.5, y=-0.32, text=f'Positive: {pos_count}, Negative: {neg_count}', showarrow=False, font=dict(size=14, color="#6b7280"))
                     ]
                 )
                 st.plotly_chart(fig3, use_container_width=True)
