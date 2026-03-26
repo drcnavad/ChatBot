@@ -367,11 +367,15 @@ def generate_ai_summary(ticker, stock_data, df):
         return f"Error generating summary: {str(e)}"
 
 
+# --- Data paths: anchor to app file so cwd on Streamlit Cloud does not break lookups ---
+_REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Reports")
+
+
 # --- Data loading and caching ---
 @st.cache_data(ttl=3600)
 def load_data():
     """Load signal analysis CSV, parse dates, normalize symbols, downcast numerics."""
-    csv_path = os.path.join("Reports", "signal_analysis.csv")
+    csv_path = os.path.join(_REPORTS_DIR, "signal_analysis.csv")
     
     if not os.path.exists(csv_path):
         st.error(f"Data file not found. Expected {csv_path}")
@@ -437,7 +441,7 @@ def get_available_symbols(df):
 @st.cache_data(ttl=3600)
 def load_company_analysis():
     """Load complete company analysis Excel (latest quarter sheet)."""
-    xlsx_path = os.path.join("Reports", "complete_company_analysis.xlsx")
+    xlsx_path = os.path.join(_REPORTS_DIR, "complete_company_analysis.xlsx")
     if not os.path.exists(xlsx_path):
         return None
     return pd.read_excel(xlsx_path, sheet_name="2_Latest_Quarter_Complete", engine="openpyxl")
@@ -471,7 +475,7 @@ def get_company_metrics(ticker, company_df):
 @st.cache_data(ttl=3600)
 def load_news_data():
     """Load news CSV from Reports folder."""
-    news_csv = os.path.join("Reports", "news_cleaned_df.csv")
+    news_csv = os.path.join(_REPORTS_DIR, "news_cleaned_df.csv")
     if not os.path.exists(news_csv):
         return None
     return pd.read_csv(news_csv)

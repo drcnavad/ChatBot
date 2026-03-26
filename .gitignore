@@ -35,6 +35,7 @@ Reports/*.csv
 Reports/*.xlsx
 !Reports/signal_analysis.csv
 !Reports/news_cleaned_df.csv
+!Reports/complete_company_analysis.xlsx
 
 # Backup/duplicate app files
 app2.py
