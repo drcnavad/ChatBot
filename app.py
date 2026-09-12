@@ -350,7 +350,7 @@ def generate_ai_summary(ticker, stock_data, df):
 
 
         response = client.chat_completion(
-            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            model="meta-llama/Llama-3.1-8B-Instruct",
             messages=messages,
             max_tokens=400,
             temperature=0.2
@@ -550,7 +550,7 @@ def generate_news_summary(news_text, sentiment_type, symbol):
         ]
         
         response = client.chat_completion(
-            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            model="meta-llama/Llama-3.1-8B-Instruct",
             messages=messages,
             max_tokens=500,
             temperature=0.2
