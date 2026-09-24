@@ -2,8 +2,11 @@
 Stock Analysis Report - Streamlit app for technical/fundamental analysis with AI-powered signals.
 """
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from huggingface_hub import InferenceClient
@@ -20,304 +23,176 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- Custom CSS styling (cream / greyish-white theme) ---
+# --- Custom CSS (slate / teal — light financial workspace) ---
 st.markdown("""
 <style>
-    .stApp, .main { background-color: #f8f6f0; }
-    .main .block-container { padding-top: 0 !important; padding-bottom: 2rem; margin-top: 0 !important; background-color: #f8f6f0; }
-    .stApp > header {
-        padding-top: 0 !important;
-        margin-top: 0 !important;
-        height: 0 !important;
-        min-height: 0 !important;
-        display: none !important;
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
+
+    .stApp, .main { background: #f1f5f9; }
+    .main .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 2.5rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
+        max-width: 1400px;
+        background: transparent;
     }
-    header[data-testid="stHeader"] { display: none !important; height: 0 !important; min-height: 0 !important; padding: 0 !important; margin: 0 !important; }
-    .main .block-container > div:first-child {
-        margin-top: 0 !important; padding-top: 0 !important;
+    .stApp > header, header[data-testid="stHeader"], [data-testid="stDecoration"] {
+        display: none !important; height: 0 !important; min-height: 0 !important;
     }
-    .stApp {
-        margin-top: 0 !important;
-        padding-top: 0 !important;
-    }
-    [data-testid="stDecoration"] {
-        display: none !important;
-        height: 0 !important;
-    }
-    #root > div {
-        margin-top: 0 !important;
-        padding-top: 0 !important;
-    }
-    h1 {
-        color: #1f2937;
-        font-weight: 600;
-        border-bottom: 1px solid #e5e7eb;
-        padding-bottom: 10px;
-        margin-bottom: 20px;
-    }
-    h2 {
-        color: #374151;
-        font-weight: 600;
-        margin-top: 30px;
-        margin-bottom: 15px;
-    }
-    h3 {
-        color: #4b5563;
-        font-weight: 600;
-        margin-top: 25px;
-        margin-bottom: 12px;
-    }
+    html, body, [class*="css"] { font-family: 'DM Sans', system-ui, sans-serif; }
+
+    h1, h2, h3 { color: #0f172a; font-weight: 600; letter-spacing: -0.02em; border: none; padding: 0; }
+
     [data-testid="stMetricValue"] {
-        color: #1f2937;
-        font-weight: 600;
-        font-size: 1.02rem;
+        color: #0f172a; font-weight: 700; font-size: 1.05rem;
+        font-family: 'JetBrains Mono', monospace;
     }
-    [data-testid="stMetricLabel"] {
-        color: #6b7280;
-        font-weight: 500;
-        font-size: 0.9rem;
-    }
+    [data-testid="stMetricLabel"] { color: #64748b; font-weight: 500; font-size: 0.8rem; }
+
     .stButton > button {
-        background: #238636;
-        color: #ffffff;
-        border: 1px solid #2ea043;
-        border-radius: 6px;
-        font-weight: 600;
-        transition: all 0.2s ease;
+        background: #0f766e; color: #fff; border: none; border-radius: 10px;
+        font-weight: 600; padding: 0.5rem 1.1rem; transition: background 0.15s ease;
     }
-    .stButton > button:hover {
-        background: #2ea043;
-        border-color: #3fb950;
-        box-shadow: 0 0 0 1px #3fb950;
-    }
-    .stInfo {
-        background-color: #faf8f5;
-        border-left: 4px solid #58a6ff;
-        border-radius: 6px;
-    }
-    .stWarning {
-        background-color: #faf8f5;
-        border-left: 4px solid #d29922;
-        border-radius: 6px;
-    }
-    .stError {
-        background-color: #faf8f5;
-        border-left: 4px solid #f85149;
-        border-radius: 6px;
-    }
-    .stSuccess {
-        background-color: #faf8f5;
-        border-left: 4px solid #3fb950;
-        border-radius: 6px;
-    }
+    .stButton > button:hover { background: #0d9488; color: #fff; border: none; }
+
     [data-testid="stExpander"] {
-        background-color: #faf8f5;
-        border: 1px solid #e8e4dc;
-        border-radius: 8px;
-        margin-bottom: 10px;
+        background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
     }
-    [data-testid="stExpander"] [data-testid="stExpanderHeader"] {
-        background-color: #f5f3ed;
-        border-radius: 8px 8px 0 0;
-        padding: 12px;
-        font-weight: 600;
-        color: #374151;
-    }
+
     [data-baseweb="tab-list"] {
-        background-color: #faf8f5;
-        border-radius: 8px;
-        padding: 4px;
+        background: #e2e8f0; border-radius: 12px; padding: 4px; gap: 4px;
     }
-    [data-baseweb="tab"] {
-        border-radius: 6px;
-        font-weight: 500;
-    }
-    hr {
-        border: none;
-        height: 1px;
-        background: #e8e4dc;
-        margin: 30px 0;
-    }
-    code {
-        background-color: #f0ede6;
-        color: #4a4a4a;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 0.9em;
-    }
-    .dataframe {
-        border-radius: 8px;
-        overflow: hidden;
-        border: 1px solid #e8e4dc;
-    }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .metric-card {
-        background: #faf8f5;
-        padding: 20px;
-        border-radius: 8px;
-        border: 1px solid #e8e4dc;
-        margin-bottom: 15px;
-    }
+    [data-baseweb="tab"] { border-radius: 10px; font-weight: 600; color: #64748b; }
+
+    div[data-testid="stDialog"] > div { border-radius: 16px; border: 1px solid #e2e8f0; }
+
+    #MainMenu, footer, header { visibility: hidden; }
+
     .js-plotly-plot {
-        border-radius: 8px;
-        background-color: #faf8f5;
-        padding: 10px;
-        border: 1px solid #e8e4dc;
+        border-radius: 12px; background: #fff;
+        border: 1px solid #e2e8f0; padding: 4px;
     }
-    .symbol-link { color: #1a73e8; text-decoration: none; font-weight: 500; }
-    .symbol-link:hover { color: #1557b0; text-decoration: underline; }
+
+    .symbol-link {
+        color: #0f766e; text-decoration: none; font-weight: 600;
+        font-family: 'JetBrains Mono', monospace; font-size: 0.9rem;
+    }
+    .symbol-link:hover { color: #0d9488; text-decoration: underline; }
+
+    .sa-topbar {
+        display: flex; align-items: flex-end; justify-content: space-between;
+        gap: 1rem; margin-bottom: 0.75rem; flex-wrap: wrap;
+    }
+    .sa-topbar h1 {
+        margin: 0; font-size: 1.45rem; font-weight: 700; color: #0f172a;
+        border: none; padding: 0;
+    }
+    .sa-topbar p { margin: 0.2rem 0 0; color: #64748b; font-size: 0.9rem; }
+    .sa-chip {
+        font-size: 0.75rem; font-weight: 600; color: #0f766e;
+        background: #ccfbf1; border: 1px solid #99f6e4;
+        padding: 0.35rem 0.7rem; border-radius: 999px; white-space: nowrap;
+    }
+    .sa-hero {
+        background: #fff; border: 1px solid #e2e8f0; border-radius: 16px;
+        padding: 1rem 1.25rem; margin: 0.5rem 0 1rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+    }
+    .sa-hero-row {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 1rem; flex-wrap: wrap;
+    }
+    .sa-sym {
+        font-size: 1.75rem; font-weight: 700; color: #0f172a;
+        font-family: 'JetBrains Mono', monospace; letter-spacing: -0.03em;
+    }
+    .sa-ident { display: flex; align-items: center; gap: 0.85rem; }
+    .sa-price { font-size: 1.25rem; font-weight: 700; color: #334155; font-family: 'JetBrains Mono', monospace; }
+    .sa-badge {
+        display: inline-block; padding: 0.35rem 0.8rem; border-radius: 999px;
+        font-weight: 700; font-size: 0.8rem;
+    }
+    .sa-badge-bull { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .sa-badge-bear { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .sa-badge-hold { background: #fef9c3; color: #854d0e; border: 1px solid #fde047; }
+    .sa-stats { display: flex; flex-wrap: wrap; gap: 0.5rem 1.35rem; justify-content: flex-end; }
+    .sa-stat { min-width: 3.5rem; }
+    .sa-stat-label { font-size: 0.66rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+    .sa-stat-val { font-size: 0.95rem; font-weight: 700; color: #0f172a; font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- Hugging Face API ---
 def get_hf_token():
-    """Get Hugging Face token from env or Streamlit secrets."""
-    token = os.getenv("HF_TOKEN", "")
+    """HF token from Streamlit secrets, falling back to the environment."""
     try:
-        if hasattr(st, 'secrets') and st.secrets is not None:
-            t = st.secrets.get("HF_TOKEN", "")
-            if t:
-                return t
+        return st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN", "")
     except Exception:
-        pass
-    return token
+        return os.getenv("HF_TOKEN", "")
+
 
 HF_TOKEN = get_hf_token()
+LLM_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+MA_COLS = ['ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']
 
-# --- AI summary helpers (trend deltas for LLM context) ---
-def build_trend_deltas(df, ticker, windows=(3, 5, 14, 50, 100)):
-    """
-    Build compact trend-difference rows for LLM context.
-    Returns a list of dicts, one per window.
-    Optimized to filter once and reuse the filtered dataframe.
-    """
-    # Filter once and sort - more efficient than filtering multiple times
-    recent = df[df["Symbol"] == ticker].sort_values("Date")
-    
-    if len(recent) == 0:
-        return []
-    
+
+def _chat(messages, max_tokens):
+    """Run a Llama chat completion and strip trailing prompt artifacts."""
+    try:
+        response = InferenceClient(token=HF_TOKEN).chat_completion(
+            model=LLM_MODEL, messages=messages, max_tokens=max_tokens, temperature=0.2
+        )
+        return re.split(r'\[/?USER\]|Can you|Could you', response.choices[0].message.content.strip())[0].strip()
+    except Exception as e:
+        return f"Error generating summary: {e}"
+
+
+# --- AI stock summary ---
+def format_trend_deltas(ticker_df, windows=(14, 50, 200)):
+    """Compact multi-window trend text for LLM context."""
+    recent = ticker_df.sort_values("Date")
     latest = recent.iloc[-1]
-    rows = []
-
+    text = "Trend Deltas:\n"
     for w in windows:
         if len(recent) < w:
             continue
-
         past = recent.iloc[-w]
-        # Pre-calculate tail window data to avoid multiple tail() calls
-        tail_data = recent.tail(w)
-
-        row = {
-            "window_days": w,
-            "price_change_pct": round(
-                (latest["Close"] / past["Close"] - 1) * 100, 2
-            ),
-            "rsi_change": round(
-                latest["RSI Options Rate"] - past["RSI Options Rate"], 2
-            ),
-            "macd_change": round(
-                latest["macd"] - past["macd"], 2
-            ),
-            "ma30_diff_pct": round(
-                (latest["Close"] - latest["ma_30"]) / latest["ma_30"] * 100, 2
-            ),
-            "ma200_diff_pct": round(
-                (latest["Close"] - latest["ma_200"]) / latest["ma_200"] * 100, 2
-            ),
-            "above_ma200_days_pct": round(
-                (tail_data["Close"] > tail_data["ma_200"]).mean() * 100, 2
-            )
-        }
-
-        rows.append(row)
-
-    return rows
-
-
-def format_trend_rows(trend_rows):
-    text = "Trend Deltas:\n"
-    for r in trend_rows:
+        tail = recent.tail(w)
         text += (
-            f"Last {r['window_days']} days: "
-            f"Price {r['price_change_pct']:.2f}%, "
-            f"RSI change {r['rsi_change']:.2f}, "
-            f"MACD change {r['macd_change']:.2f}, "
-            f"Price vs MA30 {r['ma30_diff_pct']:.2f}%, "
-            f"Price vs MA200 {r['ma200_diff_pct']:.2f}%, "
-            f"Above MA200 {r['above_ma200_days_pct']:.2f}% of days\n"
+            f"Last {w} days: "
+            f"Price {(latest['Close'] / past['Close'] - 1) * 100:.2f}%, "
+            f"RSI change {latest['RSI'] - past['RSI']:.2f}, "
+            f"MACD change {latest['macd'] - past['macd']:.2f}, "
+            f"Price vs MA30 {(latest['Close'] / latest['ma_30'] - 1) * 100:.2f}%, "
+            f"Price vs MA200 {(latest['Close'] / latest['ma_200'] - 1) * 100:.2f}%, "
+            f"Above MA200 {(tail['Close'] > tail['ma_200']).mean() * 100:.2f}% of days\n"
         )
     return text
 
 
-# --- AI stock summary (Hugging Face Llama) ---
-def generate_ai_summary(ticker, stock_data, df):
-    """Generate AI summary using Hugging Face Llama-3 model"""
-    try:
-        client = InferenceClient(token=HF_TOKEN)
-
-        # Calculate differences between current price and moving averages
-        current_price = stock_data['Close']
-        ma_differences = {}
-        ma_percentages = {}
-        
-        for ma_name in ['ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']:
-            ma_value = stock_data.get(ma_name)
-            if pd.notna(ma_value) and ma_value != 0:
-                diff = current_price - ma_value
-                diff_pct = (diff / ma_value) * 100
-                ma_differences[ma_name] = round(diff, 2)
-                ma_percentages[ma_name] = round(diff_pct, 2)
-            else:
-                ma_differences[ma_name] = 'N/A'
-                ma_percentages[ma_name] = 'N/A'
-
-        # Format MA differences for display (values already rounded to 2 decimals)
-        def format_ma_diff(diff, pct):
-            if diff == 'N/A' or pct == 'N/A':
-                return 'N/A'
-            return f"${diff:.2f} ({pct:.2f}%)"
-        
-        # Format numbers to 2 decimals, handle N/A
-        def format_num(value, default='N/A'):
-            if pd.isna(value) or value == 'N/A':
-                return default
-            return f"{float(value):.2f}"
-        
-        rsi_value = stock_data.get('RSI Options Rate')
-        macd_value = stock_data.get('macd')
-        fundamental_weight = stock_data.get('Fundamental_Weight')
-        sentiment_score = stock_data.get('SentimentScore')
-        
-        context = f"""Stock: {ticker}
-                    Date: {stock_data['Date'].strftime('%Y-%m-%d')}
-                    Current Price: ${current_price:.2f}
-                    Technical Score: {format_num(stock_data.get('combined_signal'))}
-                    RSI: {format_num(rsi_value)}
-                    MACD: {format_num(macd_value)}
-                    
-                    Price vs Moving Averages (Difference):
-                    Price - MA10: {format_ma_diff(ma_differences['ma_10'], ma_percentages['ma_10'])}
-                    Price - MA30: {format_ma_diff(ma_differences['ma_30'], ma_percentages['ma_30'])}
-                    Price - MA50: {format_ma_diff(ma_differences['ma_50'], ma_percentages['ma_50'])}
-                    Price - MA100: {format_ma_diff(ma_differences['ma_100'], ma_percentages['ma_100'])}
-                    Price - MA200: {format_ma_diff(ma_differences['ma_200'], ma_percentages['ma_200'])}
-                    
-                    Balance Sheet Score: {format_num(fundamental_weight)}
-                    Sentiment Score: {format_num(sentiment_score)}
-                    """
-        # Add trend analysis to context (only filter relevant data for this ticker)
-        ticker_normalized = str(ticker).strip().upper()
-        ticker_df = df[df['Symbol'] == ticker_normalized].copy()
-        trend_rows = build_trend_deltas(ticker_df, ticker_normalized, windows=(14, 50, 200))
-        trend_text = format_trend_rows(trend_rows)
-
-        context += f"\n{trend_text}"
-
-
-        messages = [
+def generate_ai_summary(ticker, ticker_df):
+    """AI summary + recommendation for one ticker."""
+    latest = ticker_df.nlargest(1, 'Date').iloc[0]
+    price = latest['Close']
+    ma_lines = "\n".join(
+        f"Price - {ma.upper().replace('_', '')}: ${price - latest[ma]:.2f} ({(price / latest[ma] - 1) * 100:.2f}%)"
+        for ma in MA_COLS
+    )
+    context = (
+        f"Stock: {ticker}\n"
+        f"Date: {latest['Date']:%Y-%m-%d}\n"
+        f"Current Price: ${price:.2f}\n"
+        f"Technical Score: {latest['combined_signal']:.2f}\n"
+        f"RSI: {latest['RSI']:.2f}\n"
+        f"MACD: {latest['macd']:.2f}\n\n"
+        f"Price vs Moving Averages (Difference):\n{ma_lines}\n\n"
+        f"Balance Sheet Score: {latest['Fundamental_Weight']:.2f}\n"
+        f"Sentiment Score: {latest['SentimentScore']:.2f}\n\n"
+        f"{format_trend_deltas(ticker_df)}"
+    )
+    messages = [
         {
             "role": "system",
             "content": (
@@ -347,963 +222,604 @@ def generate_ai_summary(ticker, stock_data, df):
             )
         }
     ]
+    return _chat(messages, max_tokens=400)
 
 
-        response = client.chat_completion(
-            model="meta-llama/Llama-3.1-8B-Instruct",
-            messages=messages,
-            max_tokens=400,
-            temperature=0.2
-        )
-
-        summary_raw = response.choices[0].message.content.strip()
-
-        # Clean artifacts just in case
-        summary = re.split(r'\[/?USER\]|Can you|Could you', summary_raw)[0].strip()
-
-        return summary
-
-    except Exception as e:
-        return f"Error generating summary: {str(e)}"
-
-
-# --- Data paths: anchor to app file so cwd on Streamlit Cloud does not break lookups ---
+# --- Data loading ---
 _REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Reports")
+_SIGNAL_CSV = os.path.join(_REPORTS_DIR, "signal_analysis.csv")
+_RANK_CSV = os.path.join(_REPORTS_DIR, "daily_rank.csv")
+_RANK_COLS = ["Date", "Symbol", "Rank", "combined_signal"]
 
 
-# --- Data loading and caching ---
 @st.cache_data(ttl=3600)
-def load_data():
-    """Load signal analysis CSV, parse dates, normalize symbols, downcast numerics."""
-    csv_path = os.path.join(_REPORTS_DIR, "signal_analysis.csv")
-    
-    if not os.path.exists(csv_path):
-        st.error(f"Data file not found. Expected {csv_path}")
-        return None
-    df = pd.read_csv(csv_path, low_memory=False)
-    
-    # Ensure proper data types
-    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-    df['Symbol'] = df['Symbol'].astype(str).str.strip().str.upper()
-    df['final_trade'] = df['final_trade'].astype(str).str.strip()
-    numeric_cols = df.select_dtypes(include=['float64']).columns
-    for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce', downcast='float')
-    
-    if 'is_earnings_date' in df.columns:
-        df['is_earnings_date'] = pd.to_numeric(df['is_earnings_date'], errors='coerce').fillna(0).astype(int)
-    
-    return df
+def load_data(_mtime: float):
+    """Load signal CSV; `_mtime` busts the cache when the file is rewritten."""
+    return pd.read_csv(_SIGNAL_CSV, parse_dates=['Date'])
+
+
+def load_signal_df():
+    return load_data(os.path.getmtime(_SIGNAL_CSV))
 
 
 @st.cache_data(ttl=3600)
 def get_latest_data(df):
-    """Get most recent row per symbol."""
+    """Most recent row per symbol."""
     return df.sort_values('Date', ascending=False).drop_duplicates(subset='Symbol', keep='first')
 
 
+# --- Daily rank snapshot ---
+def _compute_day_ranks(df, day):
+    """Overall rank by combined_signal for one date. Rank 1 = highest score."""
+    sub = (
+        df.loc[df["Date"] == day, ["Symbol", "combined_signal"]]
+        .sort_values("combined_signal", ascending=False)
+        .drop_duplicates(subset=["Symbol"])
+    )
+    sub["Date"] = day
+    sub["Rank"] = range(1, len(sub) + 1)
+    return sub[_RANK_COLS]
+
+
+def sync_daily_ranks(df):
+    """Keep Reports/daily_rank.csv: past days stay frozen, today is recomputed.
+
+    Re-running the notebook mid-day only changes today's ranks, even if historical
+    combined_signal rows get rewritten. Keeps the last 30 trading days.
+    """
+    work = df[["Symbol", "Date", "combined_signal"]].dropna().copy()
+    work["Date"] = work["Date"].dt.normalize()
+    recent_days = sorted(work["Date"].unique())[-30:]
+    today = recent_days[-1]
+
+    snap = pd.read_csv(_RANK_CSV) if os.path.exists(_RANK_CSV) else pd.DataFrame(columns=_RANK_COLS)
+    snap["Date"] = pd.to_datetime(snap["Date"]).dt.normalize()
+    frozen = snap[(snap["Date"] < today) & snap["Date"].isin(recent_days)]
+    frozen_days = set(frozen["Date"])
+
+    out = pd.concat(
+        [frozen]
+        + [_compute_day_ranks(work, d) for d in recent_days if d < today and d not in frozen_days]
+        + [_compute_day_ranks(work, today)],
+        ignore_index=True,
+    ).sort_values(["Date", "Rank"]).reset_index(drop=True)
+    out.to_csv(_RANK_CSV, index=False)
+    return out
+
+
+def day_rank_change(df):
+    """Symbol -> (yesterday_rank - today_rank, today_rank). Positive = moved up."""
+    snap = sync_daily_ranks(df)
+    days = sorted(snap["Date"].unique())
+    if len(days) < 2:
+        return {}
+    t = snap[snap["Date"] == days[-1]].set_index("Symbol")["Rank"]
+    y = snap[snap["Date"] == days[-2]].set_index("Symbol")["Rank"]
+    return {s: (int(y[s]) - int(t[s]), int(t[s])) for s in t.index.intersection(y.index)}
+
+
+def build_signal_rank_table(df, n_days=20):
+    """Symbol x last-n-dates table of combined_signal ranks (newest first) with Trend and earnings dates."""
+    work = df[['Symbol', 'Date', 'combined_signal']].dropna()
+    dates = sorted(work['Date'].unique())[-n_days:]
+    work = (
+        work[work['Date'].isin(dates)]
+        .sort_values('combined_signal', ascending=False)
+        .drop_duplicates(subset=['Symbol', 'Date'])
+    )
+    work['rank'] = work.groupby('Date')['combined_signal'].rank(ascending=False, method='min').astype(int)
+    pivot = work.pivot(index='Symbol', columns='Date', values='rank')
+    pivot = pivot.reindex(sorted(pivot.columns, reverse=True), axis=1)
+
+    def _rank_trend(row):
+        """BULL = 4+ consecutive rank improvements ending today, BEAR = 3+ declines."""
+        vals = [int(v) for v in row.iloc[::-1] if pd.notna(v)]
+        if len(vals) < 4:
+            return "HOLD"
+        improve = worsen = 0
+        for i in range(len(vals) - 1, 0, -1):
+            if vals[i] < vals[i - 1] and not worsen:
+                improve += 1
+            elif vals[i] > vals[i - 1] and not improve:
+                worsen += 1
+            else:
+                break
+        return "BULL" if improve >= 4 else ("BEAR" if worsen >= 3 else "HOLD")
+
+    trend = pivot.apply(_rank_trend, axis=1)
+    pivot.columns = [pd.Timestamp(c).strftime("%m/%d") for c in pivot.columns]
+    rank_cols = list(pivot.columns)
+    pivot["Trend"] = trend
+    pivot = pivot.sort_index().rename_axis("Symbol").reset_index()
+    pivot = pivot.merge(get_last_next_earnings(pivot["Symbol"].tolist()), on="Symbol", how="left")
+    return pivot[["Symbol", "Last ED", "Next ED", "Trend"] + rank_cols]
+
+
+# --- Earnings / fundamentals / news ---
 @st.cache_data(ttl=3600)
-def get_top_stocks(latest_data, n=100):
-    """Top N stocks by combined_signal, sorted descending."""
-    top_stocks = latest_data.nlargest(n, 'combined_signal')[['Symbol', 'combined_signal', 'final_trade', 'Close']].copy()
-    return top_stocks.sort_values('combined_signal', ascending=False).reset_index(drop=True)
+def load_earnings_dates():
+    ed = pd.read_csv(os.path.join(_REPORTS_DIR, "earnings_date.csv"))
+    ed['Symbol'] = ed['Symbol'].astype(str).str.strip().str.upper()
+    ed['Earnings Date'] = pd.to_datetime(ed['Earnings Date'], errors='coerce')
+    return ed.dropna(subset=['Earnings Date'])
 
 
-@st.cache_data(ttl=3600)
-def get_gauge_ranges(df):
-    """Min/max for each gauge metric (combined_signal, Fundamental_Weight, SentimentScore)."""
-    ranges = {}
-    if 'combined_signal' in df.columns:
-        ranges['combined_signal'] = {
-            'min': float(df['combined_signal'].min()),
-            'max': float(df['combined_signal'].max())
-        }
-    if 'Fundamental_Weight' in df.columns:
-        ranges['Fundamental_Weight'] = {
-            'min': float(df['Fundamental_Weight'].min()),
-            'max': float(df['Fundamental_Weight'].max())
-        }
-    if 'SentimentScore' in df.columns:
-        ranges['SentimentScore'] = {
-            'min': float(df['SentimentScore'].min()),
-            'max': float(df['SentimentScore'].max())
-        }
-    return ranges
-
-
-@st.cache_data(ttl=3600)
-def get_available_symbols(df):
-    """Sorted list of unique symbols from latest data."""
-    latest_data = get_latest_data(df)
-    return sorted([str(s).strip().upper() for s in latest_data['Symbol'].unique().tolist()])
+def get_last_next_earnings(symbols):
+    """Per symbol: most recent past and nearest upcoming earnings date."""
+    ed = load_earnings_dates()
+    today = pd.Timestamp.now().normalize()
+    rows = []
+    for sym in symbols:
+        dates = ed.loc[ed['Symbol'] == sym, 'Earnings Date']
+        last, nxt = dates[dates <= today].max(), dates[dates >= today].min()
+        rows.append({
+            'Symbol': sym,
+            'Last ED': last.strftime('%Y-%m-%d') if pd.notna(last) else '',
+            'Next ED': nxt.strftime('%Y-%m-%d') if pd.notna(nxt) else '',
+        })
+    return pd.DataFrame(rows, columns=['Symbol', 'Last ED', 'Next ED'])
 
 
 @st.cache_data(ttl=3600)
 def load_company_analysis():
-    """Load complete company analysis Excel (latest quarter sheet)."""
-    xlsx_path = os.path.join(_REPORTS_DIR, "complete_company_analysis.xlsx")
-    if not os.path.exists(xlsx_path):
-        return None
-    return pd.read_excel(xlsx_path, sheet_name="2_Latest_Quarter_Complete", engine="openpyxl")
+    return pd.read_excel(
+        os.path.join(_REPORTS_DIR, "complete_company_analysis.xlsx"),
+        sheet_name="2_Latest_Quarter_Complete", engine="openpyxl",
+    )
 
 
 def get_company_metrics(ticker, company_df):
-    """Get Fair value, PE, PB, Revenue Growth YoY for ticker from company analysis."""
-    if company_df is None or company_df.empty:
-        return {}
-    sym_col = 'Symbol' if 'Symbol' in company_df.columns else 'symbol'
-    if sym_col not in company_df.columns:
-        return {}
-    row = company_df[company_df[sym_col].astype(str).str.strip().str.upper() == str(ticker).strip().upper()]
+    """Fair value and key ratios for ticker (empty if the ticker has no fundamentals)."""
+    row = company_df[company_df['Symbol'].astype(str).str.strip().str.upper() == ticker]
     if row.empty:
         return {}
     r = row.iloc[0]
-    metrics = {}
-    for col, key in [
-        ('FairValue_Composite', 'fair_value'),
-        ('PE_Ratio', 'pe_ratio'),
-        ('PB_Ratio', 'pb_ratio'),
-        ('RevenueGrowth_YoY', 'revenue_growth_yoy')
-    ]:
-        if col in r.index and pd.notna(r[col]):
-            val = r[col]
-            metrics[key] = float(val) if isinstance(val, (int, float)) else val
-    return metrics
+    return {
+        key: float(r[col])
+        for col, key in [
+            ('FairValue_Composite', 'fair_value'),
+            ('PE_Ratio', 'pe_ratio'),
+            ('PB_Ratio', 'pb_ratio'),
+            ('RevenueGrowth_YoY', 'revenue_growth_yoy'),
+            ('TTM_ROE', 'roe'),
+            ('TTM_NetProfitMargin', 'net_margin'),
+            ('Debt_to_Equity', 'debt_to_equity'),
+        ]
+        if pd.notna(r[col])
+    }
 
 
-# --- News sentiment helpers ---
 @st.cache_data(ttl=3600)
 def load_news_data():
-    """Load news CSV from Reports folder."""
-    news_csv = os.path.join(_REPORTS_DIR, "news_cleaned_df.csv")
-    if not os.path.exists(news_csv):
-        return None
-    return pd.read_csv(news_csv)
+    return pd.read_csv(os.path.join(_REPORTS_DIR, "news_cleaned_df.csv"))
 
-def get_news_by_symbol(news_df, symbol):
-    """Filter news to rows matching symbol."""
-    if news_df is None:
-        return pd.DataFrame()
-    return news_df[news_df['symbol'] == symbol.upper()].copy()
 
-def group_news_by_sentiment(df):
-    """Split news into positive and negative DataFrames by sentiment_label."""
-    if df.empty:
-        return pd.DataFrame(), pd.DataFrame()
-    positive_news = df[df['sentiment_label'] == 'positive'].copy()
-    negative_news = df[df['sentiment_label'] == 'negative'].copy()
-    return positive_news, negative_news
-
-def format_news_for_llm(df, max_articles=20):
-    """Format news headlines/summaries as text for LLM input."""
-    if df.empty:
-        return "No news articles available."
-    df_sorted = df.sort_values('date', ascending=False).head(max_articles)
-    
-    formatted_text = f"Total articles: {len(df_sorted)}\n\n"
-    
-    for article_num, (idx, row) in enumerate(df_sorted.iterrows(), 1):
-        headline = str(row.get('headline', 'N/A'))
-        summary = str(row.get('summary', 'N/A'))
-        date = str(row.get('date', 'N/A'))
-        source = str(row.get('source', 'N/A'))
-        
-        formatted_text += f"Article {article_num}:\n"
-        formatted_text += f"Date: {date}\n"
-        formatted_text += f"Source: {source}\n"
-        formatted_text += f"Headline: {headline}\n"
-        formatted_text += f"Summary: {summary}\n\n"
-    
-    return formatted_text
+def format_news_for_llm(news, max_articles=20):
+    news = news.sort_values('date', ascending=False).head(max_articles)
+    articles = "".join(
+        f"Article {i}:\nDate: {r['date']}\nSource: {r['source']}\nHeadline: {r['headline']}\nSummary: {r['summary']}\n\n"
+        for i, (_, r) in enumerate(news.iterrows(), 1)
+    )
+    return f"Total articles: {len(news)}\n\n{articles}"
 
 
 def generate_news_summary(news_text, sentiment_type, symbol):
-    """Generate AI summary of news articles via Hugging Face Llama."""
-    if not HF_TOKEN:
-        return "Error: HF_TOKEN not configured"
-    
-    if news_text == "No news articles available.":
-        return "No news articles available for analysis."
-    
-    try:
-        client = InferenceClient(token=HF_TOKEN)
-        
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a financial news analyst. Provide a concise summary of the news articles provided. "
-                    "Focus on key themes, trends, and important information that would be relevant for stock analysis. "
-                    "Respond in 2-4 bullet points, each on a new line. Keep the summary factual and objective. Do not repeat the same information."
-                )
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Analyze the following {sentiment_type} news articles for {symbol} and provide a summary:\n\n"
-                    f"{news_text}\n\n"
-                    f"Provide a concise summary highlighting the main themes and key information from these {sentiment_type} news articles. "
-                    f"Ensure that the text is clean and readable. Do not use LaTeX formatting or special fonts for numbers (e.g. use '100' not '$100$'). "
-                    f"Make sure words are not broken up and sentences are complete."
-                )
-            }
-        ]
-        
-        response = client.chat_completion(
-            model="meta-llama/Llama-3.1-8B-Instruct",
-            messages=messages,
-            max_tokens=500,
-            temperature=0.2
-        )
-        
-        summary_raw = response.choices[0].message.content.strip()
-        
-        # Clean artifacts
-        summary = re.split(r'\[/?USER\]|Can you|Could you', summary_raw)[0].strip()
-        
-        return summary
-    
-    except Exception as e:
-        return f"Error generating summary: {str(e)}"
+    """AI bullet summary of positive or negative news for a symbol."""
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a financial news analyst. Provide a concise summary of the news articles provided. "
+                "Focus on key themes, trends, and important information that would be relevant for stock analysis. "
+                "Respond in 2-4 bullet points, each on a new line. Keep the summary factual and objective. Do not repeat the same information."
+            )
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Analyze the following {sentiment_type} news articles for {symbol} and provide a summary:\n\n"
+                f"{news_text}\n\n"
+                f"Provide a concise summary highlighting the main themes and key information from these {sentiment_type} news articles. "
+                f"Ensure that the text is clean and readable. Do not use LaTeX formatting or special fonts for numbers (e.g. use '100' not '$100$'). "
+                f"Make sure words are not broken up and sentences are complete."
+            )
+        }
+    ]
+    return _chat(messages, max_tokens=500)
+
+
+@st.dialog("AI Analysis", width="large")
+def ai_analysis_dialog(ticker, ticker_df):
+    """Modal: technical AI summary plus positive/negative news summaries."""
+    with st.spinner(f"Generating AI summary for {ticker}..."):
+        summary = generate_ai_summary(ticker, ticker_df)
+    st.markdown(f"### {ticker}")
+    st.markdown(summary)
+    st.divider()
+    news = load_news_data()
+    symbol_news = news[news['symbol'] == ticker]
+    if symbol_news.empty:
+        st.info(f"No news articles found for {ticker}")
+        return
+    for col, label in zip(st.columns(2), ("positive", "negative")):
+        subset = symbol_news[symbol_news['sentiment_label'] == label]
+        with col:
+            st.markdown(f"**{label.capitalize()} news**")
+            if subset.empty:
+                st.caption("None found")
+                continue
+            with st.spinner(f"Summarizing {label} headlines..."):
+                st.markdown(generate_news_summary(format_news_for_llm(subset), label, ticker))
+
+
+def _periods(mask):
+    """(start, end) index pairs for each consecutive True run in a boolean Series."""
+    runs = (mask != mask.shift()).cumsum()
+    return [(g.index[0], g.index[-1]) for _, g in mask[mask].groupby(runs[mask])]
 
 
 # --- Main UI ---
+with st.spinner("Loading data..."):
+    df = load_signal_df()
+
+latest_data = get_latest_data(df)
+available_symbols = sorted(latest_data['Symbol'].unique())
+if st.session_state.get('ticker_select') not in available_symbols:
+    st.session_state.ticker_select = available_symbols[0]
+
+jumped_from_link = False
+q_symbol = str(st.query_params.get("symbol", "")).strip().upper()
+if q_symbol in available_symbols:
+    st.session_state.ticker_select = q_symbol
+    jumped_from_link = True
+    del st.query_params["symbol"]
+
+by_score = latest_data.sort_values('combined_signal', ascending=False)
+buy_symbols, hold_symbols, sell_symbols = (
+    by_score.loc[by_score['final_trade'] == sig, 'Symbol'].tolist() for sig in ('BUY', 'HOLD', 'SELL')
+)
+rank_info = day_rank_change(df)
+
+
+def make_clickable_list(symbols):
+    parts = []
+    for s in symbols:
+        link = f'<a href="?symbol={quote(s)}" class="symbol-link" target="_self">{s}</a>'
+        if s not in rank_info:
+            parts.append(link)
+            continue
+        d, today_rank = rank_info[s]
+        color = "#1a7f37" if d > 0 else ("#cf222e" if d < 0 else "#6b7280")
+        parts.append(
+            f'{link}<span style="color:{color};font-size:0.85em;margin-left:2px;">#{today_rank} ({d:+d})</span>'
+        )
+    return ", ".join(parts)
+
+
+last_updated_str = (
+    datetime.fromtimestamp(os.path.getmtime(_SIGNAL_CSV), tz=ZoneInfo("America/Chicago"))
+    .strftime("%m/%d/%Y %I:%M %p CT")
+)
 st.markdown(
-    """
-    <div style="background: rgba(220, 218, 215, 0.9); padding: 24px 32px; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid rgba(180, 178, 175, 0.8);">
-        <h1 style="color: #1f2937; margin: 0; font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em;">
-            Stock Analysis Report
-        </h1>
-        <p style="color: #6b7280; font-size: 0.95rem; margin: 0.5rem 0 0 0; font-weight: 400;">
-            Technical and fundamental indicators with AI-powered signals
-        </p>
+    f"""
+    <div class="sa-topbar">
+        <div>
+            <h1>Stock Analysis</h1>
+            <p>Technical · fundamental · news signals</p>
+        </div>
+        <div class="sa-chip">Updated {last_updated_str}</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# --- Load data (cached, spinner on first load) ---
-if 'data_loaded' not in st.session_state:
-    with st.spinner("Loading data... This may take a moment on first load."):
-        df = load_data()
-        st.session_state.data_loaded = True
-else:
-    df = load_data()
+symbol_data = latest_data.set_index('Symbol')
+streaks = symbol_data[['Buy Streak', 'Sell Streak']].fillna(0).astype(int)
 
-if df is not None:
-    # --- Initialize session state ---
-    available_symbols = get_available_symbols(df)
-    latest_data = get_latest_data(df)
-    if 'ticker_select' not in st.session_state:
-        st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
-    else:
-        current_ticker = str(st.session_state.ticker_select).strip().upper()
-        if current_ticker not in available_symbols:
-            st.session_state.ticker_select = available_symbols[0] if available_symbols else ''
 
-    # Handle click from symbol link (?symbol=AAPL in URL)
-    q_symbol = str(st.query_params.get("symbol", "") or "").strip().upper()
-    if q_symbol and q_symbol in available_symbols:
-        st.session_state.ticker_select = q_symbol
-        try:
-            del st.query_params["symbol"]
-        except Exception:
-            pass
+def _ticker_label(s):
+    buy, sell = streaks.loc[s]
+    streak = f"Buy Streak of {buy} days" if buy else (f"Sell Streak of {sell} days" if sell else "No streak")
+    return f"{s}  ·  {streak}  ·  score {symbol_data.loc[s, 'combined_signal']:.0f}"
 
-    top_stocks_main = get_top_stocks(latest_data, n=500)
 
-    # Group by signal (BUY/HOLD/SELL), each sorted by combined_signal descending
-    buy_symbols = top_stocks_main[top_stocks_main['final_trade'] == 'BUY'].sort_values('combined_signal', ascending=False)['Symbol'].str.strip().str.upper().tolist()
-    hold_symbols = top_stocks_main[top_stocks_main['final_trade'] == 'HOLD'].sort_values('combined_signal', ascending=False)['Symbol'].str.strip().str.upper().tolist()
-    sell_symbols = top_stocks_main[top_stocks_main['final_trade'] == 'SELL'].sort_values('combined_signal', ascending=False)['Symbol'].str.strip().str.upper().tolist()
+dropdown_options = by_score['Symbol'].tolist()
+pick_col, ai_col = st.columns([3, 1])
+with pick_col:
+    ticker = st.selectbox(
+        "Ticker",
+        options=dropdown_options,
+        format_func=_ticker_label,
+        index=dropdown_options.index(st.session_state.ticker_select),
+        key="ticker_dropdown",
+        label_visibility="collapsed",
+    )
+st.session_state.ticker_select = ticker
+ticker_data = df[df['Symbol'] == ticker]
 
-    def make_clickable_list(symbols):
-        return ", ".join(f'<a href="?symbol={quote(s)}" class="symbol-link" target="_self">{s}</a>' for s in symbols)
+with ai_col:
+    if st.button("Generate AI Analysis", type="primary", width="stretch", key="generate_ai_btn"):
+        ai_analysis_dialog(ticker, ticker_data)
 
-    # --- Symbol lists by signal (clickable, all symbols, sorted by score descending) ---
-    st.markdown("---")
-    last_updated_str = df['Date'].max().strftime("%m/%d/%Y") if not df.empty and pd.notna(df['Date'].max()) else ""
-    with st.expander(f"Stock tickers (click to select). Last updated: {last_updated_str}", expanded=True):
-        if buy_symbols:
-            st.markdown(f"**🟢 BULLISH:** {make_clickable_list(buy_symbols)}", unsafe_allow_html=True)
-        if hold_symbols:
-            st.markdown(f"**🟡 HOLD:** {make_clickable_list(hold_symbols)}", unsafe_allow_html=True)
-        if sell_symbols:
-            st.markdown(f"**🔴 BEARISH:** {make_clickable_list(sell_symbols)}", unsafe_allow_html=True)
+with st.expander(f"Universe · {len(available_symbols)} tickers (click a symbol)", expanded=False):
+    for label, symbols in (("BULLISH", buy_symbols), ("HOLD", hold_symbols), ("BEARISH", sell_symbols)):
+        if symbols:
+            st.markdown(f"**{label}** · {make_clickable_list(symbols)}", unsafe_allow_html=True)
 
-        symbol_data = latest_data.set_index('Symbol')
-        symbol_signal = symbol_data['combined_signal'].to_dict()
-        symbol_streak_label = {}
-        for s in available_symbols:
-            try:
-                buy_streak = int(float(symbol_data.loc[s, 'Buy Streak']) or 0)
-                sell_streak = int(float(symbol_data.loc[s, 'Sell Streak']) or 0)
-                if buy_streak > 0:
-                    symbol_streak_label[s] = f"Buy Streak of {buy_streak} days"
-                elif sell_streak > 0:
-                    symbol_streak_label[s] = f"Sell Streak of {sell_streak} days"
-                else:
-                    symbol_streak_label[s] = "Streak = None"
-            except (KeyError, TypeError, ValueError):
-                symbol_streak_label[s] = "Streak = None"
-        dropdown_options = sorted(available_symbols, key=lambda s: symbol_signal.get(s, 0) or 0, reverse=True)
-        current_ticker = str(st.session_state.get('ticker_select', available_symbols[0] if available_symbols else '')).strip().upper()
-        default_idx = dropdown_options.index(current_ticker) if current_ticker in dropdown_options else 0
-        ticker_col, _ = st.columns([2, 4])
-        with ticker_col:
-            selected = st.selectbox(
-                "Enter stock ticker:",
-                options=dropdown_options,
-                format_func=lambda s: f"{s} : {symbol_streak_label.get(s, 'Streak = None')} (Score = {float(symbol_signal.get(s, 0) or 0):.0f})",
-                index=default_idx,
-                key="ticker_dropdown"
-            )
-        if selected:
-            st.session_state.ticker_select = selected
+st.markdown('<div id="ticker-focus"></div>', unsafe_allow_html=True)
+if jumped_from_link:
+    components.html(
+        """
+        <script>
+        const el = window.parent.document.getElementById('ticker-focus');
+        if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+        </script>
+        """,
+        height=0,
+    )
 
-    ticker = str(st.session_state.get('ticker_select', available_symbols[0] if available_symbols else '')).strip().upper()
+# --- Selected ticker header ---
+latest = ticker_data.nlargest(1, 'Date').iloc[0]
 
-    # --- AI Technical Analysis section ---
-    st.markdown(f"""
-    <div style="background: rgba(220, 218, 215, 0.9); padding: 16px 24px; border-radius: 8px; margin: 16px 0 16px 0; border: 1px solid rgba(180, 178, 175, 0.8);">
-        <h3 style="color: #374151; margin: 0; font-size: 1.25rem; font-weight: 600;">AI Technical and News Analysis for {ticker}</h3>
+
+def _num(v):
+    return float(v) if pd.notna(v) else None
+
+
+def _fmt(v, spec, prefix="", suffix=""):
+    return f"{prefix}{v:{spec}}{suffix}" if v is not None else "—"
+
+
+def _sign_color(v):
+    return "#0f172a" if v is None else ("#15803d" if v >= 0 else "#b91c1c")
+
+
+def _stat(label, value, color="#0f172a"):
+    return (
+        f'<div class="sa-stat"><div class="sa-stat-label">{label}</div>'
+        f'<div class="sa-stat-val" style="color:{color};">{value}</div></div>'
+    )
+
+
+signal = {'BUY': 'BULLISH', 'SELL': 'BEARISH'}.get(latest['final_trade'], 'HOLD')
+badge_cls = {'BULLISH': 'sa-badge-bull', 'BEARISH': 'sa-badge-bear'}.get(signal, 'sa-badge-hold')
+close = _num(latest['Close'])
+sentiment = _num(latest['SentimentScore'])
+comp = get_company_metrics(ticker, load_company_analysis())
+fv = comp.get('fair_value')
+upside = (fv / close - 1) * 100 if fv and close else None
+
+stats = "".join([
+    _stat("Score", _fmt(_num(latest['combined_signal']), ".1f")),
+    _stat("Balance sheet", _fmt(_num(latest['Fundamental_Weight']), ".2f")),
+    _stat("Sentiment", _fmt(sentiment, ".2f"), _sign_color(sentiment)),
+    _stat("Fair value", _fmt(fv, ",.2f", "$")),
+    _stat("Upside", _fmt(upside, "+.1f", suffix="%"), _sign_color(upside)),
+    _stat("P/E", _fmt(comp.get('pe_ratio'), ".1f")),
+    _stat("P/B", _fmt(comp.get('pb_ratio'), ".2f")),
+    _stat("Rev YoY", _fmt(comp.get('revenue_growth_yoy'), ".1f", suffix="%")),
+    _stat("ROE", _fmt(comp.get('roe'), ".1f", suffix="%")),
+    _stat("Net margin", _fmt(comp.get('net_margin'), ".1f", suffix="%")),
+    _stat("Debt/Eq", _fmt(comp.get('debt_to_equity'), ".2f")),
+])
+st.markdown(
+    f"""
+    <div class="sa-hero">
+      <div class="sa-hero-row">
+        <div class="sa-ident">
+          <div class="sa-sym">{ticker}</div>
+          <div class="sa-price">{_fmt(close, ",.2f", "$")}</div>
+          <span class="sa-badge {badge_cls}">{signal}</span>
+        </div>
+        <div class="sa-stats">{stats}</div>
+      </div>
     </div>
-    """, unsafe_allow_html=True)
-    
-    # Generate AI summary and news analysis when button clicked
-    if st.button(f"🤖 Generate AI Analysis for {ticker}", type="primary", key="generate_ai_btn"):
-        st.session_state.generate_summary = True
-    
-    if ticker and st.session_state.get('generate_summary', False):
-        ticker_data_ai = df[df['Symbol'] == ticker]
-        if not ticker_data_ai.empty:
-            latest_ai = ticker_data_ai.nlargest(1, 'Date').iloc[0]
-            with st.spinner(f"Generating AI summary for {ticker}..."):
-                summary = generate_ai_summary(ticker, latest_ai, df)
-            with st.expander(f"🤖 AI Summary for {ticker}", expanded=True):
-                st.markdown(summary)
-            news_df = load_news_data()
-            if news_df is not None:
-                symbol_news = get_news_by_symbol(news_df, ticker)
-                if not symbol_news.empty:
-                    positive_news, negative_news = group_news_by_sentiment(symbol_news)
-                    col_pos, col_neg = st.columns(2)
-                    with col_pos:
-                        if not positive_news.empty:
-                            with st.spinner(f"Analyzing {len(positive_news)} positive news articles..."):
-                                positive_news_text = format_news_for_llm(positive_news, max_articles=20)
-                                positive_summary = generate_news_summary(positive_news_text, "positive", ticker)
-                            with st.expander(f"✅ Positive News Summary ({len(positive_news)} articles)", expanded=True):
-                                st.markdown(positive_summary)
-                        else:
-                            st.info("No positive news articles found")
-                    with col_neg:
-                        if not negative_news.empty:
-                            with st.spinner(f"Analyzing {len(negative_news)} negative news articles..."):
-                                negative_news_text = format_news_for_llm(negative_news, max_articles=20)
-                                negative_summary = generate_news_summary(negative_news_text, "negative", ticker)
-                            with st.expander(f"❌ Negative News Summary ({len(negative_news)} articles)", expanded=True):
-                                st.markdown(negative_summary)
-                        else:
-                            st.info("No negative news articles found")
-                else:
-                    st.info(f"No news articles found for {ticker}")
-        st.session_state.generate_summary = False
+    """,
+    unsafe_allow_html=True,
+)
 
-    # --- Human Technical Analysis section (when ticker selected) ---
-    if ticker:
-        ticker_data = df[df['Symbol'] == ticker].copy()
-        
-        if len(ticker_data) == 0:
-            st.warning(f"❌ Ticker '{ticker}' not found in database.")
-            st.info(f"Available tickers: {', '.join(available_symbols[:20])}..." if len(available_symbols) > 20 else f"Available tickers: {', '.join(available_symbols)}")
-        else:
-            latest = ticker_data.nlargest(1, 'Date').iloc[0]
-            st.markdown(f"""
-            <div style="background: rgba(220, 218, 215, 0.9); padding: 16px 24px; border-radius: 8px; margin: 24px 0 16px 0; border: 1px solid rgba(180, 178, 175, 0.8);">
-                <h3 style="color: #374151; margin: 0; font-size: 1.25rem; font-weight: 600;">Human Technical Analysis for {ticker}</h3>
-            </div>
-            """, unsafe_allow_html=True)
+tab_charts, tab_rank = st.tabs(["Charts", "Rank"])
 
-            # Signal metrics row: Technical Signal, Current Price, Combined Signal, Buy/Sell Streak
-            signal_raw = latest['final_trade']
-            signal_mapping = {
-                'BUY': 'BULLISH',
-                'SELL': 'BEARISH',
-                'HOLD': 'HOLD'
-            }
-            signal = signal_mapping.get(signal_raw, signal_raw)
-            
-            signal_color = {
-                'BULLISH': '🟢',
-                'BEARISH': '🔴',
-                'HOLD': '🟡'
-            }
-            signal_bg = {
-                'BULLISH': 'background-color: rgba(35, 134, 54, 0.15); color: #1a7f37; border: 1px solid #238636;',
-                'BEARISH': 'background-color: rgba(248, 81, 73, 0.15); color: #c41e3a; border: 1px solid #da3633;',
-                'HOLD': 'background-color: rgba(210, 153, 34, 0.15); color: #9e6a03; border: 1px solid #9e6a03;'
-            }
-            col1, col2, col3 = st.columns([1, 1, 1])
-            
-            with col1:
-                st.markdown("""
-                <div style="font-size: 0.875rem; color: #6b7280; font-weight: 500; margin-bottom: 4px;">
-                    Technical Signal
-                </div>
-                """, unsafe_allow_html=True)
-                st.markdown(f"""
-                <div style="text-align: center; padding: 8px 12px; border-radius: 6px; {signal_bg.get(signal, '')} font-size: 0.95rem; line-height: 1.5;">
-                    <strong>{signal_color.get(signal, '')} {signal}</strong>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                buy_streak = latest.get('Buy Streak', 0)
-                st.metric("Buy Streak", f"{int(buy_streak)} days")
-            
-            with col3:
-                sell_streak = latest.get('Sell Streak', 0)
-                st.metric("Sell Streak", f"{int(sell_streak)} days")
+with tab_charts:
+    for col, ma in zip(st.columns(len(MA_COLS)), MA_COLS):
+        col.metric(ma.upper().replace('_', ' '), _fmt(_num(latest[ma]), ",.2f", "$"))
 
-            # Gauge charts: Combined Signal, Balance Sheet, News Sentiment
-            gauge_col1, gauge_col2, gauge_col3 = st.columns(3)
-            gauge_ranges = get_gauge_ranges(df)
-            
-            combined_signal_min = gauge_ranges.get('combined_signal', {}).get('min', 0)
-            combined_signal_max = gauge_ranges.get('combined_signal', {}).get('max', 100)
-            combined_signal_val = float(latest['combined_signal']) if 'combined_signal' in latest.index and pd.notna(latest['combined_signal']) else 0
-            combined_signal_mean = df['combined_signal'].mean()
-            
-            fundamental_weight_min = gauge_ranges.get('Fundamental_Weight', {}).get('min', 0)
-            fundamental_weight_max = gauge_ranges.get('Fundamental_Weight', {}).get('max', 100)
-            fundamental_weight_val = float(latest['Fundamental_Weight']) if 'Fundamental_Weight' in latest.index and pd.notna(latest['Fundamental_Weight']) else 0
-            fundamental_weight_mean = df['Fundamental_Weight'].mean()
-            
-            sentiment_score_min = gauge_ranges.get('SentimentScore', {}).get('min', -10)
-            sentiment_score_max = gauge_ranges.get('SentimentScore', {}).get('max', 10)
-            sentiment_score_val = float(latest['SentimentScore']) if 'SentimentScore' in latest.index and pd.notna(latest['SentimentScore']) else 0
-            sentiment_score_mean = df['SentimentScore'].mean()
-            with gauge_col1:
-                macd_val = latest.get('MACD Signal', None)
-                rsi_val = latest.get('RSI Options Rate', None)
-                sector_val = latest.get('Monthly Return (%)', None)
-                macd_str = f"{float(macd_val):.2f}" if macd_val is not None and pd.notna(macd_val) else "N/A"
-                rsi_str = f"{float(rsi_val):.1f}" if rsi_val is not None and pd.notna(rsi_val) else "N/A"
-                sector_str = f"{float(sector_val):.1f}" if sector_val is not None and pd.notna(sector_val) else "N/A"
-                scores_text = f"MACD: {macd_str}, RSI: {rsi_str}, Sector: {sector_str}"
-                combined_signal_mid = round(combined_signal_mean, 2)
-                fig1 = go.Figure(go.Indicator(
-                    mode = "gauge+number",
-                    value = combined_signal_val,
-                    domain = {'x': [0, 1], 'y': [0, 0.5]},
-                    title = {'text': "Combined Signal", 'font': {'color': '#374151'}},
-                    number = {'font': {'color': '#1f2937'}},
-                    gauge = {
-                        'axis': {
-                            'range': [combined_signal_min, combined_signal_max],
-                            'tickmode': 'array',
-                            'tickvals': [combined_signal_min, combined_signal_mid, combined_signal_max],
-                            'ticktext': [f'Min: {combined_signal_min:.1f}', f'Mid: {combined_signal_mid:.1f}', f'Max: {combined_signal_max:.1f}'],
-                            'tickcolor': '#6b7280',
-                            'tickfont': {'color': '#6b7280'}
-                        },
-                        'bar': {'color': "#58a6ff"},
-                        'steps': [
-                            {'range': [combined_signal_min, combined_signal_val], 'color': "#388bfd"},
-                            {'range': [combined_signal_val, combined_signal_max], 'color': "#e8e4dc"}
-                        ],
-                        'threshold': {
-                            'line': {'color': "red", 'width': 4},
-                            'thickness': 0.75,
-                            'value': combined_signal_val
-                        },
-                        'shape': 'angular'
-                    }
-                ))
-                fig1.update_layout(
-                    height=240,
-                    margin=dict(l=20, r=20, t=40, b=85),
-                    paper_bgcolor="#faf8f5",
-                    plot_bgcolor="#faf8f5",
-                    annotations=[
-                        dict(x=0.5, y=-0.12, text=f'Current: {combined_signal_val:.2f}', showarrow=False, font=dict(size=13, color="#6b7280")),
-                        dict(x=0.5, y=-0.32, text=scores_text, showarrow=False, font=dict(size=12, color="#6b7280"))
-                    ]
-                )
-                st.plotly_chart(fig1, use_container_width=True)
-            with gauge_col2:
-                company_df = load_company_analysis()
-                comp = get_company_metrics(ticker, company_df)
-                fv = comp.get('fair_value', 'N/A')
-                pe = comp.get('pe_ratio', 'N/A')
-                pb = comp.get('pb_ratio', 'N/A')
-                rev = comp.get('revenue_growth_yoy', 'N/A')
-                fv_str = f"${fv:.2f}" if isinstance(fv, (int, float)) else str(fv)
-                pe_str = f"{pe:.1f}" if isinstance(pe, (int, float)) else str(pe)
-                pb_str = f"{pb:.2f}" if isinstance(pb, (int, float)) else str(pb)
-                rev_str = f"{rev:.1f}%" if isinstance(rev, (int, float)) else str(rev)
-                metrics_line1 = f"Fair value: {fv_str}, PE ratio: {pe_str}"
-                metrics_line2 = f"PB ratio: {pb_str}, Revenue Growth YoY: {rev_str}"
-                fundamental_weight_mid = round(fundamental_weight_mean, 2)
-                fig2 = go.Figure(go.Indicator(
-                    mode = "gauge+number",
-                    value = fundamental_weight_val,
-                    domain = {'x': [0, 1], 'y': [0, 0.5]},
-                    title = {'text': "Balance Sheet", 'font': {'color': '#374151'}},
-                    number = {'font': {'color': '#1f2937'}},
-                    gauge = {
-                        'axis': {
-                            'range': [fundamental_weight_min, fundamental_weight_max],
-                            'tickmode': 'array',
-                            'tickvals': [fundamental_weight_min, fundamental_weight_mid, fundamental_weight_max],
-                            'ticktext': [f'Min: {fundamental_weight_min:.1f}', f'Mid: {fundamental_weight_mid:.1f}', f'Max: {fundamental_weight_max:.1f}'],
-                            'tickcolor': '#6b7280',
-                            'tickfont': {'color': '#6b7280'}
-                        },
-                        'bar': {'color': "#58a6ff"},
-                        'steps': [
-                            {'range': [fundamental_weight_min, fundamental_weight_val], 'color': "#388bfd"},
-                            {'range': [fundamental_weight_val, fundamental_weight_max], 'color': "#e8e4dc"}
-                        ],
-                        'threshold': {
-                            'line': {'color': "red", 'width': 4},
-                            'thickness': 0.75,
-                            'value': fundamental_weight_val
-                        },
-                        'shape': 'angular'
-                    }
-                ))
-                fig2.update_layout(
-                    height=240,
-                    margin=dict(l=20, r=20, t=40, b=85),
-                    paper_bgcolor="#faf8f5",
-                    plot_bgcolor="#faf8f5",
-                    annotations=[
-                        dict(x=0.5, y=-0.12, text=f'Current: {fundamental_weight_val:.2f}', showarrow=False, font=dict(size=13, color="#6b7280")),
-                        dict(x=0.5, y=-0.28, text=metrics_line1, showarrow=False, font=dict(size=12, color="#6b7280")),
-                        dict(x=0.5, y=-0.40, text=metrics_line2, showarrow=False, font=dict(size=12, color="#6b7280"))
-                    ]
-                )
-                st.plotly_chart(fig2, use_container_width=True)
-            with gauge_col3:
-                news_df = load_news_data()
-                symbol_news = get_news_by_symbol(news_df, ticker) if news_df is not None else pd.DataFrame()
-                pos_news, neg_news = group_news_by_sentiment(symbol_news) if not symbol_news.empty else (pd.DataFrame(), pd.DataFrame())
-                pos_count = len(pos_news)
-                neg_count = len(neg_news)
-                sentiment_score_mid = round(sentiment_score_mean, 2)
-                fig3 = go.Figure(go.Indicator(
-                    mode = "gauge+number",
-                    value = sentiment_score_val,
-                    domain = {'x': [0, 1], 'y': [0, 0.5]},
-                    title = {'text': "News Sentiment", 'font': {'color': '#374151'}},
-                    number = {'font': {'color': '#1f2937'}},
-                    gauge = {
-                        'axis': {
-                            'range': [sentiment_score_min, sentiment_score_max],
-                            'tickmode': 'array',
-                            'tickvals': [sentiment_score_min, sentiment_score_mid, sentiment_score_max],
-                            'ticktext': [f'Min: {sentiment_score_min:.1f}', f'Mid: {sentiment_score_mid:.1f}', f'Max: {sentiment_score_max:.1f}'],
-                            'tickcolor': '#6b7280',
-                            'tickfont': {'color': '#6b7280'}
-                        },
-                        'bar': {'color': "#58a6ff"},
-                        'steps': [
-                            {'range': [sentiment_score_min, sentiment_score_val], 'color': "#388bfd"},
-                            {'range': [sentiment_score_val, sentiment_score_max], 'color': "#e8e4dc"}
-                        ],
-                        'threshold': {
-                            'line': {'color': "red", 'width': 4},
-                            'thickness': 0.75,
-                            'value': sentiment_score_val
-                        },
-                        'shape': 'angular'
-                    }
-                ))
-                fig3.update_layout(
-                    height=240,
-                    margin=dict(l=20, r=20, t=40, b=85),
-                    paper_bgcolor="#faf8f5",
-                    plot_bgcolor="#faf8f5",
-                    annotations=[
-                        dict(x=0.5, y=-0.15, text=f'Current: {sentiment_score_val:.2f}', showarrow=False, font=dict(size=13, color="#6b7280")),
-                        dict(x=0.5, y=-0.32, text=f'Positive: {pos_count}, Negative: {neg_count}', showarrow=False, font=dict(size=14, color="#6b7280"))
-                    ]
-                )
-                st.plotly_chart(fig3, use_container_width=True)
+    one_year_ago = ticker_data['Date'].max() - pd.Timedelta(days=365)
+    chart = ticker_data[ticker_data['Date'] >= one_year_ago].sort_values('Date').set_index('Date')
 
-            # Filter to last 1 year and build price chart
-            latest_date = ticker_data['Date'].max()
-            one_year_ago = latest_date - pd.Timedelta(days=365)
-            ticker_data_sorted = ticker_data[ticker_data['Date'] >= one_year_ago].sort_values('Date', ascending=True)
-            if len(ticker_data_sorted) > 0:
-                # Price/MA/RSI metrics row
-                col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
-                close = latest.get('Close', 0)
-                if pd.notna(close):
-                    with col1:
-                        st.metric("Price", f"${close:.2f}", delta=None)
-                with col2:
-                    ma_10 = latest.get('ma_10', 0)
-                    if pd.notna(ma_10):
-                        st.metric("MA 10", f"${ma_10:.2f}", delta=None)
-                with col3:
-                    ma_30 = latest.get('ma_30', 0)
-                    if pd.notna(ma_30):
-                        st.metric("MA 30", f"${ma_30:.2f}", delta=None)
-                with col4:
-                    ma_50 = latest.get('ma_50', 0)
-                    if pd.notna(ma_50):
-                        st.metric("MA 50", f"${ma_50:.2f}", delta=None)
-                with col5:
-                    ma_100 = latest.get('ma_100', 0)
-                    if pd.notna(ma_100):
-                        st.metric("MA 100", f"${ma_100:.2f}", delta=None)
-                with col6:
-                    ma_200 = latest.get('ma_200', 0)
-                    if pd.notna(ma_200):
-                        st.metric("MA 200", f"${ma_200:.2f}", delta=None)
-                with col7:
-                    rsi = latest.get('RSI Options Rate', 0)
-                    if pd.notna(rsi):
-                        st.metric("RSI", f"{rsi:.2f}", delta=None)
-                # Prepare chart data: price, MAs, signal, streaks, earnings
-                cols_to_select = ['Date', 'Close', 'ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200',
-                                 'combined_signal', 'Buy Streak', 'Sell Streak']
-                if 'is_earnings_date' in ticker_data_sorted.columns:
-                    cols_to_select.append('is_earnings_date')
-                price_data = ticker_data_sorted[cols_to_select].copy()
-                price_data = price_data.set_index('Date')
-                price_data = price_data.dropna(subset=['Close'])
-                price_data['combined_signal'] = price_data['combined_signal'].fillna(0)
-                price_data['Buy Streak'] = price_data['Buy Streak'].fillna(0)
-                price_data['Sell Streak'] = price_data['Sell Streak'].fillna(0)
-                if 'is_earnings_date' in price_data.columns:
-                    price_data['is_earnings_date'] = pd.to_numeric(price_data['is_earnings_date'], errors='coerce').fillna(0).astype(int)
-                has_rsi = 'RSI Options Rate' in ticker_data_sorted.columns and not ticker_data_sorted[['Date', 'RSI Options Rate']].dropna().empty
-                has_macd = ('macd' in ticker_data_sorted.columns and 'MACD Signal' in ticker_data_sorted.columns and
-                           not ticker_data_sorted[['Date', 'macd', 'MACD Signal']].dropna().empty)
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
+        row_heights=[0.65, 0.175, 0.175],
+        subplot_titles=['<b>Price and Moving Averages</b>', '', ''],
+        specs=[[{"secondary_y": False}], [{"secondary_y": True}], [{"secondary_y": False}]],
+    )
+    fig.update_annotations(font=dict(size=13, color='#374151', family='Arial, sans-serif'), yshift=5)
 
-                # Build subplot layout (Price + optional RSI + optional MACD)
-                num_rows = 1
-                row_heights = [1.0]
-                subplot_titles = ['<b>Price and Moving Averages</b>']
-                
-                if has_rsi:
-                    num_rows += 1
-                    row_heights = [0.65, 0.35]
-                    subplot_titles.append('')
-                
-                if has_macd:
-                    num_rows += 1
-                    if has_rsi:
-                        row_heights = [0.65, 0.175, 0.175]
-                    else:
-                        row_heights = [0.65, 0.35]
-                    subplot_titles.append('')
-                fig = make_subplots(
-                    rows=num_rows, cols=1,
-                    shared_xaxes=True,
-                    vertical_spacing=0.08,
-                    row_heights=row_heights,
-                    subplot_titles=subplot_titles
-                )
-                fig.update_annotations(
-                    font=dict(size=13, color='#374151', family='Arial, sans-serif'),
-                    yshift=5
-                )
+    # Row 1: price, earnings markers, moving averages, streak bars
+    hover_close = [
+        f"Combined Signal: {sig:.2f}"
+        + (f"<br>Buy Streak: {int(b)} days" if b > 0 else "")
+        + (f"<br>Sell Streak: {int(s)} days" if s > 0 else "")
+        for sig, b, s in zip(chart['combined_signal'], chart['Buy Streak'], chart['Sell Streak'])
+    ]
+    fig.add_trace(go.Scatter(
+        x=chart.index, y=chart['Close'], name='Close Price',
+        line=dict(color='#27ae60', width=2), mode='lines', customdata=hover_close,
+        hovertemplate='<b>Close</b><br>$%{y:.2f}<br>%{customdata}<extra></extra>'
+    ), row=1, col=1)
 
-                # Row 1: Close price line with hover (signal, streaks)
-                hover_text_close = []
-                for idx in price_data.index:
-                    signal_val = price_data.loc[idx, 'combined_signal']
-                    buy_streak = price_data.loc[idx, 'Buy Streak']
-                    sell_streak = price_data.loc[idx, 'Sell Streak']
-                    hover_info = f"Combined Signal: {signal_val:.2f}"
-                    if buy_streak > 0:
-                        hover_info += f"<br>Buy Streak: {int(buy_streak)} days"
-                    if sell_streak > 0:
-                        hover_info += f"<br>Sell Streak: {int(sell_streak)} days"
-                    hover_text_close.append(hover_info)
-                fig.add_trace(go.Scatter(
-                    x=price_data.index,
-                    y=price_data['Close'],
-                    name='Close Price',
-                    line=dict(color='#27ae60', width=2),
-                    mode='lines',
-                    customdata=hover_text_close,
-                    hovertemplate='<b>Close</b><br>$%{y:.2f}<br>%{customdata}<extra></extra>'
-                ), row=1, col=1)
+    earnings = chart[chart['is_earnings_date'] == 1]
+    fig.add_trace(go.Scatter(
+        x=earnings.index, y=earnings['Close'], name='Earnings Date', mode='markers',
+        marker=dict(symbol='circle', size=10, color='#ff6b35'),
+        hovertemplate='<b>Earnings Date</b><br>$%{y:.2f}<br>%{x|%b %d, %Y}<extra></extra>'
+    ), row=1, col=1)
 
-                # Add earnings date markers on price chart
-                if 'is_earnings_date' not in price_data.columns and 'is_earnings_date' in ticker_data_sorted.columns:
-                    earnings_col = ticker_data_sorted.set_index('Date')['is_earnings_date'].reindex(price_data.index).fillna(0)
-                    price_data['is_earnings_date'] = pd.to_numeric(earnings_col, errors='coerce').fillna(0).astype(int)
-                if 'is_earnings_date' in price_data.columns:
-                    price_data['is_earnings_date'] = pd.to_numeric(price_data['is_earnings_date'], errors='coerce').fillna(0).astype(int)
-                    earnings_dates = price_data[price_data['is_earnings_date'] == 1]
-                    if len(earnings_dates) > 0:
-                        fig.add_trace(go.Scatter(
-                            x=earnings_dates.index,
-                            y=earnings_dates['Close'],
-                            name='Earnings Date',
-                            mode='markers',
-                            marker=dict(symbol='circle', size=10, color='#ff6b35', line=dict(color='#ff6b35', width=0), opacity=1.0),
-                            hovertemplate='<b>Earnings Date</b><br>$%{y:.2f}<br>%{x|%b %d, %Y}<extra></extra>',
-                            showlegend=True,
-                            legendgroup='earnings'
-                        ), row=1, col=1)
+    for ma, color in zip(MA_COLS, ['#ffd700', '#e74c3c', '#3498db', '#8b4513', '#808080']):
+        name = ma.upper().replace('_', ' ')
+        fig.add_trace(go.Scatter(
+            x=chart.index, y=chart[ma], name=name, line=dict(color=color, width=1), mode='lines',
+            hovertemplate=f'<b>{name}</b><br>$%{{y:.2f}}<extra></extra>'
+        ), row=1, col=1)
 
-                # Add moving average lines (MA 10, 30, 50, 100, 200)
-                for ma_name, ma_col, color in [
-                    ('ma_10', 'ma_10', '#ffd700'),
-                    ('ma_30', 'ma_30', '#e74c3c'),
-                    ('ma_50', 'ma_50', '#3498db'),
-                    ('ma_100', 'ma_100', '#8b4513'),
-                    ('ma_200', 'ma_200', '#808080')
-                ]:
-                    if ma_col in price_data.columns:
-                        fig.add_trace(go.Scatter(
-                            x=price_data.index,
-                            y=price_data[ma_col],
-                            name=ma_name.upper().replace('_', ' '),
-                            line=dict(color=color, width=1),
-                            mode='lines',
-                            showlegend=True,
-                            hovertemplate=f'<b>{ma_name.upper().replace("_", " ")}</b><br>$%{{y:.2f}}<extra></extra>'
-                        ), row=1, col=1)
+    top_y = chart['Close'].max() + (chart['Close'].max() - chart['Close'].min()) * 0.05
+    buy_active = chart['Buy Streak'] > 0
+    sell_active = chart['Sell Streak'] > 0
+    for mask, color, width in (
+        (buy_active, "#2ca02c", 3.5),
+        (sell_active, "#d62728", 3.5),
+        (~buy_active & ~sell_active, "#FFD700", 4.5),
+    ):
+        for start, end in _periods(mask):
+            fig.add_shape(type="line", x0=start, x1=end, y0=top_y, y1=top_y,
+                          line=dict(color=color, width=width), row=1, col=1)
 
-                # Buy/Sell/Hold streak horizontal lines above price chart
-                if 'Buy Streak' in ticker_data_sorted.columns and 'Sell Streak' in ticker_data_sorted.columns:
-                    max_price = price_data['Close'].max()
-                    min_price = price_data['Close'].min()
-                    price_range = max_price - min_price
-                    top_y_price = max_price + (price_range * 0.05)
-                    streak_data = ticker_data_sorted[['Date', 'Buy Streak', 'Sell Streak']].copy()
-                    streak_data = streak_data.set_index('Date')
-                    streak_data = streak_data.reindex(price_data.index).fillna(0)
-                    buy_active = (streak_data['Buy Streak'] > 0).astype(int)
-                    buy_periods = []
-                    start_idx = None
-                    
-                    for idx, (date, is_active) in enumerate(buy_active.items()):
-                        if is_active == 1 and start_idx is None:
-                            start_idx = idx
-                        elif is_active == 0 and start_idx is not None:
-                            buy_periods.append((streak_data.index[start_idx], streak_data.index[idx-1]))
-                            start_idx = None
-                    if start_idx is not None:
-                        buy_periods.append((streak_data.index[start_idx], streak_data.index[-1]))
-                    sell_active = (streak_data['Sell Streak'] > 0).astype(int)
-                    sell_periods = []
-                    start_idx = None
-                    
-                    for idx, (date, is_active) in enumerate(sell_active.items()):
-                        if is_active == 1 and start_idx is None:
-                            start_idx = idx
-                        elif is_active == 0 and start_idx is not None:
-                            sell_periods.append((streak_data.index[start_idx], streak_data.index[idx-1]))
-                            start_idx = None
-                    if start_idx is not None:
-                        sell_periods.append((streak_data.index[start_idx], streak_data.index[-1]))
-                    hold_active = ((buy_active == 0) & (sell_active == 0)).astype(int)
-                    hold_periods = []
-                    start_idx = None
-                    
-                    for idx, (date, is_active) in enumerate(hold_active.items()):
-                        if is_active == 1 and start_idx is None:
-                            start_idx = idx
-                        elif is_active == 0 and start_idx is not None:
-                            hold_periods.append((streak_data.index[start_idx], streak_data.index[idx-1]))
-                            start_idx = None
-                    if start_idx is not None:
-                        hold_periods.append((streak_data.index[start_idx], streak_data.index[-1]))
-                    for start_date, end_date in buy_periods:
-                        fig.add_shape(
-                            type="line",
-                            x0=start_date,
-                            x1=end_date,
-                            y0=top_y_price,
-                            y1=top_y_price,
-                            line=dict(color="#2ca02c", width=3.5),
-                            row=1, col=1
-                        )
-                    for start_date, end_date in sell_periods:
-                        fig.add_shape(
-                            type="line",
-                            x0=start_date,
-                            x1=end_date,
-                            y0=top_y_price,
-                            y1=top_y_price,
-                            line=dict(color="#d62728", width=3.5),
-                            row=1, col=1
-                        )
-                    for start_date, end_date in hold_periods:
-                        fig.add_shape(
-                            type="line",
-                            x0=start_date,
-                            x1=end_date,
-                            y0=top_y_price,
-                            y1=top_y_price,
-                            line=dict(color="#FFD700", width=4.5),
-                            row=1, col=1
-                        )
-                current_row = 2
-                if has_rsi:
-                    rsi_data = ticker_data_sorted[['Date', 'RSI Options Rate']].copy()
-                    rsi_data = rsi_data.set_index('Date')
-                    rsi_data = rsi_data.dropna()
-                    
-                    if not rsi_data.empty:
-                        fig.add_trace(go.Scatter(
-                            x=rsi_data.index,
-                            y=rsi_data['RSI Options Rate'],
-                            name='RSI',
-                            line=dict(color='#ff7f0e', width=2),
-                            mode='lines',
-                            showlegend=False,
-                            hovertemplate='<b>RSI</b><br>%{y:.2f}<extra></extra>',
-                            fill='tozeroy',
-                            fillcolor='rgba(255, 127, 14, 0.1)'
-                        ), row=current_row, col=1)
-                        
-                        fig.add_hline(y=70, line_dash="dash", line_color="rgba(200, 0, 0, 0.3)", row=current_row, col=1)
-                        fig.add_hline(y=30, line_dash="dash", line_color="rgba(0, 200, 0, 0.3)", row=current_row, col=1)
-                    current_row += 1
-                elif has_macd:
-                    current_row = 2
+    # Row 2: RSI with dotted combined score on the right axis
+    fig.add_trace(go.Scatter(
+        x=chart.index, y=chart['RSI'], name='RSI',
+        line=dict(color='#ff7f0e', width=2), mode='lines',
+        hovertemplate='<b>RSI</b><br>%{y:.2f}<extra></extra>',
+        fill='tozeroy', fillcolor='rgba(255, 127, 14, 0.1)'
+    ), row=2, col=1, secondary_y=False)
+    fig.add_hline(y=70, line_dash="dash", line_color="rgba(200, 0, 0, 0.3)", row=2, col=1, secondary_y=False)
+    fig.add_hline(y=30, line_dash="dash", line_color="rgba(0, 200, 0, 0.3)", row=2, col=1, secondary_y=False)
+    fig.add_trace(go.Scatter(
+        x=chart.index, y=chart['combined_signal'], name='My Combined Score',
+        line=dict(color='#7c3aed', width=1.8, dash='dot'), mode='lines',
+        hovertemplate='<b>My Combined Score</b><br>%{y:.2f}<extra></extra>',
+    ), row=2, col=1, secondary_y=True)
 
-                # Row 3: MACD chart (if data available)
-                if has_macd:
-                    macd_data = ticker_data_sorted[['Date', 'macd', 'MACD Signal']].copy()
-                    macd_data = macd_data.set_index('Date')
-                    macd_data = macd_data.dropna()
-                    
-                    if not macd_data.empty:
-                        fig.add_trace(go.Scatter(
-                            x=macd_data.index,
-                            y=macd_data['macd'],
-                            name='MACD',
-                            line=dict(color='#d62728', width=1.8),
-                            mode='lines',
-                            showlegend=False,
-                            hovertemplate='<b>MACD</b><br>%{y:.4f}<extra></extra>'
-                        ), row=current_row, col=1)
-                        
-                        fig.add_trace(go.Scatter(
-                            x=macd_data.index,
-                            y=macd_data['MACD Signal'],
-                            name='MACD Signal',
-                            line=dict(color='#1f77b4', width=1.8, dash='dash'),
-                            mode='lines',
-                            showlegend=False,
-                            hovertemplate='<b>MACD Signal</b><br>%{y:.4f}<extra></extra>'
-                        ), row=current_row, col=1)
-                        fig.add_hline(y=0, line_dash="dot", line_color="rgba(128, 128, 128, 0.4)", line_width=1, row=current_row, col=1)
+    # Row 3: MACD
+    fig.add_trace(go.Scatter(
+        x=chart.index, y=chart['macd'], name='MACD', line=dict(color='#d62728', width=1.8),
+        mode='lines', showlegend=False, hovertemplate='<b>MACD</b><br>%{y:.4f}<extra></extra>'
+    ), row=3, col=1)
+    fig.add_trace(go.Scatter(
+        x=chart.index, y=chart['MACD Signal'], name='MACD Signal',
+        line=dict(color='#1f77b4', width=1.8, dash='dash'), mode='lines', showlegend=False,
+        hovertemplate='<b>MACD Signal</b><br>%{y:.4f}<extra></extra>'
+    ), row=3, col=1)
+    fig.add_hline(y=0, line_dash="dot", line_color="rgba(128, 128, 128, 0.4)", line_width=1, row=3, col=1)
 
-                # Chart layout, axes, and display
-                fig.update_layout(
-                    height=850,
-                    hovermode='x unified',
-                    margin=dict(l=50, r=50, t=120, b=50),
-                    plot_bgcolor='#faf8f5',
-                    paper_bgcolor='#f8f6f0',
-                    showlegend=True,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.08,
-                        xanchor="center",
-                        x=0.5,
-                        font=dict(size=10, color='#374151'),
-                        bgcolor='rgba(250, 248, 245, 0.95)',
-                        bordercolor='#e8e4dc',
-                        borderwidth=1,
-                        itemwidth=30
-                    ),
-                    font=dict(family="Arial, sans-serif", size=11, color='#374151'),
-                    dragmode=False,
-                    hoverlabel=dict(
-                        bgcolor="#faf8f5",
-                        bordercolor="#e8e4dc",
-                        font_size=11,
-                        font_family="Arial, sans-serif"
-                    )
-                )
-                fig.update_xaxes(
-                    tickformat='%b %Y',
-                    showspikes=True,
-                    spikecolor="#6b7280",
-                    spikesnap="cursor",
-                    spikemode="across",
-                    spikethickness=1,
-                    spikedash="solid",
-                    showgrid=True,
-                    gridcolor='rgba(200, 198, 195, 0.35)',
-                    gridwidth=1,
-                    zeroline=False,
-                    showline=True,
-                    linecolor='rgba(200, 198, 195, 0.4)',
-                    linewidth=1,
-                    tickfont=dict(size=10, color='#6b7280'),
-                    title_font=dict(size=12, color='#374151')
-                )
-                fig.update_yaxes(
-                    title_text="Price ($)",
-                    title_font=dict(size=11, color='#374151'),
-                    showspikes=True,
-                    spikecolor="#6b7280",
-                    spikesnap="cursor",
-                    spikemode="toaxis",
-                    spikethickness=1,
-                    spikedash="solid",
-                    showgrid=True,
-                    gridcolor='rgba(200, 198, 195, 0.35)',
-                    gridwidth=1,
-                    zeroline=False,
-                    showline=True,
-                    linecolor='rgba(200, 198, 195, 0.4)',
-                    linewidth=1,
-                    tickfont=dict(size=10, color='#6b7280'),
-                    tickformat='$,.0f',
-                    row=1, col=1
-                )
-                if has_rsi:
-                    fig.update_yaxes(
-                        title_text="RSI",
-                        title_font=dict(size=11, color='#374151'),
-                        showspikes=True, spikecolor="#6b7280", spikesnap="cursor", spikemode="toaxis",
-                        spikethickness=1, spikedash="solid",
-                        showgrid=True, gridcolor='rgba(200, 198, 195, 0.35)', gridwidth=1,
-                        zeroline=False, showline=True, linecolor='rgba(200, 198, 195, 0.4)', linewidth=1,
-                        tickfont=dict(size=10, color='#6b7280'), range=[0, 100],
-                        row=2, col=1
-                    )
-                if has_macd:
-                    macd_row = 3 if has_rsi else 2
-                    fig.update_yaxes(
-                        title_text="MACD",
-                        title_font=dict(size=11, color='#374151'),
-                        showspikes=True, spikecolor="#6b7280", spikesnap="cursor", spikemode="toaxis",
-                        spikethickness=1, spikedash="solid",
-                        showgrid=True, gridcolor='rgba(200, 198, 195, 0.35)', gridwidth=1,
-                        zeroline=True, zerolinecolor='rgba(200, 198, 195, 0.4)', zerolinewidth=1,
-                        showline=True, linecolor='rgba(200, 198, 195, 0.4)', linewidth=1,
-                        tickfont=dict(size=10, color='#6b7280'),
-                        row=macd_row, col=1
-                    )
-                st.plotly_chart(
-                    fig, 
-                    use_container_width=True,
-                    config={
-                        'displayModeBar': True,
-                        'displaylogo': False,
-                        'modeBarButtonsToRemove': ['pan2d', 'select2d', 'lasso2d', 'autoScale2d', 'resetScale2d', 'zoomIn2d', 'zoomOut2d'],
-                        'scrollZoom': False,
-                        'doubleClick': 'reset'
-                    }
-                )
-            else:
-                st.warning("No data available for charting.")
+    grid = dict(
+        showspikes=True, spikecolor="#6b7280", spikesnap="cursor", spikethickness=1, spikedash="solid",
+        showgrid=True, gridcolor='rgba(200, 198, 195, 0.35)', gridwidth=1,
+        showline=True, linecolor='rgba(200, 198, 195, 0.4)', linewidth=1,
+        tickfont=dict(size=10, color='#6b7280'),
+    )
+    axis_title = dict(size=11, color='#374151')
+    fig.update_layout(
+        height=850,
+        hovermode='x unified',
+        margin=dict(l=50, r=50, t=120, b=50),
+        plot_bgcolor='#ffffff',
+        paper_bgcolor='#ffffff',
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5,
+            font=dict(size=10, color='#374151'), bgcolor='rgba(255, 255, 255, 0.95)',
+            bordercolor='#e2e8f0', borderwidth=1, itemwidth=30
+        ),
+        font=dict(family="Arial, sans-serif", size=11, color='#374151'),
+        dragmode=False,
+        hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family="Arial, sans-serif"),
+    )
+    fig.update_xaxes(tickformat='%b %Y', spikemode="across", zeroline=False, **grid)
+    fig.update_yaxes(title_text="Price ($)", title_font=axis_title, spikemode="toaxis", zeroline=False,
+                     tickformat='$,.0f', row=1, col=1, **grid)
+    fig.update_yaxes(title_text="RSI", title_font=axis_title, spikemode="toaxis", zeroline=False,
+                     range=[0, 100], row=2, col=1, secondary_y=False, **grid)
+    fig.update_yaxes(
+        title_text="Combined Score", title_font=dict(size=11, color='#7c3aed'), showgrid=False,
+        zeroline=True, zerolinecolor='rgba(124, 58, 237, 0.25)', zerolinewidth=1,
+        showline=True, linecolor='rgba(124, 58, 237, 0.35)', linewidth=1,
+        tickfont=dict(size=10, color='#7c3aed'), row=2, col=1, secondary_y=True
+    )
+    fig.update_yaxes(title_text="MACD", title_font=axis_title, spikemode="toaxis",
+                     zeroline=True, zerolinecolor='rgba(200, 198, 195, 0.4)', zerolinewidth=1,
+                     row=3, col=1, **grid)
+    st.plotly_chart(
+        fig,
+        width="stretch",
+        config={
+            'displaylogo': False,
+            'modeBarButtonsToRemove': ['pan2d', 'select2d', 'lasso2d', 'autoScale2d', 'resetScale2d', 'zoomIn2d', 'zoomOut2d'],
+            'scrollZoom': False,
+            'doubleClick': 'reset'
+        }
+    )
 
+with tab_rank:
+    st.markdown("**Combined-signal rank · last 20 sessions**")
+    st.caption("Rank 1 = highest score. Green/red cells mark qualifying BULL/BEAR streak days. ED colors: last ≤10d red, next ≤7d green.")
+
+    rank_table = build_signal_rank_table(df, n_days=20)
+    date_cols = [c for c in rank_table.columns if c not in ('Symbol', 'Last ED', 'Next ED', 'Trend')]
+    today = pd.Timestamp.now().normalize()
+    GREEN, RED, AMBER, TEXT = "#1a7f37", "#c41e3a", "#9e6a03", "#374151"
+
+    def _streak_flags(row):
+        """Mark rank cells inside a 4+ step improving run (BULL) or 3+ step worsening run (BEAR)."""
+        cols = [c for c in reversed(date_cols) if pd.notna(row[c])]
+        ranks = [int(row[c]) for c in cols]
+        flags = {}
+        n, i = len(ranks), 0
+        while i < n - 1:
+            j = i
+            while j + 1 < n and ranks[j + 1] < ranks[j]:
+                j += 1
+            if j - i >= 4:
+                flags.update({cols[k]: "BULL" for k in range(i, j + 1)})
+                i = j + 1
+                continue
+            j = i
+            while j + 1 < n and ranks[j + 1] > ranks[j]:
+                j += 1
+            if j - i >= 3:
+                for k in range(i, j + 1):
+                    flags.setdefault(cols[k], "BEAR")
+                i = j + 1
+                continue
+            i += 1
+        return flags
+
+    def _td(text, color=TEXT, weight="400", extra=""):
+        return f'<td style="{extra}color:{color};font-weight:{weight};text-align:center;padding:6px 8px;white-space:nowrap;">{text}</td>'
+
+    def _row_html(row):
+        sel_bg = "background-color:#e8f0fe;" if row['Symbol'] == ticker else ""
+        cells = [
+            f'<td style="font-weight:600;text-align:left;padding:6px 8px;position:sticky;left:0;z-index:1;'
+            f'background:{"#e8f0fe" if sel_bg else "#ffffff"};">{row["Symbol"]}</td>'
+        ]
+        for col, lo, hi in (("Last ED", -10, 0), ("Next ED", 0, 7)):
+            d = pd.to_datetime(row[col], errors="coerce")
+            hit = pd.notna(d) and today + pd.Timedelta(days=lo) <= d <= today + pd.Timedelta(days=hi)
+            cells.append(_td(row[col] or "", (RED if col == "Last ED" else GREEN) if hit else TEXT, "700" if hit else "400", sel_bg))
+        trend_color = {"BULL": GREEN, "BEAR": RED}.get(row['Trend'], AMBER)
+        cells.append(_td(row['Trend'], trend_color, "700" if row['Trend'] != "HOLD" else "600", sel_bg))
+        flags = _streak_flags(row)
+        for c in date_cols:
+            flag = flags.get(c)
+            color = {"BULL": GREEN, "BEAR": RED}.get(flag, TEXT)
+            cells.append(_td("" if pd.isna(row[c]) else int(row[c]), color, "700" if flag else "400", sel_bg))
+        return f"<tr>{''.join(cells)}</tr>"
+
+    thead = "".join(
+        f'<th style="position:sticky;top:0;background:#f1f5f9;padding:8px;text-align:center;'
+        f'font-size:0.8rem;color:#374151;border-bottom:1px solid #e2e8f0;white-space:nowrap;">{c}</th>'
+        for c in rank_table.columns
+    )
+    body = "".join(_row_html(row) for _, row in rank_table.iterrows())
+    st.markdown(
+        f"""
+        <div style="max-height:520px;overflow:auto;border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;">
+          <table style="border-collapse:collapse;width:100%;font-size:0.85rem;font-family:Arial,sans-serif;">
+            <thead><tr>{thead}</tr></thead>
+            <tbody>{body}</tbody>
+          </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )

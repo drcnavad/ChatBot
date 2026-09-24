@@ -1,23 +1,17 @@
-# Stock Analysis App Requirements
+# Streamlit app
 streamlit>=1.28.0
 pandas>=2.0.0
-numpy>=1.24.0
 openpyxl>=3.1.0
 plotly>=5.0.0
 huggingface_hub>=0.20.0
 python-dotenv>=1.0.0
+
+# Data pipeline (notebooks + auto_fetch_fundamentals.py)
+numpy>=1.24.0
 alpaca-py>=0.40.0
-nest-asyncio>=1.5.0
 yfinance>=0.2.0
 newsapi-python>=0.2.7
 finnhub-python>=2.4.0
 transformers>=4.50.0
 torch>=2.0.0
-papermill>=2.5.0
 jupyter>=1.0.0
-pytz>=2024.1
-scikit-learn>=1.3.0
-
-# Telegram Bot Requirements
-alpaca-trade-api==3.2.0
-python-telegram-bot==22.5

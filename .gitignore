@@ -30,11 +30,13 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Data files - only signal_analysis.csv and news_cleaned_df.csv should be tracked
+# Data files - only the reports app.py reads are tracked
 Reports/*.csv
 Reports/*.xlsx
 !Reports/signal_analysis.csv
 !Reports/news_cleaned_df.csv
+!Reports/earnings_date.csv
+!Reports/daily_rank.csv
 !Reports/complete_company_analysis.xlsx
 
 # Backup/duplicate app files
