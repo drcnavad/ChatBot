@@ -228,13 +228,14 @@ def generate_ai_summary(ticker, ticker_df):
 # --- Data loading ---
 _REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Reports")
 _SIGNAL_CSV = os.path.join(_REPORTS_DIR, "signal_analysis.csv")
+_EARNINGS_CSV = os.path.join(_REPORTS_DIR, "earnings_date.csv")
 _RANK_CSV = os.path.join(_REPORTS_DIR, "daily_rank.csv")
 _RANK_COLS = ["Date", "Symbol", "Rank", "combined_signal"]
 
 
 @st.cache_data(ttl=3600)
-def load_data(_mtime: float):
-    """Load signal CSV; `_mtime` busts the cache when the file is rewritten."""
+def load_data(mtime: float):
+    """Load signal CSV; `mtime` busts the cache when the file is rewritten."""
     return pd.read_csv(_SIGNAL_CSV, parse_dates=['Date'])
 
 
@@ -262,10 +263,10 @@ def _compute_day_ranks(df, day):
 
 
 def sync_daily_ranks(df):
-    """Keep Reports/daily_rank.csv: past days stay frozen, today is recomputed.
+    """Keep Reports/daily_rank.csv: past days stay frozen; today and the last saved day are recomputed.
 
-    Re-running the notebook mid-day only changes today's ranks, even if historical
-    combined_signal rows get rewritten. Keeps the last 30 trading days.
+    The last saved day may have been snapshotted from a partial intraday run, so it is
+    refreshed once more with complete data. Keeps the last 30 trading days.
     """
     work = df[["Symbol", "Date", "combined_signal"]].dropna().copy()
     work["Date"] = work["Date"].dt.normalize()
@@ -274,7 +275,7 @@ def sync_daily_ranks(df):
 
     snap = pd.read_csv(_RANK_CSV) if os.path.exists(_RANK_CSV) else pd.DataFrame(columns=_RANK_COLS)
     snap["Date"] = pd.to_datetime(snap["Date"]).dt.normalize()
-    frozen = snap[(snap["Date"] < today) & snap["Date"].isin(recent_days)]
+    frozen = snap[(snap["Date"] < today) & (snap["Date"] < snap["Date"].max()) & snap["Date"].isin(recent_days)]
     frozen_days = set(frozen["Date"])
 
     out = pd.concat(
@@ -337,11 +338,15 @@ def build_signal_rank_table(df, n_days=20):
 
 # --- Earnings / fundamentals / news ---
 @st.cache_data(ttl=3600)
-def load_earnings_dates():
-    ed = pd.read_csv(os.path.join(_REPORTS_DIR, "earnings_date.csv"))
+def _load_earnings_dates(mtime: float):
+    ed = pd.read_csv(_EARNINGS_CSV)
     ed['Symbol'] = ed['Symbol'].astype(str).str.strip().str.upper()
     ed['Earnings Date'] = pd.to_datetime(ed['Earnings Date'], errors='coerce')
     return ed.dropna(subset=['Earnings Date'])
+
+
+def load_earnings_dates():
+    return _load_earnings_dates(os.path.getmtime(_EARNINGS_CSV))
 
 
 def get_last_next_earnings(symbols):
@@ -358,6 +363,14 @@ def get_last_next_earnings(symbols):
             'Next ED': nxt.strftime('%Y-%m-%d') if pd.notna(nxt) else '',
         })
     return pd.DataFrame(rows, columns=['Symbol', 'Last ED', 'Next ED'])
+
+
+def get_upcoming_earnings(symbols, days=7):
+    """Earnings within the next `days` days, soonest first (one row per symbol)."""
+    ed = load_earnings_dates()
+    today = pd.Timestamp.now().normalize()
+    soon = ed[ed['Symbol'].isin(symbols) & ed['Earnings Date'].between(today, today + pd.Timedelta(days=days))]
+    return soon.sort_values(['Earnings Date', 'Symbol']).drop_duplicates('Symbol').fillna({'Time': '—'})
 
 
 @st.cache_data(ttl=3600)
@@ -823,3 +836,31 @@ with tab_rank:
         """,
         unsafe_allow_html=True,
     )
+
+# --- Upcoming earnings (next 7 days) ---
+st.markdown("**Earnings · next 7 days**")
+upcoming = get_upcoming_earnings(available_symbols)
+if upcoming.empty:
+    st.caption("No earnings in the next 7 days.")
+else:
+    cell = 'padding:6px 12px;text-align:center;white-space:nowrap;border-right:1px solid #e2e8f0;'
+    symbol_row = "".join(
+        f'<td style="{cell}font-weight:700;"><a href="?symbol={quote(s)}" class="symbol-link" target="_self">{s}</a></td>'
+        for s in upcoming['Symbol']
+    )
+    date_row = "".join(
+        f'<td style="{cell}color:#374151;">{d:%a %b %d} · {t}</td>'
+        for d, t in zip(upcoming['Earnings Date'], upcoming['Time'])
+    )
+    st.markdown(
+        f"""
+        <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;">
+          <table style="border-collapse:collapse;font-size:0.85rem;font-family:Arial,sans-serif;">
+            <tr style="background:#f1f5f9;">{symbol_row}</tr>
+            <tr>{date_row}</tr>
+          </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("AM = before market open, PM = after market close. Not-yet-announced times are predicted from the stock's past reports.")

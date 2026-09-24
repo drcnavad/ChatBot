@@ -6,7 +6,7 @@ plotly>=5.0.0
 huggingface_hub>=0.20.0
 python-dotenv>=1.0.0
 
-# Data pipeline (notebooks + auto_fetch_fundamentals.py)
+# Data pipeline (notebooks + company_report_autofetch.py)
 numpy>=1.24.0
 alpaca-py>=0.40.0
 yfinance>=0.2.0
