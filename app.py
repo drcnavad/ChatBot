@@ -184,7 +184,9 @@ def generate_ai_summary(ticker, ticker_df):
         f"Stock: {ticker}\n"
         f"Date: {latest['Date']:%Y-%m-%d}\n"
         f"Current Price: ${price:.2f}\n"
-        f"Technical Score: {latest['combined_signal']:.2f}\n"
+        f"Model Signal: {latest['final_trade']}\n"
+        f"Technical Score: {latest['Technical_Score']:.2f}\n"
+        f"Combined Score: {latest['combined_signal']:.2f}\n"
         f"RSI: {latest['RSI']:.2f}\n"
         f"MACD: {latest['macd']:.2f}\n\n"
         f"Price vs Moving Averages (Difference):\n{ma_lines}\n\n"
@@ -466,9 +468,19 @@ def ai_analysis_dialog(ticker, ticker_df):
 
 
 def _periods(mask):
-    """(start, end) index pairs for each consecutive True run in a boolean Series."""
+    """(start, end) pairs for each consecutive True run in a date-indexed boolean Series.
+
+    `end` is the next trading day, so runs touch without gaps and one-day runs stay visible.
+    """
     runs = (mask != mask.shift()).cumsum()
-    return [(g.index[0], g.index[-1]) for _, g in mask[mask].groupby(runs[mask])]
+    next_day = pd.Series(mask.index, index=mask.index).shift(-1).fillna(mask.index[-1] + pd.Timedelta(days=1))
+    return [(g.index[0], next_day[g.index[-1]]) for _, g in mask[mask].groupby(runs[mask])]
+
+
+def direction_flips(frame):
+    """Rows where final_trade flips between BUY and SELL; HOLD/EARNING days in between are ignored."""
+    direction = frame[frame['final_trade'].isin(['BUY', 'SELL'])].sort_values(['Symbol', 'Date'])
+    return direction[direction['final_trade'].ne(direction.groupby('Symbol')['final_trade'].shift())]
 
 
 # --- Main UI ---
@@ -488,8 +500,8 @@ if q_symbol in available_symbols:
     del st.query_params["symbol"]
 
 by_score = latest_data.sort_values('combined_signal', ascending=False)
-buy_symbols, hold_symbols, sell_symbols = (
-    by_score.loc[by_score['final_trade'] == sig, 'Symbol'].tolist() for sig in ('BUY', 'HOLD', 'SELL')
+buy_symbols, hold_symbols, sell_symbols, earning_symbols = (
+    by_score.loc[by_score['final_trade'] == sig, 'Symbol'].tolist() for sig in ('BUY', 'HOLD', 'SELL', 'EARNING')
 )
 rank_info = day_rank_change(df)
 
@@ -527,12 +539,12 @@ st.markdown(
 )
 
 symbol_data = latest_data.set_index('Symbol')
-streaks = symbol_data[['Buy Streak', 'Sell Streak']].fillna(0).astype(int)
+STREAK_COLS = ['Buy Streak', 'Sell Streak', 'Hold Streak']
+streaks = symbol_data[STREAK_COLS].fillna(0).astype(int)
 
 
 def _ticker_label(s):
-    buy, sell = streaks.loc[s]
-    streak = f"Buy Streak of {buy} days" if buy else (f"Sell Streak of {sell} days" if sell else "No streak")
+    streak = next((f"{col} of {n} days" for col, n in streaks.loc[s].items() if n), "No streak")
     return f"{s}  ·  {streak}  ·  score {symbol_data.loc[s, 'combined_signal']:.0f}"
 
 
@@ -555,7 +567,8 @@ with ai_col:
         ai_analysis_dialog(ticker, ticker_data)
 
 with st.expander(f"Universe · {len(available_symbols)} tickers (click a symbol)", expanded=False):
-    for label, symbols in (("BULLISH", buy_symbols), ("HOLD", hold_symbols), ("BEARISH", sell_symbols)):
+    for label, symbols in (("BULLISH", buy_symbols), ("HOLD", hold_symbols), ("BEARISH", sell_symbols),
+                           ("EARNINGS ≤2 DAYS", earning_symbols)):
         if symbols:
             st.markdown(f"**{label}** · {make_clickable_list(symbols)}", unsafe_allow_html=True)
 
@@ -594,7 +607,7 @@ def _stat(label, value, color="#0f172a"):
     )
 
 
-signal = {'BUY': 'BULLISH', 'SELL': 'BEARISH'}.get(latest['final_trade'], 'HOLD')
+signal = {'BUY': 'BULLISH', 'SELL': 'BEARISH', 'EARNING': 'EARNINGS'}.get(latest['final_trade'], 'HOLD')
 badge_cls = {'BULLISH': 'sa-badge-bull', 'BEARISH': 'sa-badge-bear'}.get(signal, 'sa-badge-hold')
 close = _num(latest['Close'])
 sentiment = _num(latest['SentimentScore'])
@@ -652,10 +665,8 @@ with tab_charts:
 
     # Row 1: price, earnings markers, moving averages, streak bars
     hover_close = [
-        f"Combined Signal: {sig:.2f}"
-        + (f"<br>Buy Streak: {int(b)} days" if b > 0 else "")
-        + (f"<br>Sell Streak: {int(s)} days" if s > 0 else "")
-        for sig, b, s in zip(chart['combined_signal'], chart['Buy Streak'], chart['Sell Streak'])
+        f"Combined Signal: {sig:.2f}" + "".join(f"<br>{col}: {int(n)} days" for col, n in zip(STREAK_COLS, counts) if n > 0)
+        for sig, *counts in zip(chart['combined_signal'], *(chart[c] for c in STREAK_COLS))
     ]
     fig.add_trace(go.Scatter(
         x=chart.index, y=chart['Close'], name='Close Price',
@@ -688,6 +699,10 @@ with tab_charts:
         for start, end in _periods(mask):
             fig.add_shape(type="line", x0=start, x1=end, y0=top_y, y1=top_y,
                           line=dict(color=color, width=width), row=1, col=1)
+    flips = direction_flips(ticker_data)
+    for day, trade in flips.loc[flips['Date'] >= chart.index[0], ['Date', 'final_trade']].itertuples(index=False):
+        fig.add_vline(x=day, line=dict(color={'BUY': "#2ca02c", 'SELL': "#d62728"}[trade], width=1, dash="dot"),
+                      opacity=0.6, row="all", col=1)
 
     # Row 2: RSI with dotted combined score on the right axis
     fig.add_trace(go.Scatter(
@@ -738,7 +753,9 @@ with tab_charts:
         dragmode=False,
         hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family="Arial, sans-serif"),
     )
-    fig.update_xaxes(tickformat='%b %Y', spikemode="across", zeroline=False, **grid)
+    fig.update_xaxes(tickformat='%b %Y', spikemode="across", zeroline=False, **(grid | dict(showgrid=False)))
+    fig.update_xaxes(showticklabels=True, tickformat='%b %d', dtick=7 * 86400000, tick0="2024-01-01",
+                     tickangle=-90, tickfont=dict(size=9, color='#6b7280'), row=1, col=1)
     fig.update_yaxes(title_text="Price ($)", title_font=axis_title, spikemode="toaxis", zeroline=False,
                      tickformat='$,.0f', row=1, col=1, **grid)
     fig.update_yaxes(title_text="RSI", title_font=axis_title, spikemode="toaxis", zeroline=False,
@@ -864,3 +881,22 @@ else:
         unsafe_allow_html=True,
     )
     st.caption("AM = before market open, PM = after market close. Not-yet-announced times are predicted from the stock's past reports.")
+
+# --- Day-1 BUY / SELL streaks ---
+st.markdown("**New signals · day 1**")
+flips_today = direction_flips(df).merge(latest_data[['Symbol', 'Date']], on=['Symbol', 'Date'])
+day1 = by_score[by_score['Symbol'].isin(flips_today['Symbol'])]
+day1_rows = "".join(
+    f'<tr><td style="padding:8px 12px;font-weight:700;color:{color};white-space:nowrap;border-right:1px solid #e2e8f0;">{trade} day 1</td>'
+    f'<td style="padding:8px 12px;">{make_clickable_list(day1.loc[day1["final_trade"] == trade, "Symbol"]) or "—"}</td></tr>'
+    for trade, color in (("BUY", "#1a7f37"), ("SELL", "#cf222e"))
+)
+st.markdown(
+    f"""
+    <div style="border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;">
+      <table style="border-collapse:collapse;width:100%;font-size:0.85rem;font-family:Arial,sans-serif;">{day1_rows}</table>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+st.caption("Stocks whose green or red line starts on the latest day (first BUY after a SELL, or first SELL after a BUY; HOLD days in between are ignored), ordered by combined score.")
