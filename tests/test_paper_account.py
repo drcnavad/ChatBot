@@ -33,6 +33,10 @@ FIXTURES = {
          "unrealized_pl": "-50.00", "unrealized_plpc": "-0.025", "side": "long"}],
     "/v2/orders": [{"submitted_at": "2026-09-22T13:30:05.123Z", "symbol": "NVDA", "side": "buy", "qty": "10",
                     "filled_qty": "10", "type": "market", "status": "filled", "filled_avg_price": "180.00"}],
+    "/v2/clock": {"timestamp": "2026-09-26T16:00:00.123456789Z", "is_open": False,
+                    "next_open": "2026-09-28T13:30:00Z", "next_close": "2026-09-26T20:00:00Z"},
+    "/v2/account/portfolio/history": {"timestamp": [1727308800, 1727395200], "equity": [100000.0, 101234.5],
+                    "profit_loss": [0.0, 1234.5], "profit_loss_pct": [0.0, 0.012345]},
 }
 
 
@@ -175,8 +179,9 @@ try:
     # ------------------------------------------------------------ read-only: only GETs, correct headers, no order code
     expect(REQUESTS and all(q["method"] == "GET" for q in REQUESTS), f"only GET requests ({len(REQUESTS)} made)")
     expect(all(q["key"] == KEY and q["secret"] == SECRET for q in REQUESTS), "auth headers sent on every request")
-    expect(all(q["path"].split("?")[0] in ("/v2/account", "/v2/positions", "/v2/orders", "/v2/forbidden") for q in REQUESTS),
-           "only account/positions/orders endpoints requested")
+    expect(all(q["path"].split("?")[0] in ("/v2/account", "/v2/positions", "/v2/orders", "/v2/clock",
+                                              "/v2/account/portfolio/history", "/v2/forbidden") for q in REQUESTS),
+           "only account/positions/orders/clock/history endpoints requested")
     src = open(os.path.join(ROOT, "alpaca_paper.py")).read()
     expect(all(w not in src for w in ('"POST"', '"DELETE"', '"PATCH"', "submit_order", "TradingClient")) and src.count('method="GET"') == 1,
            "alpaca_paper.py contains no order-placing code")

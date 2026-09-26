@@ -11,6 +11,9 @@ It picks the mode by itself (clock in US Central time):
            validate      the report files the app reads
   QUICK  any other time: main + validate only. Zero quota APIs (only Alpaca market-data bars).
 Both end with a short summary: what ran, API calls used, data date, the holdings ALERT line and the next check / rebalance.
+The upstream online steps (fundamentals, processing, scoring, sentiment, earnings) are optional: if one
+fails, the pipeline warns and continues - main_signal_analysis.ipynb reuses the last good upstream tables,
+so the evening trade still runs on fresh signals. Only a main or validate failure stops the pipeline.
 
     python run_all.py --full          # force the online update now (NewsAPI still refused if it ran within 24 h)
     python run_all.py --full --force-news     # ... and allow a second NewsAPI run (may exceed the free 100/day)
@@ -65,6 +68,7 @@ import glob
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -75,6 +79,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
 LOG_DIR = os.path.join(REPORTS, "logs")
 STATE_FILE = os.path.join(REPORTS, "run_state.json")
+CHECKPOINT_FILE = os.path.join(REPORTS, ".pipeline_checkpoint.json")   # watchdog resume point (see pipeline_watchdog.py)
 CT, ET = ZoneInfo("America/Chicago"), ZoneInfo("America/New_York")
 FULL_DAYS = {0, 2, 4}                  # Mon, Wed, Fri
 FULL_AFTER = (15, 15)                  # 3:15 PM CT - the scheduled pipeline/trade time
@@ -96,6 +101,46 @@ STEPS = [
     ("validate", "check", None, "always"),
 ]
 EXPECTED_CALLS = {"fundamentals": "Alpha Vantage <= 24", "sentiment": "NewsAPI 97 + Finnhub 97", "earnings": "Finnhub 97"}
+
+# Steps whose failure must NOT stop the pipeline or block the evening trade. Their
+# outputs degrade gracefully: main_signal_analysis.ipynb reuses the last good
+# upstream tables (weighted_sentiment.csv, balance_sheet_weights.csv,
+# earnings_date.csv), which are informational inputs to scoring, not load-bearing.
+OPTIONAL_STEPS = frozenset({"fundamentals", "processing", "scoring", "sentiment", "earnings"})
+
+
+def _stop_on_failure(name, keep_going):
+    """True when a failed step must stop the pipeline right away.
+
+    Optional steps never stop it; --keep-going never stops it; anything else
+    (main, validate) stops it so broken picks can't reach the trade.
+    """
+    return name not in OPTIONAL_STEPS and not keep_going
+
+
+def _critical_failures(failures):
+    """Failures that block the evening trade and set a nonzero exit code.
+
+    Optional-step failures degrade gracefully (the main signal notebook reuses
+    the last good tables); 'sync_paper' is a read-only refresh, so neither
+    blocks trading.
+    """
+    return [f for f in failures if f not in OPTIONAL_STEPS and f != "sync_paper"]
+
+
+def _trade_decision(failures):
+    """Evening-trade guard: (proceed, reason).
+
+    Only critical failures block trading. Optional-step failures (and the
+    read-only sync_paper) degrade gracefully - the main signals are fresh,
+    so the trade proceeds.
+    """
+    crit = _critical_failures(failures)
+    if crit:
+        return False, "critical pipeline failures (%s) - no orders sent" % ", ".join(crit)
+    if failures:
+        return True, "proceeding despite non-critical failures (%s) - signals are fresh" % ", ".join(failures)
+    return True, ""
 
 # Files the app / downstream steps read, with the columns they rely on
 REQUIRED = {
@@ -119,6 +164,46 @@ REQUIRED = {
 }
 XLSX_COLUMNS = ["Symbol", "Sector", "CurrentPrice", "FairValue_Composite", "PE_Ratio", "PB_Ratio", "RevenueGrowth_YoY",
                 "TTM_ROE", "TTM_NetProfitMargin", "Debt_to_Equity"]
+
+
+# ----------------------------------------------------------------------------- notifications
+def _notify(title, message):
+    """Tell the user the pipeline needs attention (macOS notification + loud log line).
+
+    Best effort: the log line is the primary channel (it lands in Reports/logs/run_*.log
+    and the launchd logs); the macOS notification is attempted so the event is visible
+    even without checking logs. Never raises."""
+    logging.info("NOTIFY: %s - %s", title, message)
+    try:
+        import subprocess as _sp
+        safe_title = str(title).replace('"', "'").replace("\\", "")[:100]
+        safe_msg = str(message).replace('"', "'").replace("\\", "")[:300]
+        _sp.run(["osascript", "-e",
+                 f'display notification "{safe_msg}" with title "{safe_title}" sound name "Basso"'],
+                timeout=5, capture_output=True)
+    except Exception:
+        pass  # the log line above is the fallback
+
+
+def _notebook_error_summary(output, notebook):
+    """One line describing a failed nbconvert run: 'main_signal_analysis.ipynb failed at
+    cell 12, line 5: NameError: name 'x' is not defined'. Falls back to the last
+    nbconvert ERROR line, then to a pointer at the run log. Pure: safe to unit-test."""
+    text = output or ""
+    cell = re.search(r"Cell In\[(\d+)\], line (\d+)", text)
+    err = None
+    for line in reversed(text.splitlines()):
+        s = line.strip().lstrip(">").strip()
+        if ":" in s and re.match(r"^[\w.]+(Error|Exception|Warning):", s):
+            err = s[:200]
+            break
+    if err is None:
+        for line in reversed(text.splitlines()):
+            if "ERROR |" in line:
+                err = line.split("ERROR |", 1)[1].strip()[:200]
+                break
+    where = f"cell {cell.group(1)}, line {cell.group(2)}" if cell else "unknown location"
+    return f"{notebook} failed at {where}: {err or 'see the run log for the traceback'}"
 
 
 # ----------------------------------------------------------------------------- state + mode (pure logic, unit-tested)
@@ -149,6 +234,41 @@ def save_state(state, path=STATE_FILE):
     with open(tmp, "w") as f:
         json.dump(state, f, indent=1, sort_keys=True)
     os.replace(tmp, path)
+
+
+def write_checkpoint(run_id, argv, mode, steps_done, failed_step=None, phase="steps", path=CHECKPOINT_FILE):
+    """Record pipeline progress for pipeline_watchdog.py: which steps finished and where it stopped.
+
+    Written after every step and before the trade/fill-check phases; cleared on a clean run.
+    Best effort - never raises, so a checkpoint failure can never break the pipeline itself. """
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"run_id": run_id, "argv": list(argv), "mode": mode, "phase": phase,
+                       "steps_done": list(steps_done), "failed_step": failed_step,
+                       "updated_at": datetime.now(CT).isoformat(timespec="seconds")}, f)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def read_checkpoint(path=CHECKPOINT_FILE):
+    """The last checkpoint dict, or {} when there is none (or it is corrupt)."""
+    try:
+        with open(path) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def clear_checkpoint(path=CHECKPOINT_FILE):
+    """Remove the checkpoint after a clean run (exit 0). Best effort - never raises."""
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def is_trading_day(d):
@@ -352,12 +472,14 @@ def setup_logging():
 
 
 def run_cmd(cmd, env):
-    """Run a subprocess, stream its output into the log, return the exit code."""
+    """Run a subprocess, stream its output into the log. Returns (exit code, captured output text)."""
     proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    lines = []
     for line in proc.stdout:
+        lines.append(line)
         if line.strip():
             logging.info("    %s", line.rstrip())
-    return proc.wait()
+    return proc.wait(), "".join(lines)
 
 
 def run_notebook(path, env):
@@ -503,6 +625,17 @@ def main(argv=None):
 
     now = datetime.fromisoformat(a.now).replace(tzinfo=CT) if a.now else datetime.now(CT)
     t_wall = time.time()
+    run_id = f"{now:%Y%m%d_%H%M%S}_{os.getpid()}"        # identifies this run in the watchdog checkpoint
+    saved_argv = list(argv) if argv is not None else list(sys.argv[1:])
+    _ckpt_on = a.now is None               # --now is the tests' fake clock: test runs never touch the real checkpoint
+
+    def ckpt_write(*a_, **k_):
+        if _ckpt_on:
+            write_checkpoint(*a_, **k_)
+
+    def ckpt_clear():
+        if _ckpt_on:
+            clear_checkpoint()
 
     def clock():                                            # the run's clock (= real time unless --now is given)
         """The run's clock as ISO text (= real time unless --now is given)."""
@@ -566,6 +699,7 @@ def main(argv=None):
             logging.info("FILL CHECK: %s - nothing to do", reason)
             return 0
         logging.info("=== fill-check (paper_trade.complete_unfilled_orders, PAPER only)")
+        ckpt_write(run_id, saved_argv, mode, [], phase="fill-check")
         try:
             import paper_trade
             results = paper_trade.complete_unfilled_orders(dry_run=False)
@@ -578,8 +712,11 @@ def main(argv=None):
         except Exception as e:
             logging.warning("  fill check failed: %s", e)
             return 1
+        ckpt_clear()                                          # clean fill check - nothing to resume
         return 0
 
+    _notify("Pipeline started",
+            f"{mode} mode ({why}) - {len([s for s in steps if s[0] not in skip])} steps")
     env = dict(os.environ)
     env["PIPELINE_SENTIMENT_MODE"] = "online" if mode == "full" else "offline"
     env["PIPELINE_EARNINGS_MODE"] = "online" if mode == "full" else "offline"
@@ -597,11 +734,12 @@ def main(argv=None):
             state["last_fundamentals_date"] = now.date().isoformat(); save_state(state)
         t0 = time.time()
         logging.info("=== %s (%s)", name, target or "report checks")
+        out, problems = "", []
         try:
             if kind == "script":
-                rc = run_cmd([sys.executable, target], env)
+                rc, out = run_cmd([sys.executable, target], env)
             elif kind == "notebook":
-                rc = run_notebook(target, env)
+                rc, out = run_notebook(target, env)
             else:
                 problems = validate()
                 for prob in problems:
@@ -611,6 +749,8 @@ def main(argv=None):
             logging.exception("step %s crashed: %s", name, e)
             rc = 1
         ran.append((name, rc == 0, time.time() - t0))
+        ckpt_write(run_id, saved_argv, mode, [n for n, ok, _ in ran if ok],
+                   failed_step=name if rc != 0 else None, phase="steps")
         if name == "sentiment" and rc == 0:
             # Stamp the NewsAPI 24 h guard only after the calls actually completed. The notebook
             # writes its own stamp when its NewsAPI loop finishes - prefer that timestamp so the
@@ -621,9 +761,18 @@ def main(argv=None):
         logging.info("--- %s %s (%.0fs)", name, "OK" if rc == 0 else f"FAILED (exit {rc})", time.time() - t0)
         if rc != 0:
             failures.append(name)
-            if not a.keep_going:
+            if kind == "notebook":
+                _notify(f"Notebook FAILED: {target}", _notebook_error_summary(out, target))
+            else:
+                detail = "; ".join(problems) if problems else f"exit code {rc}"
+                _notify(f"Pipeline step FAILED: {name}", f"{target or 'report checks'} - {detail}")
+            if _stop_on_failure(name, a.keep_going):
                 break
-    if mode == "full" and not failures and not a.only and not a.start:
+            elif name in OPTIONAL_STEPS:
+                logging.warning("=== %s failed but is optional - continuing with the last good tables", name)
+    # A full update counts when its critical steps (main/validate) succeeded, even if
+    # optional upstream steps failed - the main signals are fresh.
+    if mode == "full" and not _critical_failures(failures) and not a.only and not a.start:
         state["last_full_date"] = now.date().isoformat()
         state["last_full_at"] = clock()
     state["last_run_at"], state["last_mode"] = clock(), mode
@@ -640,12 +789,17 @@ def main(argv=None):
 
     trade_results, trade_meta = None, None
     if a.trade:
+        ckpt_write(run_id, saved_argv, mode, [n for n, ok, _ in ran if ok], phase="trade")
         try:
-            if failures:
-                logging.warning("=== trade skipped: pipeline had failures (%s) - no orders sent", ", ".join(failures))
+            proceed, reason = _trade_decision(failures)
+            if not proceed:
+                logging.warning("=== trade skipped: %s", reason)
                 failures.append("trade_skipped")
             else:
-                logging.info("=== trade (paper_trade.auto_trade, PAPER only)")
+                if reason:
+                    logging.warning("=== trade %s", reason)
+                else:
+                    logging.info("=== trade (paper_trade.auto_trade, PAPER only)")
                 try:
                     import paper_trade
                     orders, trade_meta, trade_results = paper_trade.auto_trade(target="auto", dry_run=False)
@@ -671,10 +825,12 @@ def main(argv=None):
 
     # ------------------------------------------------------------------ summary
     info, calls = data_summary(), read_calls(calls_file)
+    crit = _critical_failures(failures)
     logging.info("")
     logging.info("=" * 78)
     logging.info("SUMMARY  %s mode (%s), %.0f s%s", mode.upper(), why, time.time() - t_start,
-                 f"  |  FAILED at: {', '.join(failures)}" if failures else "")
+                 f"  |  FAILED at: {', '.join(crit)}" if crit
+                 else (f"  |  warnings: {', '.join(failures)}" if failures else ""))
     logging.info("  Ran:     %s", ", ".join(f"{n} {'ok' if ok else 'FAILED'}" for n, ok, _ in ran) or "nothing")
     if skip:
         logging.info("  Skipped: %s", "; ".join(f"{k} ({v.split(' - ')[0]})" for k, v in skip.items()))
@@ -704,7 +860,17 @@ def main(argv=None):
         logging.info("  %s", info["next"])
     logging.info("  Next full online update: %s  |  log %s", next_full_update(now, state), os.path.relpath(log_path, ROOT))
     logging.info("=" * 78)
-    return 1 if failures else 0
+    elapsed = time.time() - t_start
+    if crit:
+        _notify("Pipeline FAILED", f"{mode} mode, {elapsed:.0f}s - failed: {', '.join(crit)}")
+    elif failures:
+        _notify("Pipeline finished with warnings",
+                f"{mode} mode, {elapsed:.0f}s - {', '.join(failures)} (main signals are fresh)")
+    else:
+        _notify("Pipeline finished", f"{mode} mode, {elapsed:.0f}s - {len(ran)} steps ok")
+    if not crit:
+        ckpt_clear()            # clean run (warnings ok) - the watchdog has nothing to resume
+    return 1 if crit else 0
 
 
 if __name__ == "__main__":

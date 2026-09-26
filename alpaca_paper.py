@@ -1,10 +1,10 @@
-"""Read-only view of your Alpaca PAPER account: account summary, positions and recent orders.
+"""Read-only view of your Alpaca PAPER account: account summary, positions, orders, market clock and equity history.
 
 Safety rules built into this module:
   * Only the paper endpoint https://paper-api.alpaca.markets/v2 is accepted; any other URL (the live api.alpaca.markets,
     plain http, another version or host) raises PaperAccountError before a request is made.
-  * Only HTTP GET requests to /account, /positions and /orders are possible. There is no code here that places,
-    changes or cancels orders.
+  * Only HTTP GET requests to /account, /positions, /orders, /clock and /account/portfolio/history are possible.
+    There is no code here that places, changes or cancels orders.
   * The keys come from .env (ALPACA_PAPER_KEY_ID, ALPACA_PAPER_SECRET_KEY). They are sent only in the request headers
     and are never printed, logged or written to a file.
 
@@ -40,7 +40,8 @@ KEY_ENV, SECRET_ENV = "ALPACA_PAPER_KEY_ID", "ALPACA_PAPER_SECRET_KEY"
 # Also accepted, in this order, if the names above are empty: Alpaca's standard names, then the market-data names
 # ALPACA_API_KEY / ALPACA_SECRET_KEY - but only if that key ID is a PAPER key (paper key IDs start with "PK").
 FALLBACK_NAMES = [("APCA_API_KEY_ID", "APCA_API_SECRET_KEY"), ("ALPACA_API_KEY", "ALPACA_SECRET_KEY")]
-ALLOWED_PATHS = ("/account", "/positions", "/orders")          # read-only endpoints
+ALLOWED_PATHS = ("/account", "/positions", "/orders", "/clock",
+                 "/account/portfolio/history")   # read-only endpoints (GET only, paper host only)
 _LOCAL_TEST_URL = re.compile(r"http://(127\.0\.0\.1|localhost):\d{2,5}/v2")   # tests only (mock server on this machine)
 CT = ZoneInfo("America/Chicago")
 
@@ -104,7 +105,20 @@ class PaperAccount:
         except urllib.error.URLError as e:
             raise PaperAccountError(f"GET {path} failed: {e.reason}") from None
 
-    # --- the three read-only views -----------------------------------------------------------------------------------
+    # --- the read-only views ---------------------------------------------------------------------------------------
+    @staticmethod
+    def _order_rows(order_dicts):
+        """Shared row format for recent_orders() and open_orders()."""
+        rows = []
+        for o in order_dicts:
+            t = pd.to_datetime(o.get("submitted_at"), utc=True, errors="coerce")
+            rows.append({"Submitted (CT)": t.tz_convert(CT).strftime("%Y-%m-%d %I:%M %p") if pd.notna(t) else "",
+                         "Symbol": o.get("symbol"), "Side": o.get("side"), "Qty": o.get("qty") or o.get("notional"),
+                         "Filled qty": o.get("filled_qty"), "Type": o.get("type"), "Status": o.get("status"),
+                         "Filled avg price": o.get("filled_avg_price")})
+        return pd.DataFrame(rows, columns=["Submitted (CT)", "Symbol", "Side", "Qty", "Filled qty", "Type", "Status",
+                                           "Filled avg price"])
+
     def account_summary(self):
         """Equity, cash and buying power (plus today's change) as a dict of floats."""
         a = self._get("/account")
@@ -124,15 +138,42 @@ class PaperAccount:
 
     def recent_orders(self, limit=20):
         """The most recent orders (any status), newest first; times in US Central."""
+        return self._order_rows(self._get("/orders", {"status": "all", "limit": int(limit), "direction": "desc"}))
+
+    def open_orders(self, limit=50):
+        """Orders that are still open (not filled/canceled/expired), newest first; times in US Central.
+
+        This is what the pipeline watchdog reads to answer "are the evening's orders still hanging?". """
+        return self._order_rows(self._get("/orders", {"status": "open", "limit": int(limit), "direction": "desc"}))
+
+    def market_clock(self):
+        """Is the market open right now? Next open/close times, in US Central.
+
+        Lets the watchdog distinguish "the market is closed" from a real failure. """
+        c = self._get("/clock")
+
+        def ct(ts):
+            t = pd.to_datetime(ts, utc=True, errors="coerce")
+            return t.tz_convert(CT).strftime("%Y-%m-%d %I:%M %p") if pd.notna(t) else ""
+
+        return {"Is open": bool(c.get("is_open")), "Next open (CT)": ct(c.get("next_open")),
+                "Next close (CT)": ct(c.get("next_close")), "Timestamp (CT)": ct(c.get("timestamp"))}
+
+    def portfolio_history(self, period="1M", timeframe="1D"):
+        """Equity curve: one row per bar with As_Of (CT), Equity, P/L $ and P/L %.
+
+        Used for drift detection (is the account behaving like the strategy expects?). """
+        h = self._get("/account/portfolio/history", {"period": period, "timeframe": timeframe})
+        ts, eq = h.get("timestamp") or [], h.get("equity") or []
+        pl, plp = h.get("profit_loss") or [], h.get("profit_loss_pct") or []
         rows = []
-        for o in self._get("/orders", {"status": "all", "limit": int(limit), "direction": "desc"}):
-            t = pd.to_datetime(o.get("submitted_at"), utc=True, errors="coerce")
-            rows.append({"Submitted (CT)": t.tz_convert(CT).strftime("%Y-%m-%d %I:%M %p") if pd.notna(t) else "",
-                         "Symbol": o.get("symbol"), "Side": o.get("side"), "Qty": o.get("qty") or o.get("notional"),
-                         "Filled qty": o.get("filled_qty"), "Type": o.get("type"), "Status": o.get("status"),
-                         "Filled avg price": o.get("filled_avg_price")})
-        return pd.DataFrame(rows, columns=["Submitted (CT)", "Symbol", "Side", "Qty", "Filled qty", "Type", "Status",
-                                           "Filled avg price"])
+        for i, t in enumerate(ts):
+            dt = pd.to_datetime(t, unit="s", utc=True, errors="coerce")
+            rows.append({"As_Of (CT)": dt.tz_convert(CT).strftime("%Y-%m-%d %H:%M") if pd.notna(dt) else "",
+                         "Equity": float(eq[i]) if i < len(eq) and eq[i] is not None else float("nan"),
+                         "P/L $": float(pl[i]) if i < len(pl) and pl[i] is not None else 0.0,
+                         "P/L %": float(plp[i]) * 100 if i < len(plp) and plp[i] is not None else 0.0})
+        return pd.DataFrame(rows, columns=["As_Of (CT)", "Equity", "P/L $", "P/L %"])
 
 
 # --- files for the rest of the pipeline --------------------------------------------------------------------------------
@@ -177,7 +218,9 @@ def main(argv=None):
     a = p.parse_args(argv)
     acct = PaperAccount()
     s = acct.account_summary()
+    clock = acct.market_clock()
     print(f"PAPER account: equity ${s['Equity']:,.2f} | cash ${s['Cash']:,.2f} | buying power ${s['Buying power']:,.2f}")
+    print(f"Market: {'OPEN' if clock['Is open'] else 'CLOSED'} (next open {clock['Next open (CT)'] or 'n/a'})")
     print(acct.positions().round(2).to_string(index=False))
     print(acct.recent_orders(a.orders).to_string(index=False))
     if a.sync:

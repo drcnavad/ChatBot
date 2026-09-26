@@ -1,6 +1,7 @@
 #!/bin/bash
 # Login catch-up for the evening trade run. Executed at every Mac login by the
-# com.stockanalysis.trade-catchup launchd agent. It fires `run_all.py --trade`
+# com.stockanalysis.trade-catchup launchd agent. It fires `pipeline_watchdog.py --trade`
+# (the watchdog wraps run_all.py: same arguments, plus transient-failure retries)
 # ONLY when ALL of these hold:
 #   - today is Mon / Wed / Fri,
 #   - it is after 3:15 PM CT but before 7:00 PM CT (a catch-up this late may finish
@@ -33,5 +34,5 @@ if [ "$LAST_TRADE_DAY" = "$TODAY" ]; then exit 0; fi   # today's run already hap
 
 PY="$(command -v python || command -v python3)"
 LOG="$PROJ/Reports/logs/launchd_catchup.log"
-echo "$(TZ=America/Chicago date '+%F %T %Z') catch-up: missed evening trade - running run_all.py --trade" >> "$LOG"
-"$PY" run_all.py --trade >> "$LOG" 2>&1
+echo "$(TZ=America/Chicago date '+%F %T %Z') catch-up: missed evening trade - running pipeline_watchdog.py --trade" >> "$LOG"
+"$PY" pipeline_watchdog.py --trade >> "$LOG" 2>&1
