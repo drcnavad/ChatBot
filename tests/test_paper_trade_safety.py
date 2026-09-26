@@ -2,7 +2,7 @@
 
 Covers:
 1. fail-closed unknown signal status: _is_buy_signal / build_orders / latest_signal_status
-2. fail-closed cash guard: apply_cash_guard with unknown/invalid buying power
+2. fail-closed buying-power guard: apply_buying_power_guard with unknown/invalid buying power
 3. stable client order ids + broker reconciliation: _client_order_id,
    _broker_orders_by_client_id, _evening_submitted_on_broker, _morning_completion_plan
 4. sequenced evening submit: SELLs settle before BUYs are sized (submit_paper_extended_sequenced)
@@ -233,25 +233,25 @@ def test_latest_signal_status_missing_file():
           "unknown status: missing strategy_changes.csv -> {} (callers treat as HOLD)")
 
 
-# --- 2. fail-closed cash guard ---------------------------------------------------
-def test_cash_guard_unknown_buying_power():
+# --- 2. fail-closed buying-power guard -------------------------------------------
+def test_buying_power_guard_unknown_value():
     for bp, label in [(None, "None"), (float("nan"), "NaN"),
                       (float("inf"), "inf"), (-5, "negative"), ("junk", "non-numeric")]:
-        orders = paper_trade.apply_cash_guard(_orders_frame(), bp)
+        orders = paper_trade.apply_buying_power_guard(_orders_frame(), bp)
         buys = orders[orders["Symbol"].isin(["AAA", "BBB"])]
-        ok = ((buys["Side"] == "SKIP (no cash)").all()
+        ok = ((buys["Side"] == "SKIP (no buying power)").all()
               and (buys["Shares"] == 0).all()
               and (orders[orders["Symbol"] == "CCC"]["Side"] == "SELL").all())
-        check(ok, f"cash guard: cash={label} -> BUYs SKIP (no cash), SELL untouched")
+        check(ok, f"buying-power guard: bp={label} -> BUYs SKIP (no buying power), SELL untouched")
 
 
-def test_cash_guard_valid_still_caps():
-    orders = paper_trade.apply_cash_guard(_orders_frame(), 1000.0)
+def test_buying_power_guard_valid_still_caps():
+    orders = paper_trade.apply_buying_power_guard(_orders_frame(), 1000.0)
     aaa = orders[orders["Symbol"] == "AAA"].iloc[0]
     bbb = orders[orders["Symbol"] == "BBB"].iloc[0]
     total = aaa["Shares"] * aaa["Price"] + bbb["Shares"] * bbb["Price"]
     check(aaa["Side"] == "BUY" and bbb["Side"] == "BUY" and total <= 1000.0,
-          f"cash guard: valid BP still caps buys proportionally (spend {total} <= 1000)")
+          f"buying-power guard: valid BP still caps buys proportionally (spend {total} <= 1000)")
 
 
 # --- 3. stable client order ids + broker reconciliation --------------------------
@@ -447,12 +447,28 @@ def test_morning_sell_clamped_to_live_positions():
               "morning: SELL remainder clamped to the 6 shares actually held")
 
 
+def test_trade_summary_lists_buys_and_sells():
+    df = pd.DataFrame([
+        ("NVDA", "BUY", 10, "x1", "submitted"),
+        ("MSFT", "BUY", 5, "x2", "STAGED for morning market (past 7 PM CT - not submitted)"),
+        ("INTC", "SELL", 8, "x3", "submitted"),
+        ("AMD", "BUY", 3, "x4", "SKIPPED: <1 whole share"),
+        ("TSLA", "SELL", 2, "x5", "FAILED: no price"),
+        ("META", "SKIP (no buying power)", 0, None, "SKIP (no buying power)"),
+    ], columns=["Symbol", "Side", "Shares", "Order_ID", "Status"])
+    s = paper_trade._trade_summary(df)
+    check(s == "Bought: NVDA x10, MSFT x5 | Sold: INTC x8",
+          f"trade summary lists submitted/staged buys and sells (got {s!r})")
+    check(paper_trade._trade_summary(df.iloc[0:0]) == "Bought: none | Sold: none",
+          "trade summary on empty results says none/none")
+
+
 if __name__ == "__main__":
     test_unknown_status_is_not_a_buy_signal()
     test_build_orders_unknown_status_hold()
     test_latest_signal_status_missing_file()
-    test_cash_guard_unknown_buying_power()
-    test_cash_guard_valid_still_caps()
+    test_buying_power_guard_unknown_value()
+    test_buying_power_guard_valid_still_caps()
     test_client_order_id_stable()
     test_evening_reconciliation()
     test_broker_orders_unreadable_degrades_safely()
@@ -463,6 +479,7 @@ if __name__ == "__main__":
     test_morning_crash_recovery_no_duplicate()
     test_morning_partial_prior_orders_remainder()
     test_morning_sell_clamped_to_live_positions()
+    test_trade_summary_lists_buys_and_sells()
     print()
     if FAIL:
         print(f"{len(FAIL)} FAILURES:")
