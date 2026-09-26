@@ -1,0 +1,23 @@
+Date,Symbol,Status,Reason,Rank,Score,Sector,Old_Weight,New_Weight,Check,View
+2026-09-25,AAPL,not selected,skipped: sector cap (Technology already 4),15.0,46.6422,Technology,0.0,0.0,weekly,last rebalance
+2026-09-25,ANET,drop,skipped: sector cap (Technology already 4),12.0,50.3922,Technology,0.1013,0.0,weekly,last rebalance
+2026-09-25,AMD,add,selected (rank 2),2.0,67.5858,Technology,0.0,0.0936,weekly,last rebalance
+2026-09-25,CVLT,not selected,skipped: sector cap (Technology already 4),14.0,48.5049,Technology,0.0,0.0,weekly,last rebalance
+2026-09-25,FTNT,drop,skipped: sector cap (Technology already 4),11.0,50.9804,Technology,0.1283,0.0,weekly,last rebalance
+2026-09-25,GTLB,drop,skipped: sector cap (Technology already 4),13.0,50.2574,Technology,0.1037,0.0,weekly,last rebalance
+2026-09-25,HOOD,drop,rank 23 worse than 20 (picks only from ranks 1-20),23.0,41.4788,Financials,0.0775,0.0,weekly,last rebalance
+2026-09-25,MRK,drop,rank 28 worse than 20 (picks only from ranks 1-20),28.0,34.518,Health Care,0.1604,0.0,weekly,last rebalance
+2026-09-25,META,add,selected (rank 18),18.0,44.3301,Communication Services,0.0,0.1294,weekly,last rebalance
+2026-09-25,MSFT,not selected,skipped: sector cap (Technology already 4),19.0,43.5907,Technology,0.0,0.0,weekly,last rebalance
+2026-09-25,MU,not selected,earnings in 5 days (Wed Sep 30): not bought,10.0,55.6005,Technology,0.0,0.0,weekly,last rebalance
+2026-09-25,NVDA,not selected,skipped: sector cap (Technology already 4),17.0,45.723,Technology,0.0,0.0,weekly,last rebalance
+2026-09-25,PANW,add,selected (rank 9; sector cap relaxed: fewer than 10 fit the cap within the top 20),9.0,55.9804,Technology,0.0,0.1039,weekly,last rebalance
+2026-09-25,SNOW,add,selected (rank 6; sector cap relaxed: fewer than 10 fit the cap within the top 20),6.0,57.0588,Technology,0.0,0.1373,weekly,last rebalance
+2026-09-25,TEAM,hold,selected (rank 8; sector cap relaxed: fewer than 10 fit the cap within the top 20),8.0,56.4461,Technology,0.0602,0.0691,weekly,last rebalance
+2026-09-25,VEEV,add,selected (rank 4),4.0,63.0025,Technology,0.0,0.1398,weekly,last rebalance
+2026-09-25,ZS,not selected,skipped: sector cap (Technology already 4),16.0,45.7353,Technology,0.0,0.0,weekly,last rebalance
+2026-09-25,TWLO,hold,selected (rank 1),1.0,70.4167,Technology,0.0905,0.0937,weekly,last rebalance
+2026-09-25,ALAB,not selected,skipped: sector cap (Technology already 4),20.0,43.5049,Technology,0.0,0.0,weekly,last rebalance
+2026-09-25,SMCI,add,selected (rank 3),3.0,65.2941,Technology,0.0,0.0733,weekly,last rebalance
+2026-09-25,TEM,hold,selected (rank 7),7.0,57.0302,Health Care,0.062,0.0707,weekly,last rebalance
+2026-09-25,RBRK,hold,selected (rank 5; sector cap relaxed: fewer than 10 fit the cap within the top 20),5.0,62.6471,Technology,0.0793,0.0891,weekly,last rebalance

@@ -12,17 +12,19 @@ ENV/
 # Streamlit
 .streamlit/secrets.toml
 
-# Jupyter Notebook
+# Jupyter Notebook (notebooks ARE tracked; only checkpoints are ignored)
 .ipynb_checkpoints
-*.ipynb
 
-# Environment variables
+# Environment variables / secrets (all API keys live here)
 .env
 .env.local
+.env.*
+!.env.example
 
-# IDE
+# IDE / agent tooling
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 
@@ -30,25 +32,50 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Data files - only the reports app.py reads are tracked
+# Data files - only the reports the app / pipeline need are tracked
+Reports/cache/
 Reports/*.csv
 Reports/*.xlsx
+Reports/*.pkl
 !Reports/signal_analysis.csv
 !Reports/news_cleaned_df.csv
 !Reports/earnings_date.csv
 !Reports/daily_rank.csv
 !Reports/complete_company_analysis.xlsx
+!Reports/strategy_picks.csv
+!Reports/backtest_summary.csv
+!Reports/factor_history.csv
+!Reports/backtest_per_stock.csv
+!Reports/strategy_changes.csv
+!Reports/strategy_holdings.csv
+!Reports/strategy_tracking.csv
+!Reports/sentiment_history.csv
+!Reports/strategy_decisions.csv
+!Reports/benchmark_prices.csv
 
 # Backup/duplicate app files
 app2.py
 app_original.py
-alpaca_setup.py
-sector_mapping.py
-signal_analysis_functions.py
 
 # Logs
 *.log
+Reports/logs/
 
 # Documentation (don't push)
 docs/
 *.md
+
+# personal holdings for the dashboard alert / paper_trade (never commit)
+my_positions.csv
+
+# run_all.py state and per-run API call counts
+Reports/run_state.json
+Reports/logs/api_calls_*
+
+# dated safety backups (e.g. *.bak-2026-09-25-pre-mw30) stay local
+*.bak-20*
+
+# whole-folder backups and paper-account outputs (personal data)
+Stock Analysis Backup*/
+*Backup 20*/
+Reports/paper_*.csv
