@@ -117,7 +117,7 @@ sel = DEC[(DEC.Date == off_day) & DEC.Status.isin(["add", "hold"])].sort_values(
 exp_slot = {s: i + 1 for i, s in enumerate(sel.Symbol)}
 at = AppTest.from_file("app.py", default_timeout=180).run()
 page_ok(at, "initial")
-opts = at.selectbox(key="ticker_dropdown").options
+opts = [o.split("  ·  ")[0] for o in at.selectbox(key="ticker_dropdown").options]  # labels are "SYM · rank · score"; compare raw symbols
 expect(len(opts) == len(sm.tradable_symbols) + 1, f"dropdown has {len(opts)} options")
 for sym in TICKERS:
     at = at.selectbox(key="ticker_dropdown").set_value(sym).run()
