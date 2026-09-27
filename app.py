@@ -4,7 +4,7 @@ Stock Analysis dashboard (Streamlit).
 Page layout, top to bottom:
   1. Title bar + ONE-line holdings alert (what to do today).
   2. "Dashboard" tab: a compact summary (key numbers, current picks, earnings this week)
-     and the single-stock view. Open any stock directly with  http://localhost:8501/?symbol=NVDA
+     and the single-stock view. Open any stock directly with  http://localhost:8502/?symbol=NVDA
   3. "Details" tab: everything else (all signals, rank history, rules and decisions, holdings risk,
      order preview, backtest results, data freshness), each in its own expander.
 
@@ -48,12 +48,6 @@ try:
     SECTOR_MAX = winner_max_per_sector()
 except Exception:
     WINNER, SECTOR_MAX = {}, 4
-
-try:
-    import sector_mapping as _sm
-    N_TRADABLE, EXPANSION = len(_sm.tradable_symbols), getattr(_sm, "EXPANDED_UNIVERSE", None)
-except Exception:
-    N_TRADABLE, EXPANSION = None, None
 
 STRATEGY_TAG = WINNER.get("tag", "C6")
 RS_LABEL = {"etf": "vs sector ETF and SPY",
@@ -154,7 +148,6 @@ BENCH_CSV = os.path.join(REPORTS, "benchmark_prices.csv")
 PER_STOCK_CSV = os.path.join(REPORTS, "backtest_per_stock.csv")        # written by backtest.ipynb
 NEWS_CSV = os.path.join(REPORTS, "news_cleaned_df.csv")
 COMPANY_XLSX = os.path.join(REPORTS, "complete_company_analysis.xlsx")
-POSITIONS_CSV = os.path.join(ROOT, "my_positions.csv")
 CT = ZoneInfo("America/Chicago")
 MA_COLS = ['ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']
 
@@ -307,10 +300,11 @@ def _decision_days(df):
 
 
 def _day_ranks(df, day):
-    """Symbol -> rank (1 = best) for one date: the pipeline's Strategy_Rank when present, else by combined_signal."""
-    has_rank = "Strategy_Rank" in df.columns
-    sub = (df.loc[df["Date"] == day, ["Symbol", "combined_signal"] + (["Strategy_Rank"] if has_rank else [])]
-           .sort_values(["Strategy_Rank"] if has_rank else ["combined_signal"], ascending=has_rank)
+    """Symbol -> rank (1 = best) for one date: the pipeline's Strategy_Rank when present, else by combined_signal.
+    Only ranked symbols (non-null rank key) get a rank; unranked symbols are excluded, not parked at the bottom."""
+    key = "Strategy_Rank" if "Strategy_Rank" in df.columns else "combined_signal"
+    sub = (df.loc[df["Date"] == day, ["Symbol", key]].dropna(subset=[key])
+           .sort_values([key], ascending=(key == "Strategy_Rank"))
            .drop_duplicates(subset=["Symbol"]))
     return pd.Series(range(1, len(sub) + 1), index=sub["Symbol"].values)
 
@@ -555,7 +549,6 @@ SIGNAL_COLOR = {"Bullish (Buy)": "#15803d", "Hold": "#2563eb", "Bearish (Sell)":
 SIGNAL_BADGE = {"Bullish (Buy)": "sa-badge-bull", "Hold": "sa-badge-holdpos", "Bearish (Sell)": "sa-badge-bear",
                 "Bearish": "sa-badge-bear", "Neutral": "sa-badge-hold", "Neutral (sector cap)": "sa-badge-hold",
                 "Not ranked": "sa-badge-grey"}
-MARKET_FILTER_TIP = "ON = QQQ above its 200-day average; OFF halves all positions"
 
 
 def plain_reason(signal, reason, rank=None, score=None):
@@ -736,22 +729,6 @@ def strategy_events(ticker_df, decisions, symbol):
     return events, periods
 
 
-def slot_series(symbol, dates):
-    """Daily portfolio slot (1..10 = position among the picks of the decision in force; NaN when not held)."""
-    d = load_decisions()
-    out = pd.Series(np.nan, index=pd.DatetimeIndex(dates))
-    if d is None:
-        return out
-    sel = d[d["Status"].isin(["add", "hold"])].sort_values(["Date", "Rank", "Symbol"]).copy()
-    sel["Slot"] = sel.groupby("Date").cumcount() + 1
-    dec_days = sorted(sel["Date"].unique())
-    if not dec_days:
-        return out
-    mine = sel[sel["Symbol"] == symbol].set_index("Date")["Slot"]
-    in_force = pd.Series(dec_days, index=dec_days).reindex(out.index, method="ffill")
-    return pd.Series([mine.get(x, np.nan) if pd.notna(x) else np.nan for x in in_force], index=out.index)
-
-
 def event_hover(e):
     """Hover text for an entry/exit marker on the price chart."""
     sig = "Bullish (Buy)" if e.Kind == "entry" else "Bearish (Sell)"
@@ -843,7 +820,7 @@ def open_symbol(table, event, key):
 
 
 # =====================================================================================================================
-# 9. Top of the page: title bar and the one-line holdings alert
+# 9. Top of the page: title bar
 # =====================================================================================================================
 def render_top_bar(p):
     stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()
@@ -859,72 +836,16 @@ def render_top_bar(p):
         </div>""")
 
 
-@st.cache_data(ttl=600)
-def _cached_alert(mtimes, use_positions):
-    import holdings_alert
-    return holdings_alert.build_alert(use_positions=use_positions)
-
-
-def render_alert():
-    """ONE line saying what to do today (from holdings_alert.py; tickers link to the stock view).
-    Uses my_positions.csv when it exists, unless 'Strategy holdings' is chosen under Details → Data freshness and settings."""
-    try:
-        import holdings_alert
-    except Exception as e:  # deployed without the pipeline modules
-        st.caption(f"Holdings alert unavailable: {e}")
-        return
-    use_pos = st.session_state.get("alert_source", "Your positions file") == "Your positions file"
-    mt = tuple(os.path.getmtime(f) if os.path.exists(f) else 0 for f in (SIGNAL_CSV, MIDWEEK_CSV, POSITIONS_CSV))
-    try:
-        a = _cached_alert(mt, use_pos)
-    except Exception as e:
-        st.warning(f"Holdings alert unavailable: {e}")
-        return
-    parts = " · ".join("".join(esc(x) if isinstance(x, str) else
-                               f'<a href="{holdings_alert.APP_URL}{quote(x[1])}" class="symbol-link" target="_self">{esc(x[1])}</a>'
-                               for x in seg) for seg in a["lines"])
-    color = {"red": "#b91c1c", "green": "#166534", "blue": "#1e40af"}.get(a["level"], "#0f172a")
-    d = pd.Timestamp(a["data_date"])
-    tag = f'{a["source"]}, data {d:%a %b} {d.day}'
-    show_html(f'<div class="sa-alert sa-alert-{a["level"]}" style="font-size:0.95rem;font-weight:600;color:{color};background:#fff;'
-              f'border:1px solid #e2e8f0;border-left:4px solid {color};border-radius:10px;padding:8px 12px;margin:2px 0 8px 0;">'
-              f'{holdings_alert.LEVEL_ICON[a["level"]]} {parts} '
-              f'<span style="font-weight:400;color:#64748b;font-size:0.8rem;">({esc(tag)})</span></div>')
-    if a["stale"]:
-        st.caption("⚠️ " + a["stale"])
-
-
 # =====================================================================================================================
 # 10. Dashboard tab: summary
 # =====================================================================================================================
 def render_key_metrics(p):
-    """Five headline numbers: market filter, invested, stocks held, last and next decision."""
+    """Three headline numbers: stocks held, last and next decision."""
     la = p.by_symbol
-    regime = bool(la["Regime_On"].dropna().iloc[0]) if la["Regime_On"].notna().any() else None
-    c = st.columns(5)
-    c[0].metric("Market filter", "ON ✅" if regime else ("OFF ⚠️ · positions halved" if regime is not None else "—"),
-                help=MARKET_FILTER_TIP)
-    c[1].metric("Invested", f"{la['Strategy_Weight'].fillna(0).sum():.0%}")
-    c[2].metric("Stocks held", int((la["Strategy_Weight"] > 0).sum()))
-    c[3].metric("Last decision", f"{p.off_date:%a %b %d}")
-    c[4].metric("Next decision", f"{p.next_dec:%a %b %d}" if p.next_dec is not None else "—", help=p.next_kind or None)
-
-
-def render_week_decisions(p):
-    """This week's decisions in plain English (Friday rebalance + Mon/Wed checks) and the next decision."""
-    m = p.midweek
-    if m is None:
-        if p.next_dec is not None:
-            st.caption(f"Next decision: {p.next_kind} at the close of {p.next_dec:%a %b %d}.")
-        return
-    items = "".join(f'<li style="margin:2px 0;{"font-weight:700;" if int(r.Is_Latest) else ""}">{esc(str(r.Message))} '
-                    f'<span style="color:#64748b;font-weight:400;">({esc(str(r.Status))})</span></li>' for r in m.itertuples())
-    show_html(f'<div class="sa-midweek" style="border:1px solid #cbd5e1;border-left:4px solid #0f766e;border-radius:10px;'
-              f'background:#f8fafc;padding:8px 12px;margin:4px 0 10px 0;font-size:0.88rem;">'
-              f'<div style="font-weight:700;color:#0f766e;">This week · {esc(str(m["Rules"].iloc[0]))} · data through '
-              f'{pd.Timestamp(m["As_Of"].iloc[0]):%a %b %d}</div>'
-              f'<ul style="margin:4px 0 2px 18px;padding:0;">{items}</ul>'
-              f'<div style="color:#334155;">{esc(str(m["Next_Message"].iloc[0]))}</div></div>')
+    c = st.columns(3)
+    c[0].metric("Stocks held", int((la["Strategy_Weight"] > 0).sum()))
+    c[1].metric("Last decision", f"{p.off_date:%a %b %d}")
+    c[2].metric("Next decision", f"{p.next_dec:%a %b %d}" if p.next_dec is not None else "—", help=p.next_kind or None)
 
 
 def render_picks_table(p):
@@ -943,26 +864,36 @@ def render_picks_table(p):
     }).sort_values(["Portfolio weight %", "Rank"], ascending=[False, True]).reset_index(drop=True)
     event = st.dataframe(table, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
                          key="summary_tbl", column_config={"Why": st.column_config.TextColumn("Why", width="large")})
-    st.caption(f"Decisions in force (last decision {p.off_date:%a %b %d}). Click a row to open the stock.")
     open_symbol(table, event, "summary")
 
 
 def render_earnings_line(p):
-    """Earnings in the next 7 days, one line with links."""
+    """Earnings in the next 7 days: one card per stock, laid out horizontally (whole card clickable)."""
     up = upcoming_earnings(sorted(p.by_symbol.index))
     if up.empty:
-        st.caption("Earnings · next 7 days: none.")
+        st.caption("Earnings \u00b7 next 7 days: none.")
         return
-    items = " · ".join(f"{symbol_link(s)} {d:%a %b %d} {esc(str(t))}" for s, d, t in zip(up["Symbol"], up["Earnings Date"], up["Time"]))
-    show_html(f'<div style="font-size:0.88rem;margin:2px 0 4px 0;"><b>Earnings · next 7 days:</b> {items} '
-              f'<span style="color:#64748b;font-size:0.78rem;">(AM = before the open, PM = after the close; unannounced '
-              f'times are predicted)</span></div>')
+    cards = []
+    for s, d, t in zip(up["Symbol"], up["Earnings Date"], up["Time"]):
+        t = str(t)
+        sub = {"AM": "before the open", "PM": "after the close"}.get(t, "time estimated")
+        cards.append(
+            f'<a href="?symbol={quote(s)}" target="_self" style="text-decoration:none;">'
+            '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;'
+            'padding:10px 16px;min-width:118px;text-align:center;'
+            'box-shadow:0 1px 3px rgba(15,23,42,.07);">'
+            '<div style="font-family:\'JetBrains Mono\',monospace;font-weight:700;'
+            f'font-size:1.05rem;color:#0f766e;">{esc(s)}</div>'
+            f'<div style="font-size:0.82rem;font-weight:600;color:#0f172a;margin-top:3px;">{d:%a %b %d}</div>'
+            f'<div style="font-size:0.72rem;color:#64748b;margin-top:2px;">{esc(t)} \u00b7 {sub}</div>'
+            "</div></a>")
+    show_html('<div style="font-size:0.95rem;font-weight:700;margin:8px 0 6px 0;">Earnings \u00b7 next 7 days</div>'
+              '<div style="display:flex;flex-wrap:wrap;gap:10px;">' + "".join(cards) + "</div>")
 
 
 def render_summary(p):
     section("Summary")
     render_key_metrics(p)
-    render_week_decisions(p)
     render_picks_table(p)
     render_earnings_line(p)
 
@@ -980,8 +911,33 @@ def ticker_label(p, s):
     return "  ·  ".join(parts)
 
 
+def render_rank_tiers(p):
+    """Horizontal clickable rank tiers: Rank 1 to 20, Rank 21 to 50, Rank 51+.
+
+    Each symbol is a ?symbol= link, handled in main() exactly like a table click
+    (opens the stock in the stock view below). The dropdown underneath stays for manual typing."""
+    la = p.by_symbol
+    ranked = la[la["Strategy_Rank"].notna()].sort_values("Strategy_Rank")
+    tiers = [("Rank 1 to 20", ranked[ranked["Strategy_Rank"] <= 20]),
+             ("Rank 21 to 50", ranked[(ranked["Strategy_Rank"] > 20) & (ranked["Strategy_Rank"] <= 50)]),
+             ("Rank 51+", ranked[ranked["Strategy_Rank"] > 50])]
+    current = st.session_state.get("ticker_dropdown")
+    rows = []
+    for title, df in tiers:
+        links = []
+        for s in df.index:
+            link = symbol_link(s)
+            if s == current:
+                link = f'<b style="background:#dbeafe;border-radius:6px;padding:1px 5px;">{link}</b>'
+            links.append(link)
+        rows.append(f'<div style="margin:3px 0;"><b>{title}:</b> {" \u00b7 ".join(links) or "\u2014"}</div>')
+    show_html('<div style="font-size:0.92rem;line-height:2.0;">' + "".join(rows) + "</div>")
+
+
 def render_stock_picker(p, jumped):
-    """Stock dropdown (best score first) + AI button. ?symbol=X, a table click or the dropdown choose the stock."""
+    """Rank tiers (click a symbol to open it) + dropdown for manual typing + AI button.
+
+    ?symbol=X, a table click, a tier click or the dropdown choose the stock."""
     pending = st.session_state.pop("_pending_ticker", None)
     if pending in p.options:
         st.session_state.ticker_dropdown = pending
@@ -992,6 +948,7 @@ def render_stock_picker(p, jumped):
         components.html("<script>const el = window.parent.document.getElementById('ticker-focus');"
                         "if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});</script>", height=0)
     section("Stock view")
+    render_rank_tiers(p)
     pick_col, ai_col = st.columns([3, 1])
     ticker = pick_col.selectbox("Ticker", options=p.options, format_func=lambda s: ticker_label(p, s),
                                 key="ticker_dropdown", label_visibility="collapsed")
@@ -1032,7 +989,6 @@ def render_stock_header(p, ticker, tdata):
             stat_html("Held since", f"{pd.Timestamp(hold['Entry_Date']):%b %d} · {int(hold['Days_Held'])} sessions"
                       if pd.notna(hold['Entry_Date']) else "—"),
             stat_html("P&L since entry", fmt(num(hold['PnL_%']), "+.1f", suffix="%"), sign_color(num(hold['PnL_%']))),
-            stat_html("To 3×ATR stop", fmt(num(hold['Dist_to_Stop_%']), ".1f", suffix="%")),
         ]
     show_html(f"""
         <div class="sa-hero">
@@ -1049,20 +1005,19 @@ def render_stock_header(p, ticker, tdata):
         </div>""")
 
 
-def build_price_chart(p, ticker, tdata, show_strategy, show_rs, show_classic, show_legacy):
+def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_legacy):
     """Last 12 months: price + moving averages + buy/sell markers, optional score/rank, relative strength, RSI/MACD panels."""
     chart = tdata[tdata['Date'] >= tdata['Date'].max() - pd.Timedelta(days=365)].sort_values('Date').set_index('Date')
     x_start, x_end = chart.index[0], chart.index[-1]
     events, periods = strategy_events(tdata, load_decisions(), ticker)
     rs_lines = relative_strength_lines(chart, ticker) if show_rs else {}
 
-    panels = ["price"] + (["score", "rank"] if show_strategy else []) + (["rs"] if rs_lines else []) \
+    panels = ["price"] + (["score"] if show_strategy else []) + (["rs"] if rs_lines else []) \
         + (["rsi", "macd"] if show_classic else [])
-    height_of = {"price": 0.5, "score": 0.16, "rank": 0.11, "rs": 0.14, "rsi": 0.11, "macd": 0.11}
+    height_of = {"price": 0.44, "score": 0.20, "rs": 0.18, "rsi": 0.11, "macd": 0.11}
     titles = {
         "price": "<b>Price · Bullish (Buy) ▲ / Bearish (Sell) ▼ signals · shaded = Hold</b>",
-        "score": "Strategy score (purple) = 0.5 × Technical (grey) + 0.5 × Strength vs sector/SPY (teal)",
-        "rank": f"Rank (1 = best · dashed = rank 10 · blue = held) · picks skip stocks whose sector already has {SECTOR_MAX}, so a held stock can rank below 10",
+        "score": "Strategy score (green) = 0.5 × Technical (grey) + 0.5 × Strength vs sector/SPY (red)",
         "rs": "Strength vs sector ETF / SPY · price ratio rebased to 100 (rising = beating it)",
         "rsi": "RSI", "macd": "MACD",
     }
@@ -1079,7 +1034,7 @@ def build_price_chart(p, ticker, tdata, show_strategy, show_rs, show_classic, sh
         bits = [sig] + ([f"weight {w * 100:.1f}%"] if sig == "Hold" else []) \
             + ([f"rank #{r:.0f}"] if pd.notna(r) else []) + ([f"score {s:.1f}"] if pd.notna(s) else [])
         status_txt.append(" · ".join(bits))
-    fig.add_trace(go.Scatter(x=chart.index, y=chart['Close'], name='Close', line=dict(color='#27ae60', width=2), mode='lines',
+    fig.add_trace(go.Scatter(x=chart.index, y=chart['Close'], name='Close', line=dict(color='#27ae60', width=2.5), mode='lines',
                              customdata=status_txt, hovertemplate='<b>Close</b> $%{y:.2f}<br>%{customdata}<extra></extra>'), row=1, col=1)
     earnings = chart[chart['is_earnings_date'] == 1]
     fig.add_trace(go.Scatter(x=earnings.index, y=earnings['Close'], name='Earnings date', mode='markers',
@@ -1118,16 +1073,12 @@ def build_price_chart(p, ticker, tdata, show_strategy, show_rs, show_classic, sh
             hovertemplate='<b>Market filter OFF</b> %{x|%b %d}: QQQ below its 200-day average,<br>all positions halved that week<extra></extra>'),
             row=1, col=1)
 
-    # While held: entry price and the 3×ATR stop (reference only; stops were tested as C8 and not adopted)
+    # While held: entry price dotted line
     hold = row_for(HOLDINGS_CSV, ticker) if (num(chart['Strategy_Weight'].iloc[-1]) or 0) > 0 else None
-    if hold is not None and pd.notna(hold['ATR_Stop']):
-        fig.add_hline(y=float(hold['ATR_Stop']), line=dict(color='#b91c1c', width=1, dash='dash'), row=1, col=1,
-                      annotation_text=f"3×ATR stop ${hold['ATR_Stop']:,.2f} ({hold['Dist_to_Stop_%']:.1f}% below close) · reference only",
-                      annotation_position="bottom left", annotation_font=dict(size=10, color='#b91c1c'))
-        if pd.notna(hold['Entry_Price']):
-            fig.add_hline(y=float(hold['Entry_Price']), line=dict(color='#64748b', width=1, dash='dot'), row=1, col=1,
-                          annotation_text=f"entry ${hold['Entry_Price']:,.2f}", annotation_position="top left",
-                          annotation_font=dict(size=10, color='#64748b'))
+    if hold is not None and pd.notna(hold['Entry_Price']):
+        fig.add_hline(y=float(hold['Entry_Price']), line=dict(color='#64748b', width=1, dash='dot'), row=1, col=1,
+                      annotation_text=f"entry ${hold['Entry_Price']:,.2f}", annotation_position="top left",
+                      annotation_font=dict(size=10, color='#64748b'))
 
     # Next earnings date (extends the x-axis when it is within ~2 months)
     x_right = x_end
@@ -1152,31 +1103,18 @@ def build_price_chart(p, ticker, tdata, show_strategy, show_rs, show_classic, sh
             fig.add_vline(x=day, line=dict(color={'BUY': "#2ca02c", 'SELL': "#d62728"}[trade], width=1, dash="dot"),
                           opacity=0.45, row=1, col=1)
 
-    if "score" in row_of:  # score panel + rank panel
+    if "score" in row_of:  # score panel
         r = row_of["score"]
-        for col, name, color, width, dash in (("Technical_Score", "Technical", "#9ca3af", 1, "dot"),
-                                              ("RS_Score", "Strength vs sector/SPY", "#0d9488", 1.2, "solid"),
-                                              ("Strategy_Score", "Strategy score", "#7c3aed", 2, "solid")):
+        for col, name, color, width, dash in (("Technical_Score", "Technical", "#9ca3af", 1.25, "dot"),
+                                              ("RS_Score", "Strength vs sector/SPY", "#dc2626", 1.5, "solid"),
+                                              ("Strategy_Score", "Strategy score", "#16a34a", 2, "solid")):
             fig.add_trace(go.Scatter(x=chart.index, y=chart[col], name=name, mode='lines', line=dict(color=color, width=width, dash=dash),
                                      showlegend=False, hovertemplate=f'<b>{name}</b> %{{y:.1f}}<extra></extra>'), row=r, col=1)
         fig.add_hline(y=0, line=dict(color='rgba(100,116,139,0.5)', width=1, dash='dot'), row=r, col=1)
-        r = row_of["rank"]
-        n_day = p.df[p.df['Symbol'] != 'QQQ'].groupby('Date')['Strategy_Score'].count().reindex(chart.index)
-        slots = slot_series(ticker, chart.index)
-        rank_txt = [f"#{rk:.0f} of {n:.0f}" + (f" · portfolio slot {sl:.0f} of 10" if pd.notna(sl) else " · not in portfolio")
-                    if pd.notna(rk) else "not ranked" for rk, n, sl in zip(chart['Strategy_Rank'], n_day, slots)]
-        fig.add_trace(go.Scatter(x=chart.index, y=chart['Strategy_Rank'], name='Rank', mode='lines', line=dict(color='#334155', width=1.5),
-                                 customdata=rank_txt, showlegend=False, hovertemplate='<b>Rank</b> %{customdata}<extra></extra>'), row=r, col=1)
-        held_days = chart.index[slots.notna().to_numpy()]
-        if len(held_days):
-            fig.add_trace(go.Scatter(x=held_days, y=chart.loc[held_days, 'Strategy_Rank'], name='Held (portfolio slot)', mode='markers',
-                                     marker=dict(size=4, color='#2563eb'), showlegend=False, hoverinfo='skip'), row=r, col=1)
-        fig.add_hline(y=10.5, line=dict(color='#15803d', width=1, dash='dash'), row=r, col=1)
-        fig.update_yaxes(autorange="reversed", row=r, col=1)
     if "rs" in row_of:
         r = row_of["rs"]
-        for (label, series), color in zip(rs_lines.items(), ("#0d9488", "#6366f1")):
-            fig.add_trace(go.Scatter(x=series.index, y=series, name=label, mode='lines', line=dict(color=color, width=1.5),
+        for (label, series), color in zip(rs_lines.items(), ("#16a34a", "#dc2626")):
+            fig.add_trace(go.Scatter(x=series.index, y=series, name=label, mode='lines', line=dict(color=color, width=1.75),
                                      showlegend=False, hovertemplate=f'<b>{label}</b> %{{y:.1f}}<extra></extra>'), row=r, col=1)
         fig.add_hline(y=100, line=dict(color='rgba(100,116,139,0.5)', width=1, dash='dot'), row=r, col=1)
     if "rsi" in row_of:
@@ -1202,93 +1140,147 @@ def build_price_chart(p, ticker, tdata, show_strategy, show_rs, show_classic, sh
     grid = dict(showgrid=True, gridcolor='rgba(200, 198, 195, 0.35)', showline=True, linecolor='rgba(200, 198, 195, 0.4)',
                 tickfont=dict(size=10, color='#6b7280'), zeroline=False)
     fig.update_layout(
-        height=int(470 + 140 * (len(panels) - 1)), hovermode='x unified', margin=dict(l=50, r=30, t=90, b=40),
+        height=int(560 + 170 * (len(panels) - 1)), hovermode='x unified', margin=dict(l=50, r=30, t=90, b=64),
         plot_bgcolor='#ffffff', paper_bgcolor='#ffffff', dragmode=False,
         legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="center", x=0.5, font=dict(size=10, color='#374151'),
                     bgcolor='rgba(255, 255, 255, 0.95)', bordercolor='#e2e8f0', borderwidth=1),
         font=dict(family="Arial, sans-serif", size=11, color='#374151'),
         hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family="Arial, sans-serif"))
     fig.update_xaxes(type="date", range=[x_start, x_right], showspikes=True, spikemode="across", spikethickness=1, spikecolor="#6b7280",
-                     tickformat='%b %Y', **(grid | dict(showgrid=False)))
+                     dtick=7 * 24 * 60 * 60 * 1000, tickformat='%b %d', tickangle=-45,
+                     **(grid | dict(showgrid=False)))
     fig.update_yaxes(**grid)
     fig.update_yaxes(title_text="Price ($)", tickformat='$,.0f', row=1, col=1)
     return fig, chart, events, x_start, x_end
 
 
-def render_stock_chart(p, ticker, tdata):
-    """Chart options + chart + a one-line legend. Returns what the 'More about' expander needs."""
+def stock_chart_inputs(ticker, tdata):
+    """Chart-option checkboxes + the built figure and its data (the figure is displayed later, below the detail block)."""
     has_strategy = bool(tdata['Strategy_Score'].notna().any())
     o = st.columns(4)
-    show_strategy = o[0].checkbox("Strategy score & rank", value=True, key="show_strategy", disabled=not has_strategy)
+    show_strategy = o[0].checkbox("Strategy score", value=True, key="show_strategy", disabled=not has_strategy)
     show_rs = o[1].checkbox("Relative strength", value=True, key="show_rs")
-    show_classic = o[2].checkbox("RSI & MACD", value=False, key="show_classic")
+    show_classic = o[2].checkbox("RSI & MACD", value=True, key="show_classic")
     show_legacy = o[3].checkbox("Legacy signals (old rules)", value=False, key="show_legacy",
                                 help="The old BUY/SELL streak bars and flip lines from final_trade (pre-v3 rules). Not the live strategy.")
-    fig, chart, events, x_start, x_end = build_price_chart(p, ticker, tdata, show_strategy and has_strategy, show_rs,
+    fig, chart, events, x_start, x_end = build_price_chart(ticker, tdata, show_strategy and has_strategy, show_rs,
                                                            show_classic, show_legacy)
+    return fig, has_strategy, chart, events, x_start, x_end
+
+
+def render_stock_figure(fig):
+    """The price chart itself, under the always-open detail block."""
     st.plotly_chart(fig, width="stretch", config={
         'displaylogo': False, 'scrollZoom': False, 'doubleClick': 'reset',
         'modeBarButtonsToRemove': ['pan2d', 'select2d', 'lasso2d', 'autoScale2d', 'zoomIn2d', 'zoomOut2d']})
-    st.caption("▲ Bullish (Buy) · ▼ Bearish (Sell) · blue shading = Hold · hollow marker = pending · ◆ market filter OFF. "
-               "Hover a marker for the reason.")
-    return has_strategy, chart, events, x_start, x_end
+    st.caption("**How to read the panels** \u00b7 **Strategy score** \u2014 above 0 is good (an above-average "
+               "stock) and rising is better; below 0 and falling is bad. "
+               "\u00b7 **Strength** \u2014 rising green means beating its sector, rising red means beating SPY; "
+               "falling lines mean it is lagging.")
+
+
+def _mini_stat(label, value, color="#0f172a"):
+    """One compact label-above-value stat for the stock detail card."""
+    v = "\u2014" if value is None else str(value)
+    return (f'<div style="min-width:60px;"><div style="font-size:0.66rem;font-weight:600;letter-spacing:.05em;'
+            f'color:#94a3b8;text-transform:uppercase;white-space:nowrap;">{esc(label)}</div>'
+            f'<div style="font-size:0.95rem;font-weight:700;color:{color};margin-top:2px;white-space:nowrap;">{esc(v)}</div></div>')
+
+
+def _detail_group(title, stats_html, note=""):
+    """One titled row inside the stock detail card."""
+    note_html = f'<div style="font-size:0.74rem;color:#94a3b8;margin-top:8px;">{esc(note)}</div>' if note else ""
+    return (f'<div style="padding:12px 0;border-top:1px solid #f1f5f9;">'
+            f'<div style="font-size:0.7rem;font-weight:700;letter-spacing:.09em;color:#64748b;'
+            f'text-transform:uppercase;margin-bottom:9px;">{esc(title)}</div>'
+            f'<div style="display:flex;flex-wrap:wrap;gap:10px 28px;">{stats_html}</div>{note_html}</div>')
 
 
 def render_stock_more(p, ticker, tdata, has_strategy, chart, events, x_start, x_end):
-    """Expander with the secondary stock details: moving averages, fundamentals/news context, chart guide, per-stock backtest."""
+    """Always-open detail card above the chart: moving averages, fundamentals/news, per-stock backtest."""
     latest = tdata.nlargest(1, 'Date').iloc[0]
-    with st.expander(f"More about {ticker} (moving averages, fundamentals, news, per-stock backtest)", expanded=False):
-        for col, ma in zip(st.columns(len(MA_COLS)), MA_COLS):
-            col.metric(ma.upper().replace('_', ' '), fmt(num(latest[ma]), ",.2f", "$"))
+    ma_stats = [(ma.upper().replace('_', ' '), fmt(num(latest[ma]), ",.2f", "$")) for ma in MA_COLS]
 
-        # Context: latest-day values only, NOT part of the backtested rules
-        company_df = load_company()
-        comp = company_metrics(ticker, company_df)
-        close, fv = num(latest['Close']), comp.get('fair_value')
-        upside = (fv / close - 1) * 100 if fv and close else None
-        sentiment = num(latest['SentimentScore'])
-        comp_row = company_df[company_df['Symbol'].astype(str).str.upper() == ticker] if 'Symbol' in company_df else pd.DataFrame()
-        fiscal = pd.to_datetime(comp_row['FiscalDateEnding'].iloc[0], errors='coerce') \
-            if len(comp_row) and 'FiscalDateEnding' in comp_row else pd.NaT
-        news = load_news()
-        news_dates = pd.to_datetime(news.loc[news['symbol'] == ticker, 'date'], utc=True, format='mixed', errors='coerce')
-        last_news = news_dates.max() if len(news_dates) else pd.NaT
-        context = "".join([
-            stat_html("Balance sheet", fmt(num(latest['Fundamental_Weight']), ".2f")),
-            stat_html("Sentiment", fmt(sentiment, ".2f"), sign_color(sentiment)),
-            stat_html("Fair value", fmt(fv, ",.2f", "$")),
-            stat_html("Upside", fmt(upside, "+.1f", suffix="%"), sign_color(upside)),
-            stat_html("P/E", fmt(comp.get('pe_ratio'), ".1f")),
-            stat_html("P/B", fmt(comp.get('pb_ratio'), ".2f")),
-            stat_html("Rev YoY", fmt(comp.get('revenue_growth_yoy'), ".1f", suffix="%")),
-            stat_html("ROE", fmt(comp.get('roe'), ".1f", suffix="%")),
-            stat_html("Net margin", fmt(comp.get('net_margin'), ".1f", suffix="%")),
-            stat_html("Debt/Eq", fmt(comp.get('debt_to_equity'), ".2f")),
-        ])
-        show_html(f'<div class="sa-stats" style="justify-content:flex-start;margin:6px 0;">{context}</div>')
-        st.caption("Context only (latest day, not part of the backtested rules) · fundamentals: "
-                   + (f"quarter ending {fiscal:%Y-%m-%d}" if pd.notna(fiscal) else "none on file")
-                   + (f" · newest relevant news {last_news:%b %d}" if pd.notna(last_news) else " · no relevant news in the last 10 days"))
+    # Context: latest-day values only, NOT part of the backtested rules
+    company_df = load_company()
+    comp = company_metrics(ticker, company_df)
+    close, fv = num(latest['Close']), comp.get('fair_value')
+    upside = (fv / close - 1) * 100 if fv and close else None
+    sentiment = num(latest['SentimentScore'])
+    comp_row = company_df[company_df['Symbol'].astype(str).str.upper() == ticker] if 'Symbol' in company_df else pd.DataFrame()
+    fiscal = pd.to_datetime(comp_row['FiscalDateEnding'].iloc[0], errors='coerce') \
+        if len(comp_row) and 'FiscalDateEnding' in comp_row else pd.NaT
+    news = load_news()
+    news_dates = pd.to_datetime(news.loc[news['symbol'] == ticker, 'date'], utc=True, format='mixed', errors='coerce')
+    last_news = news_dates.max() if len(news_dates) else pd.NaT
+    fund_stats = [
+        ("Balance sheet", fmt(num(latest['Fundamental_Weight']), ".2f"), "#0f172a"),
+        ("Sentiment", fmt(sentiment, ".2f"), sign_color(sentiment)),
+        ("Fair value", fmt(fv, ",.2f", "$"), "#0f172a"),
+        ("Upside", fmt(upside, "+.1f", suffix="%"), sign_color(upside)),
+        ("P/E", fmt(comp.get('pe_ratio'), ".1f"), "#0f172a"),
+        ("P/B", fmt(comp.get('pb_ratio'), ".2f"), "#0f172a"),
+        ("Rev YoY", fmt(comp.get('revenue_growth_yoy'), ".1f", suffix="%"), "#0f172a"),
+        ("ROE", fmt(comp.get('roe'), ".1f", suffix="%"), "#0f172a"),
+        ("Net margin", fmt(comp.get('net_margin'), ".1f", suffix="%"), "#0f172a"),
+        ("Debt/Eq", fmt(comp.get('debt_to_equity'), ".2f"), "#0f172a"),
+    ]
+    fund_note = ("Context only (latest day, not part of the backtested rules) \u00b7 fundamentals: "
+                 + (f"quarter ending {fiscal:%Y-%m-%d}" if pd.notna(fiscal) else "none on file")
+                 + (f" \u00b7 newest relevant news {last_news:%b %d}" if pd.notna(last_news)
+                    else " \u00b7 no relevant news in the last 10 days"))
 
-        notes = ["Chart guide: green ▲ = the rules put the stock in the top-10 portfolio (bought at the next open); red ▼ = it "
-                 "dropped out (sold at the next open); blue shading = held. Rank panel: blue dots = held days; hover shows the "
-                 "rank among all ranked stocks and the portfolio slot (1–10 = position among the picks). The picks skip score ≤ 0 "
-                 f"and stocks whose sector already has {SECTOR_MAX}, which is why a held stock can sit below the rank-10 line."]
-        if has_strategy:
-            n_entries = int(((events['Kind'] == 'entry') & (events['Fill'].fillna(x_end) >= x_start)).sum()) if len(events) else 0
-            held_share = (chart['Strategy_Weight'].fillna(0) > 0).mean() * 100
-            notes.append(f"Last 12 months: held on {held_share:.0f}% of sessions, "
-                         f"{n_entries} Bullish (Buy) signal{'' if n_entries == 1 else 's'}.")
-        ps = row_for(PER_STOCK_CSV, ticker)
-        if ps is not None and pd.notna(ps.get("First bar")):
-            trades = int(ps["Closed trades"])
-            notes.append(
-                f"Backtest of the live rules from {ps['First bar']} (next-open fills, 0.1%/side): {trades} closed trade"
-                f"{'' if trades == 1 else 's'}"
-                + (f", win rate {ps['Win rate %']:.0f}%, median trade {ps['Median trade %']:+.1f}%, median hold "
-                   f"{ps['Median hold (sessions)']:.0f} sessions" if trades else "")
-                + f"; held on {ps['Held % of sessions']:.0f}% of sessions; buy & hold of the stock {ps['Buy & hold %']:+.0f}%.")
-        st.caption(" ".join(notes))
+    bt_stats, bt_notes, explainer_html = [], [], ""
+    if has_strategy:
+        n_entries = int(((events['Kind'] == 'entry') & (events['Fill'].fillna(x_end) >= x_start)).sum()) if len(events) else 0
+        held_share = (chart['Strategy_Weight'].fillna(0) > 0).mean() * 100
+        bt_notes.append(f"Last 12 months: held on {held_share:.0f}% of sessions, "
+                        f"{n_entries} Bullish (Buy) signal{'' if n_entries == 1 else 's'}.")
+    ps = row_for(PER_STOCK_CSV, ticker)
+    if ps is not None and pd.notna(ps.get("First bar")):
+        trades = int(ps["Closed trades"])
+        med = ps["Median trade %"] if trades else None
+        bnh = ps["Buy & hold %"]
+        first_bar_dt = pd.to_datetime(ps["First bar"], errors="coerce")
+        first_bar_txt = first_bar_dt.strftime("%b %d, %Y") if pd.notna(first_bar_dt) else str(ps["First bar"])
+        bt_stats = [
+            ("First bar", first_bar_txt, "#0f172a"),
+            ("Closed trades", f"{trades}", "#0f172a"),
+            ("Win rate", fmt(ps["Win rate %"], ".0f", suffix="%") if trades else None, "#0f172a"),
+            ("Median trade", fmt(med, "+.1f", suffix="%") if trades else None, sign_color(med)),
+            ("Median hold", f"{ps['Median hold (sessions)']:.0f} sessions" if trades else None, "#0f172a"),
+            ("Held % of sessions", fmt(ps["Held % of sessions"], ".0f", suffix="%"), "#0f172a"),
+            ("Buy & hold", fmt(bnh, "+.0f", suffix="%"), sign_color(bnh)),
+        ]
+        bt_notes.append(f"Backtest of the live rules from {first_bar_txt} (next-open fills, 0.1%/side).")
+        # TEMPORARY plain-English explainer (Chirag asked for it; remove when he says so)
+        if trades > 0:
+            wr = float(ps["Win rate %"])
+            wins = int(round(trades * wr / 100))
+            med_txt = f"lost {abs(med):.1f}%" if med < 0 else f"gained {med:.1f}%"
+            bnh_txt = f"up {bnh:.0f}%" if bnh >= 0 else f"down {abs(bnh):.0f}%"
+            explainer_html = (
+                '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;'
+                'padding:12px 16px;margin:2px 0 12px 0;font-size:0.85rem;color:#1e3a5f;line-height:1.6;">'
+                f"<b>What this means:</b> since {first_bar_txt} the live rules traded {esc(ticker)} {trades} times "
+                f"and made money on about {wins} of them ({wr:.0f}% win rate). The typical trade {med_txt} and lasted "
+                f"about {ps['Median hold (sessions)']:.0f} trading days \u2014 the strategy barely held {esc(ticker)}, "
+                f"only {ps['Held % of sessions']:.0f}% of all sessions. Simply buying {esc(ticker)} on {first_bar_txt} "
+                f"and holding would be {bnh_txt} today "
+                f"($10,000 \u2192 ${10000 * (1 + bnh / 100):,.0f}).</div>")
+
+    groups = _detail_group("Moving averages", "".join(_mini_stat(l, v) for l, v in ma_stats))
+    groups += _detail_group("Fundamentals & news",
+                            "".join(_mini_stat(l, v, c) for l, v, c in fund_stats), fund_note)
+    if bt_stats:
+        groups += _detail_group("Per-stock backtest",
+                                "".join(_mini_stat(l, v, c) for l, v, c in bt_stats), " ".join(bt_notes))
+    elif bt_notes:
+        groups += _detail_group("Per-stock backtest", "", " ".join(bt_notes))
+    show_html('<div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;'
+              'padding:4px 20px 14px 20px;box-shadow:0 1px 3px rgba(15,23,42,.06);margin:6px 0 10px 0;">'
+              f'<div style="font-size:1.02rem;font-weight:700;color:#0f172a;padding:12px 0 2px 0;">More about {esc(ticker)}</div>'
+              + groups + '</div>' + explainer_html)
 
 
 # =====================================================================================================================
@@ -1435,17 +1427,17 @@ def render_rules_and_changes(p):
 
 
 def render_holdings_and_tracking():
-    """Per-holding risk / P&L since entry."""
+    """Per-holding P&L since entry."""
     holdings = read_report_csv(HOLDINGS_CSV)
     if holdings is not None and not holdings.empty:
         h = holdings.copy()
         h["Weight"] = (h["Weight"] * 100).round(1)
-        st.markdown("**Holdings · risk & P&L since entry**")
+        h = h.drop(columns=["ATR_Stop", "Dist_to_Stop_%"], errors="ignore")
+        st.markdown("**Holdings · P&L since entry**")
         st.dataframe(h.rename(columns={"Weight": "Portfolio weight %", "PnL_%": "P&L %", "Days_Held": "Days held",
-                                       "Vol_63d_%": "Vol 63d %", "ATR_Stop": "ATR stop (3×)", "Dist_to_Stop_%": "To stop %"}).round(2),
+                                       "Vol_63d_%": "Vol 63d %"}).round(2),
                      width="stretch", hide_index=True)
-        st.caption("Entry = next open after the decision that added the stock (before costs). The 3×ATR stop is a risk "
-                   "reference only; stops are not part of the trading rules.")
+        st.caption("Entry = next open after the decision that added the stock (before costs).")
 
 
 def parse_positions(text):
@@ -1487,21 +1479,14 @@ def render_order_preview():
         st.warning(f"Order preview unavailable: {e}")
 
 
-BACKTEST_COLS = ["Strategy", "Start", "End", "Total Return %", "CAGR %", "Sharpe", "Max DD %", "Trades", "Win rate %",
-                 "Median trade %", "Median hold (sessions)"]
-
-
 def render_data_and_settings(p):
-    """Data freshness table + the holdings-alert source setting."""
+    """Data freshness table."""
     st.dataframe(p.freshness, width="stretch", hide_index=True)
     stale = p.freshness[p.freshness["Status"].str.startswith("⚠️")]
     if not stale.empty:
         st.warning("Stale or missing: " + ", ".join(stale["File"]) + " — run `python run_all.py` (see docs/README.md).")
     else:
         st.success("All report files are within their expected refresh window.")
-    if os.path.exists(POSITIONS_CSV):
-        st.radio("Top alert based on", ["Your positions file", "Strategy holdings"], horizontal=True, key="alert_source",
-                 help="my_positions.csv (Symbol,Shares) vs the strategy's own holdings")
 
 
 def render_details(p, ticker):
@@ -1520,12 +1505,85 @@ def render_details(p, ticker):
 
 
 # =====================================================================================================================
+# 12b. Strategy health — is the live account behaving like the backtest said it would?
+# =====================================================================================================================
+def render_health():
+    """Live PAPER equity vs the backtest reference (see strategy_health.py for the bands)."""
+    try:
+        import strategy_health as sh
+    except Exception as e:  # deployed without the pipeline modules
+        st.caption(f"Strategy health unavailable: {e}")
+        return
+    rep = sh.build_report(*sh.default_paths(ROOT))
+    ref = rep["ref"]
+    st.markdown("**Strategy health** — live account vs the backtest "
+                f"(C6-U96-T20-MW30-E5 walk-forward: Sharpe {ref['sharpe']:.2f}, max DD {ref['max_dd_pct']:.1f}%, "
+                f"win rate {ref['win_rate_pct']:.1f}%, CAGR {ref['cagr_pct']:.1f}%)")
+    if rep["data_state"] == "empty":
+        st.info("No live account history yet — `Reports/paper_account_history.csv` is written by the pipeline's "
+                "account sync (`run_all.py --sync-paper`). The backtest stats above are what the health score "
+                "will be measured against once trading starts.")
+        return
+    s = rep["stats"]
+
+    def _d(x):
+        try:
+            return f"${x:,.0f}" if x == x else "\u2014"  # NaN -> em dash
+        except TypeError:
+            return "\u2014"
+
+    c = st.columns(4)
+    c[0].metric("Equity", _d(s["equity_now"]))
+    c[1].metric("P&L since start", _d(s["pnl_dollars"]), f"{s['total_return_pct']:+.1f}%"
+                if s["total_return_pct"] == s["total_return_pct"] else None)
+    c[2].metric("CAGR (live)", f"{s['cagr_pct']:.1f}%" if s["cagr_pct"] == s["cagr_pct"] else "\u2014")
+    c[3].metric("Current drawdown", f"{s['current_dd_pct']:.1f}%", _d(s["dd_dollars"]))
+    if rep["data_state"] == "warming_up":
+        st.info(f"Only {rep['n_sessions']} sessions of live history — the health score needs {sh.WARMUP_MIN}. "
+                "The trajectory below is shown against the backtest's expected path.")
+    else:
+        color = {"green": "#15803d", "yellow": "#b45309", "red": "#b91c1c", "grey": "#64748b"}[rep["level"]]
+        st.markdown(f"<div style='font-size:2.2em;font-weight:700;color:{color}'>{rep['score']:.0f} / 100</div>",
+                    unsafe_allow_html=True)
+        st.write(rep["verdict"])
+        if rep["data_state"] == "provisional":
+            st.caption("Provisional — fewer than 63 sessions, so the Sharpe leg is not yet fully meaningful.")
+        for name, label in (("trend", "Trend — live CAGR vs backtest"), ("drawdown", "Drawdown vs backtest worst"),
+                            ("sharpe", "Consistency — rolling 63-day Sharpe")):
+            sc, lvl, txt = rep[name]
+            if name == "drawdown" and s["dd_dollars"] == s["dd_dollars"] and s["dd_dollars"] < 0:
+                txt += f" ({_d(s['dd_dollars'])} on current equity)"
+            dot = {"green": "🟢", "yellow": "🟡", "red": "🔴", "grey": "⚪"}[lvl]
+            st.markdown(f"{dot} **{label}** ({sc:.0f}/100) — {txt}")
+    if rep["live_rebased"] is not None and len(rep["live_rebased"]) >= 2:
+        fig = go.Figure()
+        x = list(rep["live_rebased"].index)
+        fig.add_trace(go.Scatter(x=x, y=rep["live_rebased"].to_numpy(), name="Live equity", line=dict(width=2.5)))
+        fig.add_trace(go.Scatter(x=x, y=rep["expected"].reindex(rep["live_rebased"].index).to_numpy(),
+                                 name=f"Backtest path ({ref['cagr_pct']:.0f}% CAGR)", line=dict(dash="dash")))
+        if rep["qqq"] is not None:
+            qx = list(rep["qqq"].index)
+            fig.add_trace(go.Scatter(x=qx, y=rep["qqq"].to_numpy(), name="QQQ", line=dict(dash="dot")))
+        fig.update_layout(title="Live equity vs backtest path (rebased to 100)", xaxis_title="Date",
+                          yaxis_title="Rebased", hovermode="x unified", height=380,
+                          legend=dict(orientation="h", y=1.02))
+        st.plotly_chart(fig, width="stretch")
+    if rep.get("regime"):
+        st.info("Regime: " + rep["regime"]["text"])
+    with st.expander("When to review the strategy", expanded=False):
+        for t in rep["review_triggers"]:
+            st.markdown(f"- {t}")
+        st.caption("Score bands — trend: 100 at/above the backtest CAGR, 50 at zero · drawdown: full marks below "
+                   "half the backtest worst (-30.8%), alert beyond it · Sharpe: full marks ≥ 1.0, alert below zero.")
+
+
+# =====================================================================================================================
 # 13. Main
 # =====================================================================================================================
 def main():
     with st.spinner("Loading data..."):
         p = build_page()
-    # ?symbol=X opens that stock (the links in the alert, the tables and the Telegram messages use this)
+    # ?symbol=X opens that stock (table clicks and the Telegram messages use this)
     q_symbol = str(st.query_params.get("symbol", "")).strip().upper()
     jumped = q_symbol in p.options
     if jumped:
@@ -1533,16 +1591,18 @@ def main():
         del st.query_params["symbol"]
 
     render_top_bar(p)
-    render_alert()
-    tab_main, tab_details = st.tabs(["📈 Dashboard", "🔎 Details"])
+    tab_main, tab_details, tab_health = st.tabs(["📈 Dashboard", "🔎 Details", "🩺 Strategy Health"])
     with tab_main:
         render_summary(p)
         ticker, tdata = render_stock_picker(p, jumped)
         render_stock_header(p, ticker, tdata)
-        chart_info = render_stock_chart(p, ticker, tdata)
-        render_stock_more(p, ticker, tdata, *chart_info)
+        fig, has_strategy, chart, events, x_start, x_end = stock_chart_inputs(ticker, tdata)
+        render_stock_more(p, ticker, tdata, has_strategy, chart, events, x_start, x_end)
+        render_stock_figure(fig)
     with tab_details:
         render_details(p, ticker)
+    with tab_health:
+        render_health()
 
 
 main()

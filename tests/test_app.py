@@ -1,7 +1,8 @@
 """App regression (Streamlit AppTest, no browser, no network): the page renders without exceptions, HTML in markdown renders
 as HTML (no escaped tags / code blocks / unbalanced tags), the price chart draws Close + all MAs on a date axis, the displayed
 rank == Strategy_Rank and the portfolio slot == position among the picks, the Strategy tab widgets work, captions name the live
-rules, and the holdings alert renders (strategy holdings + a temporary positions file, deleted afterwards).
+rules, the rank tiers render with a ?symbol= link per ranked stock, and the holdings-alert module still builds
+(strategy holdings + a temporary positions file, deleted afterwards; the dashboard banner itself was removed).
 Run: python tests/run_tests.py  (or python tests/test_app.py)"""
 import base64
 import io
@@ -162,7 +163,7 @@ expect("run_pipeline" not in blob, "old command 'run_pipeline' still shown in th
 
 # ---------------------------------------------------------------- holdings alert (strategy + temporary positions file)
 box = [m.value for m in at.markdown if "sa-alert " in m.value]
-expect(len(box) == 1, f"alert boxes on the page: {len(box)}")
+expect(len(box) == 0, f"the alert banner was removed from the dashboard, found {len(box)}")
 a = holdings_alert.build_alert(use_positions=False)
 print("alert (strategy):", " | ".join(holdings_alert.alert_text(a, urls=False)))
 held = latest[latest.Strategy_Weight.fillna(0) > 0].index.tolist()
@@ -208,6 +209,22 @@ if be.WINNER.get("earnings_block_days"):
     expect(sorted(d1.symbols[j] for j in d1.earn_days) == sorted(top3[:2]), "earnings window should be d < E <= d + 5")
     expect(all(buy not in top3[:2] for _, buy, _ in swaps), "blocked name swapped in")
     expect(len(blocked) == 2 and "not bought: earnings in 1 day" in blocked[0], f"blocked-entrant text: {blocked}")
+
+# ---------------------------------------------------------------- rank tiers: horizontal clickable lists by rank
+tier_md = [m.value for m in at.markdown if "Rank 1 to 20" in m.value and "?symbol=" in m.value]
+expect(len(tier_md) == 1, f"rank tier block found: {len(tier_md)}")
+blob = tier_md[0] if tier_md else ""
+parts = re.split(r"<b>(Rank 1 to 20|Rank 21 to 50|Rank 51\+):</b>", blob)
+expect(len(parts) == 7, f"tier headers/bodies: {len(parts)} parts")
+bodies = dict(zip(parts[1::2], parts[2::2]))
+def want_tier(sym):
+    r = latest.loc[sym, "Strategy_Rank"]
+    return "Rank 1 to 20" if r <= 20 else ("Rank 21 to 50" if r <= 50 else "Rank 51+")
+for sym in latest[latest.Strategy_Rank.notna()].index:
+    syms = set(re.findall(r"\?symbol=([A-Z0-9.]+)", bodies[want_tier(sym)]))
+    expect(sym in syms, f"{sym} (rank {latest.loc[sym, 'Strategy_Rank']:.0f}) not in its tier {want_tier(sym)!r}")
+all_linked = set(re.findall(r"\?symbol=([A-Z0-9.]+)", blob))
+expect(all_linked <= set(opts), f"tier links outside the dropdown: {sorted(all_linked - set(opts))}")
 
 print("\nAPP TESTS OK" if not FAIL else f"\nAPP TEST FAILURES ({len(FAIL)}): {FAIL}")
 sys.exit(1 if FAIL else 0)

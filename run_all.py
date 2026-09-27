@@ -489,13 +489,23 @@ def run_notebook(path, env):
 
 
 def read_calls(path):
-    """Sum the API request counts the steps appended to `path` (one JSON dict per line)."""
+    """Sum the API request counts the steps appended to `path` (one JSON dict per line).
+
+    A corrupt line (e.g. a notebook killed mid-write) is skipped, never fatal: this runs in the
+    final summary, after the trade, so it must not turn a good run into a reported failure."""
     calls = {}
     if os.path.exists(path):
         with open(path) as f:
             for line in f:
-                for k, v in json.loads(line).items():
-                    calls[k] = calls.get(k, 0) + int(v)
+                try:
+                    items = json.loads(line).items()
+                except ValueError:
+                    continue
+                for k, v in items:
+                    try:
+                        calls[k] = calls.get(k, 0) + int(v)
+                    except (TypeError, ValueError):
+                        continue
         os.remove(path)
     return calls
 
@@ -554,9 +564,17 @@ def data_summary():
     if os.path.exists(path):
         m = pd.read_csv(path)
         if len(m):
-            out.update(data_date=str(m["As_Of"].iloc[0])[:10], next=m["Next_Message"].iloc[0], rules=m["Rules"].iloc[0])
-            out["decisions"] = [f"{'>> ' if getattr(r, 'Is_Latest', False) else '   '}{r.Message} [{r.Status}]"
-                                for r in m.itertuples()]
+            # A malformed report must degrade the summary, never crash the pipeline (validate already flags it).
+            get = lambda c: m[c].iloc[0] if c in m.columns else None
+            as_of = get("As_Of")
+            out.update(data_date=str(as_of)[:10] if as_of is not None else None,
+                       next=get("Next_Message"), rules=get("Rules"))
+            if "Message" in m.columns:
+                tag = "Action" if "Action" in m.columns else ("Status" if "Status" in m.columns else None)
+                out["decisions"] = [
+                    f"{'>> ' if getattr(r, 'Is_Latest', False) else '   '}{getattr(r, 'Message', '')}"
+                    + (f" [{getattr(r, tag)}]" if tag and getattr(r, tag, None) is not None else "")
+                    for r in m.itertuples()]
     return out
 
 

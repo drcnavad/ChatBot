@@ -860,6 +860,7 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
         # B-4: delisted while held -> liquidate at the last available close (normal cost), so no
         # phantom position is carried at a frozen price. Only fires when no future bars exist at
         # all (a mere halt has later bars, so t <= last_open there and the position is kept).
+        delist_notional = 0.0
         for j in np.where((shares > 0) & ~tradable & (last_open >= 0) & (t > last_open))[0]:
             px = C[t, j]
             if not np.isfinite(px):
@@ -867,6 +868,7 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
             q = shares[j]
             px_net = px * (1 - cost)
             cash += q * px_net
+            delist_notional += q * px  # delisting sale counts toward turnover (gross, like other sales)
             entry = dates[entry_day[j]] if entry_day[j] >= 0 else dates[t]
             trades.append((cols[j], entry, dates[t], basis[j], px_net,
                            px_net / basis[j] - 1 if basis[j] > 0 else np.nan, "delist"))
@@ -885,7 +887,7 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
         desired[is_add] = w[is_add] * V / o[is_add]     # adds trade to exactly target (buy or trim)
         delta = desired - shares
         delta[np.abs(delta * np.nan_to_num(px_open)) < 1e-10] = 0.0
-        traded_notional = 0.0
+        traded_notional = delist_notional  # delisting sales already counted above
         # sells first
         for j in np.where(delta < 0)[0]:
             q = -delta[j]

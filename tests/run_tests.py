@@ -24,6 +24,9 @@
   test_alpaca_paper_reads.py mocked tests for alpaca_paper.py's read-only views: open_orders,
                          market_clock, portfolio_history parsing + the read-only guardrails
                          (paper endpoint allowlist, no order-placing code)
+  test_strategy_health.py  strategy_health.py: reference parsing, equity stats, trend/drawdown/Sharpe
+                         bands, composite score levels, regime detection, fail-soft on missing files
+                         (synthetic data, no network, no streamlit)
 Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
 import os
 import subprocess
@@ -34,7 +37,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_run_all_notify.py", "test_run_all_optional.py",
          "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_safety.py",
-         "test_paper_trade_math_audit.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py"]
+         "test_paper_trade_math_audit.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
+         "test_strategy_health.py"]
 
 
 def main():

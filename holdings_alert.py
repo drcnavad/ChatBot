@@ -8,7 +8,7 @@ an optional Weight column in % or as a fraction). Returns ONE plain line per act
   "With today's ranks the swap rule would sell ANET and buy RBRK (rank 1). Next check: ..."   (other days)
   "No swap with today's ranks. Next check: Mon Sep 28."
   "Full rebalance at the Mon Sep 28 open: sell ...; buy ..."                         (Friday / week's last session)
-Tickers link to the app (http://localhost:8501/?symbol=XXX). The swap rule is backtest_engine.midweek_swap_pairs (the exact
+Tickers link to the app (http://localhost:8502/?symbol=XXX). The swap rule is backtest_engine.midweek_swap_pairs (the exact
 function the strategy uses: top 3 in, below rank 15 out, weight inheritance; max 4 per sector unless WINNER['cap_soft'] (T20,
 live: a top-3 stock always qualifies)), followed by the mid-week exit
 backtest_engine.midweek_exit_sells (WINNER["midweek_exit_below"] = 30: any holding worse than rank 30 is sold, cash until the
@@ -38,7 +38,7 @@ SIGNAL_CSV = os.path.join(REPORTS, "signal_analysis.csv")
 MIDWEEK_CSV = os.path.join(REPORTS, "strategy_midweek_check.csv")
 ET = ZoneInfo("America/New_York")
 LEVEL_ICON = {"red": "🔴", "green": "🟢", "blue": "🔵"}
-APP_URL = "http://localhost:8501/?symbol="   # the app's ticker view (symbol query parameter)
+APP_URL = "http://localhost:8502/?symbol="   # the app's ticker view (symbol query parameter)
 
 
 # ----------------------------------------------------------------------------- small helpers: dates, live rule settings, positions file
