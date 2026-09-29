@@ -820,15 +820,65 @@ def _read_buying_power(client):
     return bp if math.isfinite(bp) and bp >= 0 else None
 
 
+def _stage_orders_for_morning(orders_df, positions, record, reason):
+    """Stage order rows for the morning fill-check instead of submitting them.
+
+    Used when BUYs cannot be safely sized in the evening (SELLs did not settle in
+    time, or buying power is unreadable): the full-size rows are recorded in the
+    pending file with no broker order id, and the morning fill-check submits them
+    as regular-hours market orders after the SELLs complete, with its own
+    affordability check. This keeps a transient evening condition from permanently
+    shrinking the BUY plan (Bug 1) or submitting oversized BUYs (Bug 2).
+    Returns a results DataFrame with STAGED statuses.
+    """
+    cols = ["Symbol", "Side", "Shares", "Order_ID", "Status"]
+    staged, skipped = [], []
+    for r in orders_df.itertuples():
+        try:
+            qty = int(math.floor(float(r.Shares)))
+        except (TypeError, ValueError):
+            qty = 0
+        if qty < 1:
+            skipped.append((r.Symbol, r.Side, r.Shares, None, "SKIPPED: <1 whole share"))
+            continue
+        if r.Side == "SELL":
+            qty, qty_reason = _sell_qty_check(r.Symbol, qty, positions)
+            if qty_reason:
+                skipped.append((r.Symbol, r.Side, r.Shares, None, qty_reason))
+                continue
+            if qty < 1:
+                skipped.append((r.Symbol, r.Side, r.Shares, None, "SKIPPED: <1 whole share held"))
+                continue
+        try:
+            limit_price = round(float(r.Price), 2)
+        except (TypeError, ValueError):
+            limit_price = 0
+        if not limit_price > 0:
+            skipped.append((r.Symbol, r.Side, r.Shares, None, "SKIPPED: no price"))
+            continue
+        entry = {"symbol": r.Symbol, "side": r.Side, "qty": qty,
+                 "limit_price": limit_price, "order_id": None}
+        staged.append(entry)
+        if record is not None:
+            record(entry)  # incremental: a crash still leaves these staged
+    return pd.DataFrame(
+        [(s["symbol"], s["side"], s["qty"], None, reason) for s in staged] + skipped,
+        columns=cols)
+
+
 def submit_paper_extended_sequenced(orders, positions=None, record=None, client=None, order_date=None):
     """Evening extended-hours submission with SELLs settled before BUYs are sized.
 
     1. Submits the SELL rows as extended-hours limit orders (each recorded).
     2. Waits (bounded, SELL_SETTLE_WAIT_SECS) for the sells to reach terminal states.
     3. Refreshes BUYING POWER from the broker and re-applies the buying-power guard
-       to the BUY rows with the fresh number (falls back to the already-guarded plan
-       when the refresh fails). Sells that filled have released buying power.
+       to the BUY rows with the fresh number. Sells that filled have released buying power.
     4. Submits the BUY rows as extended-hours limit orders (each recorded).
+    If the SELLs do not settle within the wait (extended-hours fills are not
+    guaranteed - a submitted sell's cash is not spendable until it fills) or buying
+    power is unreadable, the BUYs are STAGED for the morning fill-check instead of
+    being permanently downsized or submitted oversized: the morning submits them as
+    market orders after the SELLs complete, with its own affordability check.
     A crash between steps is safe: every submitted row carries a deterministic
     client_order_id and is recorded incrementally; a retry reconciles with the broker
     and the morning fill check completes any remainder.
@@ -841,13 +891,27 @@ def submit_paper_extended_sequenced(orders, positions=None, record=None, client=
     sell_results = submit_paper_extended(sells, positions=positions, record=record,
                                          client=client, order_date=order_date)
     sell_ids = [oid for oid in sell_results["Order_ID"] if oid]
-    if sell_ids:
-        _wait_for_terminal_all(client, sell_ids)
+    sell_state = _wait_for_terminal_all(client, sell_ids) if sell_ids else {}
+    terminal = {"filled", "canceled", "cancelled", "expired", "rejected", "done_for_day", "gone"}
+    sells_settled = all(sell_state.get(oid, ("?", 0))[0] in terminal for oid in sell_ids)
     fresh_bp = _read_buying_power(client)
-    if fresh_bp is not None:
+    if sells_settled and fresh_bp is not None:
         buys = apply_buying_power_guard(buys, fresh_bp)
-    buy_results = submit_paper_extended(buys, positions=positions, record=record,
-                                        client=client, order_date=order_date)
+        buy_results = submit_paper_extended(buys, positions=positions, record=record,
+                                            client=client, order_date=order_date)
+    else:
+        # SELLs did not settle in time, or buying power is unreadable: stage the
+        # full-size BUYs for the morning instead of downsizing them permanently
+        # (their cash is not spendable until the sells fill) or submitting them
+        # oversized (fail-closed). The morning fill-check submits them after the
+        # SELLs complete, with a fresh affordability check.
+        if not sells_settled:
+            stage_reason = ("STAGED for morning (evening SELLs did not settle in time - "
+                            "BUYs kept full-size for morning submission after SELLs complete)")
+        else:
+            stage_reason = ("STAGED for morning (evening buying power unreadable - "
+                            "BUYs kept full-size for morning affordability check)")
+        buy_results = _stage_orders_for_morning(buys, positions, record, stage_reason)
     return pd.concat([sell_results, buy_results], ignore_index=True)
 
 
@@ -1339,6 +1403,7 @@ def get_live_positions_and_equity():
 
 
 EVENING_SUBMIT_CUTOFF_CT = "19:00"  # extended hours end 7:00 PM CT - later runs stage orders for the morning
+EARLY_CLOSE_SUBMIT_CUTOFF_CT = "16:00"  # early-close days (1 PM ET close): extended hours end 4:00 PM CT
 
 
 def reconcile_positions(target_source="auto", tolerance_pct=1.0):
@@ -1396,8 +1461,11 @@ def _past_evening_cutoff(now=None):
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
+    import backtest_engine as be
+
     now = now or datetime.now(ZoneInfo("America/Chicago"))
-    return now.strftime("%H:%M") >= EVENING_SUBMIT_CUTOFF_CT
+    cutoff = EARLY_CLOSE_SUBMIT_CUTOFF_CT if be.is_early_close(now.date()) else EVENING_SUBMIT_CUTOFF_CT
+    return now.strftime("%H:%M") >= cutoff
 
 
 def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=False, extended=True):

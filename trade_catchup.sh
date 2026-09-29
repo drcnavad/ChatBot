@@ -22,8 +22,8 @@ HHMM=$((10#$(TZ=America/Chicago date +%H%M))) # 10# : 08xx/09xx are decimal, not
 if [ "$HHMM" -lt 1515 ] || [ "$HHMM" -ge 1900 ]; then exit 0; fi
 
 TODAY=$(TZ=America/Chicago date +%F)
-PY3="$(command -v python3 || command -v python)"
-LAST_TRADE_DAY="$("$PY3" -c "
+PY=/opt/anaconda3/bin/python                 # launchd has a minimal PATH: plain `python` is /usr/bin/python3 (no alpaca)
+LAST_TRADE_DAY="$("$PY" -c "
 import json
 try:
     print((json.load(open('Reports/run_state.json')).get('last_trade_at') or '')[:10])
@@ -32,7 +32,6 @@ except Exception:
 " 2>/dev/null)"
 if [ "$LAST_TRADE_DAY" = "$TODAY" ]; then exit 0; fi   # today's run already happened
 
-PY="$(command -v python || command -v python3)"
 LOG="$PROJ/Reports/logs/launchd_catchup.log"
 echo "$(TZ=America/Chicago date '+%F %T %Z') catch-up: missed evening trade - running pipeline_watchdog.py --trade" >> "$LOG"
 "$PY" pipeline_watchdog.py --trade >> "$LOG" 2>&1

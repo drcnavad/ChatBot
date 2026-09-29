@@ -151,9 +151,13 @@ BENCHMARKS = list(sector_mapping.BENCHMARK_SYMBOLS)
 
 
 # ----------------------------------------------------------------------------- calendar
+SPECIAL_CLOSURES = ["2025-01-09"]   # one-off full-day NYSE closures (national day of mourning); add new ones here
+
+
 class NYSEHolidayCalendar(AbstractHolidayCalendar):
-    """Full-day NYSE holidays (early closes are ignored)."""
+    """Full-day NYSE holidays + SPECIAL_CLOSURES (early closes: see is_early_close)."""
     rules = [
+        *[Holiday(f"Closed {d}", year=int(d[:4]), month=int(d[5:7]), day=int(d[8:])) for d in SPECIAL_CLOSURES],
         Holiday("NewYearsDay", month=1, day=1, observance=sunday_to_monday),
         USMartinLutherKingJr, USPresidentsDay, GoodFriday, USMemorialDay,
         Holiday("Juneteenth", month=6, day=19, start_date="2022-01-01", observance=nearest_workday),
@@ -164,6 +168,23 @@ class NYSEHolidayCalendar(AbstractHolidayCalendar):
 
 
 NYSE_SESSION = CustomBusinessDay(calendar=NYSEHolidayCalendar())
+
+
+def is_early_close(d):
+    """NYSE 1 PM ET close: the day after Thanksgiving, and July 3 / Dec 24 when they fall Mon-Thu (on a Friday they
+    are the observed holiday). After-hours trading then ends at 5 PM ET (4 PM CT) instead of 8 PM ET."""
+    d = pd.Timestamp(d).normalize()
+    thanksgiving = USThanksgivingDay.dates(f"{d.year}-11-01", f"{d.year}-11-30")[0]
+    return bool(d == thanksgiving + pd.Timedelta(days=1) or ((d.month, d.day) in ((7, 3), (12, 24)) and d.weekday() < 4))
+
+
+def volatility(close, window=63):
+    """Rolling std of daily returns. A single missing close (e.g. a halted day) is filled with the average of its
+    neighbours, so one gap no longer blanks the window for 64 sessions; the gap day itself keeps the previous day's
+    value because its fill uses the next close (no lookahead)."""
+    gap = close.isna() & close.shift(1).notna() & close.shift(-1).notna()
+    filled = close.mask(gap, (close.shift(1) + close.shift(-1)) / 2)
+    return filled.pct_change(fill_method=None).rolling(window).std().mask(gap).ffill(limit=1)
 
 
 def next_sessions(after, n):
@@ -1500,7 +1521,7 @@ def backtest_inputs(refresh=False):
     rs, _ = relative_strength(close, U)
     return {"close": close, "open": opn, "score": 0.5 * tech_score + 0.5 * rs, "tiebreak": rs,
             "eligible": bool_wide(tech, "eligible", idx, U),
-            "vol": close[U].pct_change(fill_method=None).rolling(63).std(),
+            "vol": volatility(close[U]),
             "regime": regime_series(close, "QQQ"), "weekly": weekly_rebalance_days(idx, live=True)}
 
 

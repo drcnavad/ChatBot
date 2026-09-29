@@ -9,7 +9,8 @@ Safety rules built into this module:
   * Only the live endpoint https://api.alpaca.markets/v2 is accepted; any other URL (the paper
     paper-api.alpaca.markets host, plain http, another version or host) raises PaperAccountError
     before a request is made.
-  * Only HTTP GET requests to /account, /positions, /orders, /clock and /account/portfolio/history are possible.
+  * Only HTTP GET requests to /account, /positions, /orders, /clock, /account/portfolio/history and
+    /account/activities (deposits/withdrawals) are possible.
     There is no code here that places, changes or cancels orders.
   * The keys come from .env (ALPACA_LIVE_KEY_ID, ALPACA_LIVE_SECRET_KEY). They are sent only in the request headers
     and are never printed, logged or written to a file.
@@ -17,7 +18,8 @@ Safety rules built into this module:
 Outputs of sync_paper_account():
   my_positions.csv                        Symbol,Shares of the live positions (read by holdings_alert.py and the app alert)
   Reports/live_portfolio_snapshot.csv    positions + cash/equity rows at the time of the sync
-  Reports/live_account_history.csv       one row per sync (equity, cash, buying power, number of positions)
+  Reports/live_account_history.csv       one row per sync (equity, cash, buying power, number of positions,
+                                         lifetime net deposits - strategy_health.py excludes them from P&L)
 
     python alpaca_paper.py            # print the summary, positions and recent orders (no files written)
     python alpaca_paper.py --sync     # ... and write the three files above
@@ -46,7 +48,7 @@ KEY_ENV, SECRET_ENV = "ALPACA_LIVE_KEY_ID", "ALPACA_LIVE_SECRET_KEY"
 # Also accepted, in this order, if the names above are empty: Alpaca's standard key names.
 FALLBACK_NAMES = [("ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY")]
 ALLOWED_PATHS = ("/account", "/positions", "/orders", "/clock",
-                 "/account/portfolio/history")   # read-only endpoints (GET only, live host only)
+                 "/account/portfolio/history", "/account/activities")   # read-only endpoints (GET only, live host only)
 _LOCAL_TEST_URL = re.compile(r"http://(127\.0\.0\.1|localhost):\d{2,5}/v2")   # tests only (mock server on this machine)
 CT = ZoneInfo("America/Chicago")
 
@@ -162,6 +164,17 @@ class PaperAccount:
         return {"Is open": bool(c.get("is_open")), "Next open (CT)": ct(c.get("next_open")),
                 "Next close (CT)": ct(c.get("next_close")), "Timestamp (CT)": ct(c.get("timestamp"))}
 
+    def net_deposits(self):
+        """Lifetime deposits minus withdrawals (CSD/CSW cash transfers + JNLC cash journals; Alpaca signs withdrawals
+        negative; canceled transfers excluded), so the strategy's P&L can leave them out."""
+        total, params = 0.0, {"activity_types": "CSD,CSW,JNLC", "page_size": 100, "direction": "desc"}
+        while True:
+            page = self._get("/account/activities", params)
+            total += sum(float(a.get("net_amount") or 0) for a in page if a.get("status") != "canceled")
+            if len(page) < 100:
+                return total
+            params = {**params, "page_token": page[-1]["id"]}
+
     def portfolio_history(self, period="1M", timeframe="1D"):
         """Equity curve: one row per bar with As_Of (CT), Equity, P/L $ and P/L %.
 
@@ -187,7 +200,7 @@ def write_positions_csv(positions, path=POSITIONS_CSV):
     return path
 
 
-def write_snapshot(summary, positions, snapshot_csv=SNAPSHOT_CSV, history_csv=HISTORY_CSV, now=None):
+def write_snapshot(summary, positions, snapshot_csv=SNAPSHOT_CSV, history_csv=HISTORY_CSV, now=None, net_deposits=0.0):
     """Positions + cash/equity rows (overwritten each sync) and one appended history row."""
     as_of = (now or datetime.now(CT)).strftime("%Y-%m-%d %H:%M")
     snap = positions.assign(As_Of=as_of)
@@ -196,7 +209,8 @@ def write_snapshot(summary, positions, snapshot_csv=SNAPSHOT_CSV, history_csv=HI
     snap = pd.concat([snap, extra], ignore_index=True)
     snap[["As_Of"] + [c for c in snap.columns if c != "As_Of"]].to_csv(snapshot_csv, index=False)
     row = pd.DataFrame([{"As_Of": as_of, "Equity": summary["Equity"], "Cash": summary["Cash"],
-                         "Buying_Power": summary["Buying power"], "Positions": int((positions["Qty"] != 0).sum())}])
+                         "Buying_Power": summary["Buying power"], "Positions": int((positions["Qty"] != 0).sum()),
+                         "Net_Deposits": net_deposits}])
     row.to_csv(history_csv, mode="a", header=not os.path.exists(history_csv), index=False)
     return snapshot_csv, history_csv
 
@@ -209,7 +223,7 @@ def sync_paper_account(account=None, positions_csv=None, snapshot_csv=None, hist
     history_csv = history_csv or HISTORY_CSV
     summary, positions = account.account_summary(), account.positions()
     write_positions_csv(positions, positions_csv)
-    write_snapshot(summary, positions, snapshot_csv, history_csv)
+    write_snapshot(summary, positions, snapshot_csv, history_csv, net_deposits=account.net_deposits())
     return {**summary, "Positions": int((positions["Qty"] != 0).sum()), "positions_csv": positions_csv}
 
 

@@ -648,7 +648,7 @@ def signal_board(df):
     Uses Reports/strategy_changes.csv (the engine's decisions) plus signal_analysis.csv for stocks not in it.
     Returns (board DataFrame, decision date)."""
     ch = read_report_csv(CHANGES_CSV)
-    sub = ch[ch["View"] == "last rebalance"] if ch is not None else pd.DataFrame()
+    sub = ch[ch["Symbol"].notna()] if ch is not None else pd.DataFrame()
     if not sub.empty:
         date = pd.Timestamp(sub["Date"].iloc[0])
     else:
@@ -1484,7 +1484,7 @@ def render_rules_and_changes(p):
         st.caption("Run `python run_all.py` to list the portfolio changes.")
         return
     st.markdown("**What changed at the latest decision**")
-    sub = changes[changes["View"] == "last rebalance"].copy()
+    sub = changes[changes["Symbol"].notna()].copy()
     earn = sub["Reason"].astype(str).str.startswith("earnings in")
     if not st.checkbox("Show Neutral (sector cap) names too", value=False, key="changes_all"):
         sub, earn = sub[(sub["Status"] != "not selected") | earn], earn[(sub["Status"] != "not selected") | earn]
@@ -1545,8 +1545,9 @@ def render_order_preview():
         if meta["source"] == "midweek":
             for msg in meta["swaps"]["Message"]:
                 st.info(msg)
+        invested = "—" if meta["invested"] is None else f"{meta['invested']:.0%}"
         st.caption(f"Targets: {meta['source']} weights as of {meta['as_of']} (last weekly rebalance {meta['last_rebalance']}, "
-                   f"last decision {meta['last_decision']}), {meta['invested']:.0%} invested · priced at the latest close · whole shares")
+                   f"last decision {meta['last_decision']}), {invested} invested · priced at the latest close · whole shares")
         st.dataframe(orders.round(2), width="stretch", hide_index=True)
         st.caption("Preview only \u2014 the scheduled pipeline submits these automatically; nothing is sent from this page.")
     except Exception as e:
@@ -1609,7 +1610,8 @@ def render_health():
     c = st.columns(4)
     c[0].metric("Equity", _d(s["equity_now"]))
     c[1].metric("P&L since start", _d(s["pnl_dollars"]), f"{s['total_return_pct']:+.1f}%"
-                if s["total_return_pct"] == s["total_return_pct"] else None)
+                if s["total_return_pct"] == s["total_return_pct"] else None,
+                help="Deposits and withdrawals are excluded (time-weighted return).")
     c[2].metric("CAGR (live)", f"{s['cagr_pct']:.1f}%" if s["cagr_pct"] == s["cagr_pct"] else "\u2014")
     c[3].metric("Current drawdown", f"{s['current_dd_pct']:.1f}%", _d(s["dd_dollars"]))
     if rep["data_state"] == "warming_up":

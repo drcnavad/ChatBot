@@ -129,6 +129,15 @@ expect(abs(st_h["pnl_dollars"] - (st_h["equity_now"] - st_h["equity_start"])) < 
 expect(st_h["dd_dollars"] <= 0, "dd dollars never positive")
 expect(abs(st_h["dd_dollars"] - (st_h["equity_now"] - st_h["peak_equity"])) < 1e-6, "dd dollars = now - peak")
 
+# --- deposits / withdrawals are not profit or loss -------------------------------------
+flows = ("As_Of,Equity,Cash,Buying_Power,Positions,Net_Deposits\n2026-09-21 16:00,10000,0,0,5,10000\n"
+         "2026-09-22 16:00,11000,0,0,5,10000\n2026-09-23 16:00,16000,0,0,5,15000\n"
+         "2026-09-24 16:00,14000,0,0,5,13000\n")   # +10% gain, then a $5,000 deposit, then a $2,000 withdrawal
+st_f = sh.equity_stats(sh.load_live_equity(_tmp(flows)))
+expect(abs(st_f["pnl_dollars"] - 1000) < 1e-6, f"deposit/withdrawal excluded from P&L: {st_f['pnl_dollars']}")
+expect(abs(st_f["total_return_pct"] - 10) < 1e-6, f"time-weighted return ignores flows: {st_f['total_return_pct']}")
+expect(st_f["current_dd_pct"] == 0 and st_f["max_dd_pct"] == 0, "a withdrawal is not a drawdown")
+
 # --- Sharpe annualization follows the actual cadence ------------------------------------
 ann = float(np.sqrt(365.25 / 1.4))  # ~daily trading-day syncs
 s_ann = sh._sharpe([0.001, -0.0005, 0.002, -0.001, 0.0015], ann)

@@ -37,6 +37,10 @@ FIXTURES = {
                     "next_open": "2026-09-28T13:30:00Z", "next_close": "2026-09-26T20:00:00Z"},
     "/v2/account/portfolio/history": {"timestamp": [1727308800, 1727395200], "equity": [100000.0, 101234.5],
                     "profit_loss": [0.0, 1234.5], "profit_loss_pct": [0.0, 0.012345]},
+    "/v2/account/activities": [
+        {"id": "a1", "activity_type": "CSD", "net_amount": "100000", "status": "executed"},
+        {"id": "a2", "activity_type": "CSW", "net_amount": "-2000", "status": "executed"},
+        {"id": "a3", "activity_type": "CSD", "net_amount": "5000", "status": "canceled"}],
 }
 
 
@@ -121,13 +125,14 @@ try:
         expect(True, "non-whitelisted path refused")
     # a server error (HTTP 403) must not leak the keys
     req_fail = None
-    ap.ALLOWED_PATHS = ap.ALLOWED_PATHS + ("/forbidden",)
+    allowed = ap.ALLOWED_PATHS
+    ap.ALLOWED_PATHS = allowed + ("/forbidden",)
     try:
         acct._get("/forbidden")
     except ap.PaperAccountError as e:
         req_fail = str(e)
     finally:
-        ap.ALLOWED_PATHS = ("/account", "/positions", "/orders")
+        ap.ALLOWED_PATHS = allowed
     expect(bool(req_fail) and "403" in req_fail and SECRET not in req_fail and KEY not in req_fail, f"HTTP error without keys: {req_fail}")
     expect(SECRET not in repr(acct) and KEY not in repr(acct), "repr hides the keys")
 
@@ -144,6 +149,7 @@ try:
     sn = pd.read_csv(snap)
     expect({"CASH", "TOTAL EQUITY", "NVDA", "MRK"} <= set(sn.Symbol), "snapshot has positions + cash/equity rows")
     expect(len(pd.read_csv(hist)) == 2 and r["Positions"] == 2, "history appends one row per sync")
+    expect((pd.read_csv(hist)["Net_Deposits"] == 98000).all(), "history records net deposits (canceled transfer excluded)")
 
     # ------------------------------------------------------------ run_all --sync-live hook (mocked, temp paths)
     import run_all
@@ -180,8 +186,9 @@ try:
     expect(REQUESTS and all(q["method"] == "GET" for q in REQUESTS), f"only GET requests ({len(REQUESTS)} made)")
     expect(all(q["key"] == KEY and q["secret"] == SECRET for q in REQUESTS), "auth headers sent on every request")
     expect(all(q["path"].split("?")[0] in ("/v2/account", "/v2/positions", "/v2/orders", "/v2/clock",
-                                              "/v2/account/portfolio/history", "/v2/forbidden") for q in REQUESTS),
-           "only account/positions/orders/clock/history endpoints requested")
+                                              "/v2/account/portfolio/history", "/v2/account/activities", "/v2/forbidden")
+               for q in REQUESTS),
+           "only account/positions/orders/clock/history/activities endpoints requested")
     src = open(os.path.join(ROOT, "alpaca_paper.py")).read()
     expect(all(w not in src for w in ('"POST"', '"DELETE"', '"PATCH"', "submit_order", "TradingClient")) and src.count('method="GET"') == 1,
            "alpaca_paper.py contains no order-placing code")

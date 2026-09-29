@@ -23,7 +23,7 @@ st = be.wide(tech, "Technical_Score").reindex(index=idx, columns=U)
 el = be.bool_wide(tech, "eligible", idx, U)
 rs, _ = be.relative_strength(C, U)
 sc = 0.5 * st + 0.5 * rs
-vol = C[U].pct_change(fill_method=None).rolling(63).std()
+vol = be.volatility(C[U])
 reg = be.regime_series(C, "QQQ")
 RA = be.winner_rank_args(reg)
 last = idx[-1]

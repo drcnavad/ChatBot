@@ -413,16 +413,30 @@ def next_trading_day_after(d):
 
 
 def fill_check_allowed(now_ct, pending_path=None):
-    """(allowed, reason): the morning fill check completes the previous evening's extended-hours
-    orders. It runs once the next trading day after the evening trade reaches 9:00 AM CT, and only
-    while a pending fill check (Reports/live_pending_orders.json) exists."""
+    """(allowed, reason, needs_investigation): the morning fill check completes the previous
+    evening's extended-hours orders. It runs once the next trading day after the evening
+    trade reaches 9:00 AM CT, and only while a pending fill check
+    (Reports/live_pending_orders.json) exists.
+    needs_investigation is True when a human must look before re-running (corrupt file,
+    invalid date, stale orders) - the caller must warn, notify, and exit nonzero.
+    It is an explicit flag, not a substring of the reason, so rewording a message
+    cannot silently downgrade the safety behavior."""
     import paper_trade
     path = pending_path or paper_trade.PENDING_ORDERS_JSON
+    # A corrupt backup from an earlier run must re-alert every time until it is
+    # investigated and removed: the first run moved it aside and exited nonzero, but
+    # without this check the next scheduled run would see "no pending file" and exit 0,
+    # silently orphaning the evening's orders.
+    leftovers = sorted(glob.glob(path + ".corrupt_*"))
+    if leftovers:
+        return False, (f"uninvestigated corrupt pending file(s) from an earlier run: "
+                       f"{', '.join(leftovers)} - investigate before re-running; "
+                       f"the evening's orders were NOT completed"), True
     try:
         with open(path) as f:
             pend = json.load(f)
     except OSError:
-        return False, "no pending fill check (no evening orders awaiting completion)"
+        return False, "no pending fill check (no evening orders awaiting completion)", False
     except ValueError:
         # A corrupt pending file must never be silently treated as "no pending orders" - that
         # would orphan the evening's orders. Back it up loudly and stop instead.
@@ -432,25 +446,25 @@ def fill_check_allowed(now_ct, pending_path=None):
         except OSError:
             bad = path
         return False, (f"the pending fill-check file is corrupt (moved to {bad}) - investigate it "
-                       f"before re-running; the evening's orders were NOT completed")
+                       f"before re-running; the evening's orders were NOT completed"), True
     if not isinstance(pend, dict) or not pend.get("orders"):
-        return False, "no pending fill check (evening order list is empty)"
+        return False, "no pending fill check (evening order list is empty)", False
     try:
         evening = datetime.fromisoformat(pend["evening_date"]).date()
     except (KeyError, ValueError, TypeError):
         return False, ("the pending fill-check file has no valid evening_date - investigate "
-                       "Reports/live_pending_orders.json before re-running")
+                       "Reports/live_pending_orders.json before re-running"), True
     d = next_trading_day_after(evening)
     earliest = datetime(d.year, d.month, d.day, FILL_CHECK_AFTER[0], FILL_CHECK_AFTER[1], tzinfo=CT)
     if now_ct < earliest:
         return False, (f"fill check for the {evening:%a %b %d} evening run opens "
-                       f"{earliest:%a %b %d} at 9:00 AM CT")
+                       f"{earliest:%a %b %d} at 9:00 AM CT"), False
     if now_ct.date() > d:
         return False, (f"the pending fill check from the {evening:%a %b %d} evening run is stale (its window was "
-                       f"{d:%a %b %d}) - investigate Reports/live_pending_orders.json; stale orders are not replayed")
+                       f"{d:%a %b %d}) - investigate Reports/live_pending_orders.json; stale orders are not replayed"), True
     if not is_trading_day(now_ct.date()):
-        return False, f"{now_ct:%a %b %d} is a market holiday - the completion orders would not fill"
-    return True, "ok"
+        return False, f"{now_ct:%a %b %d} is a market holiday - the completion orders would not fill", False
+    return True, "ok", False
 
 
 def next_full_update(now_ct, state):
@@ -735,8 +749,8 @@ def main(argv=None):
             return 0
 
     if a.fill_check:
-        ok, reason = fill_check_allowed(now)
-        if not ok and "investigate" in reason:
+        ok, reason, needs_investigation = fill_check_allowed(now)
+        if not ok and needs_investigation:
             logging.warning("FILL CHECK: %s", reason)
             _notify("Fill check needs attention", reason)
             return 1

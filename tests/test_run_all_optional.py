@@ -66,8 +66,8 @@ def test_critical_failures():
           "all-optional failures are not critical")
     check(r._critical_failures(["sentiment", "main"]) == ["main"],
           "main failure stays critical alongside optional ones")
-    check(r._critical_failures(["sync_paper"]) == [],
-          "sync_paper (read-only refresh) is not critical")
+    check(r._critical_failures(["sync_live"]) == [],
+          "sync_live (read-only refresh) is not critical")
     check(r._critical_failures(["trade"]) == ["trade"],
           "a crashed trade stays critical")
     check(r._critical_failures(["trade_partial"]) == ["trade_partial"],
@@ -87,9 +87,9 @@ def test_trade_decision():
     proceed, _ = r._trade_decision(["fundamentals", "processing", "scoring", "sentiment", "earnings"])
     check(proceed is True,
           "all-optional failures -> trade still proceeds")
-    proceed, _ = r._trade_decision(["sync_paper"])
+    proceed, _ = r._trade_decision(["sync_live"])
     check(proceed is True,
-          "sync_paper failure -> trade proceeds")
+          "sync_live failure -> trade proceeds")
     proceed, reason = r._trade_decision(["main"])
     check(proceed is False and "critical" in reason,
           "main failure -> trade blocked")

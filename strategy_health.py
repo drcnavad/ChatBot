@@ -7,10 +7,13 @@ This module compares the LIVE account against those reference stats and answers:
 "normal pain, or is the edge gone?"
 
 Live inputs (all local CSVs written by the pipeline; everything is fail-soft):
-    Reports/live_account_history.csv   As_Of,Equity,Cash,Buying_Power,Positions (one row per sync;
+    Reports/live_account_history.csv   As_Of,Equity,Cash,Buying_Power,Positions,Net_Deposits (one row per sync;
                                         deduped to one row per calendar date, last sync wins)
     Reports/benchmark_prices.csv        Date,SPY,QQQ,... (QQQ leg + regime check)
 
+Deposits and withdrawals are NOT profit or loss: returns are time-weighted (each step's
+return = (equity - net deposits made in between) / previous equity - 1), and P&L dollars =
+equity change minus net deposits since the first sync.
 Dollar values ride along everywhere: equity now, P&L since the first sync, and the
 current drawdown in dollars — the dashboard shows them next to the percentages.
 The Sharpe annualization follows the actual sync cadence (sqrt(365.25 / avg days per
@@ -75,7 +78,7 @@ def load_reference(summary_csv):
 
 
 def load_live_equity(history_csv):
-    """Live equity curve from live_account_history.csv -> DataFrame(Date, Equity).
+    """Live equity curve from live_account_history.csv -> DataFrame(Date, Equity, Net_Deposits).
 
     One row per calendar date (the last sync of the day wins): the pipeline can sync
     twice on the same date (evening trade + morning fill-check) and those must not
@@ -84,12 +87,13 @@ def load_live_equity(history_csv):
     try:
         df = pd.read_csv(history_csv)
     except (OSError, pd.errors.ParserError):
-        return pd.DataFrame(columns=["Date", "Equity"])
+        return pd.DataFrame(columns=["Date", "Equity", "Net_Deposits"])
     if "Equity" not in df.columns:
-        return pd.DataFrame(columns=["Date", "Equity"])
+        return pd.DataFrame(columns=["Date", "Equity", "Net_Deposits"])
     date_col = "As_Of" if "As_Of" in df.columns else df.columns[0]
     out = pd.DataFrame({"Date": pd.to_datetime(df[date_col], errors="coerce"),
-                        "Equity": pd.to_numeric(df["Equity"], errors="coerce")})
+                        "Equity": pd.to_numeric(df["Equity"], errors="coerce"),
+                        "Net_Deposits": pd.to_numeric(df.get("Net_Deposits", 0.0), errors="coerce")})
     out = out.dropna().sort_values("Date")
     out["_day"] = out["Date"].dt.date
     out = out.drop_duplicates("_day", keep="last").drop(columns="_day").reset_index(drop=True)
@@ -113,13 +117,21 @@ def _sharpe(returns, annualization):
     return float(r.mean() / r.std() * annualization)
 
 
+def growth_index(eq):
+    """Deposit-neutral growth of 1.0 over the live curve (time-weighted: deposits/withdrawals are not returns)."""
+    e = eq["Equity"].to_numpy(float)
+    r = (e[1:] - np.diff(eq["Net_Deposits"].to_numpy(float))) / e[:-1] - 1
+    return np.concatenate([[1.0], np.cumprod(1 + r)])
+
+
 def equity_stats(eq):
     """Core stats of a live equity curve. Returns dict; empty-ish when < 2 points.
 
     The Sharpe annualization is derived from the actual sync cadence
     (sqrt(365.25 / avg calendar days per observation) ~= sqrt(252) for roughly
     daily trading-day syncs), so a 3x/week sync does not inflate the number.
-    Dollar fields: equity_start/now, pnl_dollars, peak_equity, dd_dollars.
+    Dollar fields: equity_start/now, pnl_dollars (net of deposits), peak_equity (the peak restated in
+    today's dollars), dd_dollars.
     """
     out = {"n": int(len(eq)), "total_return_pct": float("nan"), "cagr_pct": float("nan"),
            "current_dd_pct": 0.0, "max_dd_pct": 0.0, "sharpe_full": float("nan"),
@@ -128,22 +140,22 @@ def equity_stats(eq):
            "peak_equity": float("nan"), "dd_dollars": 0.0}
     if len(eq) < 2:
         return out
-    e = eq["Equity"].to_numpy(float)
+    e, deposits, g = eq["Equity"].to_numpy(float), eq["Net_Deposits"].to_numpy(float), growth_index(eq)
     days = max((eq["Date"].iloc[-1] - eq["Date"].iloc[0]).days, 1)
     avg_gap = days / (len(eq) - 1)
     ann = float(np.sqrt(365.25 / max(avg_gap, 1.0)))
-    out["total_return_pct"] = float(e[-1] / e[0] - 1) * 100
-    out["cagr_pct"] = float((e[-1] / e[0]) ** (365.25 / days) - 1) * 100
+    out["total_return_pct"] = float(g[-1] - 1) * 100
+    out["cagr_pct"] = float(g[-1] ** (365.25 / days) - 1) * 100
     out["equity_start"] = float(e[0])
     out["equity_now"] = float(e[-1])
-    out["pnl_dollars"] = float(e[-1] - e[0])
-    peak = np.maximum.accumulate(e)
-    out["peak_equity"] = float(peak[-1])
-    out["dd_dollars"] = float(e[-1] - peak[-1])
-    dd = (e - peak) / peak * 100
+    out["pnl_dollars"] = float(e[-1] - e[0] - (deposits[-1] - deposits[0]))
+    peak = np.maximum.accumulate(g)
+    out["peak_equity"] = float(e[-1] * peak[-1] / g[-1])
+    out["dd_dollars"] = float(e[-1] - out["peak_equity"])
+    dd = (g - peak) / peak * 100
     out["current_dd_pct"] = float(dd[-1])
     out["max_dd_pct"] = float(dd.min())
-    r = np.diff(e) / e[:-1]
+    r = np.diff(g) / g[:-1]
     out["sharpe_full"] = _sharpe(r, ann)
     out["sharpe_63"] = _sharpe(r[-(ROLL_WINDOW - 1):], ann)
     out["sharpe_provisional"] = len(r) < ROLL_WINDOW - 1
@@ -277,8 +289,7 @@ def build_report(history_csv, bench_csv, summary_csv):
         if len(b):
             q = b["QQQ"].to_numpy(float)
             report["qqq"] = pd.Series(100 * q / q[0], index=pd.to_datetime(b["Date"]).dt.date)
-    report["live_rebased"] = pd.Series(100 * eq["Equity"].to_numpy(float) / float(eq["Equity"].iloc[0]),
-                                       index=eq["Date"].dt.date)
+    report["live_rebased"] = pd.Series(100 * growth_index(eq), index=eq["Date"].dt.date)
     report["expected"] = expected_path(eq["Date"], ref["cagr_pct"])
     if n < WARMUP_MIN:
         report["data_state"] = "warming_up"
