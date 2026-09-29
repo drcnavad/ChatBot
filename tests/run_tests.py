@@ -11,19 +11,20 @@
                          processing / scoring / sentiment / earnings) never stop the pipeline or
                          block trading; only main/validate failures are critical
   test_app.py            Streamlit AppTest: page, charts, displayed ranks, Details widgets, captions, holdings alert
-  test_paper_account.py  alpaca_paper.py + alpaca_paper_account.ipynb + run_all --sync-paper against a local MOCK server
+  test_paper_account.py  alpaca_paper.py + alpaca_paper_account.ipynb + run_all --sync-live against a local MOCK server
   test_dashboard_http.py the app on test port 8599 answers 200 for / and /?symbol=NVDA (never touches 8501)
-  test_paper_trade_safety.py  mocked (zero broker calls) regression tests for the paper_trade.py
-                         safety fixes: fail-closed signal status + buying-power guard, stable client order
+  test_paper_trade_live_safety.py  mocked (zero broker calls) regression tests for the LIVE paper_trade.py:
+                         live- / live-fill- order id namespace, paper=False LIVE client from LIVE keys,
+                         live ledgers, fail-closed signal status + buying-power guard, stable client order
                          ids + broker reconciliation, sequenced SELL-then-BUY submit, morning
-                         abort on unreadable positions, morning crash recovery
+                         abort on unreadable positions, morning crash recovery, --paper retired
   test_pipeline_watchdog.py mocked tests for pipeline_watchdog.py: failure classification
                          (transient / missing-upstream / unknown), --from resume logic,
                          transient retry policy, no-retry rule for trade/fill-check phases,
                          diagnose-only contract (LLM stubbed, no network)
   test_alpaca_paper_reads.py mocked tests for alpaca_paper.py's read-only views: open_orders,
                          market_clock, portfolio_history parsing + the read-only guardrails
-                         (paper endpoint allowlist, no order-placing code)
+                         (live endpoint allowlist, no order-placing code)
   test_strategy_health.py  strategy_health.py: reference parsing, equity stats, trend/drawdown/Sharpe
                          bands, composite score levels, regime detection, fail-soft on missing files
                          (synthetic data, no network, no streamlit)
@@ -36,7 +37,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_run_all_notify.py", "test_run_all_optional.py",
-         "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_safety.py",
+         "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_live_safety.py",
          "test_paper_trade_math_audit.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
          "test_strategy_health.py"]
 

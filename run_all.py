@@ -21,18 +21,18 @@ so the evening trade still runs on fresh signals. Only a main or validate failur
     python run_all.py --dry-run       # show the plan (mode, steps, expected API calls) and exit - nothing runs
     python run_all.py --positions f.csv       # alert on another positions file (default: my_positions.csv if it exists)
     python run_all.py --only main | --from scoring | --list | --backtests | --visualization | --keep-going
-    python run_all.py --sync-paper    # also refresh my_positions.csv from your Alpaca PAPER account (off by default)
-    python run_all.py --trade         # after the pipeline, auto-trade the PAPER account from the fresh signals
+    python run_all.py --sync-live     # also refresh my_positions.csv from your Alpaca LIVE account (off by default)
+    python run_all.py --trade         # after the pipeline, auto-trade the LIVE account (REAL MONEY) from the fresh signals
                                       # (pulls live positions + equity; BUY only for buy-signal ('add')
                                       #  symbols, sized Weight * equity in whole shares net of shares already
                                       #  held - never above the weight, overweight trimmed with a SELL of the
                                       #  excess; hold-signal symbols are never traded; sells = entire
                                       #  position; sells sent before buys as extended-hours
                                       #  DAY limit orders at the closing price; logs to
-                                      #  Reports/paper_orders_log.csv). If the trade step runs at/after
+                                      #  Reports/live_orders_log.csv). If the trade step runs at/after
                                       #  7:00 PM CT (extended hours over), nothing is submitted - the planned
                                       #  orders are staged for the next morning's --fill-check instead.
-                                      #  PAPER only, never live.
+                                      #  LIVE account (real money).
                                       # Runs once per scheduled window (Mon/Wed/Fri after 3:15 PM CT on a
                                       # trading day): a second --trade is refused until the next window
                                       # (trade_allowed guard), and overlapping --trade processes are
@@ -57,11 +57,11 @@ State: Reports/run_state.json - the runner's memory (all values are ISO timestam
     last_fill_check_at ............. last morning fill check
     last_run_at / last_mode ......... last invocation (any mode)
 Logs: Reports/logs/run_*.log (last 30 kept).
-By default no orders are placed. Alpaca account endpoints are only called with --sync-paper (3 read-only GETs via
+By default no orders are placed. Alpaca account endpoints are only called with --sync-live (3 read-only GETs via
 alpaca_paper.py), --trade (paper_trade.auto_trade(): reads positions + equity, then submits extended-hours DAY
-limit orders to PAPER only) or --fill-check (paper_trade.complete_unfilled_orders(): checks the evening orders
-and completes unfilled remainders with regular-hours market orders; keys ALPACA_PAPER_KEY_ID /
-ALPACA_PAPER_SECRET_KEY in .env).
+limit orders to the LIVE account (REAL MONEY)) or --fill-check (paper_trade.complete_unfilled_orders(): checks the evening orders
+and completes unfilled remainders with regular-hours market orders; keys ALPACA_LIVE_KEY_ID /
+ALPACA_LIVE_SECRET_KEY in .env).
 """
 import argparse
 import glob
@@ -122,17 +122,17 @@ def _critical_failures(failures):
     """Failures that block the evening trade and set a nonzero exit code.
 
     Optional-step failures degrade gracefully (the main signal notebook reuses
-    the last good tables); 'sync_paper' is a read-only refresh, so neither
+    the last good tables); 'sync_live' is a read-only refresh, so neither
     blocks trading.
     """
-    return [f for f in failures if f not in OPTIONAL_STEPS and f != "sync_paper"]
+    return [f for f in failures if f not in OPTIONAL_STEPS and f != "sync_live"]
 
 
 def _trade_decision(failures):
     """Evening-trade guard: (proceed, reason).
 
     Only critical failures block trading. Optional-step failures (and the
-    read-only sync_paper) degrade gracefully - the main signals are fresh,
+    read-only sync_live) degrade gracefully - the main signals are fresh,
     so the trade proceeds.
     """
     crit = _critical_failures(failures)
@@ -415,7 +415,7 @@ def next_trading_day_after(d):
 def fill_check_allowed(now_ct, pending_path=None):
     """(allowed, reason): the morning fill check completes the previous evening's extended-hours
     orders. It runs once the next trading day after the evening trade reaches 9:00 AM CT, and only
-    while a pending fill check (Reports/paper_pending_orders.json) exists."""
+    while a pending fill check (Reports/live_pending_orders.json) exists."""
     import paper_trade
     path = pending_path or paper_trade.PENDING_ORDERS_JSON
     try:
@@ -439,7 +439,7 @@ def fill_check_allowed(now_ct, pending_path=None):
         evening = datetime.fromisoformat(pend["evening_date"]).date()
     except (KeyError, ValueError, TypeError):
         return False, ("the pending fill-check file has no valid evening_date - investigate "
-                       "Reports/paper_pending_orders.json before re-running")
+                       "Reports/live_pending_orders.json before re-running")
     d = next_trading_day_after(evening)
     earliest = datetime(d.year, d.month, d.day, FILL_CHECK_AFTER[0], FILL_CHECK_AFTER[1], tzinfo=CT)
     if now_ct < earliest:
@@ -578,12 +578,12 @@ def data_summary():
     return out
 
 
-def sync_paper(positions_path=None):
-    """Optional (--sync-paper): refresh my_positions.csv + Reports/paper_*.csv from the Alpaca PAPER account (read-only)."""
+def sync_live(positions_path=None):
+    """Optional (--sync-live): refresh my_positions.csv + Reports/live_*.csv from the Alpaca LIVE account (read-only)."""
     import alpaca_paper
     kw = {"positions_csv": positions_path} if positions_path else {}
     r = alpaca_paper.sync_paper_account(**kw)
-    logging.info("  paper account: equity $%s, cash $%s, %d positions -> %s", f"{r['Equity']:,.2f}", f"{r['Cash']:,.2f}",
+    logging.info("  live account: equity $%s, cash $%s, %d positions -> %s", f"{r['Equity']:,.2f}", f"{r['Cash']:,.2f}",
                  r["Positions"], os.path.relpath(r["positions_csv"], ROOT))
 
 
@@ -607,6 +607,26 @@ def plan_steps(a, mode):
     return sel
 
 
+def _hold_sleep_assertion():
+    """Keep the Mac awake for the whole pipeline run (best-effort).
+
+    A system sleep pauses the pipeline mid-step: on 2026-09-28 the sentiment
+    step took 7415 s instead of the usual ~192 s, almost all of it frozen.
+    `caffeinate -i` blocks idle system sleep, `-s` keeps the system awake on AC
+    power (the display may still sleep), `-t 7200` caps the assertion at 2 h so
+    an orphaned process can never hold the Mac awake forever. Released via atexit.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        import atexit
+        p = subprocess.Popen(["/usr/bin/caffeinate", "-i", "-s", "-t", "7200"])
+        atexit.register(p.terminate)
+        logging.info("  sleep assertion held (caffeinate pid %d, 2 h cap)", p.pid)
+    except Exception as e:
+        logging.info("  sleep assertion unavailable (%s) - keep the Mac awake manually", e)
+
+
 def main(argv=None):
     """Command-line entry point: pick the mode, run the steps, validate the outputs, write the summary."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -622,14 +642,14 @@ def main(argv=None):
     p.add_argument("--backtests", action="store_true", help="also run backtest.ipynb (≈10 s; rewrites Reports/backtest_*.csv)")
     p.add_argument("--keep-going", action="store_true", help="continue after a failed step (still exits 1)")
     p.add_argument("--list", action="store_true", help="list the steps and exit")
-    p.add_argument("--sync-paper", action="store_true",
-                   help="refresh my_positions.csv from the Alpaca PAPER account before the alert (3 read-only GET calls)")
+    p.add_argument("--sync-live", action="store_true",
+                   help="refresh my_positions.csv from the Alpaca LIVE account before the alert (3 read-only GET calls)")
     p.add_argument("--trade", action="store_true",
-                   help="after the pipeline, auto-trade the Alpaca PAPER account from the fresh signals "
-                        "(pulls live positions + equity, submits extended-hours DAY limit orders; PAPER only)")
+                   help="after the pipeline, auto-trade the Alpaca LIVE account (REAL MONEY) from the fresh signals "
+                        "(pulls live positions + equity, submits extended-hours DAY limit orders; LIVE only)")
     p.add_argument("--fill-check", action="store_true",
                    help="morning fill check: complete the previous evening's unfilled extended-hours orders "
-                        "with regular-hours market orders (no notebooks run; PAPER only)")
+                        "with regular-hours market orders (no notebooks run; LIVE - real money)")
     p.add_argument("--now", help=argparse.SUPPRESS)          # tests: pretend it is this CT time ("2026-09-28 15:40")
     a = p.parse_args(argv)
     if a.full and a.quick:
@@ -685,12 +705,12 @@ def main(argv=None):
     for name, kind, target, _ in steps:
         extra = f"  [{EXPECTED_CALLS[name]} calls]" if name in EXPECTED_CALLS and name not in skip else ""
         logging.info("  %-13s %s%s", name, f"SKIP - {skip[name]}" if name in skip else (target or "report checks"), extra)
-    if a.sync_paper:
-        logging.info("  %-13s %s", "sync_paper", "alpaca_paper.py  [Alpaca PAPER account: 3 read-only GET calls]")
+    if a.sync_live:
+        logging.info("  %-13s %s", "sync_live", "alpaca_paper.py  [Alpaca LIVE account: 3 read-only GET calls]")
     if a.trade:
-        logging.info("  %-13s %s", "trade", "paper_trade.auto_trade  [Alpaca PAPER: reads positions+equity, submits extended-hours DAY limit orders]")
+        logging.info("  %-13s %s", "trade", "paper_trade.auto_trade  [Alpaca LIVE (REAL MONEY): reads positions+equity, submits extended-hours DAY limit orders]")
     if a.fill_check:
-        logging.info("  %-13s %s", "fill-check", "paper_trade.complete_unfilled_orders  [Alpaca PAPER: completes unfilled evening orders]")
+        logging.info("  %-13s %s", "fill-check", "paper_trade.complete_unfilled_orders  [Alpaca LIVE (REAL MONEY): completes unfilled evening orders]")
     if a.dry_run:
         return 0
 
@@ -716,7 +736,7 @@ def main(argv=None):
         if not ok:
             logging.info("FILL CHECK: %s - nothing to do", reason)
             return 0
-        logging.info("=== fill-check (paper_trade.complete_unfilled_orders, PAPER only)")
+        logging.info("=== fill-check (paper_trade.complete_unfilled_orders, LIVE - real money)")
         ckpt_write(run_id, saved_argv, mode, [], phase="fill-check")
         try:
             import paper_trade
@@ -735,6 +755,8 @@ def main(argv=None):
 
     _notify("Pipeline started",
             f"{mode} mode ({why}) - {len([s for s in steps if s[0] not in skip])} steps")
+    if a.now is None:  # real runs only - the tests' fake clock never holds a sleep assertion
+        _hold_sleep_assertion()
     env = dict(os.environ)
     env["PIPELINE_SENTIMENT_MODE"] = "online" if mode == "full" else "offline"
     env["PIPELINE_EARNINGS_MODE"] = "online" if mode == "full" else "offline"
@@ -770,11 +792,10 @@ def main(argv=None):
         ckpt_write(run_id, saved_argv, mode, [n for n, ok, _ in ran if ok],
                    failed_step=name if rc != 0 else None, phase="steps")
         if name == "sentiment" and rc == 0:
-            # Stamp the NewsAPI 24 h guard only after the calls actually completed. The notebook
-            # writes its own stamp when its NewsAPI loop finishes - prefer that timestamp so the
-            # runner's final save_state() can't clobber it with a stale value, and a crash can
-            # never create a false lockout (no stamp on failure, so a retry is still allowed).
-            state["last_news_at"] = load_state().get("last_news_at") or clock()
+            # Stamp the NewsAPI 24 h guard on success. The notebook only stamps when run by hand
+            # (PIPELINE_NEWS_APPROVED=1 under the pipeline, so it never stamps there) - without this,
+            # last_news_at goes stale and the guard can't skip a same-day retry, burning 97 NewsAPI calls.
+            state["last_news_at"] = clock()
             save_state(state)
         logging.info("--- %s %s (%.0fs)", name, "OK" if rc == 0 else f"FAILED (exit {rc})", time.time() - t0)
         if rc != 0:
@@ -795,15 +816,15 @@ def main(argv=None):
         state["last_full_at"] = clock()
     state["last_run_at"], state["last_mode"] = clock(), mode
     save_state(state)
-    paper_synced = False
-    if a.sync_paper:                                        # opt-in: refresh the positions file before the alert
-        logging.info("=== sync_paper (alpaca_paper.py, read-only)")
+    live_synced = False
+    if a.sync_live:                                        # opt-in: refresh the positions file before the alert
+        logging.info("=== sync_live (alpaca_paper.py, read-only)")
         try:
-            sync_paper(a.positions)
-            paper_synced = True
+            sync_live(a.positions)
+            live_synced = True
         except Exception as e:                              # missing keys / network: the rest of the run still counts
             logging.warning("  paper account sync failed: %s", e)
-            failures.append("sync_paper")
+            failures.append("sync_live")
 
     trade_results, trade_meta = None, None
     if a.trade:
@@ -817,7 +838,7 @@ def main(argv=None):
                 if reason:
                     logging.warning("=== trade %s", reason)
                 else:
-                    logging.info("=== trade (paper_trade.auto_trade, PAPER only)")
+                    logging.info("=== trade (paper_trade.auto_trade, LIVE - real money)")
                 try:
                     import paper_trade
                     orders, trade_meta, trade_results = paper_trade.auto_trade(target="auto", dry_run=False)
@@ -827,7 +848,7 @@ def main(argv=None):
                     n_fail = int((trade_results["Status"].str.startswith("FAILED")).sum()) if not trade_results.empty else 0
                     n_sent = (0 if trade_results.empty else
                               int((~trade_results["Status"].str.startswith(("SKIPPED", "FAILED"))).sum()))
-                    logging.info("  trade: %d buys, %d sells, %d skipped, %d failed, %d submitted/staged (target=%s, as_of=%s) -> Reports/paper_orders_log.csv",
+                    logging.info("  trade: %d buys, %d sells, %d skipped, %d failed, %d submitted/staged (target=%s, as_of=%s) -> Reports/live_orders_log.csv",
                                  n_buy, n_sell, n_skip, n_fail, n_sent, trade_meta["source"], trade_meta["as_of"])
                     if n_fail:
                         failures.append("trade_partial")
@@ -855,14 +876,14 @@ def main(argv=None):
     quota = {k: v for k, v in calls.items() if k in ("newsapi", "finnhub", "alphavantage")}
     logging.info("  API calls used: %s", ", ".join(f"{k} {v}" for k, v in quota.items()) if quota
                  else "none (Alpaca market-data bars only)")
-    if paper_synced:
-        logging.info("  Alpaca PAPER account: 3 read-only GET calls (my_positions.csv refreshed)")
+    if live_synced:
+        logging.info("  Alpaca LIVE account: 3 read-only GET calls (my_positions.csv refreshed)")
     if trade_results is not None and not trade_results.empty:
         if trade_results["Status"].str.startswith("STAGED").any():
             logging.info("  Trade: %d orders STAGED for the morning fill check (past 7 PM CT - nothing submitted)",
                          len(trade_results))
         else:
-            logging.info("  Trade: %d orders submitted to PAPER (see Reports/paper_orders_log.csv)", len(trade_results))
+            logging.info("  Trade: %d orders submitted to LIVE (see Reports/live_orders_log.csv)", len(trade_results))
     if info["data_date"]:
         logging.info("  Data through %s  |  rules %s", info["data_date"], info["rules"])
         for line in info["decisions"][-3:]:

@@ -173,15 +173,16 @@ def next_sessions(after, n):
 
 # ----------------------------------------------------------------------------- data
 def market_data_client():
-    """Alpaca market-data client (historical bars only; no trading or account endpoints). Keys: ALPACA_API_KEY /
-    ALPACA_SECRET_KEY in .env."""
+    """Alpaca market-data client (historical bars only; no trading or account endpoints). Keys: ALPACA_LIVE_KEY_ID /
+    ALPACA_LIVE_SECRET_KEY in .env (falls back to ALPACA_API_KEY / ALPACA_SECRET_KEY)."""
     import os
     from alpaca.data.historical import StockHistoricalDataClient
     from dotenv import load_dotenv
     load_dotenv(PROJECT_ROOT / ".env")
-    key, secret = os.getenv("ALPACA_API_KEY"), os.getenv("ALPACA_SECRET_KEY")
+    key = os.getenv("ALPACA_LIVE_KEY_ID") or os.getenv("ALPACA_API_KEY")
+    secret = os.getenv("ALPACA_LIVE_SECRET_KEY") or os.getenv("ALPACA_SECRET_KEY")
     if not key or not secret:
-        raise EnvironmentError("Missing API keys. Make sure .env has ALPACA_API_KEY and ALPACA_SECRET_KEY")
+        raise EnvironmentError("Missing API keys. Make sure .env has ALPACA_LIVE_KEY_ID and ALPACA_LIVE_SECRET_KEY")
     return StockHistoricalDataClient(key, secret)
 
 

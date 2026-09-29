@@ -7,7 +7,7 @@ This module compares the LIVE account against those reference stats and answers:
 "normal pain, or is the edge gone?"
 
 Live inputs (all local CSVs written by the pipeline; everything is fail-soft):
-    Reports/paper_account_history.csv   As_Of,Equity,Cash,Buying_Power,Positions (one row per sync;
+    Reports/live_account_history.csv   As_Of,Equity,Cash,Buying_Power,Positions (one row per sync;
                                         deduped to one row per calendar date, last sync wins)
     Reports/benchmark_prices.csv        Date,SPY,QQQ,... (QQQ leg + regime check)
 
@@ -75,7 +75,7 @@ def load_reference(summary_csv):
 
 
 def load_live_equity(history_csv):
-    """Live equity curve from paper_account_history.csv -> DataFrame(Date, Equity).
+    """Live equity curve from live_account_history.csv -> DataFrame(Date, Equity).
 
     One row per calendar date (the last sync of the day wins): the pipeline can sync
     twice on the same date (evening trade + morning fill-check) and those must not
@@ -298,5 +298,5 @@ def default_paths(root=None):
     """Resolve the three input CSV paths under the project root."""
     root = root or os.path.dirname(os.path.abspath(__file__))
     rep = os.path.join(root, "Reports")
-    return (os.path.join(rep, "paper_account_history.csv"), os.path.join(rep, "benchmark_prices.csv"),
+    return (os.path.join(rep, "live_account_history.csv"), os.path.join(rep, "benchmark_prices.csv"),
             os.path.join(rep, "backtest_summary.csv"))

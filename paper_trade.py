@@ -1,4 +1,4 @@
-"""Build (and optionally submit to Alpaca PAPER) the orders that move a portfolio to the strategy's target weights.
+"""Build (and optionally submit to the Alpaca LIVE account - REAL MONEY) the orders that move a portfolio to the strategy's target weights.
 
 DEFAULT = DRY RUN: prints the order list and writes nothing to any broker.
 
@@ -7,25 +7,25 @@ DEFAULT = DRY RUN: prints the order list and writes nothing to any broker.
     python paper_trade.py --target provisional                       # use "if rebalanced at latest close" weights
     python paper_trade.py --target midweek --positions my.csv        # only the latest Mon/Wed mid-week swap(s) / exit(s)
 
-Submitting requires BOTH flags and only ever talks to the PAPER environment:
+Submitting talks to the LIVE account (real money):
 
-    python paper_trade.py --submit --paper [--account-size N]
+    python paper_trade.py --submit [--account-size N]
 
-In submit mode the paper account's equity (unless --account-size is given) and positions are read from Alpaca,
-sells are sent before buys as DAY market orders (whole shares). Live trading is not supported by this script.
+In submit mode the LIVE account's equity (unless --account-size is given) and positions are read from Alpaca,
+sells are sent before buys as DAY market orders (whole shares).
 
-Auto mode (used by run_all.py --trade): auto_trade() pulls live PAPER positions + equity +
+Auto mode (used by run_all.py --trade): auto_trade() pulls LIVE positions + equity +
 cash, then plans with target="auto" (buys = Weight * equity, whole shares, capped at
-STRICT CASH - never buying power/margin; sells = the exact shares held, and only for stocks
+Alpaca buying power - margin is disabled so buying power equals cash in practice; sells = the exact shares held, and only for stocks
 actually in the portfolio), and submits as extended-hours DAY limit orders at the planned
 closing price, so they can fill in the after-hours session. Before planning, the signal
 CSVs are verified fresh (as of today, CT) - stale data aborts the trade. Submitted orders are recorded
-in Reports/paper_pending_orders.json; the next trading morning, complete_unfilled_orders()
+in Reports/live_pending_orders.json; the next trading morning, complete_unfilled_orders()
 (run_all.py --fill-check) checks their fills and completes any unfilled remainder with
 regular-hours market orders, then reconciles live positions against the strategy targets.
 Failures send a macOS notification + loud log alert. If auto_trade() runs at or after 7:00 PM CT (extended hours
 are over), it submits nothing and instead stages the planned orders in
-Reports/paper_pending_orders.json (no broker order id); the morning fill check then sends
+Reports/live_pending_orders.json (no broker order id); the morning fill check then sends
 the full quantities as regular-hours market orders. Evening submission is idempotent: rows
 already submitted/staged earlier the same evening are recorded after each submit, so a
 retry in the same window skips them instead of duplicating orders. See auto_trade() docstring.
@@ -58,8 +58,11 @@ PICKS_CSV = os.path.join(PROJECT_ROOT, "Reports", "strategy_picks.csv")
 MIDWEEK_CSV = os.path.join(PROJECT_ROOT, "Reports", "strategy_midweek_check.csv")
 SIGNAL_CSV = os.path.join(PROJECT_ROOT, "Reports", "signal_analysis.csv")
 CHANGES_CSV = os.path.join(PROJECT_ROOT, "Reports", "strategy_changes.csv")
-ORDER_LOG_CSV = os.path.join(PROJECT_ROOT, "Reports", "paper_orders_log.csv")
-PENDING_ORDERS_JSON = os.path.join(PROJECT_ROOT, "Reports", "paper_pending_orders.json")
+ORDER_LOG_CSV = os.path.join(PROJECT_ROOT, "Reports", "live_orders_log.csv")
+PENDING_ORDERS_JSON = os.path.join(PROJECT_ROOT, "Reports", "live_pending_orders.json")
+# NOTE (2026-09-28): LIVE account (real money). paper_* names are historical, kept so the
+# pipeline keeps working unchanged. paper=False, ALPACA_LIVE_* keys, live- order ids,
+# live_* ledgers. The paper version was retired; no paper rollback is kept.
 ORDER_COLUMNS = ["Symbol", "Side", "Shares", "Price", "Est_Value", "Current_Shares", "Target_Shares",
                  "Target_Weight_%", "Target_Value"]
 
@@ -247,7 +250,7 @@ def _clean_positions(positions):
 
     A NaN share count would otherwise flow into build_orders() and produce NaN order
     quantities, which crash math.floor() at submit time. Negative quantities are
-    impossible in a long-only paper account, so they are dropped too."""
+    impossible in a long-only account, so they are dropped too."""
     out = {}
     for k, v in (positions or {}).items():
         try:
@@ -530,7 +533,7 @@ def apply_buying_power_guard(orders, buying_power):
     return orders
 
 
-# ----------------------------------------------------------------------------- positions file, PAPER submission (explicit --submit --paper only), command line
+# ----------------------------------------------------------------------------- positions file, LIVE submission, command line
 def read_positions_csv(path):
     """Positions CSV (Symbol,Shares or Symbol,Qty) -> {symbol: shares}."""
     pos = pd.read_csv(path)
@@ -542,14 +545,18 @@ def read_positions_csv(path):
 
 
 def paper_trading_client():
-    """Alpaca TradingClient for the PAPER environment only (keys: see alpaca_paper.paper_keys; never a live account)."""
+    """Alpaca TradingClient for the LIVE account (paper=False). Historical name, kept for compatibility."""
     from alpaca.trading.client import TradingClient
 
-    from alpaca_paper import paper_keys
-    key, secret, _ = paper_keys()
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+    except ImportError:
+        pass  # dotenv missing: env vars still work
+    key, secret = os.getenv("ALPACA_LIVE_KEY_ID"), os.getenv("ALPACA_LIVE_SECRET_KEY")
     if not key or not secret:
-        raise SystemExit("No Alpaca PAPER keys in .env (ALPACA_PAPER_KEY_ID / ALPACA_PAPER_SECRET_KEY).")
-    return TradingClient(key, secret, paper=True)
+        raise SystemExit("No Alpaca LIVE keys in .env (ALPACA_LIVE_KEY_ID / ALPACA_LIVE_SECRET_KEY).")
+    return TradingClient(key, secret, paper=False)
 
 
 def _sell_qty_check(symbol, qty, positions, fractional=False):
@@ -593,7 +600,7 @@ def _sell_qty_check(symbol, qty, positions, fractional=False):
 
 
 def submit_paper(orders, positions=None, client=None, order_date=None):
-    """Send the BUY/SELL rows as DAY market orders to the Alpaca PAPER account (sells first).
+    """Send the BUY/SELL rows as DAY market orders to the Alpaca LIVE account (sells first).
 
     Market orders allow up to 2 decimals: quantities are rounded DOWN to 2 decimals and
     rows with <=0 shares are skipped (reported as SKIPPED, not sent). This lets a SELL
@@ -634,7 +641,7 @@ def submit_paper(orders, positions=None, client=None, order_date=None):
 
 def submit_paper_extended(orders, positions=None, record=None, client=None, order_date=None):
     """Send the BUY/SELL rows as DAY limit orders at the planned (closing) price, eligible for
-    extended-hours (after-hours) execution on the Alpaca PAPER account (sells first).
+    extended-hours (after-hours) execution on the Alpaca LIVE account (sells first).
 
     Whole shares only: fractional quantities are floored to whole shares and
     rows with <1 whole share are skipped (reported as SKIPPED, not sent).
@@ -699,7 +706,7 @@ def submit_paper_extended(orders, positions=None, record=None, client=None, orde
 def _client_order_id(symbol, side, qty, price, date_str, kind=""):
     """Deterministic client order id, stable across retries of the same plan.
 
-    Format: pa-[fill-]YYYYMMDD-SIDE-SYMBOL-qty-pricecents (<=48 chars, Alpaca-safe).
+    Format: live-[fill-]YYYYMMDD-SIDE-SYMBOL-qty-pricecents (<=48 chars, Alpaca-safe).
     `kind="fill"` marks morning fill-check completion orders. Because the id is
     deterministic, a crash between the broker submit and the local pending-file record
     cannot duplicate the order: the retry finds it on the broker by id.
@@ -713,7 +720,7 @@ def _client_order_id(symbol, side, qty, price, date_str, kind=""):
     # cents): morning completion quantities are 2-decimal, and a retry that recomputes
     # a slightly smaller remainder must still match the crashed attempt's order on the
     # broker for the no-duplicate recovery in _morning_completion_plan.
-    tag = f"pa-{kind + '-' if kind else ''}{date_str}-{side}-{sym}-{int(_safe_number(qty))}-{cents}"
+    tag = f"live-{kind + '-' if kind else ''}{date_str}-{side}-{sym}-{int(_safe_number(qty))}-{cents}"
     return tag[:48]
 
 
@@ -743,15 +750,15 @@ def _broker_orders_by_client_id(client):
 def _evening_submitted_on_broker(client, date_str):
     """{(SYMBOL, SIDE)} already submitted to the broker this evening (any status).
 
-    Matches our deterministic client_order_id prefix pa-YYYYMMDD-SIDE-SYMBOL- (morning
-    fill-check orders, pa-fill-..., are excluded). A row found here was submitted before
+    Matches our deterministic client_order_id prefix live-YYYYMMDD-SIDE-SYMBOL- (morning
+    fill-check orders, live-fill-..., are excluded). A row found here was submitted before
     a crash, so its local record never got written; skipping it on retry is always safe
     because the morning fill check completes any unfilled remainder.
     """
     out = set()
     for cid in _broker_orders_by_client_id(client):
         parts = cid.split("-")
-        if len(parts) < 6 or parts[0] != "pa" or parts[1] == "fill":
+        if len(parts) < 6 or parts[0] != "live" or parts[1] == "fill":
             continue
         if parts[1] != date_str:
             continue  # another evening's orders
@@ -986,9 +993,9 @@ def _wait_terminal(client, order_id, tries=10, pause=0.5):
 
 
 def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG_CSV, dry_run=False):
-    """Morning fill check for the previous evening's extended-hours orders (PAPER only).
+    """Morning fill check for the previous evening's extended-hours orders (LIVE).
 
-    Reads Reports/paper_pending_orders.json (written by auto_trade), checks each order's fill
+    Reads Reports/live_pending_orders.json (written by auto_trade), checks each order's fill
     status on Alpaca, and for anything not fully filled submits a regular-hours DAY market order
     for the remaining whole shares (the stale evening order is canceled first, best effort).
     Partial fills are handled: only the unfilled remainder is ordered.
@@ -1002,7 +1009,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     A dry run never aborts on this (nothing is submitted).
 
     Crash-safe morning orders: each completion order carries a deterministic client_order_id
-    (pa-fill-YYYYMMDD-SIDE-SYMBOL-qty-...). A previous attempt that crashed between its
+    (live-fill-YYYYMMDD-SIDE-SYMBOL-qty-...). A previous attempt that crashed between its
     submit and its local record is found on the broker by id and marked ALREADY COMPLETED
     instead of duplicated.
 
@@ -1010,7 +1017,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     completion; if any completion failed, only the failed rows are kept (with per-row
     completion marks) so a retry never re-orders what already completed.
     A dry run changes nothing: it neither submits, nor logs, nor removes the pending file.
-    Appends the morning orders to Reports/paper_orders_log.csv (same columns as the evening log).
+    Appends the morning orders to Reports/live_orders_log.csv (same columns as the evening log).
     Returns a DataFrame [Symbol, Side, Shares, Order_ID, Status].
     """
     from datetime import datetime
@@ -1020,7 +1027,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     from alpaca.trading.requests import MarketOrderRequest
 
     cols = ["Symbol", "Side", "Shares", "Order_ID", "Status"]
-    _print_header("MORNING FILL CHECK - Alpaca PAPER")
+    _print_header("MORNING FILL CHECK - Alpaca LIVE (REAL MONEY)")
     if not os.path.exists(pending_path):
         print("  No pending extended-hours orders - nothing to do.")
         return pd.DataFrame(columns=cols)
@@ -1212,7 +1219,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     msg = (f"FAILED: no usable price for {sym} BUY {to_order:g} shares - "
                            f"affordability cannot be verified (dropped, needs review)")
                     results.append((sym, side, to_order, oid, msg))
-                    _notify("Fill-check: BUY dropped (no price)",
+                    _notify("LIVE fill-check: BUY dropped (no price)",
                             f"{sym}: morning BUY {to_order:g} shares has no usable limit price, "
                             f"so its cost cannot be verified against buying power. Dropped for manual review.")
                     continue
@@ -1220,7 +1227,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     msg = (f"SKIP (morning buying power unreadable) - {sym} BUY {to_order:g} shares "
                            f"not completed")
                     results.append((sym, side, to_order, oid, msg))
-                    _notify("Fill-check: buying power unreadable",
+                    _notify("LIVE fill-check: buying power unreadable",
                             f"{sym}: cannot verify buying power for morning BUY completion "
                             f"({to_order:g} shares). Kept for retry.")
                     to_retry.append(o)
@@ -1232,7 +1239,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                            f"have ${spendable:,.2f} after ${reserved_buy_spend:,.2f} reserved) - "
                            f"{sym} BUY {to_order:g} shares not completed")
                     results.append((sym, side, to_order, oid, msg))
-                    _notify("Fill-check: insufficient buying power",
+                    _notify("LIVE fill-check: insufficient buying power",
                             f"{sym}: morning BUY {to_order:g} shares needs ~${est_cost:,.2f} "
                             f"but only ${spendable:,.2f} buying power is available. Kept for retry.")
                     to_retry.append(o)
@@ -1280,15 +1287,15 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     print(f"\n  Completed/Filled: {n_completed}  |  Failed: {n_failed}  |  Kept for retry: {len(to_retry)}")
     if n_failed and not dry_run:
         failed_syms = ", ".join(results.loc[results["Status"].str.startswith("FAILED"), "Symbol"].astype(str))
-        _notify("Fill-check had FAILED orders",
+        _notify("LIVE fill-check had FAILED orders",
                 f"{n_failed} completion(s) failed: {failed_syms}. "
-                "They are kept in Reports/paper_pending_orders.json for retry.")
+                "They are kept in Reports/live_pending_orders.json for retry.")
     if not dry_run and not results.empty:
         def _syms(mask):
             return ", ".join(f"{r.Symbol} x{r.Shares:g}" for r in results[mask].itertuples())
         completed = _syms(results["Status"].str.contains("COMPLETED", na=False))
         filled = _syms(results["Status"].str.startswith("FILLED"))
-        _notify("Morning fill-check done",
+        _notify("Morning LIVE fill-check done",
                 f"Completed: {completed or 'none'} | Evening fills: {filled or 'none'} | "
                 f"Failed: {n_failed} | Kept for retry: {len(to_retry)}")
 
@@ -1302,18 +1309,18 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         if not ok:
             drift = report[report["Status"] != "OK"]
             syms = ", ".join(drift["Symbol"].astype(str))
-            _notify("Position DRIFT detected",
+            _notify("LIVE position DRIFT detected",
                     f"These differ from strategy targets by >1pp: {syms}. "
                     "Review manually - a fill may have failed silently.")
             print("\n  !! DRIFT detected - notification sent, review manually.")
         else:
             print("\n  All positions match strategy targets (within 1pp).")
-    _print_header("MORNING FILL CHECK COMPLETE")
+    _print_header("MORNING LIVE FILL CHECK COMPLETE")
     return results
 
 
 def get_live_positions_and_equity():
-    """(positions dict, equity float, cash float, buying power float) from the Alpaca PAPER account.
+    """(positions dict, equity float, cash float, buying power float) from the Alpaca LIVE account.
 
     Positions are {SYMBOL: shares} with fractional shares preserved here
     (submit_paper floors them to whole shares when sending). Buying power is what
@@ -1321,17 +1328,14 @@ def get_live_positions_and_equity():
     the account, so buying power equals cash in practice). Cash is returned for
     display only.
     """
-    from alpaca_paper import PaperAccount
-    acct = PaperAccount()
-    summary = acct.account_summary()
-    pos_df = acct.positions()
-    if pos_df.empty:
-        positions = {}
-    else:
-        positions = dict(zip(pos_df["Symbol"].astype(str).str.upper().str.strip(),
-                             pd.to_numeric(pos_df["Qty"], errors="coerce").fillna(0)))
-        positions = {k: float(v) for k, v in positions.items() if float(v) != 0}
-    return positions, float(summary["Equity"]), float(summary["Cash"]), float(summary["Buying power"])
+    client = paper_trading_client()
+    acct = client.get_account()
+    positions = {}
+    for p in client.get_all_positions():
+        qty = float(p.qty)
+        if qty != 0:
+            positions[str(p.symbol).upper()] = qty
+    return positions, float(acct.equity), float(acct.cash), float(acct.buying_power)
 
 
 EVENING_SUBMIT_CUTOFF_CT = "19:00"  # extended hours end 7:00 PM CT - later runs stage orders for the morning
@@ -1397,9 +1401,9 @@ def _past_evening_cutoff(now=None):
 
 
 def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=False, extended=True):
-    """Full auto flow for the pipeline: pull live PAPER positions + equity, plan, optionally submit.
+    """Full auto flow for the pipeline: pull LIVE positions + equity, plan, optionally submit.
 
-    - Pulls current stock positions, equity, cash and buying power from Alpaca PAPER.
+    - Pulls current stock positions, equity, cash and buying power from the Alpaca LIVE account.
     - Plans orders with source=target (default "auto"): BUY orders go out only for buy-signal
       ('add') symbols, sized as Weight * equity in whole shares (rounded down) and net of shares
       already held - a buy never exceeds its weight limit, and a holding already above its weight
@@ -1418,12 +1422,12 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
       bounded wait for the sells to settle, buying power is re-read from the broker and the
       BUYs are re-checked against it (apply_buying_power_guard) before they are submitted the same way.
       Each successfully submitted order is recorded incrementally in
-      Reports/paper_pending_orders.json for the morning fill check (complete_unfilled_orders).
+      Reports/live_pending_orders.json for the morning fill check (complete_unfilled_orders).
       Every order carries a deterministic client_order_id, so a crash between the broker submit
       and the local record cannot duplicate it on retry (the retry reconciles with the broker).
     - If extended=False: submits via submit_paper() - regular-hours DAY market orders.
     - If it is at or past 7:00 PM CT (extended hours are over), nothing is submitted regardless
-      of `extended`: the planned orders are staged in Reports/paper_pending_orders.json with no
+      of `extended`: the planned orders are staged in Reports/live_pending_orders.json with no
       broker order id, and the morning fill check (complete_unfilled_orders) sends the full
       quantities as regular-hours market orders. Staged rows are reported as STAGED, never FAILED.
     - Idempotent retries: rows already submitted/staged earlier the same evening are recorded
@@ -1431,29 +1435,29 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
       duplicating orders. Rows found on the broker from this evening but never recorded
       locally (a crash between submit and record) are likewise skipped - the morning fill
       check completes any unfilled remainder. FAILED rows are never recorded, so they are retried.
-    - Appends a row per submitted order to Reports/paper_orders_log.csv and returns
+    - Appends a row per submitted order to Reports/live_orders_log.csv and returns
       (orders, meta, results_df).
 
-    Raises PaperAccountError / SystemExit if keys are missing; ValueError if the
+    Raises SystemExit if keys are missing; ValueError if the
     signal CSVs are missing or empty (run main_signal_analysis.ipynb first).
     """
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    _print_header("EVENING TRADE - Alpaca PAPER")
+    _print_header("EVENING TRADE - Alpaca LIVE (REAL MONEY)")
     try:
         # Fail closed on stale signals: never trade on yesterday's data after a
         # partial pipeline failure.
         as_of_date = check_signal_freshness()
         print(f"  Signals fresh: as of {as_of_date} (today, CT)")
     except ValueError as e:
-        _notify("Trade ABORTED - stale signals", str(e))
+        _notify("LIVE trade ABORTED - stale signals", str(e))
         raise
 
     try:
         positions, equity, cash, buying_power = get_live_positions_and_equity()
     except Exception as e:
-        _notify("Trade ABORTED - cannot read account", f"Could not read Alpaca PAPER account: {e}")
+        _notify("LIVE trade ABORTED - cannot read account", f"Could not read Alpaca LIVE account: {e}")
         raise
     print(f"  Equity ${equity:,.2f}  |  Cash ${cash:,.2f}  |  Positions: {len(positions)} symbols")
 
@@ -1481,7 +1485,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
         # the morning fill check completes any unfilled remainder.
         broker_submitted = _evening_submitted_on_broker(client, date_str)
     # Idempotent retry: skip BUY/SELL rows already submitted/staged earlier this evening.
-    already = _todays_recorded_orders()
+    already = _todays_recorded_orders(PENDING_ORDERS_JSON)
     dup_rows, keep_idx = [], []
     for r in orders.itertuples():
         key = (str(r.Symbol).upper(), r.Side)
@@ -1525,13 +1529,13 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
             entry = {"symbol": r.Symbol, "side": r.Side, "qty": qty,
                      "limit_price": limit_price, "order_id": None}
             staged.append(entry)
-            record_pending_order(entry, meta)  # incremental: a crash still leaves these staged
+            record_pending_order(entry, meta, PENDING_ORDERS_JSON)  # incremental: a crash still leaves these staged
         results = pd.DataFrame(
             [(s["symbol"], s["side"], s["qty"], None, "STAGED for morning market (past 7 PM CT - not submitted)")
              for s in staged] + skipped + dup_rows, columns=cols)
     else:
         def _recorder(entry):
-            record_pending_order(entry, meta)  # incremental: a crash still leaves these recorded
+            record_pending_order(entry, meta, PENDING_ORDERS_JSON)  # incremental: a crash still leaves these recorded
         if extended:
             results = submit_paper_extended_sequenced(orders_to_send, positions=positions,
                                                       record=_recorder, client=client,
@@ -1562,14 +1566,14 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
     print(f"\n  Submitted/Staged: {n_submitted}  |  Failed: {n_failed}  |  Skipped: {n_skipped}")
     if n_failed:
         failed_syms = ", ".join(results.loc[results["Status"].str.startswith("FAILED"), "Symbol"].astype(str))
-        _notify("Trade had FAILED orders",
+        _notify("LIVE trade had FAILED orders",
                 f"{n_failed} order(s) failed this evening: {failed_syms}. "
-                "Check Reports/paper_orders_log.csv - failed rows will be retried.")
+                "Check Reports/live_orders_log.csv - failed rows will be retried.")
     if n_submitted:
         staged = bool(results["Status"].str.contains("STAGED", na=False).any())
-        _notify("Evening PAPER trades " + ("staged for the morning" if staged else "submitted"),
+        _notify("LIVE evening trades " + ("staged for the morning" if staged else "submitted"),
                 _trade_summary(results))
-    _print_header("EVENING TRADE COMPLETE")
+    _print_header("EVENING LIVE TRADE COMPLETE")
     return orders, meta, results
 
 
@@ -1585,7 +1589,7 @@ def earnings_rule_note():
 
 
 def main(argv=None):
-    """Command line: print the order list (dry run) or submit to the Alpaca PAPER account."""
+    """Command line: print the order list (dry run) or submit to the Alpaca LIVE account (REAL MONEY)."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--account-size", type=float, help="dollars to allocate (dry run default: 100000)")
     p.add_argument("--positions", help="CSV with Symbol,Shares of current holdings (dry run)")
@@ -1594,20 +1598,21 @@ def main(argv=None):
     p.add_argument("--fractional", action="store_true", help="fractional share quantities (dry run preview only)")
     p.add_argument("--min-value", type=float, default=1.0, help="skip trades smaller than this many dollars")
     p.add_argument("--out", help="also write the order list to this CSV")
-    p.add_argument("--submit", action="store_true", help="send the orders (requires --paper)")
-    p.add_argument("--paper", action="store_true", help="confirm the PAPER environment for --submit")
+    p.add_argument("--submit", action="store_true", help="send the orders to the Alpaca LIVE account (REAL MONEY)")
+    p.add_argument("--paper", action="store_true", help="RETIRED: this script now trades LIVE; --paper is refused")
     p.add_argument("--fill-check", action="store_true",
-                   help="morning fill check: complete unfilled extended-hours orders from the last auto_trade (PAPER only)")
+                   help="morning fill check: complete unfilled extended-hours orders from the last auto_trade (LIVE)")
     p.add_argument("--live", action="store_true", help=argparse.SUPPRESS)
     a = p.parse_args(argv)
 
-    if a.live:
-        sys.exit("Refusing: this script never trades a live account.")
-    if a.submit and not a.paper:
-        sys.exit("Refusing: --submit needs --paper as well (paper trading only).")
+    if a.paper:
+        sys.exit("Refusing: --paper is retired - this script now submits to the Alpaca LIVE "
+                 "account. Use --submit (without --paper) to proceed.")
     if a.submit and a.fractional:
         sys.exit("Refusing: submit mode uses whole shares only.")
     if a.fill_check:
+        if not a.live:
+            sys.exit("Refusing: --fill-check needs --live as well (LIVE trading only).")
         if a.submit or a.fractional or a.account_size or a.positions or a.out or a.target != "auto":
             sys.exit("Refusing: --fill-check takes no other order options.")
         results = complete_unfilled_orders(dry_run=False)
@@ -1649,9 +1654,9 @@ def main(argv=None):
     if a.out:
         orders.to_csv(a.out, index=False)
     if not a.submit:
-        print("\nDRY RUN - nothing was sent. Use --submit --paper to send these orders to the Alpaca PAPER account.")
+        print("\nDRY RUN - nothing was sent. Use --submit to send these orders to the Alpaca LIVE account (REAL MONEY).")
         return orders
-    print("\nSubmitting to Alpaca PAPER ...")
+    print("\nSubmitting to Alpaca LIVE (REAL MONEY) ...")
     print(submit_paper(orders, positions=positions).to_string(index=False))
     return orders
 

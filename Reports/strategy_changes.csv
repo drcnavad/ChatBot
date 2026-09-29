@@ -21,3 +21,4 @@ Date,Symbol,Status,Reason,Rank,Score,Sector,Old_Weight,New_Weight,Check,View
 2026-09-25,SMCI,add,selected (rank 3),3.0,65.2941,Technology,0.0,0.0733,weekly,last rebalance
 2026-09-25,TEM,hold,selected (rank 7),7.0,57.0302,Health Care,0.062,0.0707,weekly,last rebalance
 2026-09-25,RBRK,hold,selected (rank 5; sector cap relaxed: fewer than 10 fit the cap within the top 20),5.0,62.6471,Technology,0.0793,0.0891,weekly,last rebalance
+2026-09-28,,no_action,no swap or exit at this check,,,,,0.0,mid-week,last rebalance

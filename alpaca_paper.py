@@ -1,17 +1,23 @@
-"""Read-only view of your Alpaca PAPER account: account summary, positions, orders, market clock and equity history.
+"""Read-only view of your Alpaca LIVE account: account summary, positions, orders, market clock and equity history.
+
+NOTE (2026-09-28): this module used to read the Alpaca PAPER account. Paper trading is retired from this
+pipeline, so the module now reads the LIVE account. The filename and the class/function names
+(PaperAccount, paper_keys(), sync_paper_account(), ...) are kept unchanged so that pipeline_watchdog.py,
+run_all.py and the dashboard keep working without edits.
 
 Safety rules built into this module:
-  * Only the paper endpoint https://paper-api.alpaca.markets/v2 is accepted; any other URL (the live api.alpaca.markets,
-    plain http, another version or host) raises PaperAccountError before a request is made.
+  * Only the live endpoint https://api.alpaca.markets/v2 is accepted; any other URL (the paper
+    paper-api.alpaca.markets host, plain http, another version or host) raises PaperAccountError
+    before a request is made.
   * Only HTTP GET requests to /account, /positions, /orders, /clock and /account/portfolio/history are possible.
     There is no code here that places, changes or cancels orders.
-  * The keys come from .env (ALPACA_PAPER_KEY_ID, ALPACA_PAPER_SECRET_KEY). They are sent only in the request headers
+  * The keys come from .env (ALPACA_LIVE_KEY_ID, ALPACA_LIVE_SECRET_KEY). They are sent only in the request headers
     and are never printed, logged or written to a file.
 
 Outputs of sync_paper_account():
-  my_positions.csv                        Symbol,Shares of the paper positions (read by holdings_alert.py and the app alert)
-  Reports/paper_portfolio_snapshot.csv    positions + cash/equity rows at the time of the sync
-  Reports/paper_account_history.csv       one row per sync (equity, cash, buying power, number of positions)
+  my_positions.csv                        Symbol,Shares of the live positions (read by holdings_alert.py and the app alert)
+  Reports/live_portfolio_snapshot.csv    positions + cash/equity rows at the time of the sync
+  Reports/live_account_history.csv       one row per sync (equity, cash, buying power, number of positions)
 
     python alpaca_paper.py            # print the summary, positions and recent orders (no files written)
     python alpaca_paper.py --sync     # ... and write the three files above
@@ -32,16 +38,15 @@ from dotenv import load_dotenv
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
 POSITIONS_CSV = os.path.join(ROOT, "my_positions.csv")
-SNAPSHOT_CSV = os.path.join(REPORTS, "paper_portfolio_snapshot.csv")
-HISTORY_CSV = os.path.join(REPORTS, "paper_account_history.csv")
+SNAPSHOT_CSV = os.path.join(REPORTS, "live_portfolio_snapshot.csv")
+HISTORY_CSV = os.path.join(REPORTS, "live_account_history.csv")
 
-PAPER_BASE_URL = "https://paper-api.alpaca.markets/v2"       # the ONLY accepted endpoint
-KEY_ENV, SECRET_ENV = "ALPACA_PAPER_KEY_ID", "ALPACA_PAPER_SECRET_KEY"
-# Also accepted, in this order, if the names above are empty: Alpaca's standard names, then the market-data names
-# ALPACA_API_KEY / ALPACA_SECRET_KEY - but only if that key ID is a PAPER key (paper key IDs start with "PK").
-FALLBACK_NAMES = [("APCA_API_KEY_ID", "APCA_API_SECRET_KEY"), ("ALPACA_API_KEY", "ALPACA_SECRET_KEY")]
+LIVE_BASE_URL = "https://api.alpaca.markets/v2"       # the ONLY accepted endpoint
+KEY_ENV, SECRET_ENV = "ALPACA_LIVE_KEY_ID", "ALPACA_LIVE_SECRET_KEY"
+# Also accepted, in this order, if the names above are empty: Alpaca's standard key names.
+FALLBACK_NAMES = [("ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY")]
 ALLOWED_PATHS = ("/account", "/positions", "/orders", "/clock",
-                 "/account/portfolio/history")   # read-only endpoints (GET only, paper host only)
+                 "/account/portfolio/history")   # read-only endpoints (GET only, live host only)
 _LOCAL_TEST_URL = re.compile(r"http://(127\.0\.0\.1|localhost):\d{2,5}/v2")   # tests only (mock server on this machine)
 CT = ZoneInfo("America/Chicago")
 
@@ -51,31 +56,29 @@ class PaperAccountError(Exception):
 
 
 def check_base_url(url, allow_local_test=False):
-    """Return the URL if it is the Alpaca paper endpoint (or, in tests only, a localhost mock); otherwise raise."""
+    """Return the URL if it is the Alpaca live endpoint (or, in tests only, a localhost mock); otherwise raise."""
     url = str(url).rstrip("/")
-    if url == PAPER_BASE_URL:
+    if url == LIVE_BASE_URL:
         return url
     if allow_local_test and _LOCAL_TEST_URL.fullmatch(url):
         return url
-    raise PaperAccountError(f"refused base URL {url!r}: only {PAPER_BASE_URL} (Alpaca PAPER) is allowed")
+    raise PaperAccountError(f"refused base URL {url!r}: only {LIVE_BASE_URL} (Alpaca LIVE) is allowed")
 
 
 def paper_keys():
-    """(key_id, secret, source names) of the Alpaca PAPER keys from .env; ("", "", note) if none. Values are never printed."""
+    """(key_id, secret, source names) of the Alpaca LIVE keys from .env; ("", "", note) if none. Values are never printed."""
     load_dotenv(os.path.join(ROOT, ".env"))
     for key_name, secret_name in [(KEY_ENV, SECRET_ENV)] + FALLBACK_NAMES:
         key, secret = os.getenv(key_name, "").strip(), os.getenv(secret_name, "").strip()
-        if key and secret and (key_name == KEY_ENV or key.startswith("PK")):
+        if key and secret:
             return key, secret, f"{key_name} / {secret_name}"
-    other = os.getenv("ALPACA_API_KEY", "").strip()
-    why = " (ALPACA_API_KEY is not a paper key, not used)" if other and not other.startswith("PK") else ""
-    return "", "", f"{KEY_ENV} / {SECRET_ENV} are missing or empty in .env{why}"
+    return "", "", f"{KEY_ENV} / {SECRET_ENV} are missing or empty in .env"
 
 
 class PaperAccount:
-    """Read-only client for the Alpaca PAPER trading API."""
+    """Read-only client for the Alpaca LIVE trading API."""
 
-    def __init__(self, key_id=None, secret_key=None, base_url=PAPER_BASE_URL, timeout=15, _allow_local_test=False):
+    def __init__(self, key_id=None, secret_key=None, base_url=LIVE_BASE_URL, timeout=15, _allow_local_test=False):
         self.base_url = check_base_url(base_url, allow_local_test=_allow_local_test)
         note = "keys passed in"
         if key_id is None or secret_key is None:
@@ -199,7 +202,7 @@ def write_snapshot(summary, positions, snapshot_csv=SNAPSHOT_CSV, history_csv=HI
 
 
 def sync_paper_account(account=None, positions_csv=None, snapshot_csv=None, history_csv=None):
-    """Read the paper account (3 GET calls) and write my_positions.csv + the snapshot files. Returns the summary dict.
+    """Read the LIVE account (3 GET calls) and write my_positions.csv + the snapshot files. Returns the summary dict.
     Paths default to the module settings (POSITIONS_CSV, SNAPSHOT_CSV, HISTORY_CSV), looked up at call time."""
     account = account or PaperAccount()
     positions_csv, snapshot_csv = positions_csv or POSITIONS_CSV, snapshot_csv or SNAPSHOT_CSV
@@ -211,7 +214,7 @@ def sync_paper_account(account=None, positions_csv=None, snapshot_csv=None, hist
 
 
 def main(argv=None):
-    """Command line: print the paper account (read-only); --sync also writes the files."""
+    """Command line: print the live account (read-only); --sync also writes the files."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--sync", action="store_true", help="also write my_positions.csv and the Reports snapshot files")
     p.add_argument("--orders", type=int, default=10, help="how many recent orders to show (default 10)")
@@ -219,7 +222,7 @@ def main(argv=None):
     acct = PaperAccount()
     s = acct.account_summary()
     clock = acct.market_clock()
-    print(f"PAPER account: equity ${s['Equity']:,.2f} | cash ${s['Cash']:,.2f} | buying power ${s['Buying power']:,.2f}")
+    print(f"LIVE account: equity ${s['Equity']:,.2f} | cash ${s['Cash']:,.2f} | buying power ${s['Buying power']:,.2f}")
     print(f"Market: {'OPEN' if clock['Is open'] else 'CLOSED'} (next open {clock['Next open (CT)'] or 'n/a'})")
     print(acct.positions().round(2).to_string(index=False))
     print(acct.recent_orders(a.orders).to_string(index=False))

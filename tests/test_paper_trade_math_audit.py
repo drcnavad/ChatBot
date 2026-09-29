@@ -12,9 +12,10 @@ Covers the audit fixes:
   without crashing the run
 - reconcile_positions on a hold day returns OK with an empty report (no false DRIFT)
 
-Reuses the stubbed alpaca environment and FakeClient helpers from
-test_paper_trade_safety (importing it is side-effect free: its tests only run
-under __main__). Run: PYTHONPATH=. python tests/test_paper_trade_math_audit.py
+Self-contained: stubs alpaca.trading in sys.modules and defines its own
+FakeClient helpers (the old test_paper_trade_safety.py was retired; its
+LIVE successor is test_paper_trade_live_safety.py).
+Run: PYTHONPATH=. python tests/test_paper_trade_math_audit.py
 """
 import json
 import os
@@ -24,10 +25,177 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from test_paper_trade_safety import (
-    FAIL, check, FakeClient, _use_fake, _orders_frame, _write_pending, paper_trade,
-)
+# --- stub alpaca.trading before paper_trade's in-function imports run -----------
+import types
+
+from enum import Enum as _Enum
+
+
+class OrderSide(_Enum):
+    BUY = "buy"
+    SELL = "sell"
+
+
+class TimeInForce(_Enum):
+    DAY = "day"
+
+
+class QueryOrderStatus(_Enum):
+    ALL = "all"
+    OPEN = "open"
+    CLOSED = "closed"
+
+
+class SortDirection(_Enum):
+    DESCENDING = "desc"
+    ASCENDING = "asc"
+
+
+class _Req:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+class MarketOrderRequest(_Req):
+    pass
+
+
+class LimitOrderRequest(_Req):
+    pass
+
+
+class GetOrdersRequest(_Req):
+    pass
+
+
+_alpaca = types.ModuleType("alpaca")
+_trading = types.ModuleType("alpaca.trading")
+_client_mod = types.ModuleType("alpaca.trading.client")
+_enums = types.ModuleType("alpaca.trading.enums")
+_requests = types.ModuleType("alpaca.trading.requests")
+_enums.OrderSide = OrderSide
+_enums.TimeInForce = TimeInForce
+_enums.QueryOrderStatus = QueryOrderStatus
+_enums.SortDirection = SortDirection
+_requests.MarketOrderRequest = MarketOrderRequest
+_requests.LimitOrderRequest = LimitOrderRequest
+_requests.GetOrdersRequest = GetOrdersRequest
+sys.modules["alpaca"] = _alpaca
+sys.modules["alpaca.trading"] = _trading
+sys.modules["alpaca.trading.client"] = _client_mod
+sys.modules["alpaca.trading.enums"] = _enums
+sys.modules["alpaca.trading.requests"] = _requests
+
 import pandas as pd
+
+import paper_trade
+
+FAIL = []
+
+
+def check(ok, what):
+    print(("PASS " if ok else "FAIL ") + what)
+    if not ok:
+        FAIL.append(what)
+
+
+# --- fakes --------------------------------------------------------------------
+class FakePosition:
+    def __init__(self, symbol, qty):
+        self.symbol = symbol
+        self.qty = qty
+
+
+class FakeAccount:
+    def __init__(self, buying_power, cash=None):
+        self.buying_power = buying_power
+        # cash defaults to buying_power when not given (ample for tests)
+        self.cash = buying_power if cash is None else cash
+
+
+class FakeOrder:
+    def __init__(self, id, symbol="", side="BUY", qty=0, status="new", filled_qty=0,
+                 client_order_id="", limit_price=None):
+        self.id = id
+        self.symbol = symbol
+        self.side = side
+        self.qty = qty
+        self.status = status  # plain string: the code handles .value or str()
+        self.filled_qty = filled_qty
+        self.client_order_id = client_order_id
+        self.limit_price = limit_price
+
+
+class FakeClient:
+    """Stand-in for alpaca TradingClient. Records everything; never touches the network."""
+
+    def __init__(self):
+        self.submitted = []      # request objects, in submission order
+        self.orders = {}         # id -> FakeOrder (for get_order)
+        self.all_orders = []     # for get_orders
+        self.positions = []      # [(symbol, qty)]
+        self.buying_power = 100000.0
+        self.fail_positions = False
+        self.fail_orders = False
+        self._next_id = 1
+
+    def submit_order(self, req):
+        self.submitted.append(req)
+        oid = f"fake-{self._next_id}"
+        self._next_id += 1
+        o = FakeOrder(id=oid, symbol=req.symbol, qty=req.qty,
+                      client_order_id=getattr(req, "client_order_id", "") or "")
+        self.orders[oid] = o
+        self.all_orders.append(o)
+        return o
+
+    def get_order(self, oid):
+        return self.orders[oid]
+
+    def cancel_order(self, oid):
+        if oid in self.orders:
+            self.orders[oid].status = "canceled"
+
+    def get_all_positions(self):
+        if self.fail_positions:
+            raise ConnectionError("broker unreachable")
+        return [FakePosition(s, q) for s, q in self.positions]
+
+    def get_account(self):
+        return FakeAccount(self.buying_power)
+
+    def get_orders(self, req=None):
+        if self.fail_orders:
+            raise ConnectionError("broker unreachable")
+        return list(self.all_orders)
+
+
+def _use_fake(fake):
+    orig = paper_trade.paper_trading_client
+    paper_trade.paper_trading_client = lambda: fake
+    return orig
+
+
+def _orders_frame():
+    cols = paper_trade.ORDER_COLUMNS
+    rows = [
+        {"Symbol": "AAA", "Side": "BUY", "Shares": 10, "Price": 100.0, "Est_Value": 1000.0,
+         "Current_Shares": 0, "Target_Shares": 10, "Target_Weight_%": 10.0, "Target_Value": 1000.0},
+        {"Symbol": "BBB", "Side": "BUY", "Shares": 5, "Price": 100.0, "Est_Value": 500.0,
+         "Current_Shares": 0, "Target_Shares": 5, "Target_Weight_%": 5.0, "Target_Value": 500.0},
+        {"Symbol": "CCC", "Side": "SELL", "Shares": 3, "Price": 100.0, "Est_Value": 300.0,
+         "Current_Shares": 3, "Target_Shares": 0, "Target_Weight_%": 0.0, "Target_Value": 0.0},
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def _write_pending(path, orders):
+    payload = {"evening_date": paper_trade._today_ct().date().isoformat(),
+               "submitted_at_ct": "2026-09-25 18:00:00",
+               "target_source": "test", "as_of": "2026-09-25",
+               "orders": orders}
+    with open(path, "w") as f:
+        json.dump(payload, f)
 
 
 def test_build_orders_rejects_inf_price():
@@ -111,7 +279,7 @@ def test_buying_power_guard_invalid_row_skipped_upfront():
 
 def test_client_order_id_inf_price_no_crash():
     cid = paper_trade._client_order_id("AAA", "BUY", 10, float("inf"), "20260926", kind="fill")
-    check(cid == "pa-fill-20260926-BUY-AAA-10-0",
+    check(cid == "live-fill-20260926-BUY-AAA-10-0",
           f"+inf price -> price-cents fall back to 0, no OverflowError ({cid})")
 
 

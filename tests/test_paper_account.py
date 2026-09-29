@@ -1,4 +1,4 @@
-"""alpaca_paper.py / alpaca_paper_account.ipynb / run_all.py --sync-paper against a MOCK Alpaca server on 127.0.0.1.
+"""alpaca_paper.py / alpaca_paper_account.ipynb / run_all.py --sync-live against a MOCK Alpaca server on 127.0.0.1.
 
 No request ever goes to Alpaca: the client is pointed at a local mock (allowed only with the test-only flag), dummy keys are
 passed explicitly (.env is not read), and every file is written to a temporary folder (the real my_positions.csv and
@@ -74,7 +74,7 @@ class Mock(BaseHTTPRequestHandler):
 server = HTTPServer(("127.0.0.1", 0), Mock)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 MOCK = f"http://127.0.0.1:{server.server_port}/v2"
-tmp = tempfile.mkdtemp(prefix="paper_test_")
+tmp = tempfile.mkdtemp(prefix="live_test_")
 
 
 def real_positions_state():
@@ -85,24 +85,24 @@ def real_positions_state():
 REAL_BEFORE = real_positions_state()
 try:
     # ------------------------------------------------------------ URL guard (no request is made for refused URLs)
-    for bad in ["https://api.alpaca.markets/v2", "http://paper-api.alpaca.markets/v2", "https://paper-api.alpaca.markets/v1",
-                "https://paper-api.alpaca.markets.evil.com/v2", "https://example.com/v2", MOCK]:
+    for bad in ["https://paper-api.alpaca.markets/v2", "http://api.alpaca.markets/v2", "https://api.alpaca.markets/v1",
+                "https://api.alpaca.markets.evil.com/v2", "https://example.com/v2", MOCK]:
         try:
             ap.PaperAccount(KEY, SECRET, base_url=bad)
             expect(False, f"refuses {bad}")
         except ap.PaperAccountError:
             expect(True, f"refuses {bad}")
-    expect(ap.PaperAccount(KEY, SECRET).base_url == "https://paper-api.alpaca.markets/v2", "accepts the paper URL (no request made)")
+    expect(ap.PaperAccount(KEY, SECRET).base_url == "https://api.alpaca.markets/v2", "accepts the live URL (no request made)")
     try:
         ap.PaperAccount(KEY, SECRET, base_url="http://10.0.0.5:8080/v2", _allow_local_test=True)
         expect(False, "test flag only allows localhost")
     except ap.PaperAccountError:
         expect(True, "test flag only allows localhost")
     try:
-        ap.PaperAccount("", "", base_url=ap.PAPER_BASE_URL)
+        ap.PaperAccount("", "", base_url=ap.LIVE_BASE_URL)
         expect(False, "missing keys raise")
     except ap.PaperAccountError as e:
-        expect("ALPACA_PAPER_KEY_ID" in str(e), "missing keys raise a clear error")
+        expect("ALPACA_LIVE_KEY_ID" in str(e), "missing keys raise a clear error")
 
     # ------------------------------------------------------------ read-only views against the mock
     acct = ap.PaperAccount(KEY, SECRET, base_url=MOCK, _allow_local_test=True)
@@ -145,17 +145,17 @@ try:
     expect({"CASH", "TOTAL EQUITY", "NVDA", "MRK"} <= set(sn.Symbol), "snapshot has positions + cash/equity rows")
     expect(len(pd.read_csv(hist)) == 2 and r["Positions"] == 2, "history appends one row per sync")
 
-    # ------------------------------------------------------------ run_all --sync-paper hook (mocked, temp paths)
+    # ------------------------------------------------------------ run_all --sync-live hook (mocked, temp paths)
     import run_all
     real = ap.PaperAccount, ap.POSITIONS_CSV, ap.SNAPSHOT_CSV, ap.HISTORY_CSV
     try:
         ap.PaperAccount = functools.partial(real[0], KEY, SECRET, base_url=MOCK, _allow_local_test=True)
         ap.POSITIONS_CSV, ap.SNAPSHOT_CSV, ap.HISTORY_CSV = (os.path.join(tmp, n) for n in ("rp.csv", "rs.csv", "rh.csv"))
-        run_all.sync_paper()
-        expect(os.path.exists(ap.POSITIONS_CSV) and os.path.exists(ap.SNAPSHOT_CSV), "run_all.sync_paper writes the positions file")
+        run_all.sync_live()
+        expect(os.path.exists(ap.POSITIONS_CSV) and os.path.exists(ap.SNAPSHOT_CSV), "run_all.sync_live writes the positions file")
     finally:
         ap.PaperAccount, ap.POSITIONS_CSV, ap.SNAPSHOT_CSV, ap.HISTORY_CSV = real
-    expect(run_all.main(["--dry-run", "--quick", "--sync-paper"]) == 0, "run_all --dry-run --sync-paper plans without calling")
+    expect(run_all.main(["--dry-run", "--quick", "--sync-live"]) == 0, "run_all --dry-run --sync-live plans without calling")
 
     # ------------------------------------------------------------ the notebook, top to bottom, against the mock
     import nbformat
@@ -191,5 +191,5 @@ finally:
     import shutil
     shutil.rmtree(tmp, ignore_errors=True)
 
-print("\nPAPER ACCOUNT TESTS OK" if not FAIL else f"\nPAPER ACCOUNT TEST FAILURES ({len(FAIL)}): {FAIL}")
+print("\nLIVE ACCOUNT TESTS OK" if not FAIL else f"\nLIVE ACCOUNT TEST FAILURES ({len(FAIL)}): {FAIL}")
 sys.exit(1 if FAIL else 0)

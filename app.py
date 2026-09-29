@@ -8,8 +8,9 @@ Page layout, top to bottom:
   3. "Details" tab: everything else (all signals, rank history, rules and decisions, holdings risk,
      order preview, backtest results, data freshness), each in its own expander.
 
-The app only READS the Reports/*.csv files written by `python run_all.py`. It never places orders and never calls
-a paid data API (the optional "AI analysis" button uses the Hugging Face token from .env).
+The app only READS the Reports/*.csv files written by `python run_all.py` for strategy data. It never places orders and never calls
+a paid data API (the optional "AI analysis" button uses the Hugging Face token from .env). The stock header additionally
+shows a display-only live quote from yfinance (free); it never feeds back into signals, picks, backtests, or orders.
 """
 import html
 import os
@@ -121,6 +122,9 @@ st.markdown("""
     .sa-ident { display: flex; align-items: center; gap: 0.85rem; }
     .sa-sym { font-size: 1.75rem; font-weight: 700; color: #0f172a; font-family: 'JetBrains Mono', monospace; }
     .sa-price { font-size: 1.25rem; font-weight: 700; color: #334155; font-family: 'JetBrains Mono', monospace; }
+    .sa-live { font-size: 0.85rem; font-weight: 600; color: #334155; font-family: 'JetBrains Mono', monospace; margin-top: 0.15rem; }
+    .sa-live-dot { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 9999px; background: #16a34a; margin-right: 0.3rem; }
+    .sa-live-sub { font-weight: 400; color: #64748b; }
     .sa-badge { display: inline-block; padding: 0.35rem 0.8rem; border-radius: 999px; font-weight: 700; font-size: 0.8rem; }
     .sa-badge-bull { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
     .sa-badge-bear { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
@@ -423,6 +427,43 @@ def company_metrics(ticker, company_df):
 def load_news():
     news = read_report_csv(NEWS_CSV)
     return news if news is not None else pd.DataFrame(columns=["symbol", "date", "headline", "summary", "source", "sentiment_label"])
+
+
+# =====================================================================================================================
+# 4b. Live quotes (display only; never touches strategy, signals, picks, backtests, or orders)
+# =====================================================================================================================
+try:
+    import yfinance as _yf
+    _YF_OK = True
+except ImportError:  # graceful degradation: dashboard works without live quotes
+    _yf, _YF_OK = None, False
+
+
+@st.cache_data(ttl=120)
+def live_quote(ticker: str):
+    """Latest yfinance quote for one ticker -> (price, bar_time) or None.
+
+    Display-only helper for the stock header. The strategy always uses the completed
+    daily-bar Close from Reports/*.csv; this result never feeds back into signals,
+    picks, backtests, or orders. Returns None when yfinance is missing, the fetch
+    fails/rate-limits, or there is no usable bar.
+    """
+    if not _YF_OK or not ticker:
+        return None
+    try:
+        df = _yf.download(ticker, period="1d", interval="1m", prepost=True,
+                          progress=False, auto_adjust=False)
+        if df is None or df.empty:
+            return None
+        closes = df["Close"]
+        if isinstance(closes, pd.DataFrame):  # yfinance>=0.12 returns MultiIndex columns
+            closes = closes.iloc[:, 0]
+        closes = closes.dropna()
+        if closes.empty:
+            return None
+        return float(closes.iloc[-1]), pd.Timestamp(closes.index[-1])
+    except Exception:
+        return None
 
 
 # =====================================================================================================================
@@ -961,6 +1002,23 @@ def render_stock_picker(p, jumped):
 def render_stock_header(p, ticker, tdata):
     """Name, price, official signal and the numbers that decide it (score, rank, slot, weight)."""
     latest = tdata.nlargest(1, 'Date').iloc[0]
+    # Display-only live quote: shown under the official bar close, never used by the strategy.
+    live_html = ""
+    live = live_quote(ticker)
+    if live is not None:
+        lp, lts = live
+        lts = pd.Timestamp(lts)
+        # Only label it LIVE when the quote is from today's session; otherwise the bar close above is already the latest.
+        if lts.tzinfo is not None and lts.tz_convert(CT).date() == datetime.now(tz=CT).date():
+            bar_close = num(latest['Close'])
+            chg = (lp / bar_close - 1) * 100 if bar_close else None
+            live_html = (
+                f'<div class="sa-live" title="Live quote from yfinance (display only — the strategy uses the bar close above)">'
+                f'<span class="sa-live-dot"></span>LIVE {fmt(lp, ",.2f", "$")} '
+                f'<span style="color:{sign_color(chg)};">{fmt(chg, "+.2f", suffix="%")}</span>'
+                f' <span class="sa-live-sub">vs {pd.Timestamp(latest["Date"]):%a} close · '
+                f'{lts.tz_convert(CT).strftime("%I:%M %p")} CT</span></div>'
+            )
     score, rank = num(latest.get('Strategy_Score')), num(latest.get('Strategy_Rank'))
     weight = num(latest.get('Strategy_Weight')) or 0.0
     n_ranked = int(p.latest['Strategy_Score'].notna().sum())
@@ -995,7 +1053,8 @@ def render_stock_header(p, ticker, tdata):
           <div class="sa-hero-row">
             <div class="sa-ident">
               <div class="sa-sym">{esc(ticker)}</div>
-              <div class="sa-price">{fmt(num(latest['Close']), ",.2f", "$")}</div>
+              <div class="sa-price" title="Latest completed daily bar — the strategy's official price">{fmt(num(latest['Close']), ",.2f", "$")}</div>
+              {live_html}
               <span class="sa-badge {SIGNAL_BADGE.get(status, 'sa-badge-grey')}" title="Official signal from the decisions in force">{esc(status)}</span>
               {chips_html}
             </div>
@@ -1089,6 +1148,21 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
         fig.add_vline(x=ned, line=dict(color='#f97316', width=1.2, dash='dash'), row="all", col=1)
         fig.add_annotation(x=ned, y=1, xref="x", yref="y domain", text=f"next earnings {ned:%b %d}", showarrow=False,
                            yanchor="bottom", xanchor="right", font=dict(size=10, color='#c2410c'))
+
+    # Live price marker (display only): a single dot at today's date so the price panel reaches the current
+    # session. Bars, moving averages, and every strategy panel still end at the last completed bar.
+    live = live_quote(ticker)
+    if live is not None:
+        lp, lts = live
+        lts = pd.Timestamp(lts)
+        if lts.tzinfo is not None and lts.tz_convert(CT).date() == datetime.now(tz=CT).date():
+            live_day = lts.tz_convert(CT).normalize().tz_localize(None)
+            fig.add_trace(go.Scatter(
+                x=[live_day], y=[lp], name="Live", mode="markers",
+                marker=dict(symbol="circle", size=8, color="#16a34a", line=dict(width=2, color="#ffffff")),
+                hovertemplate="<b>Live</b> $%{y:.2f}<br>%{x|%b %d, %Y} · intraday, display only<extra></extra>"),
+                row=1, col=1)
+            x_right = max(x_right, live_day) + pd.Timedelta(days=2)
 
     # Old rules (off by default): streak bars + BUY/SELL flip lines from final_trade
     if show_legacy:
@@ -1474,7 +1548,7 @@ def render_order_preview():
         st.caption(f"Targets: {meta['source']} weights as of {meta['as_of']} (last weekly rebalance {meta['last_rebalance']}, "
                    f"last decision {meta['last_decision']}), {meta['invested']:.0%} invested · priced at the latest close · whole shares")
         st.dataframe(orders.round(2), width="stretch", hide_index=True)
-        st.caption("Preview only. To send these to Alpaca PAPER run `python paper_trade.py --submit --paper` yourself.")
+        st.caption("Preview only \u2014 the scheduled pipeline submits these automatically; nothing is sent from this page.")
     except Exception as e:
         st.warning(f"Order preview unavailable: {e}")
 
@@ -1498,7 +1572,7 @@ def render_details(p, ticker):
         render_rules_and_changes(p)
     with st.expander("Holdings risk", expanded=False):
         render_holdings_and_tracking()
-    with st.expander("Order preview for a paper account (nothing is sent)", expanded=False):
+    with st.expander("Order preview (nothing is sent)", expanded=False):
         render_order_preview()
     with st.expander("Data freshness and settings", expanded=False):
         render_data_and_settings(p)
@@ -1508,7 +1582,7 @@ def render_details(p, ticker):
 # 12b. Strategy health — is the live account behaving like the backtest said it would?
 # =====================================================================================================================
 def render_health():
-    """Live PAPER equity vs the backtest reference (see strategy_health.py for the bands)."""
+    """Live equity vs the backtest reference (see strategy_health.py for the bands)."""
     try:
         import strategy_health as sh
     except Exception as e:  # deployed without the pipeline modules
@@ -1520,8 +1594,8 @@ def render_health():
                 f"(C6-U96-T20-MW30-E5 walk-forward: Sharpe {ref['sharpe']:.2f}, max DD {ref['max_dd_pct']:.1f}%, "
                 f"win rate {ref['win_rate_pct']:.1f}%, CAGR {ref['cagr_pct']:.1f}%)")
     if rep["data_state"] == "empty":
-        st.info("No live account history yet — `Reports/paper_account_history.csv` is written by the pipeline's "
-                "account sync (`run_all.py --sync-paper`). The backtest stats above are what the health score "
+        st.info("No live account history yet — `Reports/live_account_history.csv` is written by the pipeline's "
+                "account sync (`run_all.py --sync-live`). The backtest stats above are what the health score "
                 "will be measured against once trading starts.")
         return
     s = rep["stats"]
@@ -1591,6 +1665,13 @@ def main():
         del st.query_params["symbol"]
 
     render_top_bar(p)
+    # One-click freshness: every data cache is already keyed on the Reports/*.csv modification times,
+    # so clearing the caches and rerunning always shows the newest pipeline output + live quotes.
+    if st.button("🔄 Refresh data",
+                   help="Clear all cached data and reload the latest Reports/*.csv files and live quotes."):
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.rerun()
     tab_main, tab_details, tab_health = st.tabs(["📈 Dashboard", "🔎 Details", "🩺 Strategy Health"])
     with tab_main:
         render_summary(p)

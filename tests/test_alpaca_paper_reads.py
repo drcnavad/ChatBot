@@ -1,6 +1,6 @@
 """Mocked tests for the new alpaca_paper.py read-only views (open_orders, market_clock,
 portfolio_history): parsing is correct and the module stays read-only (no order placement,
-paper endpoint allowlist intact). Zero network calls.
+live endpoint allowlist intact). Zero network calls.
 Run from the project root:  python tests/test_alpaca_paper_reads.py
 """
 import os
@@ -88,7 +88,7 @@ class TestReadOnlyGuardrails(unittest.TestCase):
 
     def test_dangerous_paths_refused_without_network(self):
         acct = ap.PaperAccount.__new__(ap.PaperAccount)
-        acct.base_url = ap.PAPER_BASE_URL
+        acct.base_url = ap.LIVE_BASE_URL
         for bad in ("/orders/123/cancel", "/orders", "/positions/XYZ"):
             if bad in ap.ALLOWED_PATHS:
                 continue
