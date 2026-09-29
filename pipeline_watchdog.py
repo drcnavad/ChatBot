@@ -332,8 +332,8 @@ def handle_failure(argv, tail, checkpoint):
         report = write_diagnosis_report(step or phase, phase, diagnosis, tail, snapshot)
         # Title keeps the phase name ("trade failed" / "fill-check failed").
         run_all._notify(f"{phase} failed - check Alpaca",
-                        f"The {phase} run crashed; some orders may or may not have gone out. Open Alpaca "
-                        f"to see what filled. Not retried automatically. "
+                        f"The {phase} run crashed; some orders may have gone out - check Alpaca > Orders. "
+                        f"Sent orders are saved and never sent twice; the scheduled job retries the rest. "
                         + (f"Report: Reports/{os.path.basename(report)}" if report else "Log: Reports/logs"),
                         details=(diagnosis or {}).get("diagnosis"))
         return 1
@@ -375,6 +375,9 @@ def main(argv=None):
             if not (quiet and last_line.startswith("idle:")):
                 log("pipeline finished cleanly on attempt %d", tries)
             return 0
+        if rc == run_all.EXIT_REPORTED:    # a trade / fill-check problem run_all already explained in an alert
+            log("run_all reported the problem itself (exit %d) - no retry, no second alert", rc)
+            return 1
         checkpoint = run_all.read_checkpoint()
         action = handle_failure(args, tail, checkpoint)
         if action == 1:

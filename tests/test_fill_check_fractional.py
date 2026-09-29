@@ -329,6 +329,26 @@ check("rerun: MU not repeated, ANET sent once", [(x.symbol, x.qty) for x in b.su
 res = run(b, p)
 check("rerun: a third run finds nothing to do", res.empty and len(b.submitted) == 2)
 
+# Alpaca rejects the market order every time: retried at most MAX_FILL_TRIES checks, then dropped (never forever)
+class Rejecting(Broker):
+    def submit_order(self, req):
+        raise RuntimeError("insufficient buying power")
+
+
+o, r = eve("ANET", "BUY", 3.58, 3, "expired", 0)
+b = Rejecting(orders=[o]); p = write_pending([r])
+NOTES.clear()
+res1 = run(b, p)
+check("rejected market order: kept for retry (try 1), alert says it retries - don't place by hand",
+      os.path.exists(p) and "retrying" in status_of(res1, "ANET")
+      and any("retrying" in t and "don't place" in m for t, m in NOTES), (status_of(res1, "ANET"), NOTES))
+run(b, p)
+NOTES.clear()
+res3 = run(b, p)
+check(f"rejected market order: dropped after {pt.MAX_FILL_TRIES} tries, alert says place by hand",
+      not os.path.exists(p) and "gave up" in status_of(res3, "ANET")
+      and any("by hand" in m and "No money" in m for t, m in NOTES), (status_of(res3, "ANET"), NOTES))
+
 # market closed (holiday / Mac woke after the close)
 o, r = eve("ANET", "BUY", 3.58, 3, "expired", 0)
 b = Broker(orders=[o], is_open=False); p = write_pending([r]); res = run(b, p)

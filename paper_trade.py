@@ -69,6 +69,7 @@ PENDING_ORDERS_JSON = os.path.join(PROJECT_ROOT, "Reports", "live_pending_orders
 ORDER_COLUMNS = ["Symbol", "Side", "Shares", "Price", "Est_Value", "Current_Shares", "Target_Shares",
                  "Target_Weight_%", "Target_Value"]
 NO_TRADE_BAND = 0.01   # Friday rebalance: a target holding within 1 percentage point of its weight is not traded
+MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
 CASH_CUSHION = 0.01    # buys are sized to free cash / (1 + 1%) so market fills a bit above the estimate still fit
 
 
@@ -1341,6 +1342,15 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         rem = _floor2(qty - filled)
         return min(rem, _floor2(have)) if have is not None else rem
 
+    def _retry(o, sym, side, q, oid, why):
+        """Keep row `o` for the next fill check (every 30 min in market hours), at most MAX_FILL_TRIES times."""
+        o["tries"] = int(_safe_number(o.get("tries"), default=0)) + 1
+        if o["tries"] < MAX_FILL_TRIES:
+            results.append((sym, side, q, oid, f"FAILED (try {o['tries']} of {MAX_FILL_TRIES}, retrying in 30 min): {why}"))
+            to_retry.append(o)
+        else:
+            results.append((sym, side, q, oid, f"FAILED (gave up after {o['tries']} tries): {why}"))
+
     def _save_pending():
         """Persist per-row completion marks right away, so a crash mid-run never re-orders a row."""
         try:
@@ -1381,7 +1391,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             waiting = [(o.get("symbol", "?"), o.get("qty")) for o in evening_orders if isinstance(o, dict)]
             _notify("9 AM check waiting: market closed",
                     f"Market closed, so nothing was sent and no money moved. Still to finish: "
-                    f"{_list_syms(waiting)}. Nothing to do: it retries at the next 9 AM check. "
+                    f"{_list_syms(waiting)}. Nothing to do: it tries again every 30 min while the market is open. "
                     f"List: Reports/live_pending_orders.json", details=msg)
             return pd.DataFrame([(o.get("symbol", "?"), o.get("side", "?"), o.get("qty"), o.get("order_id"),
                                   "WAITING: " + msg) for o in evening_orders if isinstance(o, dict)], columns=cols)
@@ -1445,8 +1455,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             try:
                 alp = client.get_order(oid)
             except Exception as e:
-                results.append((sym, side, qty, oid, f"FAILED: cannot read order: {e}"))
-                to_retry.append(o)
+                _retry(o, sym, side, qty, oid, f"cannot read order: {e}")
                 continue
             raw = alp.status
             status = raw.value.lower() if hasattr(raw, "value") else str(raw).lower()
@@ -1506,9 +1515,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 if not _wait_terminal(client, oid):
                     # Fail closed: the evening order may still fill - retry later instead
                     # of risking a duplicate market order now.
-                    results.append((sym, side, remaining, oid,
-                                    "FAILED: evening order still open after cancel - kept for retry"))
-                    to_retry.append(o)
+                    _retry(o, sym, side, remaining, oid, "evening order still open after cancel")
                     continue
                 try:  # re-read: it may have filled while the cancel was processed
                     chk = client.get_order(oid)
@@ -1517,8 +1524,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     status = raw.value.lower() if hasattr(raw, "value") else str(raw).lower()
                 except Exception as e:
                     # Fail closed: without the final fill count the remainder is unknown.
-                    results.append((sym, side, remaining, oid, f"FAILED: cannot re-read order after cancel ({e}) - kept for retry"))
-                    to_retry.append(o)
+                    _retry(o, sym, side, remaining, oid, f"cannot re-read order after cancel ({e})")
                     continue
                 if status == "filled":
                     filled = max(filled, order_qty or 0.0)
@@ -1544,9 +1550,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             # for this symbol (fail closed - never risk a second working order).
             held_now, open_now = _symbol_state(client, sym)
             if held_now is None:
-                results.append((sym, side, to_order, oid,
-                                "FAILED: cannot re-check positions/open orders - kept for retry"))
-                to_retry.append(o)
+                _retry(o, sym, side, to_order, oid, "cannot re-check positions/open orders")
                 continue
             if open_now:
                 ids = ", ".join(str(getattr(x, "id", "?")) for x in open_now)
@@ -1609,7 +1613,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     results.append((sym, side, to_order, oid, msg))
                     _notify(f"9 AM check: {sym} buy on hold",
                             f"Couldn't read your buying power, so the {sym} buy of {_fmt_shares(to_order)} "
-                            f"shares was NOT sent (no money moved). It retries at the next 9 AM check. Log: Reports/logs",
+                            f"shares was NOT sent (no money moved). It tries again in 30 min. Log: Reports/logs",
                             details=msg)
                     to_retry.append(o)
                     continue
@@ -1643,9 +1647,8 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 reserved_buy_spend += est_cost  # later BUYs are judged on what is left
             results.append((sym, side, to_order, str(m.id),
                             f"COMPLETED via market ({status}, filled {filled:g}/{qty}){partial}"))
-        except Exception as e:
-            results.append((sym, side, remaining, oid, f"FAILED: {e}"))
-            to_retry.append(o)
+        except Exception as e:                      # e.g. Alpaca rejected the market order, or the network dropped
+            _retry(o, sym, side, remaining, oid, str(e))
     results = pd.DataFrame(results, columns=cols)
     if not dry_run and log_csv and not results.empty:
         log = results.drop(columns=["Order_ID"], errors="ignore").copy()
@@ -1675,11 +1678,19 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     print(f"\n  Completed/Filled: {n_completed}  |  Failed: {n_failed}  |  Kept for retry: {len(to_retry)}")
     if n_failed and not dry_run:
         failed = results[results["Status"].str.startswith("FAILED")]
-        _notify(f"9 AM check: {n_failed} order(s) failed",
-                f"Not completed: {_list_syms(zip(failed['Symbol'], failed['Shares']))}. The missing shares were "
-                f"not traded. Check Alpaca and place any you still want by hand. "
-                f"Log: Reports/live_orders_log.csv",
-                details="; ".join(f"{r.Symbol}: {r.Status}" for r in failed.itertuples()))
+        again = failed["Status"].str.contains("retrying", na=False)
+        if again.any():
+            _notify(f"Fill check: {int(again.sum())} order(s) retrying",
+                    f"Not sent yet: {_list_syms(zip(failed[again]['Symbol'], failed[again]['Shares']))}. No money "
+                    f"moved for these. It tries again in 30 min (up to {MAX_FILL_TRIES} times) - don't place them "
+                    f"by hand. Log: Reports/live_orders_log.csv",
+                    details="; ".join(f"{r.Symbol}: {r.Status}" for r in failed[again].itertuples()))
+        if (~again).any():
+            _notify(f"Fill check: {int((~again).sum())} order(s) failed",
+                    f"Not traded: {_list_syms(zip(failed[~again]['Symbol'], failed[~again]['Shares']))}. No money "
+                    f"moved for these and they won't be retried. Place any you still want by hand in Alpaca. "
+                    f"Log: Reports/live_orders_log.csv",
+                    details="; ".join(f"{r.Symbol}: {r.Status}" for r in failed[~again].itertuples()))
     if not dry_run and not results.empty:
         def _pairs(mask):
             return [(f"{r.Side.lower()} {r.Symbol}", r.Shares) for r in results[mask].itertuples()]

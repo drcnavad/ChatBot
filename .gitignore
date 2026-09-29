@@ -82,3 +82,7 @@ Reports/paper_*.csv
 
 # lock files of the running jobs
 Reports/.*.lock
+
+# live order state + watchdog resume point (account data, never commit)
+Reports/live_pending_orders.json*
+Reports/.pipeline_checkpoint.json

@@ -238,5 +238,38 @@ try:
 finally:
     wd.run_pipeline = orig
 
+# a failed --trade: one plain alert (what happened, money moved?, what next) and the watchdog adds nothing
+import paper_trade as _pt
+_saved_rec = _pt._todays_recorded_orders
+_pt._todays_recorded_orders = lambda *a, **k: set()
+try:
+    D0 = pd.Timestamp("2026-09-30")
+    t, m = ra.trade_failure_text(D0, ["trade"], "can't reach Alpaca", {"decision_attempts": {"decision": "2026-09-30", "n": 1}}, True)
+    check("trade failed: says no money moved and that it retries (try 2 of 3)",
+          "No orders went out, no money moved" in m and "try 2 of 3" in m, m)
+    t, m = ra.trade_failure_text(D0, ["trade"], "x", {"decision_attempts": {"decision": "2026-09-30", "n": 3}}, True)
+    check("trade failed 3rd time: says no more automatic tries + the command", "No more automatic tries" in m
+          and "run_all.py --trade" in m, m)
+    t, m = ra.trade_failure_text(D0, ["main", "trade_skipped"], None, {}, True)
+    check("pipeline broke before the trade: 'not placed ... No money moved'", "not placed" in m and "No money moved" in m, m)
+    _pt._todays_recorded_orders = lambda *a, **k: {("AMD", "BUY"), ("MU", "SELL")}
+    t, m = ra.trade_failure_text(D0, ["trade"], "network", {}, False)
+    check("trade failed after 2 orders went out: says so, never sent twice", "2 order(s) went out" in m
+          and "never sent twice" in m, m)
+    check("trade alerts fit a pop-up (<= 200 chars shown, title <= 40)", len(t) <= 40, t)
+finally:
+    _pt._todays_recorded_orders = _saved_rec
+
+wd.run_pipeline = lambda argv: (ra.EXIT_REPORTED, "Trade not placed ...\n")
+_saved_notify = ra._notify
+ra._notify = lambda *a, **k: NOTIFIED.append(a)
+NOTIFIED = []
+try:
+    with redirect_stdout(io.StringIO()):
+        rc = wd.main(["--trade", "--scheduled"])
+    check("watchdog: a failure run_all already reported -> exit 1, no retry, no second alert", rc == 1 and not NOTIFIED, NOTIFIED)
+finally:
+    wd.run_pipeline, ra._notify = orig, _saved_notify
+
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
 sys.exit(1 if FAIL else 0)

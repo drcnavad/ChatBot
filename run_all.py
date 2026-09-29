@@ -376,6 +376,7 @@ SESSION_FROM = (9, 0)            # catch-up / completion market orders from 9:00
 SESSION_STOP_MIN = 15            # ... until 15 min before the close (2:45 PM CT; 11:45 AM on early-close days)
 MAX_DECISION_ATTEMPTS = 3        # launchd retries a decision whose run failed at most 3 times ...
 RETRY_GAP_MIN = 60               # ... at least 60 min apart
+EXIT_REPORTED = 3                # a trade / fill-check failure already alerted in plain words: the watchdog stays quiet
 
 
 def _parse_ct(text):
@@ -607,10 +608,18 @@ def next_full_update(now_ct, state):
 
 # ----------------------------------------------------------------------------- execution
 def setup_logging():
-    """Log to the console and to Reports/logs/run_<time>.log (keeps the newest KEEP_LOGS logs)."""
+    """Log to the console and to Reports/logs/run_<time>.log (keeps the newest KEEP_LOGS logs; other logs over 5 MB
+    are cut to their last 1 MB)."""
     os.makedirs(LOG_DIR, exist_ok=True)
     for old in sorted(glob.glob(os.path.join(LOG_DIR, "run_*.log")))[:-KEEP_LOGS + 1]:
         os.remove(old)
+    for big in glob.glob(os.path.join(LOG_DIR, "*.log")) + glob.glob(os.path.join(LOG_DIR, "*.err")):
+        if os.path.getsize(big) > 5_000_000:            # launchd/dashboard logs only grow: keep their last 1 MB
+            with open(big, "rb") as f:
+                f.seek(-1_000_000, 2)
+                tail = f.read()
+            with open(big, "wb") as f:                  # launchd appends (O_APPEND), so it keeps writing at the end
+                f.write(tail)
     path = os.path.join(LOG_DIR, f"run_{datetime.now():%Y%m%d_%H%M%S}.log")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S", force=True,
                         handlers=[logging.FileHandler(path), logging.StreamHandler(sys.stdout)])
@@ -887,13 +896,15 @@ def main(argv=None):
         log_path = setup_logging()
     logging.info("run_all | %s CT | mode %s (%s)%s", f"{now:%a %b %d %I:%M %p}", mode.upper(), why,
                  " | DRY RUN - nothing runs" if a.dry_run else "")
-    for name, kind, target, _ in steps:
+    for name, kind, target, _ in ([] if a.fill_check else steps):     # a fill check runs no notebooks
         extra = f"  [{EXPECTED_CALLS[name]} calls]" if name in EXPECTED_CALLS and name not in skip else ""
         logging.info("  %-13s %s%s", name, f"SKIP - {skip[name]}" if name in skip else (target or "report checks"), extra)
     if a.sync_live:
         logging.info("  %-13s %s", "sync_live", "alpaca_paper.py  [Alpaca LIVE account: 3 read-only GET calls]")
     if a.trade:
-        logging.info("  %-13s %s", "trade", "paper_trade.auto_trade  [Alpaca LIVE (REAL MONEY): reads positions+equity, submits extended-hours DAY limit orders]")
+        logging.info("  %-13s %s", "trade", "paper_trade.auto_trade  [Alpaca LIVE (REAL MONEY): reads positions+equity, " + (
+            "sends regular-hours market orders now, 2-decimal shares]" if how == "session" else
+            "submits whole-share extended-hours DAY limit orders; the 9 AM check sends the fractional rest]"))
     if a.fill_check:
         logging.info("  %-13s %s", "fill-check", "paper_trade.complete_unfilled_orders  [Alpaca LIVE (REAL MONEY): completes unfilled evening orders]")
     if a.trade:
@@ -972,9 +983,15 @@ def _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, cl
             for r in results.itertuples():
                 logging.info("  %s %-6s %s shares -> %s", r.Side, r.Symbol, r.Shares, r.Status)
         state.update(update_state(last_fill_check_at=clock()))
-    except Exception as e:
+    except Exception as e:                                # Alpaca/network down: the pending list is kept, nothing duplicated
         logging.warning("  fill check failed: %s", e)
-        return 1
+        if state.get("fill_alert_on") != now.date().isoformat():
+            _notify("Fill check couldn't finish", "Couldn't reach Alpaca to finish the pending orders. Orders already sent "
+                    "are saved and never sent twice; the rest waits. It tries again every 30 min in market hours - nothing "
+                    "to do unless this keeps coming back. Log: Reports/logs", details=str(e))
+            state.update(update_state(fill_alert_on=now.date().isoformat()))
+        ckpt_clear()
+        return EXIT_REPORTED
     ckpt_clear()                                          # clean fill check - nothing to resume
     return 0
 
@@ -1006,7 +1023,7 @@ def _trade(a, D, how, failures, state, clock, ckpt):
         except Exception as e:
             logging.warning("  trade failed: %s", e)
             failures.append("trade")
-            return None, None
+            return None, {"error": str(e)}
         st_, side = results["Status"].astype(str), results["Side"]
         n_fail = int(st_.str.startswith("FAILED").sum())
         n_sent = int((~st_.str.startswith(("SKIP", "FAILED"))).sum())
@@ -1160,7 +1177,9 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
     logging.info("  Next full online update: %s  |  log %s", next_full_update(now, state), os.path.relpath(log_path, ROOT))
     logging.info("=" * 78)
     elapsed = time.time() - t_start
-    if crit:
+    if crit and a.trade:
+        _notify(*trade_failure_text(D, crit, (trade_meta or {}).get("error"), state, a.scheduled))
+    elif crit:
         _notify("Pipeline FAILED", f"{mode} mode, {elapsed:.0f}s - failed: {', '.join(crit)}")
     elif failures:
         _notify("Pipeline finished with warnings",
@@ -1169,7 +1188,33 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
         _notify("Pipeline finished", f"{mode} mode, {elapsed:.0f}s - {len(ran)} steps ok")
     if not crit:
         ckpt_clear()            # clean run (warnings ok) - the watchdog has nothing to resume
+    if a.trade and any(f in crit for f in ("trade", "trade_partial", "send_now")):
+        ckpt_clear()            # alerted above in plain words; the scheduled job decides any retry
+        return EXIT_REPORTED
     return 1 if crit else 0
+
+
+def trade_failure_text(D, crit, error, state, scheduled):
+    """(title, message) for a --trade run that did not finish cleanly: what happened, whether money moved, what next."""
+    import paper_trade
+    att = state.get("decision_attempts") or {}
+    n = int(att.get("n", 0)) if att.get("decision") == D.date().isoformat() else 0
+    again = (f"It tries again automatically in about an hour, or at the next market open (try {n + 1} of "
+             f"{MAX_DECISION_ATTEMPTS})." if scheduled and n < MAX_DECISION_ATTEMPTS else
+             "No more automatic tries: once fixed, run python run_all.py --trade (the next decision replaces it otherwise).")
+    if "trade_skipped" in crit:
+        broke = ", ".join(f for f in crit if f != "trade_skipped")
+        return "Trade not placed", f"The {D:%a %b %d} trade was not placed: the data update failed ({broke}). No money moved. {again}"
+    if "trade" in crit:
+        sent = len(paper_trade._todays_recorded_orders())
+        moved = ("No orders went out, no money moved." if not sent else
+                 f"{sent} order(s) went out before the error; they are saved and never sent twice - check Alpaca.")
+        return "Trade not placed", f"The {D:%a %b %d} trade stopped: {_clip(error or 'see the log', 90)}. {moved} {again}"
+    if "send_now" in crit:
+        return ("Catch-up orders not sent yet", "The catch-up orders are saved; the fill check sends them within 30 min "
+                "(market hours). No money moved yet. Nothing to do unless this repeats.")
+    return ("Trade done with problems", "Some orders were not sent - see the other alert. The rest went out. "
+            "The failed ones are not retried; place them by hand if you still want them.")
 
 
 if __name__ == "__main__":
