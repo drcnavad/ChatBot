@@ -633,7 +633,7 @@ def submit_paper(orders, positions=None, client=None, order_date=None):
                                  client_order_id=_client_order_id(r.Symbol, r.Side, qty, 0, date_str))
         try:
             o = client.submit_order(req)
-            results.append((r.Symbol, r.Side, qty, str(o.status)))
+            results.append((r.Symbol, r.Side, qty, f"submitted ({getattr(o.status, 'value', o.status)})"))
         except Exception as e:  # keep going; report every failure
             results.append((r.Symbol, r.Side, qty, f"FAILED: {e}"))
     return pd.DataFrame(results, columns=["Symbol", "Side", "Shares", "Status"])
@@ -693,7 +693,7 @@ def submit_paper_extended(orders, positions=None, record=None, client=None, orde
                                 client_order_id=_client_order_id(r.Symbol, r.Side, qty, price, date_str))
         try:
             o = client.submit_order(req)
-            results.append((r.Symbol, r.Side, qty, str(o.id), str(o.status)))
+            results.append((r.Symbol, r.Side, qty, str(o.id), f"submitted ({getattr(o.status, 'value', o.status)})"))
             if record is not None:
                 record({"symbol": r.Symbol, "side": r.Side, "qty": qty,
                         "limit_price": price, "order_id": str(o.id)})
@@ -1466,8 +1466,11 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
     n_buy = int((orders["Side"] == "BUY").sum())
     n_sell = int((orders["Side"] == "SELL").sum())
     print(f"  Plan: {n_buy} BUY, {n_sell} SELL  (source: {meta['source']}, as of {meta['as_of']})")
-    # Cap BUY spending at buying power (margin is disabled on the account).
-    orders = apply_buying_power_guard(orders, buying_power)
+    # Cap BUY spending at buying power (margin is disabled on the account). SELLs go first, so
+    # their proceeds count here; the sequenced submit / morning fill check re-cap BUYs at the
+    # actual post-sell buying power.
+    planned_sells = orders.loc[orders["Side"] == "SELL", "Est_Value"].sum()
+    orders = apply_buying_power_guard(orders, buying_power + planned_sells)
     skipped_bp = orders[orders["Side"] == "SKIP (no buying power)"]
     if not skipped_bp.empty:
         print(f"  Buying-power guard: {len(skipped_bp)} BUY row(s) SKIPPED - insufficient buying power")

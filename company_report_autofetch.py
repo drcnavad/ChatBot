@@ -27,6 +27,7 @@ from datetime import date, datetime, timedelta
 import numpy as np
 import pandas as pd
 import requests
+from dotenv import load_dotenv
 
 import sector_mapping
 
@@ -34,8 +35,10 @@ import sector_mapping
 
 MANUAL_SYMBOL = ""  # e.g. "UPST" -> fetch only this stock now; "" -> daily rotation
 
-ALPHA_VANTAGE_API = "I2LJ0T360O636D2S"
-REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Reports")
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+ALPHA_VANTAGE_API = os.environ["ALPHAVANTAGE_API_KEY"]
+REPORTS_DIR = os.path.join(PROJECT_ROOT, "Reports")
 BALANCE_CSV = os.path.join(REPORTS_DIR, "balance_sheet.csv")
 RUN_LOG_CSV = os.path.join(REPORTS_DIR, "fetch_run_log.csv")  # Symbol | RunDate | IncomeStatus | BalanceStatus
 
@@ -78,6 +81,8 @@ BALANCE_FIELDS = {
     "TotalLiabilities": "totalLiabilities",
     "CommonStockSharesOutstanding": "commonStockSharesOutstanding",
     "TotalShareholderEquity": "totalShareholderEquity",
+    "TotalDebt": "shortLongTermDebtTotal",
+    "CashAndEquivalents": "cashAndCashEquivalentsAtCarryingValue",
 }
 MILLIONS_COLS = [*INCOME_FIELDS, *BALANCE_FIELDS]
 NUMERIC_COLS = MILLIONS_COLS + ["OperatingMargin", "BVPS", "Debt_to_Equity"]
@@ -169,7 +174,8 @@ def get_stale_symbols():
     today = datetime.now().date()
     cool_for = COOLDOWN_DAYS or -(-len(ALL_SYMBOLS) // MAX_STOCKS)
     log = load_run_log()
-    last_any = log.groupby("Symbol")["RunDate"].max()
+    attempted = log[(log["IncomeStatus"] != "rate_limit") & (log["BalanceStatus"] != "rate_limit")]
+    last_any = attempted.groupby("Symbol")["RunDate"].max()
     ok = log[(log["IncomeStatus"] == "ok") & (log["BalanceStatus"] == "ok")]
     last_ok = ok.groupby("Symbol")["RunDate"].max()
 

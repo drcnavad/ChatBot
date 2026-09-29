@@ -445,6 +445,9 @@ def fill_check_allowed(now_ct, pending_path=None):
     if now_ct < earliest:
         return False, (f"fill check for the {evening:%a %b %d} evening run opens "
                        f"{earliest:%a %b %d} at 9:00 AM CT")
+    if now_ct.date() > d:
+        return False, (f"the pending fill check from the {evening:%a %b %d} evening run is stale (its window was "
+                       f"{d:%a %b %d}) - investigate Reports/live_pending_orders.json; stale orders are not replayed")
     if not is_trading_day(now_ct.date()):
         return False, f"{now_ct:%a %b %d} is a market holiday - the completion orders would not fill"
     return True, "ok"
@@ -733,6 +736,10 @@ def main(argv=None):
 
     if a.fill_check:
         ok, reason = fill_check_allowed(now)
+        if not ok and "investigate" in reason:
+            logging.warning("FILL CHECK: %s", reason)
+            _notify("Fill check needs attention", reason)
+            return 1
         if not ok:
             logging.info("FILL CHECK: %s - nothing to do", reason)
             return 0
@@ -828,13 +835,13 @@ def main(argv=None):
 
     trade_results, trade_meta = None, None
     if a.trade:
-        ckpt_write(run_id, saved_argv, mode, [n for n, ok, _ in ran if ok], phase="trade")
         try:
             proceed, reason = _trade_decision(failures)
             if not proceed:
                 logging.warning("=== trade skipped: %s", reason)
                 failures.append("trade_skipped")
             else:
+                ckpt_write(run_id, saved_argv, mode, [n for n, ok, _ in ran if ok], phase="trade")
                 if reason:
                     logging.warning("=== trade %s", reason)
                 else:
