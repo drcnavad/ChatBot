@@ -124,7 +124,7 @@ class TestMainFlow(unittest.TestCase):
         with mock.patch.object(wd, "run_pipeline", return_value=(1, "HTTP 503 Service Unavailable")) as rp, \
              mock.patch.object(wd.run_all, "read_checkpoint", return_value=dict(self.CP)), \
              mock.patch("time.sleep"), \
-             mock.patch.object(wd, "alpaca_snapshot", return_value={}) as snap, \
+             mock.patch.object(wd, "alpaca_snapshot", return_value={}), \
              mock.patch.object(wd, "diagnose_with_llm", return_value={"diagnosis": "d"}) as diag, \
              mock.patch.object(wd, "write_diagnosis_report", return_value="/tmp/d.md") as rep, \
              mock.patch.object(wd.run_all, "_notify") as notif:
@@ -224,12 +224,12 @@ class TestLLMProviders(unittest.TestCase):
     def test_provider_priority(self):
         with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "g", "GROQ_API_KEY": "q",
                                            "ANTHROPIC_API_KEY": "a"}, clear=True):
-            self.assertEqual(wd._llm_provider(), ("gemini", "gemini-2.0-flash", "g"))
+            self.assertEqual(wd._llm_provider(), ("gemini", "gemini-flash-latest", "g"))
         with mock.patch.dict(os.environ, {"GROQ_API_KEY": "q",
                                            "ANTHROPIC_API_KEY": "a"}, clear=True):
             self.assertEqual(wd._llm_provider(), ("groq", "llama-3.3-70b-versatile", "q"))
         with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "a"}, clear=True):
-            self.assertEqual(wd._llm_provider(), ("anthropic", "claude-3-5-haiku-latest", "a"))
+            self.assertEqual(wd._llm_provider(), ("anthropic", "claude-haiku-4-5", "a"))
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(wd._llm_provider(), (None, None, None))
 
@@ -251,7 +251,7 @@ class TestLLMProviders(unittest.TestCase):
              mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
             d = wd.diagnose_with_llm("main", "steps", "KeyError", {})
         self.assertIn("generativelanguage.googleapis.com", seen["url"])
-        self.assertIn("gemini-2.0-flash", seen["url"])
+        self.assertIn("gemini-flash-latest", seen["url"])
         self.assertIn("contents", seen["body"])
         self.assertEqual(seen["body"]["generationConfig"]["maxOutputTokens"], 1500)
         self.assertEqual(d["diagnosis"], "gem blew it")

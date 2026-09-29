@@ -101,13 +101,18 @@ WINNER = {
     # cash); a top-3 swap candidate with earnings is skipped. Dates: Reports/earnings_date.csv. Tag gets "-E5".
     # REVERT: "earnings_block_days": None, then `python run_all.py`.
     "earnings_block_days": 5,
-    # Earnings half-sell (LIVE from 2026-09-28, user decision, NOT backtested): at a decision (Friday rebalance or Mon/Wed
+    # Earnings half-sell (LIVE from 2026-09-28, user decision; simulated since 2026-09-28 via rebalance_band): at a decision (Friday rebalance or Mon/Wed
     # check), a HELD stock whose next earnings date E is in the same window (d < E <= d + earnings_block_days) is cut by this
     # fraction - once per earnings event. Until E has passed it is not bought more (a Friday rebalance keeps it at most at
     # its current weight); after E the normal rules resume. The freed weight stays cash until the Friday rebalance sizes the
-    # picks again. Needs "earnings_block_days" (the window). Tag unchanged (no backtest row for it).
+    # picks again. Needs "earnings_block_days" (the window). Tag unchanged (rules_version gets an "h").
     # REVERT: "earnings_sell_fraction": None, then `python run_all.py`.
     "earnings_sell_fraction": 0.5,
+    # Friday rebalance band (LIVE from 2026-09-28, user decision): at the weekly rebalance EVERY pick is brought back to its
+    # weight (bought up or trimmed) unless it is within this many percentage points of equity; Mon/Wed checks trade only
+    # swaps, exits and the earnings half-sell. paper_trade.NO_TRADE_BAND must equal this (tests check it). simulate(band=)
+    # models it. REVERT (backtest only): None = the old rule, only adds and exits are traded and holds are never resized.
+    "rebalance_band": 0.01,
 }
 
 
@@ -867,8 +872,14 @@ def earnings_half_sell(weights, held, days_row, d, fraction, done, cols=None):
 
 
 # ----------------------------------------------------------------------------- simulator
-def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST):
+def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST, band=None, block=None):
     """Share-based daily simulation.
+
+    band (live rule from 2026-09-28, WINNER['rebalance_band']): when given, the fills follow the CURRENT live planner -
+    at a weekly rebalance (``rebalance`` True on the decision day) every held pick is brought back to its target unless it
+    is within band x equity of it; on other decision days only adds, exits and weight cuts of a holding (the earnings
+    half-sell: shares x new/old weight) are traded. ``block`` (days until earnings, earnings_days_ahead; NaN = none): a held
+    pick with earnings in the window is never bought up. band=None keeps the rule described below (adds and exits only).
 
     target: weights decided at the close of each date (row d executes at the open of d+1).
     Trading follows the LIVE rule: only adds and exits are ever traded, holds are never resized.
@@ -898,6 +909,9 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
     O = open_w.to_numpy(float)
     C = close_w.reindex(columns=cols).ffill().to_numpy(float)
     W = target.reindex(index=dates, columns=cols).fillna(0.0).to_numpy(float)
+    REB = (rebalance.reindex(dates).astype("boolean").fillna(False).to_numpy(bool) if rebalance is not None
+           else np.zeros(len(dates), bool))
+    BLK = block.reindex(index=dates, columns=cols).to_numpy(float) if block is not None else None
     N = len(cols)
     # B-4: last session with a real open per symbol; a held symbol past that point is delisted.
     last_open = np.where(~np.isnan(O), np.arange(len(dates))[:, None], -1).max(axis=0)
@@ -938,6 +952,17 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
         is_add = tradable & (w > 0) & (wp <= 0)
         desired[is_exit] = 0.0
         desired[is_add] = w[is_add] * V / o[is_add]     # adds trade to exactly target (buy or trim)
+        if band is not None and t > 0:
+            held = tradable & (shares > 0) & (w > 0) & (wp > 0)
+            if REB[t - 1]:                               # weekly rebalance: every pick back to target outside the band
+                tgt = np.where(held, w * V / np.where(tradable, o, 1.0), shares)
+                move = held & (np.abs(tgt - shares) * np.nan_to_num(o) > band * V)
+                if BLK is not None:                      # earnings soon: a held pick is not bought up
+                    move &= ~((tgt > shares) & ~np.isnan(BLK[t - 1]))
+                desired[move] = tgt[move]
+            else:                                        # mid-week: only a cut weight (earnings half-sell) is traded
+                cut = held & (w < wp - 1e-12)
+                desired[cut] = shares[cut] * w[cut] / wp[cut]
         delta = desired - shares
         delta[np.abs(delta * np.nan_to_num(px_open)) < 1e-10] = 0.0
         traded_notional = delist_notional  # delisting sales already counted above
@@ -1585,6 +1610,7 @@ def backtest_inputs(refresh=False):
 
 def run_rules(inp, start=WALK_FORWARD_START, **overrides):
     """Backtest WINNER (optionally with some keys changed, e.g. run_rules(inp, midweek_exit_below=None)) from `start`.
+    Fills follow the live planner (WINNER['rebalance_band']; None = adds and exits only).
     Returns {"res": simulate() output, "targets", "checks": mid-week check log, "decisions": decision log}."""
     saved = dict(WINNER)
     try:
@@ -1592,13 +1618,15 @@ def run_rules(inp, start=WALK_FORWARD_START, **overrides):
         checks, decisions = [], []
         tgt, _ = winner_targets(inp["score"], inp["eligible"], inp["vol"], inp["regime"], inp["weekly"],
                                 tiebreak_w=inp["tiebreak"], check_log=checks, decision_log=decisions)
+        band, block_days = WINNER.get("rebalance_band"), WINNER.get("earnings_block_days")
     finally:
         WINNER.clear()
         WINNER.update(saved)
     full = tgt.reindex(index=inp["close"].index, columns=inp["close"].columns).fillna(0.0)
-    res = simulate(inp["open"], inp["close"], full, start, rebalance=inp["weekly"], cost=COST)
+    block = (earnings_days_ahead(full.index, list(full.columns), load_earnings(), block_days)
+             if band is not None and block_days else None)
+    res = simulate(inp["open"], inp["close"], full, start, rebalance=inp["weekly"], cost=COST, band=band, block=block)
     return {"res": res, "targets": tgt, "checks": pd.DataFrame(checks), "decisions": pd.DataFrame(decisions)}
-
 
 
 def buy_and_hold(inp, symbol, start=WALK_FORWARD_START):

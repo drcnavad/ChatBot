@@ -2,7 +2,7 @@
 
 Usage (drop-in replacement for run_all.py - every argument is passed straight through):
 
-    python pipeline_watchdog.py --trade          # evening run (Mon/Wed/Fri after 3:15 PM CT)
+    python pipeline_watchdog.py --trade          # evening run (decision day after 3:15 PM CT; launchd adds --scheduled)
     python pipeline_watchdog.py --fill-check     # morning run (next trading day from 9:00 AM CT)
 
 What it does on a failed run (exit code != 0):
@@ -35,8 +35,11 @@ project's .env file (loaded automatically) or the environment:
 
   The first key found wins (Gemini > Groq > Anthropic). Without any key the watchdog
   still retries transient failures; it just skips the LLM diagnosis and notifies with
-  the raw log excerpt instead. Model override: PIPELINE_LLM_MODEL
-  (defaults: gemini-2.0-flash / llama-3.3-70b-versatile / claude-3-5-haiku-latest).
+  the raw log excerpt instead. Model: LLM_PROVIDERS below (config, no key needed to change it)
+  or the PIPELINE_LLM_MODEL environment variable. Gemini uses Google's "gemini-flash-latest"
+  alias (it moves to the newest Flash model, so a model shutdown can't break it again - the
+  old gemini-2.0-flash was shut down on 2026-06-01 and returned HTTP 404); on a 404 the next
+  name in GEMINI_FALLBACK_MODELS is tried.
 
   Diagnose-only contract: the LLM explains the failure and proposes a fix for human
   review. It is never applied automatically.
@@ -84,10 +87,11 @@ _load_env()
 # Free/paid LLM providers for the diagnose-only layer: (env key, default model, id).
 # The first configured key wins.
 LLM_PROVIDERS = (
-    ("GEMINI_API_KEY", "gemini-2.0-flash", "gemini"),
+    ("GEMINI_API_KEY", "gemini-flash-latest", "gemini"),
     ("GROQ_API_KEY", "llama-3.3-70b-versatile", "groq"),
-    ("ANTHROPIC_API_KEY", "claude-3-5-haiku-latest", "anthropic"),
+    ("ANTHROPIC_API_KEY", "claude-haiku-4-5", "anthropic"),
 )
+GEMINI_FALLBACK_MODELS = ("gemini-2.5-flash",)   # tried in order when the model above answers HTTP 404
 
 
 def _llm_provider():
@@ -264,11 +268,18 @@ def diagnose_with_llm(step, phase, log_tail, snapshot):
         ' "resume_step": "which pipeline step to resume from after the fix, or null",\n'
         ' "confidence": "high|medium|low"}'
     )
-    try:
-        text = _llm_complete(provider, model, key, prompt)
-    except Exception as e:
-        log("LLM diagnosis failed (%s: %s) - falling back to raw notification", type(e).__name__, e)
-        return None
+    models = [model] + ([m for m in GEMINI_FALLBACK_MODELS if m != model] if provider == "gemini" else [])
+    text = None
+    for m in models:
+        try:
+            text = _llm_complete(provider, m, key, prompt)
+            break
+        except Exception as e:
+            if getattr(e, "code", None) == 404 and m != models[-1]:
+                log("LLM model %s not found (404) - trying %s", m, models[models.index(m) + 1])
+                continue
+            log("LLM diagnosis failed (%s: %s) - falling back to raw notification", type(e).__name__, e)
+            return None
     try:
         d = json.loads(text)
         return d if isinstance(d, dict) else {"diagnosis": text}

@@ -12,7 +12,7 @@
                          block trading; only main/validate failures are critical
   test_app.py            Streamlit AppTest: page, charts, displayed ranks, Details widgets, captions, holdings alert
   test_paper_account.py  alpaca_paper.py + alpaca_paper_account.ipynb + run_all --sync-live against a local MOCK server
-  test_dashboard_http.py the app on test port 8599 answers 200 for / and /?symbol=NVDA (never touches 8501)
+  test_dashboard_http.py the app on test port 8599 answers 200 for / and /?symbol=NVDA (never touches 8502, the running app)
   test_paper_trade_live_safety.py  mocked (zero broker calls) regression tests for the LIVE paper_trade.py:
                          live- / live-fill- order id namespace, paper=False LIVE client from LIVE keys,
                          live ledgers, fail-closed signal status + buying-power guard, stable client order
@@ -43,7 +43,7 @@ ROOT = os.path.dirname(HERE)
 TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_run_all_notify.py", "test_run_all_optional.py",
          "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_live_safety.py", "test_fill_check_fractional.py",
          "test_paper_trade_math_audit.py", "test_notifications.py", "test_rebalance_rules.py", "test_earnings_half_sell.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
-         "test_strategy_health.py"]
+         "test_strategy_health.py", "test_live_rules_audit.py"]
 
 
 def main():

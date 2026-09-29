@@ -18,7 +18,6 @@ Covers the live-specific safety properties:
 Run: cd <folder> && python3 tests/test_paper_trade_live_safety.py
 """
 import json
-import math
 import os
 os.environ.setdefault("STOCK_ANALYSIS_NO_POPUPS", "1")  # never pop real macOS alerts from tests
 import sys
@@ -82,7 +81,6 @@ _dotenv_stub = types.ModuleType("dotenv")
 _dotenv_stub.load_dotenv = lambda *a, **k: None
 sys.modules["dotenv"] = _dotenv_stub
 import paper_trade
-import paper_trade as pt
 
 PASS, FAIL = [], []
 
@@ -450,7 +448,6 @@ res, fc, pend = _morning_bp_case(100000.0, 50.0, 5, True)  # plenty
 check("morning: sufficient BP -> submitted", len(fc.submitted) == 1)
 check("morning: sufficient BP -> pending removed", not os.path.exists(pend))
 
-import math as _m
 res, fc, pend = _morning_bp_case(float("nan"), 50.0, 5, False)  # unreadable BP
 check("morning: unreadable BP -> not submitted", len(fc.submitted) == 0)
 check("morning: unreadable BP -> kept for retry", os.path.exists(pend))

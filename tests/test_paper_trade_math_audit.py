@@ -365,7 +365,7 @@ def test_morning_buy_cumulative_cash_reserved():
         fake.buying_power = 10000.0  # cash defaults to buying_power in the fake
         orig = _use_fake(fake)
         try:
-            res = paper_trade.complete_unfilled_orders(pending_path=pp, log_csv=None, dry_run=False)
+            paper_trade.complete_unfilled_orders(pending_path=pp, log_csv=None, dry_run=False)
         finally:
             paper_trade.paper_trading_client = orig
         got = [(r.symbol, r.qty) for r in fake.submitted]

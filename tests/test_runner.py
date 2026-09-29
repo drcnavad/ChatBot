@@ -32,6 +32,10 @@ cases = [("2026-09-28 15:40", {}, "full"),        # Monday after 3:15 PM CT
          ("2026-11-26 16:00", {}, "quick"),       # Thanksgiving (Thursday anyway)
          ("2026-12-25 16:00", {}, "quick"),       # Christmas Friday = holiday
          ("2026-09-07 16:00", {}, "quick"),       # Labor Day Monday = holiday
+         ("2026-12-24 16:00", {}, "full"),        # Thursday = the week's rebalance (Friday Christmas is a holiday)
+         ("2026-07-02 16:00", {}, "full"),        # Thursday = rebalance (Fri Jul 3 2026 is the Independence Day holiday)
+         ("2026-09-08 16:00", {}, "full"),        # Tuesday = the Monday check moved by the Labor Day holiday
+         ("2026-10-01 16:00", {}, "quick"),       # a normal Thursday: no decision
          ("2026-09-28 18:00", {"last_full_date": "2026-09-28"}, "quick"),   # full update already done today
          ("2026-09-30 15:30", {"last_full_date": "2026-09-28"}, "full")]
 for when, state, want in cases:
@@ -39,6 +43,28 @@ for when, state, want in cases:
     expect(mode == want, f"{when} {state or ''} -> {mode} ({why})")
 expect(r.choose_mode(t("2026-09-29 10:00"), {}, force_full=True)[0] == "full", "--full forces full")
 expect(r.choose_mode(t("2026-09-28 16:00"), {}, force_quick=True)[0] == "quick", "--quick forces quick")
+
+# decision days follow the strategy calendar (backtest_engine.next_decision), not fixed weekdays
+for d, want in [("2026-10-02", "full rebalance"), ("2026-09-30", "mid-week check"), ("2026-09-28", "mid-week check"),
+                ("2026-09-29", None), ("2026-12-24", "full rebalance"), ("2026-12-25", None), ("2026-09-08", "mid-week check"),
+                ("2026-09-07", None)]:
+    got = r.decision_day(datetime.fromisoformat(d).date())
+    expect(got == want, f"decision_day {d} -> {got}")
+nxt = r.next_scheduled_trade(t("2026-12-23 16:00"))
+expect(nxt is not None and nxt.date().isoformat() == "2026-12-24", f"next trade after Wed Dec 23 = Thu Dec 24 ({nxt})")
+expect(r.already_attempted(t("2026-10-02 16:30"), {"last_trade_attempt_at": "2026-10-02T15:15:07-05:00"}),
+       "a scheduled run skips a window already attempted today")
+expect(not r.already_attempted(t("2026-10-02 16:30"), {"last_trade_attempt_at": "2026-09-30T15:15:07-05:00"}),
+       "a scheduled run proceeds when the last attempt was an earlier day")
+expect(not r.already_attempted(t("2026-10-02 16:30"), {}), "a scheduled run proceeds with no attempt on record")
+att = {"last_trade_attempt_at": "2026-10-02T15:15:07-05:00"}
+expect(r.trade_gate(t("2026-10-02 16:30"), {})[0], "trade gate: Friday after 3:15 PM with nothing on record -> trade")
+expect(not r.trade_gate(t("2026-10-02 14:00"), {})[0], "trade gate: before 3:15 PM -> nothing (login at 2 PM does not trade)")
+expect(not r.trade_gate(t("2026-10-01 16:30"), {})[0], "trade gate: Thursday (no decision) -> nothing")
+expect(not r.trade_gate(t("2026-10-02 16:30"), att, scheduled=True)[0], "trade gate: launchd re-run after an attempt -> nothing")
+expect(r.trade_gate(t("2026-10-02 16:30"), att, scheduled=False)[0], "trade gate: a manual/resumed run is not blocked by the attempt")
+expect(not r.trade_gate(t("2026-10-02 18:00"), {"last_trade_at": "2026-10-02T15:40:00-05:00"})[0],
+       "trade gate: already traded this window -> nothing")
 
 st = {"last_news_at": "2026-09-28T15:41:00-05:00"}
 expect(not r.news_allowed(t("2026-09-28 20:00"), st)[0], "NewsAPI refused 4 h after the last run")

@@ -1,7 +1,9 @@
 """ONE command for the whole Stock Analysis pipeline:   python run_all.py      (or open run_all.ipynb and Run All)
 
 It picks the mode by itself (clock in US Central time):
-  FULL   Mon / Wed / Fri after 3:15 PM CT on a trading day, when the full online update has not run yet today:
+  FULL   on a strategy decision day after 3:15 PM CT, when the full online update has not run yet today. Decision days =
+         the Friday rebalance (the week's last session, e.g. Thursday when Friday is a holiday) and the Mon/Wed checks
+         (the first session on/after Mon/Wed, e.g. Tuesday after a Monday holiday) - backtest_engine.next_decision:
            fundamentals  company_report_autofetch.py - Alpha Vantage rotation, max 12 stocks = max 24 calls (free limit 25/day)
            processing    company_report_processing.ipynb + scoring company_report_scoring.ipynb (company reports)
            sentiment     sentiment_analysis.ipynb online - NewsAPI 97 calls (free limit 100/day -> never twice within 24 h)
@@ -36,16 +38,16 @@ so the evening trade still runs on fresh signals. Only a main or validate failur
                                       #  7:00 PM CT (extended hours over), nothing is submitted - the planned
                                       #  orders are staged for the next morning's --fill-check instead.
                                       #  LIVE account (real money).
-                                      # Runs once per scheduled window (Mon/Wed/Fri after 3:15 PM CT on a
-                                      # trading day): a second --trade is refused until the next window
-                                      # (trade_allowed guard), and overlapping --trade processes are
-                                      # serialized by Reports/.trade.lock. last_trade_at is stamped only
-                                      # when orders were actually submitted or staged, so a run that sent
-                                      # nothing never blocks the next window. If the Mac was asleep/off at
-                                      # 3:15 PM, a login agent (trade_catchup.sh, installed by
-                                      # setup_stock_schedule.sh) fires the missed --trade once at the next
-                                      # login that same Mon/Wed/Fri between 3:15 and 7:00 PM CT.
-    python run_all.py --fill-check    # the next trading morning after a --trade (from 9:00 AM CT): check the
+                                      # Runs once per decision window (decision day after 3:15 PM CT): a
+                                      # second --trade is refused until the next window (trade_allowed
+                                      # guard), and overlapping runs are serialized by Reports/.trade.lock.
+                                      # last_trade_at is stamped only when orders were actually submitted
+                                      # or staged, so a run that sent nothing never blocks the next window.
+    python run_all.py --trade --scheduled   # what launchd runs (see launchd/): like --trade, but quietly does
+                                      # nothing when this window's run was already attempted today, so a
+                                      # 3:15 PM run, a wake-from-sleep run and a login run never repeat it.
+    python run_all.py --fill-check    # the next trading morning after a --trade (from 9:00 AM CT; retried on the
+                                      # next trading days, up to 3): check the
                                       # evening's extended-hours orders and complete any unfilled remainder
                                       # with regular-hours market orders (orders staged by a past-7PM --trade
                                       # are sent in full). Runs no notebooks and uses no quota APIs.
@@ -57,9 +59,13 @@ State: Reports/run_state.json - the runner's memory (all values are ISO timestam
     last_fundamentals_date ......... last Alpha Vantage rotation (date; max once/day)
     last_trade_at .................. last --trade that actually submitted or staged orders (a run that sent
                                      nothing is never marked complete, so it can't block the next window)
+    last_trade_attempt_at .......... last --trade that got past the window/guard/lock checks (--scheduled runs
+                                     skip a window already attempted today)
     last_fill_check_at ............. last morning fill check
     last_run_at / last_mode ......... last invocation (any mode)
-Logs: Reports/logs/run_*.log (last 30 kept).
+Logs: Reports/logs/run_*.log (last 30 kept); launchd output: Reports/logs/launchd_*.log.
+Schedule (launchd, see launchd/install_schedule.sh): 3:15 PM CT Mon-Fri --trade --scheduled, 9:00 AM CT Mon-Fri
+--fill-check; both also run at login (RunAtLoad) and launchd fires a slot missed during sleep once on wake.
 By default no orders are placed. Alpaca account endpoints are only called with --sync-live (3 read-only GETs via
 alpaca_paper.py), --trade (paper_trade.auto_trade(): reads positions + equity, then submits extended-hours DAY
 limit orders to the LIVE account (REAL MONEY)) or --fill-check (paper_trade.complete_unfilled_orders(): checks the evening orders
@@ -84,7 +90,6 @@ LOG_DIR = os.path.join(REPORTS, "logs")
 STATE_FILE = os.path.join(REPORTS, "run_state.json")
 CHECKPOINT_FILE = os.path.join(REPORTS, ".pipeline_checkpoint.json")   # watchdog resume point (see pipeline_watchdog.py)
 CT, ET = ZoneInfo("America/Chicago"), ZoneInfo("America/New_York")
-FULL_DAYS = {0, 2, 4}                  # Mon, Wed, Fri
 FULL_AFTER = (15, 15)                  # 3:15 PM CT - the scheduled pipeline/trade time
 NEWS_MIN_GAP_H = 24                    # NewsAPI free tier: 100 requests/day, one run = 97
 BAR_FINAL_ET = (16, 30)                # the pipeline treats the daily bar as final after 4:30 PM ET (3:30 PM CT)
@@ -293,15 +298,31 @@ def is_trading_day(d):
     return len(__import__("pandas").date_range(day, day, freq=be.NYSE_SESSION)) == 1
 
 
+def decision_day(d):
+    """'full rebalance' / 'mid-week check' when date d is a strategy decision session, else None.
+
+    Same calendar as the strategy (backtest_engine.next_decision): the rebalance is the week's last session (Thursday
+    when Friday is a holiday) and a check is the first session on/after each Mon/Wed (Tuesday after a Monday holiday)."""
+    if not is_trading_day(d):
+        return None
+    import backtest_engine as be
+    prev = d - timedelta(days=1)
+    while not is_trading_day(prev):
+        prev -= timedelta(days=1)
+    nxt, kind, _ = be.next_decision(__import__("pandas").Timestamp(prev))
+    return kind if nxt.date() == d else None
+
+
 def full_window(now_ct):
-    """(True, why) when the automatic full update is due by the clock: Mon/Wed/Fri trading day after 3:15 PM CT."""
-    if now_ct.weekday() not in FULL_DAYS:
-        return False, f"{now_ct:%a} is not a Mon/Wed/Fri full-update day"
+    """(True, why) when the automatic full update / trade is due by the clock: a decision day after 3:15 PM CT."""
+    if not is_trading_day(now_ct.date()):
+        return False, f"{now_ct:%a %b %d} is not a trading day"
+    kind = decision_day(now_ct.date())
+    if not kind:
+        return False, f"{now_ct:%a %b %d} is not a decision day (no rebalance or mid-week check)"
     if (now_ct.hour, now_ct.minute) < FULL_AFTER:
         return False, f"before {FULL_AFTER[0] - 12}:{FULL_AFTER[1]:02d} PM CT"
-    if not is_trading_day(now_ct.date()):
-        return False, f"{now_ct:%a %b %d} is a market holiday"
-    return True, f"{now_ct:%a} after {FULL_AFTER[0] - 12}:{FULL_AFTER[1]:02d} PM CT"
+    return True, f"{now_ct:%a} {kind} after {FULL_AFTER[0] - 12}:{FULL_AFTER[1]:02d} PM CT"
 
 
 def choose_mode(now_ct, state, force_full=False, force_quick=False):
@@ -339,19 +360,19 @@ def fundamentals_allowed(now_ct, state, force=False):
 
 
 def next_scheduled_trade(after_ct):
-    """Next Mon/Wed/Fri 3:15 PM CT trading day strictly after after_ct."""
+    """Next decision day 3:15 PM CT strictly after after_ct."""
     base = after_ct.date()
     for k in range(0, 12):
         d = base + timedelta(days=k)
         cand = datetime(d.year, d.month, d.day, FULL_AFTER[0], FULL_AFTER[1], tzinfo=CT)
-        if cand > after_ct and d.weekday() in FULL_DAYS and is_trading_day(d):
+        if cand > after_ct and decision_day(d):
             return cand
     return None
 
 
 def trade_allowed(now_ct, state):
     """(allowed, reason): auto-trade runs once per scheduled window - a second --trade is skipped
-    until the next Mon/Wed/Fri 3:15 PM CT trading day after the last trade."""
+    until the next decision day 3:15 PM CT after the last trade."""
     last = state.get("last_trade_at")
     if not last:
         return True, "ok"
@@ -365,8 +386,28 @@ def trade_allowed(now_ct, state):
     return True, "ok"
 
 
+def already_attempted(now_ct, state):
+    """True when a --trade run already got past its checks today (launchd --scheduled runs then do nothing)."""
+    return str(state.get("last_trade_attempt_at", ""))[:10] == now_ct.date().isoformat()
+
+
+def trade_gate(now_ct, state, scheduled=False):
+    """(go, reason): may a --trade run trade now? Decision day after 3:15 PM CT, not traded yet this window, and for a
+    launchd (--scheduled) run not already attempted today. Also shown by --dry-run, so the schedule can be tested safely."""
+    due, why = full_window(now_ct)
+    if not due:
+        return False, f"not a trade window ({why})"
+    ok, reason = trade_allowed(now_ct, state)
+    if not ok:
+        return False, reason
+    if scheduled and already_attempted(now_ct, state):
+        return False, f"today's window was already attempted at {state['last_trade_attempt_at']} (scheduled run)"
+    return True, why
+
+
 TRADE_LOCK = os.path.join(REPORTS, ".trade.lock")
-TRADE_LOCK_STALE_S = 2 * 3600              # a lock older than this is taken over (crashed run)
+FILL_LOCK = os.path.join(REPORTS, ".fill_check.lock")
+TRADE_LOCK_STALE_S = 6 * 3600              # a lock of a dead process, or older than this, is taken over (crashed run)
 
 
 def acquire_trade_lock(path=TRADE_LOCK):
@@ -388,7 +429,10 @@ def acquire_trade_lock(path=TRADE_LOCK):
         with open(path) as f:
             old = json.load(f)
         pid, at = int(old.get("pid", 0)), old.get("at", "")
-        age = (datetime.now(CT) - datetime.fromisoformat(at)).total_seconds() if at else float("inf")
+        t = datetime.fromisoformat(at) if at else None
+        if t is not None and t.tzinfo is None:
+            t = t.replace(tzinfo=CT)
+        age = (datetime.now(CT) - t).total_seconds() if t else float("inf")
         alive = False
         if pid > 0:
             try:
@@ -501,7 +545,7 @@ def next_full_update(now_ct, state):
         d = (now_ct + timedelta(days=k)).replace(hour=FULL_AFTER[0], minute=FULL_AFTER[1], second=0, microsecond=0)
         if full_window(d)[0] and d.date().isoformat() != state.get("last_full_date"):
             return ("today" if k == 0 else f"{d:%a %b} {d.day}") + " after 3:15 PM CT"
-    return "the next Mon/Wed/Fri trading day after 3:15 PM CT"
+    return "the next decision day after 3:15 PM CT"
 
 
 # ----------------------------------------------------------------------------- execution
@@ -588,7 +632,7 @@ def validate():
 
 
 def wait_for_final_bar(mode, dry_run=False):
-    """Full mode on a decision day: the Mon/Wed/Fri decision needs today's completed daily bar (final after 4:30 PM ET)."""
+    """Full mode on a decision day: the decision needs today's completed daily bar (final after 4:30 PM ET)."""
     now = datetime.now(ET)
     ready = now.replace(hour=BAR_FINAL_ET[0], minute=BAR_FINAL_ET[1] + 1, second=0, microsecond=0)
     if mode != "full" or now >= ready or not is_trading_day(now.date()):
@@ -695,6 +739,8 @@ def main(argv=None):
     p.add_argument("--fill-check", action="store_true",
                    help="morning fill check: complete the previous evening's unfilled extended-hours orders "
                         "with regular-hours market orders (no notebooks run; LIVE - real money)")
+    p.add_argument("--scheduled", action="store_true",
+                   help="launchd runs: with --trade, do nothing if this window's trade was already attempted today")
     p.add_argument("--now", help=argparse.SUPPRESS)          # tests: pretend it is this CT time ("2026-09-28 15:40")
     p.add_argument("--no-resume", action="store_true", help="do not resume from a previous failed run's checkpoint")
     a = p.parse_args(argv)
@@ -778,58 +824,71 @@ def main(argv=None):
         logging.info("  %-13s %s", "trade", "paper_trade.auto_trade  [Alpaca LIVE (REAL MONEY): reads positions+equity, submits extended-hours DAY limit orders]")
     if a.fill_check:
         logging.info("  %-13s %s", "fill-check", "paper_trade.complete_unfilled_orders  [Alpaca LIVE (REAL MONEY): completes unfilled evening orders]")
+    if a.trade:
+        go, gate_why = trade_gate(now, state, scheduled=a.scheduled and not a.start)
+        logging.info("TRADE: %s", ("due - " if go else "nothing to do - ") + gate_why)
+        if not go:
+            return 0
     if a.dry_run:
         return 0
 
     if a.trade:
-        due, why = full_window(now)
-        if not due:
-            logging.info("TRADE: not a scheduled trade window (%s) - skipping", why)
-            logging.info("Nothing ran - --trade runs Mon/Wed/Fri after 3:15 PM CT on a trading day.")
-            return 0
-        ok, reason = trade_allowed(now, state)
-        if not ok:
-            logging.info("TRADE GUARD: %s", reason)
-            logging.info("Nothing ran - to avoid accidental double orders, --trade runs once per scheduled window.")
-            return 0
         locked, lock_reason = acquire_trade_lock()
         if not locked:
             logging.info("TRADE LOCK: %s - another --trade run is already in progress; exiting.", lock_reason)
             logging.info("Nothing ran - the other --trade run owns this window.")
             return 0
+        state["last_trade_attempt_at"] = clock(); save_state(state)
 
     if a.fill_check:
-        ok, reason, needs_investigation = fill_check_allowed(now)
-        if not ok and needs_investigation:
-            logging.warning("FILL CHECK: %s", reason)
-            if "stale" in reason:
-                body = ("Leftover orders weren't finished within 3 trading days. Nothing was sent now (no "
-                        "money moved). Finish them in Alpaca, then delete Reports/live_pending_orders.json.")
-            else:
-                body = ("The 9 AM order list is damaged, so nothing was sent (no money moved). Check Alpaca, "
-                        "then clear the live_pending_orders files in Reports. Log: Reports/logs")
-            _notify("9 AM check needs you", body, details=reason)
-            return 1
-        if not ok:
-            logging.info("FILL CHECK: %s - nothing to do", reason)
+        locked, lock_reason = acquire_trade_lock(FILL_LOCK)
+        if not locked:
+            logging.info("FILL CHECK LOCK: %s - another fill check is running; exiting.", lock_reason)
             return 0
-        logging.info("=== fill-check (paper_trade.complete_unfilled_orders, LIVE - real money)")
-        ckpt_write(run_id, saved_argv, mode, [], phase="fill-check")
         try:
-            import paper_trade
-            results = paper_trade.complete_unfilled_orders(dry_run=False)
-            if results.empty:
-                logging.info("  fill check: no pending orders")
-            else:
-                for r in results.itertuples():
-                    logging.info("  %s %-6s %s shares -> %s", r.Side, r.Symbol, r.Shares, r.Status)
-            state["last_fill_check_at"] = clock(); save_state(state)
-        except Exception as e:
-            logging.warning("  fill check failed: %s", e)
-            return 1
-        ckpt_clear()                                          # clean fill check - nothing to resume
-        return 0
+            return _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, clock)
+        finally:
+            release_trade_lock(FILL_LOCK)
 
+    return _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_path, ckpt_write, ckpt_clear, clock)
+
+
+def _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, clock):
+    """The --fill-check phase (under the fill-check lock). Returns the exit code."""
+    ok, reason, needs_investigation = fill_check_allowed(now)
+    if not ok and needs_investigation:
+        logging.warning("FILL CHECK: %s", reason)
+        if "stale" in reason:
+            body = ("Leftover orders weren't finished within 3 trading days. Nothing was sent now (no "
+                    "money moved). Finish them in Alpaca, then delete Reports/live_pending_orders.json.")
+        else:
+            body = ("The 9 AM order list is damaged, so nothing was sent (no money moved). Check Alpaca, "
+                    "then clear the live_pending_orders files in Reports. Log: Reports/logs")
+        _notify("9 AM check needs you", body, details=reason)
+        return 1
+    if not ok:
+        logging.info("FILL CHECK: %s - nothing to do", reason)
+        return 0
+    logging.info("=== fill-check (paper_trade.complete_unfilled_orders, LIVE - real money)")
+    ckpt_write(run_id, saved_argv, mode, [], phase="fill-check")
+    try:
+        import paper_trade
+        results = paper_trade.complete_unfilled_orders(dry_run=False)
+        if results.empty:
+            logging.info("  fill check: no pending orders")
+        else:
+            for r in results.itertuples():
+                logging.info("  %s %-6s %s shares -> %s", r.Side, r.Symbol, r.Shares, r.Status)
+        state["last_fill_check_at"] = clock(); save_state(state)
+    except Exception as e:
+        logging.warning("  fill check failed: %s", e)
+        return 1
+    ckpt_clear()                                          # clean fill check - nothing to resume
+    return 0
+
+
+def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_path, ckpt_write, ckpt_clear, clock):
+    """The notebook steps, the optional live sync and the --trade phase, then the summary. Returns the exit code."""
     _notify("Pipeline started",
             f"{mode} mode ({why}) - {len([s for s in steps if s[0] not in skip])} steps")
     if a.now is None:  # real runs only - the tests' fake clock never holds a sleep assertion
@@ -956,11 +1015,10 @@ def main(argv=None):
     if live_synced:
         logging.info("  Alpaca LIVE account: 3 read-only GET calls (my_positions.csv refreshed)")
     if trade_results is not None and not trade_results.empty:
-        if trade_results["Status"].str.startswith("STAGED").any():
-            logging.info("  Trade: %d orders STAGED for the morning fill check (past 7 PM CT - nothing submitted)",
-                         len(trade_results))
-        else:
-            logging.info("  Trade: %d orders submitted to LIVE (see Reports/live_orders_log.csv)", len(trade_results))
+        st_ = trade_results["Status"].astype(str)
+        logging.info("  Trade: %d submitted to LIVE, %d STAGED for the 9 AM fill check, %d skipped/failed "
+                     "(see Reports/live_orders_log.csv)", int(st_.str.startswith("submitted").sum()),
+                     int(st_.str.startswith("STAGED").sum()), int(st_.str.startswith(("SKIP", "FAILED")).sum()))
     if info["data_date"]:
         logging.info("  Data through %s  |  rules %s", info["data_date"], info["rules"])
         for line in info["decisions"][-3:]:

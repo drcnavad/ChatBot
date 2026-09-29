@@ -1873,7 +1873,6 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
     _print_section("Results")
     if not results.empty:
         print(results.drop(columns=["Order_ID"], errors="ignore").to_string(index=False))
-    status_counts = results["Status"].str.split(":").str[0].str.strip().value_counts()
     n_submitted = int(((results["Status"].str.contains("submitted", case=False, na=False)) |
                        (results["Status"].str.contains("STAGED", na=False))).sum())
     n_failed = int(results["Status"].str.startswith("FAILED").sum())
@@ -1942,15 +1941,20 @@ def main(argv=None):
         return results
 
     positions = read_positions_csv(a.positions) if a.positions else {}
-    account_size = a.account_size
+    account_size, buying_power = a.account_size, None
     if a.submit:
         client = paper_trading_client()
         positions = {pos.symbol: float(pos.qty) for pos in client.get_all_positions()}
+        acct = client.get_account()
+        buying_power = float(acct.buying_power)
         if account_size is None:
-            account_size = float(client.get_account().equity)
+            account_size = float(acct.equity)
     account_size = account_size or 100_000.0
 
     orders, meta, targets = plan_orders(a.target, account_size, positions, min_value=a.min_value, fractional=a.fractional)
+    if a.submit:   # same cash cap as the pipeline: buys fit in buying power + the sells' proceeds, less the 1% cushion
+        sells_value = orders.loc[orders["Side"] == "SELL", "Est_Value"].sum()
+        orders = apply_buying_power_guard(orders, buying_power + sells_value)
     inv = meta["invested"]
     print(f"Strategy: {meta['strategy']} | targets = {meta['source']} weights | as of {meta['as_of']} "
           f"(last weekly rebalance {meta['last_rebalance']}, last decision {meta['last_decision']}) | "

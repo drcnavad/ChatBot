@@ -70,14 +70,20 @@ EXIT_NOTE = (f"Mid-week exit: after the swap step, any holding ranked worse than
              "next open and the cash stays idle until the Friday rebalance. " if EXIT_BELOW else "")
 EARNINGS_NOTE = (f"Earnings rule: at the Friday rebalance and the mid-week checks a "
                  f"stock that is not held is not bought if its next earnings date is within the next {EARNINGS} calendar days; "
-                 f"its slot goes to the next eligible stock, else cash. Held stocks are never sold because of earnings. " if EARNINGS else "")
+                 f"its slot goes to the next eligible stock, else cash. "
+                 + (f"A held stock with earnings in that window is cut by {WINNER['earnings_sell_fraction']:.0%} once "
+                    "(cash until the Friday rebalance) and not bought more until its earnings have passed. "
+                    if WINNER.get("earnings_sell_fraction") else "Held stocks are never sold because of earnings. ")
+                 if EARNINGS else "")
 
 
 def rules_text():
     """The live trading rules in plain words."""
     return (f"**Strategy rules ({STRATEGY_TAG})**\n"
-            f"- **When:** every Mon / Wed / Fri at the close (decision days).\n"
-            f"- **What:** hold the top 10 stocks by Strategy Score (0.5 × Technical + 0.5 × Relative Strength {RS_LABEL}), score > 0, max {SECTOR_MAX} per sector.\n"
+            f"- **When:** Friday rebalance + Mon/Wed checks at the close (a holiday moves them to the nearest session).\n"
+            + (f"- **Rebalance:** every pick is brought back to its weight unless within {WINNER['rebalance_band']:.0%} of equity.\n"
+               if WINNER.get("rebalance_band") else "")
+            + f"- **What:** hold the top 10 stocks by Strategy Score (0.5 × Technical + 0.5 × Relative Strength {RS_LABEL}), score > 0, max {SECTOR_MAX} per sector.\n"
             f"- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger position).\n"
             f"- **Market filter:** if QQQ closes at or below its 200-day average, every position is halved (50% cash).\n"
             f"- **Signals:** Bullish (Buy) = enters the top 10 · Hold = stays · Bearish (Sell) = leaves.\n"
@@ -296,9 +302,9 @@ def data_freshness(latest_bar):
     return pd.DataFrame(rows)
 
 
-# --- Decision-day ranks (Mon/Wed/Fri): rank change compares the last two decision days, not calendar days ---
+# --- Decision-day ranks (Fri rebalance + Mon/Wed checks, holiday-shifted): rank change compares the last two decision days, not calendar days ---
 def _decision_days(df):
-    """Sorted Mon/Wed/Fri decision dates present in the signal data."""
+    """Sorted decision dates (Rebalance_Day or Midweek_Check) present in the signal data."""
     mask = (df["Rebalance_Day"] == 1) | (df["Midweek_Check"] == 1)
     return sorted(df.loc[mask, "Date"].unique())
 
@@ -316,7 +322,7 @@ def _day_ranks(df, day):
 @st.cache_data(ttl=3600)
 def day_rank_change(_df, mtime: float):
     """Symbol -> (prev_decision_rank - latest_decision_rank, latest_rank); positive = moved up.
-    Compares the last two Mon/Wed/Fri decision days, not consecutive calendar days."""
+    Compares the last two decision days, not consecutive calendar days."""
     df = _df
     days = _decision_days(df)
     if len(days) < 2:
@@ -329,7 +335,7 @@ def day_rank_change(_df, mtime: float):
 
 def rank_trend(ranks_old_to_new):
     """Rank momentum (information only, not a trade rule): Bullish = 4+ rank improvements in a row ending today,
-    Bearish = 3+ declines in a row, otherwise Hold. Runs over decision days (Mon/Wed/Fri)."""
+    Bearish = 3+ declines in a row, otherwise Hold. Runs over decision days."""
     vals = list(ranks_old_to_new)
     if len(vals) < 4:
         return "Hold"
@@ -346,7 +352,7 @@ def rank_trend(ranks_old_to_new):
 
 @st.cache_data(ttl=3600)
 def rank_pivot(_df, mtime: float, n_days=20):
-    """Symbol x last-n Mon/Wed/Fri decision-day rank table (newest first) + Trend."""
+    """Symbol x last-n decision-day rank table (newest first) + Trend."""
     df = _df
     dec = df[(df["Rebalance_Day"] == 1) | (df["Midweek_Check"] == 1)]
     work = dec[['Symbol', 'Date', 'combined_signal']].dropna(subset=['combined_signal'])
@@ -1395,7 +1401,7 @@ def render_rank_history(p, ticker):
     pivot["Signal"] = pivot["Symbol"].map(signal_text)
     pivot["Slot"] = pivot["Symbol"].map(p.slot_off).fillna("—")
     table = pivot[["Symbol", "Signal", "Slot", "Last ED", "Next ED", "Trend"] + date_cols]
-    st.caption("Rank 1 = highest Strategy Score, recomputed on Mon/Wed/Fri decision days among all ranked stocks "
+    st.caption("Rank 1 = highest Strategy Score, recomputed on decision days (Fri + Mon/Wed; shifted for holidays) among all ranked stocks "
                f"({int(p.latest['Strategy_Rank'].notna().sum())} today; QQQ is a benchmark). Slot = position among the 10 picks. "
                "Signal = the decision in force. Trend = rank momentum "
                "(Bullish = 4+ better decision days in a row, Bearish = 3+ worse decision days), information only. "

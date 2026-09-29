@@ -1,4 +1,4 @@
-"""Dashboard smoke test over HTTP on the TEST port 8599 (never 8501, the user's running app).
+"""Dashboard smoke test over HTTP on the TEST port 8599 (never 8502, the user's running app).
 
 Starts `streamlit run app.py --server.port 8599` as a child process, checks HTTP 200 for / and /?symbol=NVDA and the
 health endpoint, then stops only that child process. Fails (without touching anything) if 8599 is already in use.
