@@ -2,17 +2,18 @@
 
 Synthetic data and mocks only - no network, no broker calls, no pop-ups.
   * simulate(band=...) = the live rule: Friday brings every pick back to its weight outside the 1-point band (bought up
-    or trimmed), a held pick with earnings soon is not bought up, a Mon/Wed weight cut (earnings half-sell) sells that
-    share of the holding, and band=None keeps the old adds/exits-only fills.
+    or trimmed), a held pick with earnings soon is not bought up, a Mon/Wed weight change alone is never traded (no
+    earnings half-sell), and band=None keeps the old adds/exits-only fills.
   * paper_trade.NO_TRADE_BAND equals WINNER['rebalance_band'] (live and backtest use one number).
   * paper_trade --submit (manual CLI) caps buys at buying power + sells, less the 1% cushion.
   * run_all --fill-check never runs twice at once (lock file).
-  * holdings_alert lists the Friday half-sells; the watchdog falls back to another Gemini model on HTTP 404.
+  * the watchdog falls back to another Gemini model on HTTP 404.
 Run: cd <folder> && python3 tests/test_live_rules_audit.py
 """
 import io
 import os
 import sys
+import tempfile
 import urllib.error
 from contextlib import redirect_stdout
 
@@ -65,17 +66,12 @@ check("band: without the earnings block the underweight pick is bought up on Mon
       (r_free["exposure"].loc["2026-09-28"], r_blk["exposure"].loc["2026-09-28"]))
 check("band: with earnings in the window it is NOT bought up before earnings", n_blk == 0, n_blk)
 
-# mid-week weight cut (earnings half-sell on Wed Sep 30) sells half of the shares at the Thu Oct 1 open
+# a mid-week weight change alone (no swap, no exit) is never traded: the band applies only at the Friday rebalance
 tgt3 = tgt.copy()
 tgt3.loc["2026-09-30":"2026-10-01", "BBB"] = 0.2
-r3 = be.simulate(px, px, tgt3, "2026-09-22", rebalance=weekly, cost=0.0, band=0.01)
-t3 = r3["trades"]
-cut = t3[(t3["Symbol"] == "BBB") & (t3["Exit"] == pd.Timestamp("2026-10-01"))]
-check("band: a Mon/Wed weight cut (half-sell) is traded the next open", len(cut) == 1 and cut["Kind"].iloc[0] == "trim",
-      t3.to_string())
-r3_old = be.simulate(px, px, tgt3, "2026-09-22", rebalance=weekly, cost=0.0)
-check("band=None: the old simulator ignored the half-sell (the reason run_rules now passes the band)",
-      not ((r3_old["trades"]["Symbol"] == "BBB") & (r3_old["trades"]["Exit"] == pd.Timestamp("2026-10-01"))).any())
+t3 = be.simulate(px, px, tgt3, "2026-09-22", rebalance=weekly, cost=0.0, band=0.01)["trades"]
+check("band: a Mon/Wed weight change alone is not traded (no earnings half-sell)",
+      not ((t3["Symbol"] == "BBB") & (t3["Exit"] == pd.Timestamp("2026-10-01"))).any(), t3.to_string())
 
 # ---- one band number for live and backtest
 check("live band == backtest band (paper_trade.NO_TRADE_BAND == WINNER['rebalance_band'])",
@@ -119,19 +115,6 @@ o = sent.get("o")
 buy = o[o["Side"] == "BUY"] if o is not None else pd.DataFrame()
 check("CLI --submit: the buy is cut to fit $1,000 + $500 of sells, less 1% (14 shares of $100)",
       len(buy) == 1 and int(buy["Shares"].iloc[0]) == 14, None if o is None else o[["Symbol", "Side", "Shares"]].to_dict("records"))
-
-# ---- holdings_alert: Friday half-sell names from strategy_changes.csv
-import tempfile
-
-import holdings_alert as ha
-
-with tempfile.TemporaryDirectory() as d:
-    p = os.path.join(d, "changes.csv")
-    pd.DataFrame([{"Date": "2026-10-02", "Symbol": "AAA", "Reason": "earnings Tue Oct 06: sold half before earnings"},
-                  {"Date": "2026-10-02", "Symbol": "BBB", "Reason": "earnings Mon Oct 05: sold 50% earlier, not bought more before earnings"},
-                  {"Date": "2026-10-02", "Symbol": "CCC", "Reason": "selected (rank 3)"}]).to_csv(p, index=False)
-    check("alert: Friday line names only the stocks sold in half this rebalance", ha.friday_half_sells(p, "2026-10-02") == ["AAA"],
-          ha.friday_half_sells(p, "2026-10-02"))
 
 # ---- watchdog: a 404 (model shut down) falls back to the next Gemini model
 import pipeline_watchdog as wd

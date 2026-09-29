@@ -6,8 +6,7 @@
   4. C6-U96-T20-MW30-E5 (the live rules from 2026-09-25: + no new buys with earnings within 5 days; PARTIAL - the earnings
      dates on disk start in late 2024): engine == the independent re-implementation, numbers pinned as a regression
      (pinned values re-baselined 2026-09-25 after simulate() was fixed to trade only on target changes)
-  (3 and 4 were user decisions, not pre-registered tests.) The earnings half-sell (live from 2026-09-28, not backtested)
-  is switched off here; it changes weights only, never which stocks are held, so the live swap/sell history still matches.
+  (3 and 4 were user decisions, not pre-registered tests.)
 Compares targets, swap and sell logs with the independent re-implementation in tests/backtest_setup.py, and the live
 pipeline's decision history (Reports/strategy_decisions.csv) with the test over the overlapping window.
 Run: python tests/run_tests.py  (or PYTHONPATH=. python tests/test_midweek_repro.py)"""
@@ -32,7 +31,7 @@ MW = {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]}
 
 def check(exit_all, t20=False, e5=False):
     chk = []
-    kw = {"exit_all_below": exit_all, "earnings_block_days": 5 if e5 else None, "earnings_sell_fraction": None,
+    kw = {"exit_all_below": exit_all, "earnings_block_days": 5 if e5 else None,
           "selection": dict(max_pick_rank=20, cap_soft=True) if t20 else g.PLAIN}
     t_live, checks = be.winner_targets(g.sc, g.el, g.vol, g.reg, g.weekly, tiebreak_w=g.rs, check_log=chk, midweek=MW, **kw)
     t_test, swaps_test, sells_test = g.buffered_midweek(3, 15, exit_all, t20=t20, block=g.block_matrix(5) if e5 else None)

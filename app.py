@@ -71,9 +71,8 @@ EXIT_NOTE = (f"Mid-week exit: after the swap step, any holding ranked worse than
 EARNINGS_NOTE = (f"Earnings rule: at the Friday rebalance and the mid-week checks a "
                  f"stock that is not held is not bought if its next earnings date is within the next {EARNINGS} calendar days; "
                  f"its slot goes to the next eligible stock, else cash. "
-                 + (f"A held stock with earnings in that window is cut by {WINNER['earnings_sell_fraction']:.0%} once "
-                    "(cash until the Friday rebalance) and not bought more until its earnings have passed. "
-                    if WINNER.get("earnings_sell_fraction") else "Held stocks are never sold because of earnings. ")
+                 f"A held stock is never sold because of earnings, and it is not topped up at the Friday rebalance "
+                 f"before its earnings. "
                  if EARNINGS else "")
 
 
@@ -1476,7 +1475,7 @@ def render_rules_and_changes(p):
         last_day = mw["Event_Date"].iloc[-1]
         acts = set(mw.loc[mw["Event_Date"] == last_day, "Action"])
         mw_val = (f"{pd.Timestamp(last_day):%a %b %d} · "
-                  + (" + ".join(x for x, k in (("swap", "SWAP"), ("exit", "SELL"), ("earnings half-sell", "TRIM")) if k in acts) or "no trade"))
+                  + (" + ".join(x for x, k in (("swap", "SWAP"), ("exit", "SELL")) if k in acts) or "no trade"))
     else:
         mw_val = "none yet this week" if MIDWEEK else "off"
     c = st.columns(3)

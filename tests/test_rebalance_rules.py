@@ -1,9 +1,10 @@
 """Mocked tests (zero broker calls, zero network, no pop-ups) for the Friday rebalance and cash rules (2026-09-28):
 - 1-percentage-point no-trade band; owned 'hold' picks trimmed / topped up to target;
 - buys sized from free cash with a 1% cushion: the part that fits is bought, and in sequence never more than the cash;
-- earnings: an unowned pick with earnings within 5 days is not bought, an owned one is not topped up (a trim still goes);
-  the mid-week earnings TRIM sells half;
-- the 9 AM check retries after a missed session (up to 3 trading days), with no duplicate orders on the retry.
+- earnings: an unowned pick with earnings within 5 days is not bought, an owned one is not topped up (a trim still goes;
+  nothing is ever sold because of earnings);
+- the fill check sends only in regular hours, a daytime catch-up's orders at once, and drops orders whose decision was
+  superseded (next decision slot passed); no duplicate orders on a retry.
 Run: cd <folder> && python3 tests/test_rebalance_rules.py
 """
 import json
@@ -54,7 +55,6 @@ import pandas as pd
 import paper_trade as pt
 import run_all
 
-pt._notify = lambda *a, **k: None
 PASS, FAIL = [], []
 
 
@@ -92,17 +92,6 @@ check("earnings: unowned pick not newly bought", plan(0.10, 0, blocked=bl)[0].st
       plan(0.10, 0, blocked=bl))
 check("earnings: owned underweight pick not topped up", plan(0.10, 3, blocked=bl)[0] == "HOLD")
 check("earnings: owned overweight pick can still be trimmed", plan(0.05, 10, blocked=bl) == ("SELL", 5.0))
-sw = pd.DataFrame([{"Action": "TRIM", "Sell": "AMD", "Buy": None, "Weight_%": 5.0, "Sell_Fraction": 0.5}])
-o = pt.build_swap_orders(sw, 10000, positions={"AMD": 7.33, "TEM": 4}, prices={"AMD": 100.0}, fractional=True)
-r = o.set_index("Symbol")
-check("mid-week earnings TRIM: sell half, 2 decimals rounded down (7.33 -> 3.66), nothing bought",
-      r.loc["AMD", "Side"] == "SELL" and r.loc["AMD", "Shares"] == 3.66 and (o.Side == "BUY").sum() == 0
-      and r.loc["TEM", "Side"] == "HOLD", o[["Symbol", "Side", "Shares"]].to_dict("records"))
-o = pt.build_swap_orders(sw, 10000, positions={"AMD": 7}, prices={"AMD": 100.0}, fractional=False)
-check("mid-week earnings TRIM, whole shares: 7 -> sell 3", o.iloc[0].Side == "SELL" and o.iloc[0].Shares == 3)
-bad = sw.assign(Sell_Fraction=float("nan"))
-check("TRIM without a valid fraction is never sent", pt.build_swap_orders(bad, 10000, {"AMD": 7}, {"AMD": 100.0}).iloc[0].Side
-      == "SKIP (bad fraction)")
 be_days = pt.earnings_blocked(["AAA", "BBB"], "2026-09-28",
                               earnings_csv=(lambda p: (pd.DataFrame({"Symbol": ["AAA", "BBB"], "Earnings Date":
                                             ["2026-10-02", "2026-10-09"]}).to_csv(p, index=False), p)[1])(
@@ -193,21 +182,28 @@ check("evening partial buy: 9 whole shares sent ($1,000 / 1.01 = 9.90 fits), no 
 check("evening partial buy: pending keeps the full 15-share plan for 9 AM (order_qty 9)",
       rec and rec[0]["qty"] == 15.0 and rec[0]["order_qty"] == 9, rec)
 
-# ------------------------------------------------------------------ retry after a missed session
+# ------------------------------------------------------------------ fill-check gate: regular hours, until the next decision
 CT = run_all.CT
 p = pending([{"symbol": "AAA", "side": "BUY", "qty": 1, "limit_price": 100.0, "order_id": None}], "2026-10-02")
-gate = lambda y, m, d, h=10: run_all.fill_check_allowed(datetime(y, m, d, h, 0, tzinfo=CT), pending_path=p)
-check("gate: Mon 10/5 8 AM -> not yet", not gate(2026, 10, 5, 8)[0])
+gate = lambda y, m, d, h=10, mi=0: run_all.fill_check_allowed(datetime(y, m, d, h, mi, tzinfo=CT), pending_path=p)
+check("gate: Fri 10/2 evening orders -> Mon 10/5 8 AM not yet", not gate(2026, 10, 5, 8)[0])
 check("gate: Mon 10/5 10 AM -> runs", gate(2026, 10, 5)[0])
-check("gate: Tue 10/6 (Mac slept Monday) -> retries", gate(2026, 10, 6)[0], gate(2026, 10, 6))
-check("gate: Wed 10/7 -> still retries (3rd trading day)", gate(2026, 10, 7)[0])
-g8 = gate(2026, 10, 8)
-check("gate: Thu 10/8 -> stale, needs you (alert)", not g8[0] and g8[2] and "stale" in g8[1], g8)
+check("gate: Mon 10/5 2:50 PM (15 min before the close) -> waits, no alert", not gate(2026, 10, 5, 14, 50)[0]
+      and not gate(2026, 10, 5, 14, 50)[2])
 check("gate: Sat 10/10 -> no run, no alert", not gate(2026, 10, 10)[0] and not gate(2026, 10, 10)[2])
-p2 = pending([{"symbol": "AAA", "side": "BUY", "qty": 1, "limit_price": 100.0, "order_id": None, "evening_date": "2026-09-25"},
-              {"symbol": "BBB", "side": "SELL", "qty": 1, "limit_price": 50.0, "order_id": None}], "2026-09-30")
-g = run_all.fill_check_allowed(datetime(2026, 10, 1, 10, 0, tzinfo=CT), pending_path=p2)
-check("gate: staleness counts from the oldest leftover (9/25 -> retried 9/28-9/30, stale 10/1)", not g[0] and g[2], g)
+exp = lambda when: [o["symbol"] for o in pt.superseded_orders(datetime.fromisoformat(when).replace(tzinfo=CT), p)]
+check("superseded: Friday's leftovers can be completed until Mon 3:15 PM", exp("2026-10-05 15:14") == [])
+check("superseded: from Mon 3:15 PM (the next decision) they are dropped, never sent", exp("2026-10-05 15:15") == ["AAA"])
+p2 = pending([{"symbol": "AAA", "side": "BUY", "qty": 1, "limit_price": 100.0, "order_id": None,
+               "recorded_at": "2026-10-05T10:02:00-05:00"}], "2026-10-05")
+json.dump({**json.load(open(p2)), "send_now": True}, open(p2, "w"))
+g = run_all.fill_check_allowed(datetime(2026, 10, 5, 10, 5, tzinfo=CT), pending_path=p2)
+check("gate: a daytime catch-up's orders (send_now) go at once, not next morning", g[0], g)
+check("superseded: a Monday-morning catch-up (Friday's decision) expires at Mon 3:15 PM",
+      [o["symbol"] for o in pt.superseded_orders(datetime(2026, 10, 5, 15, 15, tzinfo=CT), p2)] == ["AAA"])
+pt._notify = lambda *a, **k: None
+dropped = pt.drop_superseded_orders(datetime(2026, 10, 5, 15, 16, tzinfo=CT), p2)
+check("drop_superseded_orders: removes the rows (file gone when empty)", len(dropped) == 1 and not os.path.exists(p2))
 
 # no duplicates on retry: Monday's completion reached the broker but the Mac died before recording it
 cid = pt._client_order_id("AAA", "BUY", 20, 100.0, "20261002", kind="fill")

@@ -2,8 +2,9 @@
 
 Usage (drop-in replacement for run_all.py - every argument is passed straight through):
 
-    python pipeline_watchdog.py --trade          # evening run (decision day after 3:15 PM CT; launchd adds --scheduled)
-    python pipeline_watchdog.py --fill-check     # morning run (next trading day from 9:00 AM CT)
+    python pipeline_watchdog.py --trade          # decision run (3:15 PM CT, or a missed decision's catch-up;
+                                                 #  launchd adds --scheduled and runs it every 30 min, idle unless due)
+    python pipeline_watchdog.py --fill-check     # fill check (from 9:00 AM CT in regular hours; launchd: --scheduled)
 
 What it does on a failed run (exit code != 0):
   * Reads Reports/.pipeline_checkpoint.json (written by run_all.py after every step) to find
@@ -363,12 +364,16 @@ def main(argv=None):
 
     tries, retried_upstream = 0, False
     cur_argv = list(args)
+    quiet = "--scheduled" in args          # launchd runs every 30 min: an idle run leaves just run_all's "idle:" line
     while True:
         tries += 1
-        log("attempt %d: run_all.py %s", tries, " ".join(cur_argv) or "(no args)")
+        if not (quiet and tries == 1):
+            log("attempt %d: run_all.py %s", tries, " ".join(cur_argv) or "(no args)")
         rc, tail = run_pipeline(cur_argv)
         if rc == 0:
-            log("pipeline finished cleanly on attempt %d", tries)
+            last_line = (tail.strip().splitlines() or [""])[-1]
+            if not (quiet and last_line.startswith("idle:")):
+                log("pipeline finished cleanly on attempt %d", tries)
             return 0
         checkpoint = run_all.read_checkpoint()
         action = handle_failure(args, tail, checkpoint)

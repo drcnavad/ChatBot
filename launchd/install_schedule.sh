@@ -1,10 +1,11 @@
 #!/bin/bash
 # Install (or refresh after editing) the Stock Analysis launchd jobs:  bash launchd/install_schedule.sh
-#   com.stockanalysis.evening         Mon-Fri 3:15 PM CT + at login: pipeline_watchdog.py --trade --scheduled
-#   com.stockanalysis.morning         Mon-Fri 9:00 AM CT + at login: pipeline_watchdog.py --fill-check
+#   com.stockanalysis.evening         Mon-Fri 3:15 PM CT, at login, on wake, every 30 min: pipeline_watchdog.py --trade --scheduled
+#   com.stockanalysis.morning         Mon-Fri 9:00 AM CT, at login, on wake, every 30 min: pipeline_watchdog.py --fill-check --scheduled
 #   com.stockanalysis.dashboard-8502  always on (restarted if it stops): the app on http://localhost:8502
-# A slot missed while the Mac sleeps runs once on wake; a slot missed while it is off runs at the next login
-# (RunAtLoad). run_all.py decides whether anything is due and a lock file stops double runs, so extra starts are harmless.
+# run_all.py decides whether anything is due (a decision after its 3:15 PM slot, or a missed one caught up at the next
+# regular session until the next slot); idle starts print one "idle:" line. run_state last_decision and lock files
+# stop double runs, so extra starts are harmless.
 # Uninstall: launchctl bootout gui/$(id -u)/<label>  and delete ~/Library/LaunchAgents/<label>.plist
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"

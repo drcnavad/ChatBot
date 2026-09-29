@@ -50,21 +50,16 @@ for d, want in [("2026-10-02", "full rebalance"), ("2026-09-30", "mid-week check
                 ("2026-09-07", None)]:
     got = r.decision_day(datetime.fromisoformat(d).date())
     expect(got == want, f"decision_day {d} -> {got}")
-nxt = r.next_scheduled_trade(t("2026-12-23 16:00"))
-expect(nxt is not None and nxt.date().isoformat() == "2026-12-24", f"next trade after Wed Dec 23 = Thu Dec 24 ({nxt})")
-expect(r.already_attempted(t("2026-10-02 16:30"), {"last_trade_attempt_at": "2026-10-02T15:15:07-05:00"}),
-       "a scheduled run skips a window already attempted today")
-expect(not r.already_attempted(t("2026-10-02 16:30"), {"last_trade_attempt_at": "2026-09-30T15:15:07-05:00"}),
-       "a scheduled run proceeds when the last attempt was an earlier day")
-expect(not r.already_attempted(t("2026-10-02 16:30"), {}), "a scheduled run proceeds with no attempt on record")
-att = {"last_trade_attempt_at": "2026-10-02T15:15:07-05:00"}
-expect(r.trade_gate(t("2026-10-02 16:30"), {})[0], "trade gate: Friday after 3:15 PM with nothing on record -> trade")
-expect(not r.trade_gate(t("2026-10-02 14:00"), {})[0], "trade gate: before 3:15 PM -> nothing (login at 2 PM does not trade)")
-expect(not r.trade_gate(t("2026-10-01 16:30"), {})[0], "trade gate: Thursday (no decision) -> nothing")
-expect(not r.trade_gate(t("2026-10-02 16:30"), att, scheduled=True)[0], "trade gate: launchd re-run after an attempt -> nothing")
-expect(r.trade_gate(t("2026-10-02 16:30"), att, scheduled=False)[0], "trade gate: a manual/resumed run is not blocked by the attempt")
-expect(not r.trade_gate(t("2026-10-02 18:00"), {"last_trade_at": "2026-10-02T15:40:00-05:00"})[0],
-       "trade gate: already traded this window -> nothing")
+# the --trade gate (full catch-up cases: tests/test_catch_up.py)
+expect(r.decision_gate(t("2026-10-02 16:30"), {})[1] == "evening", "trade gate: Friday after 3:15 PM with nothing on record -> trade")
+expect(r.decision_gate(t("2026-10-02 14:00"), {"last_decision": "2026-09-30"})[1] is None,
+       "trade gate: before 3:15 PM with Wednesday done -> nothing (login at 2 PM does not trade)")
+expect(r.decision_gate(t("2026-10-02 18:00"), {"last_decision": "2026-10-02"})[1] is None,
+       "trade gate: this decision already ran -> nothing")
+att = {"decision_attempts": {"decision": "2026-10-02", "n": 1, "at": "2026-10-02T15:15:07-05:00"}}
+expect(r.decision_gate(t("2026-10-02 15:40"), att, scheduled=True)[1] is None, "trade gate: launchd retry within 60 min -> nothing")
+expect(r.decision_gate(t("2026-10-02 16:20"), att, scheduled=True)[1] == "evening", "trade gate: launchd retry after 60 min -> trade")
+expect(r.decision_gate(t("2026-10-02 15:40"), att, scheduled=False)[1] == "evening", "trade gate: a manual/resumed run is not limited")
 
 st = {"last_news_at": "2026-09-28T15:41:00-05:00"}
 expect(not r.news_allowed(t("2026-09-28 20:00"), st)[0], "NewsAPI refused 4 h after the last run")

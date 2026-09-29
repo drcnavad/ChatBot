@@ -79,3 +79,6 @@ Reports/logs/api_calls_*
 Stock Analysis Backup*/
 *Backup 20*/
 Reports/paper_*.csv
+
+# lock files of the running jobs
+Reports/.*.lock

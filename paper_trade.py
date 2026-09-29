@@ -19,7 +19,9 @@ cash, then plans with target="auto" (buys = Weight * equity, whole shares, cappe
 Alpaca buying power - margin is disabled so buying power equals cash in practice; sells = the exact shares held, and only for stocks
 actually in the portfolio), and submits as extended-hours DAY limit orders at the planned
 closing price, so they can fill in the after-hours session. Before planning, the signal
-CSVs are verified fresh (as of today, CT) - stale data aborts the trade. Submitted orders are recorded
+CSVs are verified fresh (as of today, CT; for a missed decision caught up later, as of the last complete session and
+not older than that decision) - stale data aborts the trade. A catch-up in regular hours stages its orders (send_now)
+and run_all sends them at once as market orders. Submitted orders are recorded
 in Reports/live_pending_orders.json; the next trading morning, complete_unfilled_orders()
 (run_all.py --fill-check) checks their fills and completes any unfilled remainder with
 regular-hours market orders, then reconciles live positions against the strategy targets.
@@ -36,15 +38,14 @@ Targets come from Reports/strategy_picks.csv (written by main_signal_analysis.ip
   - `midweek`     = the decisions of the latest Mon/Wed mid-week check (Reports/strategy_midweek_check.csv, live rules):
                     swap = SELL all shares of the stock that fell below rank 15 and BUY the new top-3 stock with the same dollars
                     (without --positions the dollars = the old stock's target weight x account size); exit = SELL all shares of
-                    a stock ranked worse than 30, SELL-ONLY (the cash stays idle until the Friday rebalance); earnings trim =
-                    SELL half (Sell_Fraction) of a holding with earnings within 5 days, once per earnings event. Nothing else is traded.
+                    a stock ranked worse than 30, SELL-ONLY (the cash stays idle until the Friday rebalance). Nothing else is traded.
   - `auto` (default) = provisional on a rebalance day (the decision day itself); midweek when the latest bar is a Mon/Wed
                     check that produced a swap or an exit; hold on a quiet mid-week day (no swap/exit at the
                     latest check) - every position is left unchanged, matching the backtest (no drift
                     rebalance, and cash from a mid-week exit stays idle until Friday); otherwise current.
-Earnings rules (backtest_engine.WINNER["earnings_block_days"] = 5, ["earnings_sell_fraction"] = 0.5): the targets leave
-out stocks not held with earnings within 5 calendar days and cut a held one by half once before its earnings. The live
-planner adds its own check for the LIVE account: a pick with earnings within 5 days is not newly bought or topped up.
+Earnings rule (backtest_engine.WINNER["earnings_block_days"] = 5): the targets leave out stocks not held with earnings
+within 5 calendar days. The live planner adds its own check for the LIVE account: a pick with earnings within 5 days is
+not newly bought or topped up (a held stock is never sold because of earnings).
 """
 import argparse
 import json
@@ -158,6 +159,9 @@ def _trade_notice(results, prices=None):
         tail = ("Money moves as they fill; small leftovers finish at 9 AM. Nothing to do."
                 if not staged.any() else
                 f"{int(staged.sum())} small order(s) go out at 9 AM. Nothing to do.")
+    elif results.loc[staged, "Status"].str.contains("catch-up", na=False).all():
+        title = f"Catch-up trades: {len(sells)} sell, {len(buys)} buy"
+        tail = "A missed decision, traded now with market orders. Nothing to do."
     else:
         title = f"Trades queued: {len(sells)} sell, {len(buys)} buy"
         tail = "Not sent yet, no money moved. They go out at the 9 AM check. Nothing to do."
@@ -180,17 +184,26 @@ def _print_section(title):
     print(f"\n  --- {title} ---", flush=True)
 
 
-def check_signal_freshness(picks_csv=PICKS_CSV, changes_csv=CHANGES_CSV):
-    """Verify the signal CSVs are from today (CT) before any trading.
+def check_signal_freshness(picks_csv=PICKS_CSV, changes_csv=CHANGES_CSV, decision=None, now=None):
+    """Verify the signal CSVs are fresh before any trading.
 
-    Fail-closed: raises ValueError when the data is stale or missing, so
-    auto_trade never trades on yesterday's signals after a partial pipeline
-    failure. Returns the As_Of date string when fresh.
+    Without `decision`: both files must be as of today (CT). With `decision` (the decision date being traded, e.g. a
+    missed Friday caught up on Monday morning): the files must be as of the latest complete session at `now` (today
+    after 4:30 PM ET, else the previous session) and not older than the decision - so a catch-up accepts the
+    decision's own files but never older ones.
+    Fail-closed: raises ValueError when the data is stale or missing, so auto_trade never trades on old signals after
+    a partial pipeline failure. Returns the As_Of date string when fresh.
     """
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    today = datetime.now(ZoneInfo("America/Chicago")).date().isoformat()
+    now = now or datetime.now(ZoneInfo("America/Chicago"))
+    today = now.date().isoformat()
+    if decision is not None:
+        import backtest_engine as be
+        today = be.last_complete_session(now).date().isoformat()   # the date the files must carry
+        if today < pd.Timestamp(decision).date().isoformat():
+            raise ValueError(f"STALE DATA: the {pd.Timestamp(decision):%Y-%m-%d} decision's close is not final yet")
     for path, label in [(picks_csv, "strategy_picks.csv"), (changes_csv, "strategy_changes.csv")]:
         if not os.path.exists(path):
             raise ValueError(f"STALE DATA: {label} not found - run the pipeline before trading")
@@ -200,7 +213,7 @@ def check_signal_freshness(picks_csv=PICKS_CSV, changes_csv=CHANGES_CSV):
     as_of = str(picks["As_Of"].iloc[0])[:10]
     if as_of != today:
         raise ValueError(
-            f"STALE DATA: strategy_picks.csv is as of {as_of}, but today is {today} (CT) - "
+            f"STALE DATA: strategy_picks.csv is as of {as_of}, but it should be {today} (CT) - "
             "the pipeline did not produce fresh signals; refusing to trade")
     # Every consumed input must be fresh: the buy/hold signal statuses come from
     # strategy_changes.csv. A stale changes file would silently turn every target
@@ -212,7 +225,7 @@ def check_signal_freshness(picks_csv=PICKS_CSV, changes_csv=CHANGES_CSV):
     changes_date = str(changes["Date"].astype(str).str[:10].max())
     if changes_date != today:
         raise ValueError(
-            f"STALE DATA: strategy_changes.csv is as of {changes_date}, but today is {today} (CT) - "
+            f"STALE DATA: strategy_changes.csv is as of {changes_date}, but it should be {today} (CT) - "
             "the pipeline did not produce fresh signal statuses; refusing to trade")
     return as_of
 
@@ -230,24 +243,31 @@ def latest_midweek_swaps(midweek_csv=MIDWEEK_CSV, as_of=None):
     m = m[m["Event"] == "mid-week check"]
     if as_of is not None:
         m = m[m["Event_Date"].astype(str) == str(as_of)]
-    return m[m["Action"].isin(["SWAP", "SELL", "TRIM"])].reset_index(drop=True)
+    return m[m["Action"].isin(["SWAP", "SELL"])].reset_index(drop=True)
 
 
-def load_targets(source="auto", picks_csv=PICKS_CSV, midweek_csv=MIDWEEK_CSV):
+def load_targets(source="auto", picks_csv=PICKS_CSV, midweek_csv=MIDWEEK_CSV, decision=None):
     """(targets DataFrame[Symbol, Weight, Price], meta dict). Weights are fractions of the account (rest = cash).
 
-    meta['swaps'] holds the latest mid-week swap rows (source 'midweek'); targets are then the weights after the swap."""
+    meta['swaps'] holds the latest mid-week swap rows (source 'midweek'); targets are then the weights after the swap.
+    decision (a date): trade that decision - a missed one caught up later - instead of the latest bar's: its rebalance
+    weights (only while the data is as of that Friday) or the swaps/exits of its mid-week check."""
     picks = pd.read_csv(picks_csv)
     if picks.empty:
         raise ValueError(f"{picks_csv} is empty - run main_signal_analysis.ipynb first")
     as_of, last_reb = str(picks["As_Of"].iloc[0]), str(picks["Last_Rebalance"].iloc[0])
     last_dec = str(picks["Last_Decision"].iloc[0]) if "Last_Decision" in picks.columns else last_reb
-    swaps = latest_midweek_swaps(midweek_csv, as_of)
+    day = pd.Timestamp(decision).date().isoformat() if decision is not None else as_of
+    swaps = latest_midweek_swaps(midweek_csv, day)
+    if source == "auto" and day == last_reb and as_of != day:
+        raise ValueError(f"the {day} rebalance weights are gone (data now as of {as_of}) - cannot trade that decision")
+    if source == "auto" and day != as_of and day < last_reb:
+        raise ValueError(f"the {day} decision is older than the {last_reb} rebalance - superseded, not traded")
     if source == "auto":
         # A quiet mid-week day (no swap/exit at the latest check) holds every position
         # unchanged, matching the backtest: no drift rebalance, and cash from a mid-week
         # exit stays idle until the Friday rebalance.
-        source = "provisional" if as_of == last_reb else ("midweek" if len(swaps) else "hold")
+        source = "provisional" if day == last_reb else ("midweek" if len(swaps) else "hold")
     if source == "midweek" and not len(swaps):
         raise ValueError(f"no mid-week swap or exit at the latest check ({as_of}) - nothing to trade (use target 'current')")
     if source == "hold":
@@ -268,6 +288,20 @@ def latest_prices(symbols, signal_csv=SIGNAL_CSV):
     df = pd.read_csv(signal_csv, usecols=["Date", "Symbol", "Close"], parse_dates=["Date"])
     df = df[df["Symbol"].isin(symbols)].sort_values("Date").drop_duplicates("Symbol", keep="last")
     return dict(zip(df["Symbol"], df["Close"]))
+
+
+def current_prices(symbols):
+    """{symbol: latest trade price} from Alpaca market data (read-only, no account calls) - sizes a daytime catch-up at
+    today's prices. {} when unavailable; the plan then uses the decision's closes."""
+    try:
+        from alpaca.data.requests import StockLatestTradeRequest
+
+        import backtest_engine as be
+        trades = be.market_data_client().get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=sorted(symbols)))
+        return {str(s): float(t.price) for s, t in trades.items() if t is not None and t.price}
+    except Exception as e:
+        print(f"  current prices unavailable ({e}) - sizing from the decision's closes")
+        return {}
 
 
 def latest_signal_status(changes_csv=CHANGES_CSV, as_of=None):
@@ -481,7 +515,6 @@ def build_swap_orders(swaps, account_size, positions=None, prices=None, fraction
 
     If the account holds no `Sell` shares (no --positions given) the dollars = the swap's target weight x account_size.
     Whole shares (rounded down) by default; fractional=True rounds DOWN to 2 decimals.
-    Earnings trim rows (Action TRIM): SELL Sell_Fraction of the holding (rounded down), nothing bought.
     Every other holding is left alone (HOLD rows)."""
     if not account_size or account_size <= 0 or not math.isfinite(account_size):
         raise ValueError("account_size must be a positive number")
@@ -492,22 +525,6 @@ def build_swap_orders(swaps, account_size, positions=None, prices=None, fraction
     rows, touched = [], set()
     for r in swaps.itertuples():
         out_sym = str(r.Sell)
-        if str(getattr(r, "Action", "")) == "TRIM":
-            # Earnings trim: sell Sell_Fraction (half) of the holding, rounded DOWN; nothing is bought.
-            frac = _safe_number(getattr(r, "Sell_Fraction", None), default=None)
-            have = positions.get(out_sym, 0.0)
-            p_out = _safe_number(prices.get(out_sym), default=None)
-            q = 0
-            if frac is not None and 0 < frac <= 1:
-                q = _floor2(have * frac) if fractional else math.floor(have * frac)
-            side = ("SKIP (bad fraction)" if frac is None or not 0 < frac <= 1 else
-                    "SELL" if q > 0 else "SELL (none held)" if not have else "HOLD")
-            q = q if side == "SELL" else 0
-            rows.append({"Symbol": out_sym, "Side": side, "Shares": q, "Price": p_out,
-                         "Est_Value": round(q * p_out, 2) if q and p_out else 0.0, "Current_Shares": have,
-                         "Target_Shares": have - q, "Target_Weight_%": None, "Target_Value": None})
-            touched.add(out_sym)
-            continue
         in_sym = str(r.Buy) if isinstance(r.Buy, str) and r.Buy.strip() else None       # None = mid-week exit (sell only)
         # Normalize prices: None/NaN/inf/non-numeric all mean "no usable price".
         # +inf must be rejected explicitly (`inf > 0` is True) - it would otherwise
@@ -593,21 +610,25 @@ def build_hold_orders(positions, prices=None):
 
 
 def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signal_csv=SIGNAL_CSV, midweek_csv=MIDWEEK_CSV,
-                min_value=1.0, fractional=False):
-    """(orders, meta, targets) for any target source; used by the CLI and the app's order preview. No broker calls."""
-    targets, meta = load_targets(source, picks_csv, midweek_csv)
+                min_value=1.0, fractional=False, decision=None, live_prices=None):
+    """(orders, meta, targets) for any target source; used by the CLI and the app's order preview. No broker calls.
+    decision: see load_targets. live_prices {symbol: price}: size with these (a daytime catch-up) instead of the closes."""
+    targets, meta = load_targets(source, picks_csv, midweek_csv, decision=decision)
     positions = positions or {}
+    live_prices = live_prices or {}
+    targets = targets.assign(Price=targets["Symbol"].map(live_prices).fillna(targets["Price"]))
     if meta["source"] == "hold":
         # Quiet mid-week check: the backtest holds every position unchanged (no drift
         # rebalance), so live emits HOLD rows for all current positions - nothing is submitted.
-        px = latest_prices(sorted(positions), signal_csv)
+        px = {**latest_prices(sorted(positions), signal_csv), **live_prices}
         return build_hold_orders(positions, px), meta, targets
     if meta["source"] == "midweek":
         syms = sorted(set(meta["swaps"]["Sell"].astype(str)) | set(meta["swaps"]["Buy"].dropna().astype(str)) | set(positions))
         px = latest_prices(syms, signal_csv)
         px.update(dict(zip(targets["Symbol"], targets["Price"])))
+        px.update(live_prices)
         return build_swap_orders(meta["swaps"], account_size, positions, px, fractional=fractional), meta, targets
-    prices = latest_prices([s for s in positions if s not in set(targets["Symbol"])], signal_csv)
+    prices = {**latest_prices([s for s in positions if s not in set(targets["Symbol"])], signal_csv), **live_prices}
     # 'add' and 'hold' statuses come from the latest decision in strategy_changes.csv: both are
     # brought to target (1-point no-trade band); unknown statuses are left as they are.
     statuses = latest_signal_status(as_of=meta["as_of"])
@@ -1152,6 +1173,7 @@ def record_pending_order(entry, meta, pending_path=PENDING_ORDERS_JSON):
     """
     now_ct = _today_ct()
     today = now_ct.date().isoformat()
+    entry = {**entry, "recorded_at": now_ct.isoformat(timespec="seconds"), "decision": meta.get("decision")}
     try:
         with open(pending_path) as f:
             pend = json.load(f)
@@ -1174,11 +1196,72 @@ def record_pending_order(entry, meta, pending_path=PENDING_ORDERS_JSON):
                "target_source": (pend.get("target_source") if isinstance(pend, dict) else None) or meta.get("source"),
                "as_of": (pend.get("as_of") if isinstance(pend, dict) else None) or meta.get("as_of"),
                "orders": orders_list}
+    if meta.get("session") or (isinstance(pend, dict) and pend.get("send_now")):
+        payload["send_now"] = True        # a daytime catch-up: the fill check sends these at once (not next morning)
     os.makedirs(os.path.dirname(pending_path), exist_ok=True)
     tmp = pending_path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(payload, f, indent=1)
     os.replace(tmp, pending_path)
+
+
+def _order_expiry(row, pend):
+    """When a pending row is superseded: the first decision slot (3:15 PM CT) after it was recorded (rows without
+    recorded_at: after 3:15 PM CT on their evening date). None when it cannot be told."""
+    from datetime import datetime
+
+    import backtest_engine as be
+    try:
+        t = datetime.fromisoformat(str(row["recorded_at"]))
+    except (KeyError, TypeError, ValueError):
+        try:
+            t = be.decision_slot(str(row.get("evening_date") or pend.get("evening_date")))
+        except (TypeError, ValueError):
+            return None
+    return be.next_decision_slot(t if t.tzinfo else t.replace(tzinfo=be.CENTRAL))
+
+
+def superseded_orders(now, pending_path=None):
+    """Pending rows whose decision was replaced by a newer one (the next decision slot has passed). [] when none."""
+    pending_path = pending_path or PENDING_ORDERS_JSON
+    try:
+        with open(pending_path) as f:
+            pend = json.load(f)
+    except (OSError, ValueError):
+        return []                      # missing, or corrupt (the fill check reports that)
+    rows = pend.get("orders") if isinstance(pend, dict) else None
+    out = []
+    for o in rows or []:
+        exp = _order_expiry(o, pend) if isinstance(o, dict) else None
+        if exp is not None and exp <= now:
+            out.append(o)
+    return out
+
+
+def drop_superseded_orders(now=None, pending_path=None):
+    """Remove the superseded rows from the pending file and alert: they are never sent - the newer decision re-plans
+    the account. Unfinished orders of a decision can therefore only be completed until the next decision slot.
+    Returns the dropped rows."""
+    now, pending_path = now or _today_ct(), pending_path or PENDING_ORDERS_JSON
+    old = superseded_orders(now, pending_path)
+    if not old:
+        return []
+    with open(pending_path) as f:
+        pend = json.load(f)
+    pend["orders"] = [o for o in pend["orders"] if o not in old]
+    if pend["orders"]:
+        tmp = pending_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(pend, f, indent=1)
+        os.replace(tmp, pending_path)
+    else:
+        os.remove(pending_path)
+    _notify("Old orders dropped",
+            f"{len(old)} unsent order(s) ({_list_syms([(o.get('symbol'), o.get('qty')) for o in old])}) belonged to an "
+            f"earlier decision; a newer decision replaced it, so they were not sent. No money moved.",
+            details="; ".join(f"{o.get('side')} {o.get('symbol')} {o.get('qty')} recorded {o.get('recorded_at') or o.get('evening_date')}"
+                              for o in old))
+    return old
 
 
 def _wait_terminal(client, order_id, tries=10, pause=0.5):
@@ -1219,7 +1302,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     Cash: SELLs go first; each BUY is sized to the cash free right then (limit x 1.01 per share).
     If only part fits, that part is bought; if under $1 fits, it is logged NO FILL (not enough
     cash) and dropped - the next Friday rebalance re-plans it. Rows left over from an earlier
-    evening are completed too (run_all retries the check for up to 3 trading days).
+    evening are completed too, until the next decision slot (then drop_superseded_orders removes them).
     Orders staged by a past-7PM evening run (no broker order id) were never submitted, so the
     full quantity is sent as a regular-hours market order.
     A rejected evening order is never auto-retried - it is logged as REJECTED for review
@@ -1734,7 +1817,8 @@ def _past_evening_cutoff(now=None):
     return now.strftime("%H:%M") >= cutoff
 
 
-def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=False, extended=True):
+def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=False, extended=True, decision=None,
+               session=False):
     """Full auto flow for the pipeline: pull LIVE positions + equity, plan, optionally submit.
 
     - Pulls current stock positions, equity, cash and buying power from the Alpaca LIVE account.
@@ -1770,6 +1854,12 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
       duplicating orders. Rows found on the broker from this evening but never recorded
       locally (a crash between submit and record) are likewise skipped - the morning fill
       check completes any unfilled remainder. FAILED rows are never recorded, so they are retried.
+    - decision (a date): the decision being traded - run_all passes it, so a missed decision caught up later trades
+      that decision's picks (its point-in-time ranks) and the freshness check accepts its files.
+    - session=True (run_all: a missed decision caught up during regular hours): sized at current prices
+      (current_prices), nothing is sent here - every order is STAGED with send_now, and run_all sends them at once
+      as regular-hours market orders in 2-decimal shares (complete_unfilled_orders).
+    - Pending rows of an earlier decision whose catch-up window closed are dropped first (drop_superseded_orders).
     - Appends a row per submitted order to Reports/live_orders_log.csv and returns
       (orders, meta, results_df).
 
@@ -1783,8 +1873,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
     try:
         # Fail closed on stale signals: never trade on yesterday's data after a
         # partial pipeline failure.
-        as_of_date = check_signal_freshness()
-        print(f"  Signals fresh: as of {as_of_date} (today, CT)")
+        as_of_date = check_signal_freshness(decision=decision)
+        print(f"  Signals fresh: as of {as_of_date}" + (f" (decision {pd.Timestamp(decision):%Y-%m-%d})" if decision is not None else " (today, CT)"))
     except ValueError as e:
         _notify("Trade skipped: signals not fresh",
                 "Today's signal files weren't ready, so no orders were sent and no money moved. "
@@ -1801,7 +1891,13 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
     print(f"  Equity ${equity:,.2f}  |  Cash ${cash:,.2f}  |  Positions: {len(positions)} symbols")
 
     _print_section("Planning orders")
-    orders, meta, targets = plan_orders(target, equity, positions, min_value=min_value, fractional=True)
+    live = {}
+    if session:
+        live = current_prices(set(positions) | set(pd.read_csv(PICKS_CSV)["Symbol"].astype(str)))
+        print(f"  Catch-up in regular hours: sized at current prices ({len(live)} quotes)")
+    orders, meta, targets = plan_orders(target, equity, positions, min_value=min_value, fractional=True,
+                                        decision=decision, live_prices=live)
+    meta.update(decision=pd.Timestamp(decision).date().isoformat() if decision is not None else None, session=session)
     n_buy = int((orders["Side"] == "BUY").sum())
     n_sell = int((orders["Side"] == "SELL").sum())
     print(f"  Plan: {n_buy} BUY, {n_sell} SELL  (source: {meta['source']}, as of {meta['as_of']})")
@@ -1816,7 +1912,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
     if dry_run:
         return orders, meta, pd.DataFrame(columns=["Symbol", "Side", "Shares", "Order_ID", "Status"])
     cols = ["Symbol", "Side", "Shares", "Order_ID", "Status"]
-    defer = _past_evening_cutoff()
+    drop_superseded_orders(pending_path=PENDING_ORDERS_JSON)
+    defer = session or _past_evening_cutoff()
     # One broker client for reconciliation + submission (not needed when staging past 7 PM).
     client, date_str, broker_submitted = None, None, set()
     if not defer:
@@ -1846,7 +1943,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
         # morning fill check sends them as regular-hours fractional market orders.
         results = pd.concat([_stage_orders_for_morning(
             orders_to_send, positions, lambda e: record_pending_order(e, meta, PENDING_ORDERS_JSON),
-            "STAGED for morning market (past 7 PM CT - not submitted)"),
+            "STAGED for regular-hours market orders now (catch-up)" if session
+            else "STAGED for morning market (past 7 PM CT - not submitted)"),
             pd.DataFrame(dup_rows, columns=cols)], ignore_index=True)
     else:
         def _recorder(entry):
@@ -1879,7 +1977,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
     n_skipped = int(results["Status"].str.startswith("SKIP").sum())
     print(f"\n  Submitted/Staged: {n_submitted}  |  Failed: {n_failed}  |  Skipped: {n_skipped}")
     if n_failed:
-        # Not retried automatically: --trade runs once per window, and failed rows are
+        # Not retried automatically: a decision runs once (run_state last_decision), and failed rows are
         # not in the 9 AM list. Say so plainly.
         failed = results[results["Status"].str.startswith("FAILED")]
         _notify(f"Trade: {n_failed} order(s) not sent",
@@ -1900,10 +1998,9 @@ def earnings_rule_note():
         from backtest_engine import WINNER
     except Exception:
         return ""
-    n, f = WINNER.get("earnings_block_days"), WINNER.get("earnings_sell_fraction")
-    return ((f"Earnings rule: stocks with earnings within {n} days are not bought or topped up" +
-             (f"; a holding is cut by {f:.0%} once before its earnings" if f else "") +
-             " (see Reports/strategy_changes.csv).") if n else "")
+    n = WINNER.get("earnings_block_days")
+    return (f"Earnings rule: stocks with earnings within {n} days are not bought or topped up "
+            "(see Reports/strategy_changes.csv)." if n else "")
 
 
 def main(argv=None):
@@ -1961,7 +2058,7 @@ def main(argv=None):
           f"invested {f'{inv:.0%}' if inv is not None else 'unchanged (hold)'})")
     if meta["source"] == "midweek":
         for act, m in zip(meta["swaps"]["Action"], meta["swaps"]["Message"]):
-            print({"SELL": "MID-WEEK EXIT: ", "TRIM": "EARNINGS TRIM: "}.get(act, "MID-WEEK SWAP: ") + m)
+            print(("MID-WEEK EXIT: " if act == "SELL" else "MID-WEEK SWAP: ") + m)
         if not positions and (meta["swaps"]["Action"] == "SWAP").any():
             print("(no --positions given: the buy is sized at the sold stock's target weight x account size)")
     print(earnings_rule_note())

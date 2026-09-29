@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Morning fill check: Mon-Fri 9:00 AM CT. Completes the previous evening's unfilled orders; nothing to do otherwise.
-     Installed by launchd/install_schedule.sh. RunAtLoad = also runs at login/boot, and launchd runs a slot missed
-     during sleep once on wake; run_all.py decides whether anything is due (so extra starts are harmless). -->
+<!-- Fill check: Mon-Fri 9:00 AM CT, at login/boot (RunAtLoad), once on wake, and every 30 min (StartInterval).
+     run_all.py --fill-check --scheduled sends orders only in regular hours (9:00 AM CT to 15 min before the close):
+     the evening's leftovers from the next morning, a daytime catch-up's orders at once, and never after the next
+     decision slot (superseded). Otherwise it prints one "idle:" line. Installed by launchd/install_schedule.sh. -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -12,6 +13,7 @@
         <string>/opt/anaconda3/bin/python</string>
         <string>/Users/drcnavad/Desktop/Stock Analysis/pipeline_watchdog.py</string>
         <string>--fill-check</string>
+        <string>--scheduled</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/drcnavad/Desktop/Stock Analysis</string>
@@ -28,6 +30,8 @@
         <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
         <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
     </array>
+    <key>StartInterval</key>
+    <integer>1800</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>

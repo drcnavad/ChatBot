@@ -35,8 +35,6 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
 POSITIONS_FILE = os.path.join(ROOT, "my_positions.csv")
 SIGNAL_CSV = os.path.join(REPORTS, "signal_analysis.csv")
-MIDWEEK_CSV = os.path.join(REPORTS, "strategy_midweek_check.csv")
-CHANGES_CSV = os.path.join(REPORTS, "strategy_changes.csv")
 ET = ZoneInfo("America/New_York")
 LEVEL_ICON = {"red": "🔴", "green": "🟢", "blue": "🔵"}
 APP_URL = "http://localhost:8502/?symbol="   # the app's ticker view (symbol query parameter)
@@ -196,29 +194,8 @@ def T(sym):
     return ("ticker", sym)
 
 
-def friday_half_sells(changes_csv, d):
-    """[symbol] the Friday rebalance on day d cuts in half before earnings (reason '... sold half before earnings')."""
-    try:
-        c = pd.read_csv(changes_csv)
-        c = c[(pd.to_datetime(c["Date"]) == pd.Timestamp(d)) & c["Reason"].astype(str).str.contains("before earnings")
-              & c["Reason"].astype(str).str.contains(": sold ") & ~c["Reason"].astype(str).str.contains("earlier")]
-        return sorted(c["Symbol"].astype(str))
-    except Exception:
-        return []
-
-
 # ----------------------------------------------------------------------------- build the alert (list of plain-text segments; tickers become links in the app)
-def earnings_trims(midweek_csv, d):
-    """[(symbol, fraction)] the strategy's earnings half-sell (Action TRIM) called for at the check on day d."""
-    try:
-        m = pd.read_csv(midweek_csv)
-        m = m[(m["Action"] == "TRIM") & (pd.to_datetime(m["Event_Date"]) == pd.Timestamp(d))]
-        return [(str(r.Sell), float(r.Sell_Fraction)) for r in m.itertuples()]
-    except Exception:
-        return []
-
-
-def build_alert(sig=None, positions_path=None, use_positions=True, now=None, midweek_csv=MIDWEEK_CSV):
+def build_alert(sig=None, positions_path=None, use_positions=True, now=None):
     """One plain line per action (list of segments: str or ("ticker", SYM)) + level / source / data date.
 
     level: red = a swap to do (check day, or a missed check per the positions file), blue = full rebalance due,
@@ -295,10 +272,6 @@ def build_alert(sig=None, positions_path=None, use_positions=True, now=None, mid
         seg = [f"Full rebalance at the {_day(fill)} open: sell "]
         seg += _join([T(s) for s in sells]) if sells else ["nothing"]
         seg += ["; buy "] + (_join([T(s) for s in buys]) if buys else ["nothing"]) + ["."]
-        halves = friday_half_sells(CHANGES_CSV, D)
-        if halves:
-            seg += ["; sell half of "] + _join([T(s) for s in halves]) + [" (earnings within "
-                                                                          f"{be.WINNER['earnings_block_days']} days)."]
         skipped = blocked_picks(dday, new, old)
         if skipped:
             seg += [f" Not bought (earnings within {be.WINNER['earnings_block_days']} days): " + "; ".join(skipped) + "."]
@@ -315,10 +288,6 @@ def build_alert(sig=None, positions_path=None, use_positions=True, now=None, mid
             lines.append(pair_line(f"Swap at the {_day(fill)} open: ", swaps, dday, ", same dollar amount."))
         if exits:
             lines.append(["Sell "] + sells_seg(exits, dday) + [f" at the {_day(fill)} open, hold cash until {cash_until(D)}."])
-        for sym, frac in earnings_trims(midweek_csv, D):      # earnings half-sell (once per earnings event)
-            lines.append([f"Sell {frac:.0%} of ", ("ticker", sym),
-                          f" at the {_day(fill)} open (earnings within {be.WINNER['earnings_block_days']} days), "
-                          f"hold cash until {cash_until(D)}."])
         if lines:
             out.update(level="red", lines=lines)
         else:

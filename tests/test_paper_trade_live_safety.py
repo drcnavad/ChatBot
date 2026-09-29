@@ -198,7 +198,7 @@ check("market: live- id", m0.client_order_id.startswith("live-"))
 
 # ------------------------------------------------- 5: stale signals fail closed
 monkey = []
-patch_live(monkey, check_signal_freshness=lambda: (_ for _ in ()).throw(ValueError("STALE DATA")))
+patch_live(monkey, check_signal_freshness=lambda **k: (_ for _ in ()).throw(ValueError("STALE DATA")))
 try:
     paper_trade.auto_trade(dry_run=True)
     check("stale signals raise", False)
@@ -213,7 +213,7 @@ tmp = tempfile.mkdtemp()
 pend, log = os.path.join(tmp, "live_pending_orders.json"), os.path.join(tmp, "live_orders_log.csv")
 monkey = []
 patch_live(monkey,
-           check_signal_freshness=lambda: "2026-09-28",
+           check_signal_freshness=lambda **k: "2026-09-28",
            get_live_positions_and_equity=lambda: ({"AAA": 10}, 100000.0, 50000.0, 50000.0),
            _past_evening_cutoff=lambda: True,
            plan_orders=lambda *a, **k: (fake_orders_df(), {"source": "auto", "as_of": "2026-09-28"}, pd.DataFrame()),

@@ -4,7 +4,7 @@
                           (30,T,F) 452.96/1.3172, (30,T,T) 387.57/1.2249)
                          and an independent re-implementation of the earnings rule
   test_rank_audit.py     saved ranks, scores, picks, mid-week decisions and earnings skips re-derived independently
-  test_runner.py         run_all.py mode choice + NewsAPI once-a-day guard (pure logic, no API calls)
+  test_runner.py         run_all.py mode choice, trade gate + NewsAPI once-a-day guard (pure logic, no API calls)
   test_run_all_notify.py run_all.py notifications: _notify never raises, _notebook_error_summary
                          extracts cell/line/error from nbconvert output, run_cmd returns (rc, output)
   test_run_all_optional.py run_all.py optional steps: upstream API failures (fundamentals /
@@ -29,6 +29,8 @@
   test_alpaca_paper_reads.py mocked tests for alpaca_paper.py's read-only views: open_orders,
                          market_clock, portfolio_history parsing + the read-only guardrails
                          (live endpoint allowlist, no order-placing code)
+  test_catch_up.py       missed-decision catch-up: each decision runs once (3:15 PM slot or the next regular session),
+                         superseded at the next slot; weekends wait for the open; holidays; send_now fill gate
   test_strategy_health.py  strategy_health.py: reference parsing, equity stats, trend/drawdown/Sharpe
                          bands, composite score levels, regime detection, fail-soft on missing files
                          (synthetic data, no network, no streamlit)
@@ -42,8 +44,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_run_all_notify.py", "test_run_all_optional.py",
          "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_live_safety.py", "test_fill_check_fractional.py",
-         "test_paper_trade_math_audit.py", "test_notifications.py", "test_rebalance_rules.py", "test_earnings_half_sell.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
-         "test_strategy_health.py", "test_live_rules_audit.py"]
+         "test_paper_trade_math_audit.py", "test_notifications.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
+         "test_strategy_health.py", "test_live_rules_audit.py", "test_catch_up.py"]
 
 
 def main():

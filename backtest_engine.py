@@ -101,16 +101,9 @@ WINNER = {
     # cash); a top-3 swap candidate with earnings is skipped. Dates: Reports/earnings_date.csv. Tag gets "-E5".
     # REVERT: "earnings_block_days": None, then `python run_all.py`.
     "earnings_block_days": 5,
-    # Earnings half-sell (LIVE from 2026-09-28, user decision; simulated since 2026-09-28 via rebalance_band): at a decision (Friday rebalance or Mon/Wed
-    # check), a HELD stock whose next earnings date E is in the same window (d < E <= d + earnings_block_days) is cut by this
-    # fraction - once per earnings event. Until E has passed it is not bought more (a Friday rebalance keeps it at most at
-    # its current weight); after E the normal rules resume. The freed weight stays cash until the Friday rebalance sizes the
-    # picks again. Needs "earnings_block_days" (the window). Tag unchanged (rules_version gets an "h").
-    # REVERT: "earnings_sell_fraction": None, then `python run_all.py`.
-    "earnings_sell_fraction": 0.5,
     # Friday rebalance band (LIVE from 2026-09-28, user decision): at the weekly rebalance EVERY pick is brought back to its
-    # weight (bought up or trimmed) unless it is within this many percentage points of equity; Mon/Wed checks trade only
-    # swaps, exits and the earnings half-sell. paper_trade.NO_TRADE_BAND must equal this (tests check it). simulate(band=)
+    # weight (bought up or trimmed) unless it is within this many percentage points of equity (a held pick with earnings
+    # in the E5 window is not bought up); Mon/Wed checks trade only swaps and exits. paper_trade.NO_TRADE_BAND must equal this (tests check it). simulate(band=)
     # models it. REVERT (backtest only): None = the old rule, only adds and exits are traded and holds are never resized.
     "rebalance_band": 0.01,
 }
@@ -141,8 +134,6 @@ if WINNER.get("midweek_swap"):                   # mid-week swap on top of the w
 if WINNER.get("earnings_block_days"):             # no new buys shortly before earnings (live from 2026-09-25)
     WINNER["tag"] += f'-E{WINNER["earnings_block_days"]}'
     WINNER["name"] += f' + no new buys with earnings in the next {WINNER["earnings_block_days"]} days'
-    if WINNER.get("earnings_sell_fraction"):      # held stocks: sell part before earnings (live from 2026-09-28)
-        WINNER["name"] += f' + sell {WINNER["earnings_sell_fraction"]:.0%} of a holding before earnings'
 
 
 def winner_max_per_sector():
@@ -849,36 +840,13 @@ def earnings_note(days, d):
     return f"earnings in {days} day{'' if days == 1 else 's'} ({pd.Timestamp(d) + pd.Timedelta(days=days):%a %b %d})"
 
 
-def earnings_half_sell(weights, held, days_row, d, fraction, done, cols=None):
-    """Earnings half-sell at one decision (Friday rebalance or Mon/Wed check). For each stock with weight > 0 in
-    `weights` that is HELD (`held` > 0) and has earnings E within the window (`days_row` = days until E, NaN = none):
-    the first time for this event (done[j] != E) its weight becomes min(weight, held) x (1 - fraction) and done[j] = E;
-    later decisions before E only cap it at the held weight (no top-up before earnings). `weights` is changed in place.
-    Returns [(j, weight_before, weight_after, reason)] for the stocks touched."""
-    out = []
-    d = pd.Timestamp(d).normalize()
-    for j in np.where((weights > 0) & (held > 0) & ~np.isnan(days_row))[0]:
-        e = d + pd.Timedelta(days=int(days_row[j]))
-        before = weights[j]
-        if done.get(j) == e:
-            weights[j] = min(weights[j], held[j])
-            why = f"earnings {e:%a %b %d}: sold {fraction:.0%} earlier, not bought more before earnings"
-        else:
-            weights[j] = min(weights[j], held[j]) * (1 - fraction)
-            done[j] = e
-            why = f"earnings {e:%a %b %d}: sold {'half' if fraction == 0.5 else f'{fraction:.0%}'} before earnings"
-        out.append((j, before, weights[j], why))
-    return out
-
-
 # ----------------------------------------------------------------------------- simulator
 def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST, band=None, block=None):
     """Share-based daily simulation.
 
     band (live rule from 2026-09-28, WINNER['rebalance_band']): when given, the fills follow the CURRENT live planner -
     at a weekly rebalance (``rebalance`` True on the decision day) every held pick is brought back to its target unless it
-    is within band x equity of it; on other decision days only adds, exits and weight cuts of a holding (the earnings
-    half-sell: shares x new/old weight) are traded. ``block`` (days until earnings, earnings_days_ahead; NaN = none): a held
+    is within band x equity of it; on other decision days only adds and exits are traded. ``block`` (days until earnings, earnings_days_ahead; NaN = none): a held
     pick with earnings in the window is never bought up. band=None keeps the rule described below (adds and exits only).
 
     target: weights decided at the close of each date (row d executes at the open of d+1).
@@ -952,17 +920,13 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
         is_add = tradable & (w > 0) & (wp <= 0)
         desired[is_exit] = 0.0
         desired[is_add] = w[is_add] * V / o[is_add]     # adds trade to exactly target (buy or trim)
-        if band is not None and t > 0:
+        if band is not None and t > 0 and REB[t - 1]:   # weekly rebalance: every pick back to target outside the band
             held = tradable & (shares > 0) & (w > 0) & (wp > 0)
-            if REB[t - 1]:                               # weekly rebalance: every pick back to target outside the band
-                tgt = np.where(held, w * V / np.where(tradable, o, 1.0), shares)
-                move = held & (np.abs(tgt - shares) * np.nan_to_num(o) > band * V)
-                if BLK is not None:                      # earnings soon: a held pick is not bought up
-                    move &= ~((tgt > shares) & ~np.isnan(BLK[t - 1]))
-                desired[move] = tgt[move]
-            else:                                        # mid-week: only a cut weight (earnings half-sell) is traded
-                cut = held & (w < wp - 1e-12)
-                desired[cut] = shares[cut] * w[cut] / wp[cut]
+            tgt = np.where(held, w * V / np.where(tradable, o, 1.0), shares)
+            move = held & (np.abs(tgt - shares) * np.nan_to_num(o) > band * V)
+            if BLK is not None:                          # earnings soon: a held pick is not bought up
+                move &= ~((tgt > shares) & ~np.isnan(BLK[t - 1]))
+            desired[move] = tgt[move]
         delta = desired - shares
         delta[np.abs(delta * np.nan_to_num(px_open)) < 1e-10] = 0.0
         traded_notional = delist_notional  # delisting sales already counted above
@@ -1081,8 +1045,7 @@ def deterministic_rank(score_w, eligible_w=None, tiebreak_w=None):
 
 def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=None, min_score=0.0,
                  sector_cap=0.4, vol_sizing=True, buffer_rank=None, regime_scale=None, decision_log=None,
-                 tiebreak_w=None, max_pick_rank=None, cap_soft=False, buy_block=None, held_w=None, start_holdings=None,
-                 earnings_sell=None):
+                 tiebreak_w=None, max_pick_rank=None, cap_soft=False, buy_block=None, held_w=None, start_holdings=None):
     """Weekly top-N by score with sector cap and inverse-volatility weights.
 
     On rebalance days: candidates = eligible & score > min_score, best first, at most floor(sector_cap*n)
@@ -1101,8 +1064,6 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
     buy_block: optional frame of days until earnings (earnings_days_ahead; NaN = no block): such a stock is not bought unless
                already held; its slot goes to the next candidate. held_w: holdings that count as "already held" (default:
                this function's own carried holdings). start_holdings: holdings before the first date (default: none).
-    earnings_sell: optional (fraction, done) - earnings half-sell (earnings_half_sell) on held picks with earnings in the
-                   buy_block window; `done` {column index: earnings date} is shared with the mid-week checks.
     """
     dates, cols = score_w.index, list(score_w.columns)
     S = score_w.to_numpy(float)
@@ -1174,10 +1135,6 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
                 new[picked] = inv / inv.sum() * (len(picked) / n)
                 if soft and not R[t]:
                     new *= regime_scale
-            if earnings_sell and BB is not None:
-                held_w_now = H[t] if H is not None else current
-                for j, _, _, why in earnings_half_sell(new, held_w_now, BB[t], dates[t], *earnings_sell):
-                    reason[j] = why
             if decision_log is not None:
                 for j in range(len(cols)):
                     if new[j] == 0 and current[j] == 0 and j not in reason:
@@ -1291,7 +1248,7 @@ def midweek_exit_sells(cur, rank, exit_all_below):
 
 def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_days, enter_top=3, exit_below=15,
                         sector_cap=0.4, n=10, min_score=0.0, tiebreak_w=None, decision_log=None, check_log=None,
-                        exit_all_below=None, cap_soft=False, buy_block=None, reselect=None, earnings_sell=None):
+                        exit_all_below=None, cap_soft=False, buy_block=None, reselect=None):
     """Weekly targets (``base`` from rank_targets) + mid-week swaps on ``check_days``.
 
     On a check day: rank = position among qualifying names (eligible, score > min_score, valid vol), same order as
@@ -1308,8 +1265,6 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
     buy_block (earnings rule): days-until-earnings frame; a top-N candidate with earnings in the window is skipped.
     reselect(t, held) -> (weights, log rows): redo the weekly selection with the REAL holdings (needed when the earnings
     rule is on, because "already held" then matters); its rows replace rank_targets' rows for that date.
-    earnings_sell (fraction, done): after the swaps and exits, a holding with earnings in the buy_block window is cut by
-    `fraction` once per earnings event (check_log Action 'TRIM', Fraction); the cash stays idle until the weekly rebalance.
     decision_log: rows (like rank_targets) for check days WITH a swap or exit (hold / add / drop).
     check_log: one dict per check day and swap (Action 'SWAP') and per exit (Action 'SELL'), or one 'NO SWAP' row with a Note.
     """
@@ -1349,16 +1304,7 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
             skip = {j for j in order[:enter_top] if cur[j] == 0 and not np.isnan(BB[t, j])} if BB is not None else set()
             swaps = midweek_swap_pairs(cur, order, rank, sectors, enter_top, exit_below, cap, skip=skip)
             exits = midweek_exit_sells(cur, rank, exit_all_below)
-            trims = []
-            if earnings_sell and BB is not None:
-                trims = [(j, b - a, why) for j, b, a, why in
-                         earnings_half_sell(cur, cur.copy(), BB[t], dates[t], *earnings_sell) if a < b]
             if check_log is not None:
-                for h, w, why in trims:
-                    check_log.append({"Date": dates[t], "Action": "TRIM", "Sell": cols[h], "Sell_Rank": rank.get(h, np.nan),
-                                      "Sell_Score": S[t, h], "Buy": "", "Buy_Rank": np.nan, "Buy_Score": np.nan,
-                                      "Weight": w, "Sell_Sector": sectors[h], "Buy_Sector": "",
-                                      "Fraction": earnings_sell[0], "Note": f"{why}; cash until the weekly rebalance"})
                 if swaps or exits:
                     for e, h, w in swaps:
                         check_log.append({"Date": dates[t], "Action": "SWAP", "Sell": cols[h], "Sell_Rank": rank.get(h, np.nan),
@@ -1369,7 +1315,7 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
                                           "Sell_Score": S[t, h], "Buy": "", "Buy_Rank": np.nan, "Buy_Score": np.nan,
                                           "Weight": w, "Sell_Sector": sectors[h], "Buy_Sector": "",
                                           "Note": f"worse than rank {exit_all_below}: sold, cash until the weekly rebalance"})
-                elif not trims:
+                else:
                     held = np.where(before > 0)[0]
                     worst = max((rank.get(j, 1e6) for j in held), default=np.nan)
                     entrants = [cols[j] for j in order[:enter_top] if before[j] == 0 and j not in skip]
@@ -1393,11 +1339,10 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
                     check_log.append({"Date": dates[t], "Action": "NO SWAP", "Sell": "", "Sell_Rank": np.nan,
                                       "Sell_Score": np.nan, "Buy": "", "Buy_Rank": np.nan, "Buy_Score": np.nan,
                                       "Weight": np.nan, "Sell_Sector": "", "Buy_Sector": "", "Note": note})
-            if (swaps or exits or trims) and decision_log is not None:
+            if (swaps or exits) and decision_log is not None:
                 partner = {h: e for e, h, _ in swaps}
                 partner.update({e: h for e, h, _ in swaps})
                 exited = {h for h, _ in exits}
-                trimmed = {h: why for h, _, why in trims}
                 for j in np.where((before > 0) | (cur > 0))[0]:
                     r = rank.get(j, np.nan)
                     rtxt = f"rank {r}" if r == r else "no longer qualifies"
@@ -1414,8 +1359,6 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
                     elif cur[j] == 0:
                         status = "drop"
                         why = f"mid-week swap out: {rtxt} (below {exit_below}); replaced by {cols[p]} (rank {rank[p]})"
-                    elif j in trimmed:
-                        status, why = "hold", f"mid-week check ({rtxt}): {trimmed[j]}; cash until the weekly rebalance"
                     else:
                         status, why = "hold", f"kept at mid-week check ({rtxt})"
                     decision_log.append({"Date": dates[t], "Symbol": cols[j], "Status": status, "Reason": why,
@@ -1476,7 +1419,7 @@ def _rebase_weekly_log(decision_log, date, idx, held_before, new, cols, sectors,
 
 def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_w=None, decision_log=None,
                    check_log=None, midweek=None, exit_all_below="winner", selection=None, earnings_block_days="winner",
-                   earnings=None, earnings_sell_fraction="winner"):
+                   earnings=None):
     """Live WINNER targets: weekly rank_targets + (if WINNER['midweek_swap']) mid-week swaps + (if
     WINNER['midweek_exit_below']) mid-week exits to cash.
 
@@ -1484,8 +1427,7 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
     WINNER['midweek_swap'] (pass False to force plain weekly); ``exit_all_below`` overrides WINNER['midweek_exit_below']
     (None = no mid-week exit); ``selection`` = dict(max_pick_rank=..., cap_soft=...) overrides the T20 keys;
     ``earnings_block_days`` overrides WINNER['earnings_block_days'] (None = no earnings rule); ``earnings`` = earnings dates
-    (default: load_earnings(), i.e. Reports/earnings_date.csv); ``earnings_sell_fraction`` overrides
-    WINNER['earnings_sell_fraction'] (None = no earnings half-sell)."""
+    (default: load_earnings(), i.e. Reports/earnings_date.csv)."""
     mw = WINNER.get("midweek_swap") if midweek is None else midweek
     if exit_all_below == "winner":
         exit_all_below = WINNER.get("midweek_exit_below")
@@ -1497,11 +1439,8 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
     if earnings_block_days:
         block = earnings_days_ahead(score_w.index, list(score_w.columns),
                                     load_earnings() if earnings is None else earnings, earnings_block_days)
-    if earnings_sell_fraction == "winner":
-        earnings_sell_fraction = WINNER.get("earnings_sell_fraction")
-    frac = earnings_sell_fraction if block is not None else None
     base = rank_targets(score_w, eligible_w, vol_w, rebalance_days=rebalance_days, decision_log=decision_log,
-                        tiebreak_w=tiebreak_w, buy_block=block, earnings_sell=(frac, {}) if frac else None, **args)
+                        tiebreak_w=tiebreak_w, buy_block=block, **args)
     if not mw:
         return base, pd.Series(False, index=base.index)
 
@@ -1510,16 +1449,14 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
         rows = [] if decision_log is not None else None
         day = score_w.index[[t]]
         one = rank_targets(score_w.iloc[[t]], eligible_w, vol_w, rebalance_days=pd.Series(True, index=day),
-                           decision_log=rows, tiebreak_w=tiebreak_w, buy_block=block.iloc[[t]], start_holdings=held,
-                           earnings_sell=esell, **args)
+                           decision_log=rows, tiebreak_w=tiebreak_w, buy_block=block.iloc[[t]], start_holdings=held, **args)
         return one.iloc[0].to_numpy(float), rows or []
-    esell = (frac, {}) if frac else None        # one "already sold for this earnings event" memory for Fri + Mon/Wed
     checks = midweek_check_days(base.index, mw.get("days", ("Mon", "Wed")), rebalance_days)
     tgt = apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, checks, mw["enter_top"], mw["exit_below"],
                               WINNER["sector_cap"], WINNER["n"], WINNER["min_score"], tiebreak_w=tiebreak_w,
                               decision_log=decision_log, check_log=check_log, exit_all_below=exit_all_below,
                               cap_soft=args["cap_soft"], buy_block=block,
-                              reselect=reselect if block is not None else None, earnings_sell=esell)
+                              reselect=reselect if block is not None else None)
     return tgt, checks
 
 
@@ -1541,6 +1478,62 @@ def next_decision(latest, days=None):
         if any(c.dayofweek in codes for c in pd.date_range(prev + pd.Timedelta(days=1), d, freq="D")):
             return d, "mid-week check", sess[i + 1]
     return sess[1], "full rebalance", sess[2]
+
+
+# ----------------------------------------------------------------------------- decision calendar (live schedule)
+DECISION_TIME_CT = (15, 15)                    # each decision is made and traded at 3:15 PM CT on its session
+CENTRAL = ZoneInfo("America/Chicago")
+
+
+def is_session(d):
+    """True when date d is an NYSE session (full-day holidays excluded)."""
+    d = pd.Timestamp(d).normalize()
+    return len(pd.date_range(d, d, freq=NYSE_SESSION)) == 1
+
+
+def decision_kind(d):
+    """'full rebalance' / 'mid-week check' when date d is a decision session (same calendar as next_decision:
+    Thursday rebalance when Friday is a holiday, Tuesday check after a Monday holiday), else None."""
+    d = pd.Timestamp(d).normalize()
+    if not is_session(d):
+        return None
+    nxt, kind, _ = next_decision(d - NYSE_SESSION)
+    return kind if nxt == d else None
+
+
+def decision_slot(d):
+    """The decision's scheduled time: 3:15 PM CT on session d (tz-aware)."""
+    d = pd.Timestamp(d)
+    return datetime(d.year, d.month, d.day, *DECISION_TIME_CT, tzinfo=CENTRAL)
+
+
+def last_decision_date(t):
+    """The latest decision session whose 3:15 PM CT slot is at or before t (tz-aware), as a Timestamp."""
+    d = pd.Timestamp(t.astimezone(CENTRAL).date())
+    for _ in range(15):
+        if decision_kind(d) and decision_slot(d) <= t:
+            return d
+        d -= pd.Timedelta(days=1)
+    return None
+
+
+def next_decision_slot(t):
+    """The first decision slot (3:15 PM CT) strictly after t (tz-aware). A missed decision can be caught up until then."""
+    d = pd.Timestamp(t.astimezone(CENTRAL).date())
+    for _ in range(15):
+        if decision_kind(d) and decision_slot(d) > t:
+            return decision_slot(d)
+        d += pd.Timedelta(days=1)
+    return None
+
+
+def last_complete_session(t):
+    """The latest session whose daily bar is final at t (after 4:30 PM ET, the drop_partial_last_bar rule)."""
+    et = t.astimezone(EASTERN)
+    d = pd.Timestamp(et.date())
+    if is_session(d) and (et.hour, et.minute) >= (16, 30):
+        return d
+    return pd.Timestamp(pd.date_range(end=d - pd.Timedelta(days=1), periods=1, freq=NYSE_SESSION)[0])
 
 
 # ----------------------------------------------------------------------------- live helpers

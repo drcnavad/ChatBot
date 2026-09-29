@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Evening run: Mon-Fri 3:15 PM CT. Trades only on a decision day (Fri rebalance, Mon/Wed check; holiday-shifted), once per day.
-     Installed by launchd/install_schedule.sh. RunAtLoad = also runs at login/boot, and launchd runs a slot missed
-     during sleep once on wake; run_all.py decides whether anything is due (so extra starts are harmless). -->
+<!-- Decision run: Mon-Fri 3:15 PM CT, at login/boot (RunAtLoad), once on wake for a slot missed in sleep, and every
+     30 min (StartInterval) as a catch-up net. run_all.py --scheduled does work only when a decision is due: the
+     day's decision after 3:15 PM, or a missed one (Mac asleep/off) at the next regular session until the next
+     decision slot. Otherwise it prints one "idle:" line. A decision never runs twice (run_state last_decision + lock).
+     Installed by launchd/install_schedule.sh. -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -29,6 +31,8 @@
         <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>15</integer></dict>
         <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>15</integer></dict>
     </array>
+    <key>StartInterval</key>
+    <integer>1800</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
