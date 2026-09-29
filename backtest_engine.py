@@ -98,9 +98,16 @@ WINNER = {
     # Earnings rule (LIVE from 2026-09-25, user decision, not a tested rule): a stock that is NOT held is not bought when its
     # next earnings date E is within the next N calendar days after the decision date d (d < E <= d + N), at the Friday
     # rebalance and at the Mon/Wed swap. Its slot goes to the next eligible stock within ranks 1-20 (same T20 logic; none ->
-    # cash); a top-3 swap candidate with earnings is skipped. Held stocks are never sold because of earnings. Dates:
-    # Reports/earnings_date.csv. Tag gets "-E5". REVERT: "earnings_block_days": None, then `python run_all.py`.
+    # cash); a top-3 swap candidate with earnings is skipped. Dates: Reports/earnings_date.csv. Tag gets "-E5".
+    # REVERT: "earnings_block_days": None, then `python run_all.py`.
     "earnings_block_days": 5,
+    # Earnings half-sell (LIVE from 2026-09-28, user decision, NOT backtested): at a decision (Friday rebalance or Mon/Wed
+    # check), a HELD stock whose next earnings date E is in the same window (d < E <= d + earnings_block_days) is cut by this
+    # fraction - once per earnings event. Until E has passed it is not bought more (a Friday rebalance keeps it at most at
+    # its current weight); after E the normal rules resume. The freed weight stays cash until the Friday rebalance sizes the
+    # picks again. Needs "earnings_block_days" (the window). Tag unchanged (no backtest row for it).
+    # REVERT: "earnings_sell_fraction": None, then `python run_all.py`.
+    "earnings_sell_fraction": 0.5,
 }
 
 
@@ -129,6 +136,8 @@ if WINNER.get("midweek_swap"):                   # mid-week swap on top of the w
 if WINNER.get("earnings_block_days"):             # no new buys shortly before earnings (live from 2026-09-25)
     WINNER["tag"] += f'-E{WINNER["earnings_block_days"]}'
     WINNER["name"] += f' + no new buys with earnings in the next {WINNER["earnings_block_days"]} days'
+    if WINNER.get("earnings_sell_fraction"):      # held stocks: sell part before earnings (live from 2026-09-28)
+        WINNER["name"] += f' + sell {WINNER["earnings_sell_fraction"]:.0%} of a holding before earnings'
 
 
 def winner_max_per_sector():
@@ -835,6 +844,28 @@ def earnings_note(days, d):
     return f"earnings in {days} day{'' if days == 1 else 's'} ({pd.Timestamp(d) + pd.Timedelta(days=days):%a %b %d})"
 
 
+def earnings_half_sell(weights, held, days_row, d, fraction, done, cols=None):
+    """Earnings half-sell at one decision (Friday rebalance or Mon/Wed check). For each stock with weight > 0 in
+    `weights` that is HELD (`held` > 0) and has earnings E within the window (`days_row` = days until E, NaN = none):
+    the first time for this event (done[j] != E) its weight becomes min(weight, held) x (1 - fraction) and done[j] = E;
+    later decisions before E only cap it at the held weight (no top-up before earnings). `weights` is changed in place.
+    Returns [(j, weight_before, weight_after, reason)] for the stocks touched."""
+    out = []
+    d = pd.Timestamp(d).normalize()
+    for j in np.where((weights > 0) & (held > 0) & ~np.isnan(days_row))[0]:
+        e = d + pd.Timedelta(days=int(days_row[j]))
+        before = weights[j]
+        if done.get(j) == e:
+            weights[j] = min(weights[j], held[j])
+            why = f"earnings {e:%a %b %d}: sold {fraction:.0%} earlier, not bought more before earnings"
+        else:
+            weights[j] = min(weights[j], held[j]) * (1 - fraction)
+            done[j] = e
+            why = f"earnings {e:%a %b %d}: sold {'half' if fraction == 0.5 else f'{fraction:.0%}'} before earnings"
+        out.append((j, before, weights[j], why))
+    return out
+
+
 # ----------------------------------------------------------------------------- simulator
 def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST):
     """Share-based daily simulation.
@@ -1025,7 +1056,8 @@ def deterministic_rank(score_w, eligible_w=None, tiebreak_w=None):
 
 def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=None, min_score=0.0,
                  sector_cap=0.4, vol_sizing=True, buffer_rank=None, regime_scale=None, decision_log=None,
-                 tiebreak_w=None, max_pick_rank=None, cap_soft=False, buy_block=None, held_w=None, start_holdings=None):
+                 tiebreak_w=None, max_pick_rank=None, cap_soft=False, buy_block=None, held_w=None, start_holdings=None,
+                 earnings_sell=None):
     """Weekly top-N by score with sector cap and inverse-volatility weights.
 
     On rebalance days: candidates = eligible & score > min_score, best first, at most floor(sector_cap*n)
@@ -1044,6 +1076,8 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
     buy_block: optional frame of days until earnings (earnings_days_ahead; NaN = no block): such a stock is not bought unless
                already held; its slot goes to the next candidate. held_w: holdings that count as "already held" (default:
                this function's own carried holdings). start_holdings: holdings before the first date (default: none).
+    earnings_sell: optional (fraction, done) - earnings half-sell (earnings_half_sell) on held picks with earnings in the
+                   buy_block window; `done` {column index: earnings date} is shared with the mid-week checks.
     """
     dates, cols = score_w.index, list(score_w.columns)
     S = score_w.to_numpy(float)
@@ -1115,6 +1149,10 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
                 new[picked] = inv / inv.sum() * (len(picked) / n)
                 if soft and not R[t]:
                     new *= regime_scale
+            if earnings_sell and BB is not None:
+                held_w_now = H[t] if H is not None else current
+                for j, _, _, why in earnings_half_sell(new, held_w_now, BB[t], dates[t], *earnings_sell):
+                    reason[j] = why
             if decision_log is not None:
                 for j in range(len(cols)):
                     if new[j] == 0 and current[j] == 0 and j not in reason:
@@ -1228,7 +1266,7 @@ def midweek_exit_sells(cur, rank, exit_all_below):
 
 def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_days, enter_top=3, exit_below=15,
                         sector_cap=0.4, n=10, min_score=0.0, tiebreak_w=None, decision_log=None, check_log=None,
-                        exit_all_below=None, cap_soft=False, buy_block=None, reselect=None):
+                        exit_all_below=None, cap_soft=False, buy_block=None, reselect=None, earnings_sell=None):
     """Weekly targets (``base`` from rank_targets) + mid-week swaps on ``check_days``.
 
     On a check day: rank = position among qualifying names (eligible, score > min_score, valid vol), same order as
@@ -1245,6 +1283,8 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
     buy_block (earnings rule): days-until-earnings frame; a top-N candidate with earnings in the window is skipped.
     reselect(t, held) -> (weights, log rows): redo the weekly selection with the REAL holdings (needed when the earnings
     rule is on, because "already held" then matters); its rows replace rank_targets' rows for that date.
+    earnings_sell (fraction, done): after the swaps and exits, a holding with earnings in the buy_block window is cut by
+    `fraction` once per earnings event (check_log Action 'TRIM', Fraction); the cash stays idle until the weekly rebalance.
     decision_log: rows (like rank_targets) for check days WITH a swap or exit (hold / add / drop).
     check_log: one dict per check day and swap (Action 'SWAP') and per exit (Action 'SELL'), or one 'NO SWAP' row with a Note.
     """
@@ -1284,7 +1324,16 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
             skip = {j for j in order[:enter_top] if cur[j] == 0 and not np.isnan(BB[t, j])} if BB is not None else set()
             swaps = midweek_swap_pairs(cur, order, rank, sectors, enter_top, exit_below, cap, skip=skip)
             exits = midweek_exit_sells(cur, rank, exit_all_below)
+            trims = []
+            if earnings_sell and BB is not None:
+                trims = [(j, b - a, why) for j, b, a, why in
+                         earnings_half_sell(cur, cur.copy(), BB[t], dates[t], *earnings_sell) if a < b]
             if check_log is not None:
+                for h, w, why in trims:
+                    check_log.append({"Date": dates[t], "Action": "TRIM", "Sell": cols[h], "Sell_Rank": rank.get(h, np.nan),
+                                      "Sell_Score": S[t, h], "Buy": "", "Buy_Rank": np.nan, "Buy_Score": np.nan,
+                                      "Weight": w, "Sell_Sector": sectors[h], "Buy_Sector": "",
+                                      "Fraction": earnings_sell[0], "Note": f"{why}; cash until the weekly rebalance"})
                 if swaps or exits:
                     for e, h, w in swaps:
                         check_log.append({"Date": dates[t], "Action": "SWAP", "Sell": cols[h], "Sell_Rank": rank.get(h, np.nan),
@@ -1295,7 +1344,7 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
                                           "Sell_Score": S[t, h], "Buy": "", "Buy_Rank": np.nan, "Buy_Score": np.nan,
                                           "Weight": w, "Sell_Sector": sectors[h], "Buy_Sector": "",
                                           "Note": f"worse than rank {exit_all_below}: sold, cash until the weekly rebalance"})
-                else:
+                elif not trims:
                     held = np.where(before > 0)[0]
                     worst = max((rank.get(j, 1e6) for j in held), default=np.nan)
                     entrants = [cols[j] for j in order[:enter_top] if before[j] == 0 and j not in skip]
@@ -1319,10 +1368,11 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
                     check_log.append({"Date": dates[t], "Action": "NO SWAP", "Sell": "", "Sell_Rank": np.nan,
                                       "Sell_Score": np.nan, "Buy": "", "Buy_Rank": np.nan, "Buy_Score": np.nan,
                                       "Weight": np.nan, "Sell_Sector": "", "Buy_Sector": "", "Note": note})
-            if (swaps or exits) and decision_log is not None:
+            if (swaps or exits or trims) and decision_log is not None:
                 partner = {h: e for e, h, _ in swaps}
                 partner.update({e: h for e, h, _ in swaps})
                 exited = {h for h, _ in exits}
+                trimmed = {h: why for h, _, why in trims}
                 for j in np.where((before > 0) | (cur > 0))[0]:
                     r = rank.get(j, np.nan)
                     rtxt = f"rank {r}" if r == r else "no longer qualifies"
@@ -1339,6 +1389,8 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
                     elif cur[j] == 0:
                         status = "drop"
                         why = f"mid-week swap out: {rtxt} (below {exit_below}); replaced by {cols[p]} (rank {rank[p]})"
+                    elif j in trimmed:
+                        status, why = "hold", f"mid-week check ({rtxt}): {trimmed[j]}; cash until the weekly rebalance"
                     else:
                         status, why = "hold", f"kept at mid-week check ({rtxt})"
                     decision_log.append({"Date": dates[t], "Symbol": cols[j], "Status": status, "Reason": why,
@@ -1399,7 +1451,7 @@ def _rebase_weekly_log(decision_log, date, idx, held_before, new, cols, sectors,
 
 def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_w=None, decision_log=None,
                    check_log=None, midweek=None, exit_all_below="winner", selection=None, earnings_block_days="winner",
-                   earnings=None):
+                   earnings=None, earnings_sell_fraction="winner"):
     """Live WINNER targets: weekly rank_targets + (if WINNER['midweek_swap']) mid-week swaps + (if
     WINNER['midweek_exit_below']) mid-week exits to cash.
 
@@ -1407,7 +1459,8 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
     WINNER['midweek_swap'] (pass False to force plain weekly); ``exit_all_below`` overrides WINNER['midweek_exit_below']
     (None = no mid-week exit); ``selection`` = dict(max_pick_rank=..., cap_soft=...) overrides the T20 keys;
     ``earnings_block_days`` overrides WINNER['earnings_block_days'] (None = no earnings rule); ``earnings`` = earnings dates
-    (default: load_earnings(), i.e. Reports/earnings_date.csv)."""
+    (default: load_earnings(), i.e. Reports/earnings_date.csv); ``earnings_sell_fraction`` overrides
+    WINNER['earnings_sell_fraction'] (None = no earnings half-sell)."""
     mw = WINNER.get("midweek_swap") if midweek is None else midweek
     if exit_all_below == "winner":
         exit_all_below = WINNER.get("midweek_exit_below")
@@ -1419,8 +1472,11 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
     if earnings_block_days:
         block = earnings_days_ahead(score_w.index, list(score_w.columns),
                                     load_earnings() if earnings is None else earnings, earnings_block_days)
+    if earnings_sell_fraction == "winner":
+        earnings_sell_fraction = WINNER.get("earnings_sell_fraction")
+    frac = earnings_sell_fraction if block is not None else None
     base = rank_targets(score_w, eligible_w, vol_w, rebalance_days=rebalance_days, decision_log=decision_log,
-                        tiebreak_w=tiebreak_w, buy_block=block, **args)
+                        tiebreak_w=tiebreak_w, buy_block=block, earnings_sell=(frac, {}) if frac else None, **args)
     if not mw:
         return base, pd.Series(False, index=base.index)
 
@@ -1429,14 +1485,16 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
         rows = [] if decision_log is not None else None
         day = score_w.index[[t]]
         one = rank_targets(score_w.iloc[[t]], eligible_w, vol_w, rebalance_days=pd.Series(True, index=day),
-                           decision_log=rows, tiebreak_w=tiebreak_w, buy_block=block.iloc[[t]], start_holdings=held, **args)
+                           decision_log=rows, tiebreak_w=tiebreak_w, buy_block=block.iloc[[t]], start_holdings=held,
+                           earnings_sell=esell, **args)
         return one.iloc[0].to_numpy(float), rows or []
+    esell = (frac, {}) if frac else None        # one "already sold for this earnings event" memory for Fri + Mon/Wed
     checks = midweek_check_days(base.index, mw.get("days", ("Mon", "Wed")), rebalance_days)
     tgt = apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, checks, mw["enter_top"], mw["exit_below"],
                               WINNER["sector_cap"], WINNER["n"], WINNER["min_score"], tiebreak_w=tiebreak_w,
                               decision_log=decision_log, check_log=check_log, exit_all_below=exit_all_below,
                               cap_soft=args["cap_soft"], buy_block=block,
-                              reselect=reselect if block is not None else None)
+                              reselect=reselect if block is not None else None, earnings_sell=esell)
     return tgt, checks
 
 

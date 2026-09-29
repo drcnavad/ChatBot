@@ -150,6 +150,8 @@ class TestMainFlow(unittest.TestCase):
         diag.assert_called_once()                     # diagnosed, not fixed
         notif.assert_called_once()
         self.assertIn("trade failed", notif.call_args[0][0])
+        self.assertLessEqual(len(notif.call_args[0][0]), 40)
+        self.assertIn("Alpaca", notif.call_args[0][1])
 
     def test_unknown_error_diagnosed_not_retried(self):
         with mock.patch.object(wd, "run_pipeline", return_value=(1, "KeyError: 'Strategy_Weight'")) as rp, \

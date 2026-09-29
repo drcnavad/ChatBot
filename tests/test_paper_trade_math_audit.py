@@ -19,6 +19,7 @@ Run: PYTHONPATH=. python tests/test_paper_trade_math_audit.py
 """
 import json
 import os
+os.environ.setdefault("STOCK_ANALYSIS_NO_POPUPS", "1")  # never pop real macOS alerts from tests
 import sys
 import tempfile
 
@@ -164,6 +165,9 @@ class FakeClient:
     def get_account(self):
         return FakeAccount(self.buying_power)
 
+    def get_clock(self):
+        return type("Clock", (), {"is_open": True})()
+
     def get_orders(self, req=None):
         if self.fail_orders:
             raise ConnectionError("broker unreachable")
@@ -259,7 +263,7 @@ def test_buying_power_guard_recomputes_cost_not_est_value():
     df = _orders_frame()
     df.loc[0, "Est_Value"] = 1.0
     df.loc[1, "Est_Value"] = 1.0
-    out = paper_trade.apply_buying_power_guard(df, 600.0)
+    out = paper_trade.apply_buying_power_guard(df, 600.0, cushion=0)  # pure scaling (cushion tested separately)
     aaa = out[out["Symbol"] == "AAA"].iloc[0]
     bbb = out[out["Symbol"] == "BBB"].iloc[0]
     check((aaa["Shares"], bbb["Shares"]) == (4, 2),
@@ -349,7 +353,8 @@ def test_morning_sells_complete_before_buys():
 
 
 def test_morning_buy_cumulative_cash_reserved():
-    # Two BUYs each fit in cash alone but not together: the second must SKIP.
+    # Two BUYs each fit in cash alone but not together: the second buys only the part that
+    # still fits after the first (1% cushion), never more than the cash.
     with tempfile.TemporaryDirectory() as td:
         pp = os.path.join(td, "pending.json")
         _write_pending(pp, [
@@ -363,14 +368,11 @@ def test_morning_buy_cumulative_cash_reserved():
             res = paper_trade.complete_unfilled_orders(pending_path=pp, log_csv=None, dry_run=False)
         finally:
             paper_trade.paper_trading_client = orig
-        check(len(fake.submitted) == 1 and fake.submitted[0].symbol == "AAA",
-              "morning: first BUY submitted ($6,300 est. of $10,000 buying power)")
-        check(any("SKIP (insufficient morning buying power" in s for s in res["Status"]),
-              "morning: second BUY SKIPs - buying power already reserved by the first")
-        check(os.path.exists(pp), "morning: skipped BUY kept in the pending file for retry")
-        kept = json.load(open(pp))["orders"]
-        check(len(kept) == 1 and kept[0]["symbol"] == "BBB",
-              "morning: only the skipped BUY row is kept for retry")
+        got = [(r.symbol, r.qty) for r in fake.submitted]
+        check(got == [("AAA", 60), ("BBB", 39.0)],
+              f"morning: first BUY in full ($6,060 with cushion), second cut to what is left: 3,940 / 101 = 39 (got {got})")
+        check(sum(q * 100.0 * 1.01 for _, q in got) <= 10000.0, "morning: both BUYs together stay within buying power")
+        check(not os.path.exists(pp), "morning: the part that did not fit is not retried (pending file removed)")
 
 
 def test_morning_malformed_row_dropped():

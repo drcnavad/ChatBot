@@ -18,6 +18,10 @@
                          live ledgers, fail-closed signal status + buying-power guard, stable client order
                          ids + broker reconciliation, sequenced SELL-then-BUY submit, morning
                          abort on unreadable positions, morning crash recovery, --paper retired
+  test_fill_check_fractional.py mocked: 2-decimal sizing (whole shares after hours, fractional rest
+                         next morning, exact exits) + morning fill check: partial/full/no fill,
+                         cancel confirmation, crash between cancel and replace, same-day rerun,
+                         market closed, open order on broker
   test_pipeline_watchdog.py mocked tests for pipeline_watchdog.py: failure classification
                          (transient / missing-upstream / unknown), --from resume logic,
                          transient retry policy, no-retry rule for trade/fill-check phases,
@@ -37,15 +41,15 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_run_all_notify.py", "test_run_all_optional.py",
-         "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_live_safety.py",
-         "test_paper_trade_math_audit.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
+         "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_live_safety.py", "test_fill_check_fractional.py",
+         "test_paper_trade_math_audit.py", "test_notifications.py", "test_rebalance_rules.py", "test_earnings_half_sell.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
          "test_strategy_health.py"]
 
 
 def main():
     fast = "--fast" in sys.argv
     env = dict(os.environ, PYTHONPATH=ROOT + os.pathsep + os.environ.get("PYTHONPATH", ""), PYTHONDONTWRITEBYTECODE="1",
-               PYTHONWARNINGS="ignore")
+               PYTHONWARNINGS="ignore", STOCK_ANALYSIS_NO_POPUPS="1")  # tests never pop real alerts
     results = []
     for t in TESTS:
         if fast and t in ("test_app.py", "test_dashboard_http.py"):

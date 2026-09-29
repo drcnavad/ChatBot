@@ -23,12 +23,15 @@ so the evening trade still runs on fresh signals. Only a main or validate failur
     python run_all.py --only main | --from scoring | --list | --backtests | --visualization | --keep-going
     python run_all.py --sync-live     # also refresh my_positions.csv from your Alpaca LIVE account (off by default)
     python run_all.py --trade         # after the pipeline, auto-trade the LIVE account (REAL MONEY) from the fresh signals
-                                      # (pulls live positions + equity; BUY only for buy-signal ('add')
-                                      #  symbols, sized Weight * equity in whole shares net of shares already
-                                      #  held - never above the weight, overweight trimmed with a SELL of the
-                                      #  excess; hold-signal symbols are never traded; sells = entire
-                                      #  position; sells sent before buys as extended-hours
-                                      #  DAY limit orders at the closing price; logs to
+                                      # (pulls live positions + equity; Friday rebalance brings every target
+                                      #  pick ('add' or 'hold') to Weight * equity - bought up or trimmed -
+                                      #  unless within 1 point of equity (no-trade band); no new buy / top-up
+                                      #  of a pick with earnings within 5 days; Mon/Wed = swaps/exits and the
+                                      #  earnings half-sell only; non-targets sold entirely; sells sent first,
+                                      #  then buys sized to the cash free after the sells (1% cushion) as
+                                      #  WHOLE-share extended-hours DAY limit orders at the closing price;
+                                      #  the rest (2 decimals) is completed by the next --fill-check (9 AM,
+                                      #  retried up to 3 trading days); logs to
                                       #  Reports/live_orders_log.csv). If the trade step runs at/after
                                       #  7:00 PM CT (extended hours over), nothing is submitted - the planned
                                       #  orders are staged for the next morning's --fill-check instead.
@@ -167,17 +170,29 @@ XLSX_COLUMNS = ["Symbol", "Sector", "CurrentPrice", "FairValue_Composite", "PE_R
 
 
 # ----------------------------------------------------------------------------- notifications
-def _notify(title, message):
+NO_POPUPS_ENV = "STOCK_ANALYSIS_NO_POPUPS"   # set to 1 to log alerts without macOS pop-ups (the tests do)
+
+
+def _clip(text, limit):
+    """Collapse whitespace and cut to `limit` characters (ending in an ellipsis). Pure."""
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "\u2026"
+
+
+def _notify(title, message, details=None):
     """Tell the user the pipeline needs attention (macOS notification + loud log line).
 
-    Best effort: the log line is the primary channel (it lands in Reports/logs/run_*.log
-    and the launchd logs); the macOS notification is attempted so the event is visible
-    even without checking logs. Never raises."""
-    logging.info("NOTIFY: %s - %s", title, message)
+    Pop-up: title <= 40 chars, body <= 200 (macOS cuts longer text); `details` and the
+    full text only go to the log. Best effort: the log line is the primary channel (it
+    lands in Reports/logs/run_*.log and the launchd logs). STOCK_ANALYSIS_NO_POPUPS=1
+    skips the pop-up (the tests set it). Never raises."""
+    logging.info("NOTIFY: %s - %s%s", title, message, f" | details: {details}" if details else "")
+    if os.environ.get(NO_POPUPS_ENV, "").strip() not in ("", "0"):
+        return
     try:
         import subprocess as _sp
-        safe_title = str(title).replace('"', "'").replace("\\", "")[:100]
-        safe_msg = str(message).replace('"', "'").replace("\\", "")[:300]
+        safe_title = _clip(title, 40).replace('"', "'").replace("\\", "")
+        safe_msg = _clip(message, 200).replace('"', "'").replace("\\", "")
         _sp.run(["osascript", "-e",
                  f'display notification "{safe_msg}" with title "{safe_title}" sound name "Basso"'],
                 timeout=5, capture_output=True)
@@ -402,6 +417,7 @@ def release_trade_lock(path=TRADE_LOCK):
 
 
 FILL_CHECK_AFTER = (9, 0)                # 9:00 AM CT - the morning fill check opens after this
+FILL_CHECK_RETRY_DAYS = 3                # leftovers are retried for this many trading days, then "stale"
 
 
 def next_trading_day_after(d):
@@ -414,9 +430,10 @@ def next_trading_day_after(d):
 
 def fill_check_allowed(now_ct, pending_path=None):
     """(allowed, reason, needs_investigation): the morning fill check completes the previous
-    evening's extended-hours orders. It runs once the next trading day after the evening
-    trade reaches 9:00 AM CT, and only while a pending fill check
-    (Reports/live_pending_orders.json) exists.
+    evening's extended-hours orders. It opens at 9:00 AM CT on the next trading day after the
+    evening trade and, if the Mac slept through that session, retries on each following
+    trading day - up to FILL_CHECK_RETRY_DAYS trading days - while a pending fill check
+    (Reports/live_pending_orders.json) exists. Older leftovers are "stale" (needs a human).
     needs_investigation is True when a human must look before re-running (corrupt file,
     invalid date, stale orders) - the caller must warn, notify, and exit nonzero.
     It is an explicit flag, not a substring of the reason, so rewording a message
@@ -459,11 +476,22 @@ def fill_check_allowed(now_ct, pending_path=None):
     if now_ct < earliest:
         return False, (f"fill check for the {evening:%a %b %d} evening run opens "
                        f"{earliest:%a %b %d} at 9:00 AM CT"), False
-    if now_ct.date() > d:
-        return False, (f"the pending fill check from the {evening:%a %b %d} evening run is stale (its window was "
-                       f"{d:%a %b %d}) - investigate Reports/live_pending_orders.json; stale orders are not replayed"), True
     if not is_trading_day(now_ct.date()):
         return False, f"{now_ct:%a %b %d} is a market holiday - the completion orders would not fill", False
+    # Staleness counts from the OLDEST leftover (rows kept from an earlier evening carry their date).
+    oldest = evening
+    for o in pend["orders"]:
+        try:
+            oldest = min(oldest, datetime.fromisoformat(str(o.get("evening_date"))).date())
+        except (AttributeError, ValueError, TypeError):
+            pass
+    last = next_trading_day_after(oldest)
+    for _ in range(FILL_CHECK_RETRY_DAYS - 1):
+        last = next_trading_day_after(last)
+    if now_ct.date() > last:
+        return False, (f"the pending fill check from the {oldest:%a %b %d} evening run is stale (retried through "
+                       f"{last:%a %b %d}, {FILL_CHECK_RETRY_DAYS} trading days) - investigate "
+                       f"Reports/live_pending_orders.json; stale orders are not replayed"), True
     return True, "ok", False
 
 
@@ -668,6 +696,7 @@ def main(argv=None):
                    help="morning fill check: complete the previous evening's unfilled extended-hours orders "
                         "with regular-hours market orders (no notebooks run; LIVE - real money)")
     p.add_argument("--now", help=argparse.SUPPRESS)          # tests: pretend it is this CT time ("2026-09-28 15:40")
+    p.add_argument("--no-resume", action="store_true", help="do not resume from a previous failed run's checkpoint")
     a = p.parse_args(argv)
     if a.full and a.quick:
         p.error("--full and --quick exclude each other")
@@ -712,6 +741,27 @@ def main(argv=None):
         if not ok:
             skip["fundamentals"] = reason
 
+    # Resume from checkpoint: if a previous run failed today at a critical step,
+    # skip the steps that already succeeded and restart from the failed step.
+    # This avoids re-running (and re-paying for) quota APIs after a transient failure.
+    # Never resumes from a trade-phase failure (money-adjacent); the watchdog handles those.
+    if _ckpt_on and not a.no_resume:
+        ckpt = read_checkpoint()
+        ckpt_failed = ckpt.get("failed_step")
+        if ckpt_failed and ckpt.get("phase") == "steps":
+            try:
+                ckpt_time = datetime.fromisoformat(ckpt.get("updated_at", ""))
+                ckpt_today = ckpt_time.date() == now.date()
+            except (ValueError, TypeError):
+                ckpt_today = False
+            ckpt_mode = ckpt.get("mode")
+            # Only resume same-day, same-mode checkpoints; stale or mismatched ones are ignored
+            # (the plan printout below lists each resumed step as "SKIP - resumed ...")
+            if ckpt_today and ckpt_mode == mode:
+                for done_name in ckpt.get("steps_done", []):
+                    if done_name not in skip:
+                        skip[done_name] = f"resumed - already completed in failed {ckpt_time:%I:%M %p} run"
+
     if a.dry_run:
         logging.basicConfig(level=logging.INFO, format="%(message)s", force=True, stream=sys.stdout)
         log_path = None
@@ -752,7 +802,13 @@ def main(argv=None):
         ok, reason, needs_investigation = fill_check_allowed(now)
         if not ok and needs_investigation:
             logging.warning("FILL CHECK: %s", reason)
-            _notify("Fill check needs attention", reason)
+            if "stale" in reason:
+                body = ("Leftover orders weren't finished within 3 trading days. Nothing was sent now (no "
+                        "money moved). Finish them in Alpaca, then delete Reports/live_pending_orders.json.")
+            else:
+                body = ("The 9 AM order list is damaged, so nothing was sent (no money moved). Check Alpaca, "
+                        "then clear the live_pending_orders files in Reports. Log: Reports/logs")
+            _notify("9 AM check needs you", body, details=reason)
             return 1
         if not ok:
             logging.info("FILL CHECK: %s - nothing to do", reason)
@@ -822,7 +878,7 @@ def main(argv=None):
         if rc != 0:
             failures.append(name)
             if kind == "notebook":
-                _notify(f"Notebook FAILED: {target}", _notebook_error_summary(out, target))
+                _notify(f"Notebook failed: {target.replace('.ipynb', '')}", _notebook_error_summary(out, target))
             else:
                 detail = "; ".join(problems) if problems else f"exit code {rc}"
                 _notify(f"Pipeline step FAILED: {name}", f"{target or 'report checks'} - {detail}")
@@ -844,7 +900,7 @@ def main(argv=None):
             sync_live(a.positions)
             live_synced = True
         except Exception as e:                              # missing keys / network: the rest of the run still counts
-            logging.warning("  paper account sync failed: %s", e)
+            logging.warning("  live account sync failed: %s", e)
             failures.append("sync_live")
 
     trade_results, trade_meta = None, None

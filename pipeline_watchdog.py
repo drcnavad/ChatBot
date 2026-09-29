@@ -251,8 +251,8 @@ def diagnose_with_llm(step, phase, log_tail, snapshot):
     if not provider:
         return None
     prompt = (
-        "You are diagnosing a failed step of an automated stock-analysis pipeline that paper-trades "
-        "stocks on Alpaca (paper account only). DIAGNOSE ONLY - do not apply anything.\n\n"
+        "You are diagnosing a failed step of an automated stock-analysis pipeline that trades "
+        "stocks on the Alpaca LIVE account (real money). DIAGNOSE ONLY - do not apply anything.\n\n"
         f"Failed step: {step} (phase: {phase})\n"
         f"Alpaca snapshot (read-only): {json.dumps(snapshot)[:1500]}\n\n"
         "Log tail (most recent lines first are the most relevant):\n"
@@ -318,9 +318,12 @@ def handle_failure(argv, tail, checkpoint):
         snapshot = alpaca_snapshot()
         diagnosis = diagnose_with_llm(step or phase, phase, tail, snapshot)
         report = write_diagnosis_report(step or phase, phase, diagnosis, tail, snapshot)
-        run_all._notify(f"Pipeline needs attention: {phase} failed",
-                        f"{(diagnosis or {}).get('diagnosis', 'see the run log')[:220]}"
-                        + (f" - report: {os.path.basename(report)}" if report else ""))
+        # Title keeps the phase name ("trade failed" / "fill-check failed").
+        run_all._notify(f"{phase} failed - check Alpaca",
+                        f"The {phase} run crashed; some orders may or may not have gone out. Open Alpaca "
+                        f"to see what filled. Not retried automatically. "
+                        + (f"Report: Reports/{os.path.basename(report)}" if report else "Log: Reports/logs"),
+                        details=(diagnosis or {}).get("diagnosis"))
         return 1
 
     kind, detail = classify_failure(tail)

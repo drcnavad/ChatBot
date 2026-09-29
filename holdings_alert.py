@@ -196,6 +196,16 @@ def T(sym):
 
 
 # ----------------------------------------------------------------------------- build the alert (list of plain-text segments; tickers become links in the app)
+def earnings_trims(midweek_csv, d):
+    """[(symbol, fraction)] the strategy's earnings half-sell (Action TRIM) called for at the check on day d."""
+    try:
+        m = pd.read_csv(midweek_csv)
+        m = m[(m["Action"] == "TRIM") & (pd.to_datetime(m["Event_Date"]) == pd.Timestamp(d))]
+        return [(str(r.Sell), float(r.Sell_Fraction)) for r in m.itertuples()]
+    except Exception:
+        return []
+
+
 def build_alert(sig=None, positions_path=None, use_positions=True, now=None, midweek_csv=MIDWEEK_CSV):
     """One plain line per action (list of segments: str or ("ticker", SYM)) + level / source / data date.
 
@@ -289,6 +299,10 @@ def build_alert(sig=None, positions_path=None, use_positions=True, now=None, mid
             lines.append(pair_line(f"Swap at the {_day(fill)} open: ", swaps, dday, ", same dollar amount."))
         if exits:
             lines.append(["Sell "] + sells_seg(exits, dday) + [f" at the {_day(fill)} open, hold cash until {cash_until(D)}."])
+        for sym, frac in earnings_trims(midweek_csv, D):      # earnings half-sell (once per earnings event)
+            lines.append([f"Sell {frac:.0%} of ", ("ticker", sym),
+                          f" at the {_day(fill)} open (earnings within {be.WINNER['earnings_block_days']} days), "
+                          f"hold cash until {cash_until(D)}."])
         if lines:
             out.update(level="red", lines=lines)
         else:

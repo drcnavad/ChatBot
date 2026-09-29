@@ -20,6 +20,7 @@ Run: cd <folder> && python3 tests/test_paper_trade_live_safety.py
 import json
 import math
 import os
+os.environ.setdefault("STOCK_ANALYSIS_NO_POPUPS", "1")  # never pop real macOS alerts from tests
 import sys
 import tempfile
 import types
@@ -129,6 +130,7 @@ class FakeClient:
     def get_order(self, oid): return self.orders_by_id[oid]
     def cancel_order(self, oid): self.canceled.append(oid)
     def get_orders(self, req): return list(self.orders_list)
+    def get_clock(self): return types.SimpleNamespace(is_open=True)
 
 
 def fake_orders_df():
@@ -217,7 +219,7 @@ patch_live(monkey,
            get_live_positions_and_equity=lambda: ({"AAA": 10}, 100000.0, 50000.0, 50000.0),
            _past_evening_cutoff=lambda: True,
            plan_orders=lambda *a, **k: (fake_orders_df(), {"source": "auto", "as_of": "2026-09-28"}, pd.DataFrame()),
-           apply_buying_power_guard=lambda o, bp: o,
+           apply_buying_power_guard=lambda o, bp, **k: o,
            _todays_recorded_orders=lambda *a, **k: set())
 orig_pend, orig_log = paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV
 paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV = pend, log
@@ -279,7 +281,7 @@ check("morning: logged to LIVE csv", os.path.exists(log))
 # ------------------------------------------------- 8: crash recovery (no duplicate)
 tmp = tempfile.mkdtemp()
 pend, log = os.path.join(tmp, "live_pending_orders.json"), os.path.join(tmp, "live_orders_log.csv")
-prior = FakeOrder(id="morn-1", status="accepted", filled_qty=6, client_order_id="live-fill-20260929-SELL-AAA-6-10000")
+prior = FakeOrder(id="morn-1", status="accepted", filled_qty=6, client_order_id="live-fill-20260928-SELL-AAA-6-10000")
 eve = {"evening_date": "2026-09-28", "submitted_at_ct": "2026-09-28 16:00:00",
        "target_source": "auto", "as_of": "2026-09-28", "orders": [
     {"symbol": "AAA", "side": "SELL", "qty": 10, "limit_price": 100.0, "order_id": "eve-1"},
@@ -292,7 +294,7 @@ fc = FakeClient(positions={"AAA": 10},
 monkey = []
 patch_live(monkey, paper_trading_client=lambda: fc,
            _wait_terminal=lambda c, oid, **k: True,
-           _broker_orders_by_client_id=lambda c: {"live-fill-20260929-SELL-AAA-6-10000": prior},
+           _broker_orders_by_client_id=lambda c: {"live-fill-20260928-SELL-AAA-6-10000": prior},
            _today_ct=lambda: __import__("datetime").datetime(2026, 9, 29, 10, 0,
                         tzinfo=__import__("zoneinfo").ZoneInfo("America/Chicago")))
 orig_pend, orig_log = paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV
@@ -434,10 +436,15 @@ def _morning_bp_case(bp, price, qty, expect_submit):
     for k, v in monkey.pop().items(): setattr(paper_trade, k, v)
     return res, fc, pend
 
-res, fc, pend = _morning_bp_case(100.0, 50.0, 5, False)  # need ~$262.50, have $100
-check("morning: insufficient BP -> not submitted", len(fc.submitted) == 0)
-check("morning: insufficient BP -> kept for retry", os.path.exists(pend))
-check("morning: insufficient BP -> SKIP status", res.iloc[0]["Status"].startswith("SKIP"), res.iloc[0]["Status"])
+res, fc, pend = _morning_bp_case(100.0, 50.0, 5, False)  # need ~$252.50 (1% cushion), have $100
+check("morning: short on cash -> buys the part that fits (100 / 50.50 = 1.98)",
+      [getattr(o, "qty", None) for o in fc.submitted] == [1.98], [getattr(o, "qty", None) for o in fc.submitted])
+check("morning: short on cash -> partial noted, row done", "only 1.98 of 5 fit" in res.iloc[0]["Status"]
+      and not os.path.exists(pend), res.iloc[0]["Status"])
+res, fc, pend = _morning_bp_case(0.5, 50.0, 5, False)  # not even $1 free
+check("morning: no cash -> nothing sent", len(fc.submitted) == 0)
+check("morning: no cash -> NO FILL, not retried", res.iloc[0]["Status"].startswith("NO FILL")
+      and not os.path.exists(pend), res.iloc[0]["Status"])
 
 res, fc, pend = _morning_bp_case(100000.0, 50.0, 5, True)  # plenty
 check("morning: sufficient BP -> submitted", len(fc.submitted) == 1)
