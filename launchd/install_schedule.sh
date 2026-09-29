@@ -30,4 +30,5 @@ done
 
 echo
 echo "To wake the Mac for the 3:15 PM run, paste this once in Terminal (asks for your password):"
-echo "  sudo pmset repeat wakeorpoweron MTWRF 15:05:00"
+echo "  sudo pmset repeat wakeorpoweron MTWRF 15:16:00"
+echo "(1 minute after the slot on purpose: launchd runs the missed 3:15 job right on wake, before the Mac can doze off again)"
