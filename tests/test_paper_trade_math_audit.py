@@ -318,7 +318,7 @@ def test_morning_buy_no_price_dropped_not_retried():
         fake = FakeClient()
         orig = _use_fake(fake)
         try:
-            res = paper_trade.complete_unfilled_orders(pending_path=pp, log_csv=None, dry_run=False)
+            res = paper_trade.complete_unfilled_orders(pending_path=pp, log_csv=None)
         finally:
             paper_trade.paper_trading_client = orig
         check(fake.submitted == [], "morning: BUY with no price is never submitted")
@@ -344,7 +344,7 @@ def test_morning_sells_complete_before_buys():
             lambda client, ids, **kw: wait_calls.append(list(ids)) or {})
         orig = _use_fake(fake)
         try:
-            paper_trade.complete_unfilled_orders(pending_path=pp, log_csv=None, dry_run=False)
+            paper_trade.complete_unfilled_orders(pending_path=pp, log_csv=None)
         finally:
             paper_trade.paper_trading_client = orig
             paper_trade._wait_for_terminal_all = orig_wait
@@ -368,7 +368,7 @@ def test_morning_buy_cumulative_cash_reserved():
         fake.buying_power = 10000.0  # cash defaults to buying_power in the fake
         orig = _use_fake(fake)
         try:
-            paper_trade.complete_unfilled_orders(pending_path=pp, log_csv=None, dry_run=False)
+            paper_trade.complete_unfilled_orders(pending_path=pp, log_csv=None)
         finally:
             paper_trade.paper_trading_client = orig
         got = [(r.symbol, r.qty) for r in fake.submitted]
@@ -389,7 +389,7 @@ def test_morning_malformed_row_dropped():
         fake.positions = [("BBB", 5)]
         orig = _use_fake(fake)
         try:
-            res = paper_trade.complete_unfilled_orders(pending_path=pp, log_csv=None, dry_run=False)
+            res = paper_trade.complete_unfilled_orders(pending_path=pp, log_csv=None)
         finally:
             paper_trade.paper_trading_client = orig
         check(any("FAILED: malformed" in s for s in res["Status"]),

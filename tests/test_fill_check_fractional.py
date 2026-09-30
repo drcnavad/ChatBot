@@ -141,7 +141,7 @@ def write_pending(rows, evening_date="2026-10-02"):
 
 def run(broker, path):
     pt.paper_trading_client = lambda: broker
-    return pt.complete_unfilled_orders(pending_path=path, log_csv=None, dry_run=False)
+    return pt.complete_unfilled_orders(pending_path=path, log_csv=None)
 
 
 def status_of(res, sym):

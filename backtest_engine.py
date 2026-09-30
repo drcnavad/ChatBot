@@ -513,7 +513,7 @@ def fi_signals_strict(df, lookback=3, min_fi=2):
     df = df.drop(columns=["fi_direction", "fi_streak"], errors='ignore')
     return df
 
-def bollinger_signal_middle(df, bb_window=BB_WINDOW, rsi_col='rsi', close_col='Close', ma_period=20, ticker_col='Symbol'):
+def bollinger_signal_middle(df, bb_window=BB_WINDOW, rsi_col='rsi', close_col='Close', ticker_col='Symbol'):
     """
     Generates BB+RSI signals using middle band as trend filter.
     Now also detects oversold conditions when price is at/below lower Bollinger band.
@@ -750,7 +750,7 @@ def _peer_median(r, symbols, sector_of, min_peers=3, leave_one_out=True):
     return pd.DataFrame(out, index=r.index)[symbols]
 
 
-def relative_strength(close_w, symbols=None, vol_adjust=False, benchmark=None):
+def relative_strength(close_w, symbols=None, benchmark=None):
     """Point-in-time relative strength, all -100..100 cross-sectional scores.
 
     benchmark (default WINNER['rs_benchmark'], live = 'etf'):
@@ -770,7 +770,6 @@ def relative_strength(close_w, symbols=None, vol_adjust=False, benchmark=None):
     assert benchmark in ("etf", "sector_median", "median_all"), benchmark
     etf_of = {s: sector_mapping.sector_etf_for(s) for s in symbols}
     parts_sv, parts_ss = [], []
-    daily = close_w.pct_change(fill_method=None) if vol_adjust else None
     for w in RS_WINDOWS:
         r = close_w / close_w.shift(w) - 1
         stock = r[symbols]
@@ -787,11 +786,6 @@ def relative_strength(close_w, symbols=None, vol_adjust=False, benchmark=None):
                 sec_all = _peer_median(r, symbols, sec_of, leave_one_out=False)
                 univ_med = stock.median(axis=1, skipna=True)
                 ss = sec_all.sub(univ_med, axis=0).fillna(sector.sub(r["SPY"], axis=0))
-        if vol_adjust:  # excess return per unit of the stock's own volatility over the same window
-            vol = (daily.rolling(w, min_periods=max(10, w // 2)).std() * np.sqrt(w)).replace(0, np.nan)
-            sv = sv / vol[symbols]
-            sec_vol = pd.DataFrame({s: vol[etf_of[s]] if etf_of[s] in vol else vol["SPY"] for s in symbols})
-            ss = ss / sec_vol
         parts_sv.append(sv.rank(axis=1, pct=True))
         parts_ss.append(ss.rank(axis=1, pct=True))
     pct = (RS_WEIGHTS["stock_vs_sector"] * sum(parts_sv) / len(parts_sv)

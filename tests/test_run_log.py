@@ -121,11 +121,11 @@ check("queued-only row: nothing sent, no money moved", moved == "no" and m.start
 # ------------------------------------------------------------------ fill check: nothing pending -> no row
 ROWS.clear()
 missing = os.path.join(tempfile.mkdtemp(), "live_pending_orders.json")
-r = pt.complete_unfilled_orders(pending_path=missing, log_csv=None, dry_run=False)
+r = pt.complete_unfilled_orders(pending_path=missing, log_csv=None)
 check("nothing pending: no row at all", r.empty and not ROWS, ROWS)
 empty = os.path.join(tempfile.mkdtemp(), "live_pending_orders.json")
 json.dump({"evening_date": "2026-10-02", "orders": []}, open(empty, "w"))
-r = pt.complete_unfilled_orders(pending_path=empty, log_csv=None, dry_run=False)
+r = pt.complete_unfilled_orders(pending_path=empty, log_csv=None)
 check("empty order list: no row at all", r.empty and not ROWS, ROWS)
 
 # ------------------------------------------------------------------ holdings check (reconcile)
@@ -179,7 +179,7 @@ def morning(held, reconcile_ok=True):
         open(p, "w"))
     ROWS.clear()
     with redirect_stdout(io.StringIO()):
-        pt.complete_unfilled_orders(pending_path=p, log_csv=None, dry_run=False)
+        pt.complete_unfilled_orders(pending_path=p, log_csv=None)
     return list(ROWS)
 
 

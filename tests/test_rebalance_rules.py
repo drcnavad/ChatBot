@@ -159,7 +159,7 @@ def pending(rows, evening_date="2026-10-02"):
 def morning(b, p):
     pt.paper_trading_client = lambda: b
     pt.reconcile_positions = lambda *a, **k: (pd.DataFrame(), True)
-    return pt.complete_unfilled_orders(pending_path=p, log_csv=None, dry_run=False)
+    return pt.complete_unfilled_orders(pending_path=p, log_csv=None)
 
 
 rows = [{"symbol": s, "side": "BUY", "qty": q, "limit_price": PRICES[s], "order_id": None}

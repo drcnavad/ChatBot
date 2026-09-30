@@ -89,7 +89,6 @@ class PaperAccount:
             secret_key = secret_key if secret_key is not None else env_secret
         if not key_id or not secret_key:
             raise PaperAccountError(note if "missing" in note else f"{KEY_ENV} / {SECRET_ENV} are missing or empty in .env")
-        self.key_source = note
         self._headers = {"APCA-API-KEY-ID": key_id, "APCA-API-SECRET-KEY": secret_key, "Accept": "application/json"}
         self.timeout = timeout
 

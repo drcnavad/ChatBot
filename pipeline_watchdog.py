@@ -35,8 +35,8 @@ project's .env file (loaded automatically) or the environment:
     ANTHROPIC_API_KEY=...   # console.anthropic.com - paid
 
   The first key found wins (Gemini > Groq > Anthropic). Without any key the watchdog
-  still retries transient failures; it just skips the LLM diagnosis and notifies with
-  the raw log excerpt instead. Model: LLM_PROVIDERS below (config, no key needed to change it)
+  still retries transient failures; it just skips the LLM diagnosis and writes the run-log row
+  and a report with the raw log excerpt instead. Model: LLM_PROVIDERS below (config, no key needed to change it)
   or the PIPELINE_LLM_MODEL environment variable. Gemini uses Google's "gemini-flash-latest"
   alias (it moves to the newest Flash model, so a model shutdown can't break it again - the
   old gemini-2.0-flash was shut down on 2026-06-01 and returned HTTP 404); on a 404 the next
@@ -45,9 +45,8 @@ project's .env file (loaded automatically) or the environment:
   Diagnose-only contract: the LLM explains the failure and proposes a fix for human
   review. It is never applied automatically.
 
-"Continuous" monitoring: the pipeline only runs on its schedule (launchd), so the watchdog
-rides along with each scheduled run - between runs the pipeline is idle and there is nothing
-to watch. To use it, point the launchd jobs at pipeline_watchdog.py instead of run_all.py.
+The launchd jobs (launchd/*.plist) run pipeline_watchdog.py, so it rides along with each scheduled run -
+between runs the pipeline is idle and there is nothing to watch.
 """
 import collections
 import json
@@ -104,7 +103,7 @@ def _llm_provider():
             return provider, (override or default_model), key
     return None, None, None
 
-# Phases where money moves (or may have moved): never auto-retry, diagnose + notify only.
+# Phases where money moves (or may have moved): never auto-retry, diagnose + run-log row only.
 NO_RETRY_PHASES = ("trade", "fill-check")
 
 # Upstream file -> the STEPS entry that produces it (for the missing-file resume).
@@ -319,7 +318,7 @@ def write_diagnosis_report(step, phase, diagnosis, log_tail, snapshot):
     return path
 
 
-def handle_failure(argv, tail, checkpoint):
+def handle_failure(tail, checkpoint):
     """A run failed: retry what is safe, diagnose the rest. Returns the process exit code."""
     phase = checkpoint.get("phase", "steps") if checkpoint else "steps"
     step = resume_step(checkpoint)
@@ -330,7 +329,6 @@ def handle_failure(argv, tail, checkpoint):
         snapshot = alpaca_snapshot()
         diagnosis = diagnose_with_llm(step or phase, phase, tail, snapshot)
         report = write_diagnosis_report(step or phase, phase, diagnosis, tail, snapshot)
-        # Title keeps the phase name ("trade failed" / "fill-check failed").
         run_all.log_event("Watchdog", "failed", "unknown",
                           f"The {phase} run crashed; some orders may have gone out - check Alpaca > Orders. "
                           f"Sent orders are saved and never sent twice; the scheduled job retries the rest. "
@@ -379,7 +377,7 @@ def main(argv=None):
             log("run_all reported the problem itself (exit %d) - no retry, no second row", rc)
             return 1
         checkpoint = run_all.read_checkpoint()
-        action = handle_failure(args, tail, checkpoint)
+        action = handle_failure(tail, checkpoint)
         if action == 1:
             return 1
         kind, target = action

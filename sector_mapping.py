@@ -486,11 +486,6 @@ fundamentals_watchlist = [
 ]
 
 
-def fundamentals_symbols():
-    """Sorted, de-duplicated fundamentals universe: watchlist + every tradable stock."""
-    return sorted(set(fundamentals_watchlist) | set(tradable_symbols))
-
-
 def sector_etf_for(symbol):
     """SPDR sector ETF ticker for a symbol (None when the sector has no ETF, e.g. 'Commodities')."""
     by_name = {name: etf for etf, name in sector_etfs.items()}
@@ -503,15 +498,6 @@ stock_sector_df = pd.DataFrame(stock_symbols, columns=['Symbol'])
 # Add Sector and Company Name columns
 stock_sector_df["Sector"] = stock_sector_df["Symbol"].map(symbol_sector)
 stock_sector_df["Company Name"] = stock_sector_df["Symbol"].map(symbol_name)
-
-# sector_map = {
-#     "Consumer Cyclical": "Consumer Discretionary",
-#     "Consumer Defensive": "Consumer Staples",
-#     "Information Technology": "Technology",
-#     "Healthcare": "Health Care"
-# }
-
-# stock_sector_df["Sector"] = stock_sector_df["Sector"].replace(sector_map)
 
 if __name__ == "__main__":
     print(stock_sector_df)

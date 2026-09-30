@@ -38,14 +38,14 @@ so the evening trade still runs on fresh signals. Only a main or validate failur
                                       #    15 min before the close) with the missed decision's own picks, sized at current
                                       #    prices, sent at once as regular-hours market orders (2 decimals); evenings,
                                       #    nights, weekends and holidays wait for the next session;
-                                      #  - superseded (skipped, logged, alert) once the next decision slot arrives.
+                                      #  - superseded (skipped, one Reports/run_log.csv row) once the next decision slot arrives.
     python run_all.py --trade --scheduled   # what launchd runs (see launchd/; at 3:15 PM, login, wake and every 30 min):
                                       # like --trade, but a start with nothing due prints one "idle:" line (no log, no
-                                      # alert), and a failed decision is retried at most 3 times, 60+ min apart.
+                                      # run-log row), and a failed decision is retried at most 3 times, 60+ min apart.
     python run_all.py --fill-check    # send the pending orders (Reports/live_pending_orders.json) as regular-hours market
                                       # orders: the evening's unfilled rest from 9:00 AM CT the next trading day, a
                                       # daytime catch-up's at once; only in regular hours and only until the next decision
-                                      # slot (then dropped with an alert). Runs no notebooks, uses no quota APIs.
+                                      # slot (then dropped, with a run-log row). Runs no notebooks, uses no quota APIs.
                                       # --scheduled: idle starts print one "idle:" line.
 
 State: Reports/run_state.json - the runner's memory (all values are ISO timestamps unless noted; merged under a file lock):
@@ -56,7 +56,8 @@ State: Reports/run_state.json - the runner's memory (all values are ISO timestam
     last_decision .................. date of the last decision traded (orders placed/staged, or nothing to trade) -
                                      it never runs again
     decision_attempts .............. {decision, n, at}: launchd attempts of a decision that failed before trading
-    last_superseded ................ last missed decision reported as skipped (alert sent once)
+    last_superseded ................ last missed decision reported as skipped (run-log row written once)
+    fill_problem_logged_on ......... date a failed fill check was last written to the run log (once a day)
     last_trade_at .................. last --trade that actually submitted or staged orders
     last_fill_check_at ............. last fill check that sent orders
     last_run_at / last_mode ......... last invocation (any mode)
@@ -549,11 +550,11 @@ def fill_check_allowed(now_ct, pending_path=None):
     whose decision was superseded (the next decision slot passed) are dropped before this check by
     paper_trade.drop_superseded_orders, so nothing old is ever replayed.
     needs_investigation is True when a human must look before re-running (corrupt file, invalid date) - the caller
-    must warn, notify, and exit nonzero. It is an explicit flag, not a substring of the reason, so rewording a message
+    must warn, write a run-log row, and exit nonzero. It is an explicit flag, not a substring of the reason, so rewording a message
     cannot silently downgrade the safety behavior."""
     import paper_trade
     path = pending_path or paper_trade.PENDING_ORDERS_JSON
-    # A corrupt backup from an earlier run must re-alert until it is investigated and removed: the first run moved it
+    # A corrupt backup from an earlier run must keep being reported until it is investigated and removed: the first run moved it
     # aside and exited nonzero, but without this check the next run would see "no pending file" and exit 0, silently
     # orphaning the evening's orders.
     leftovers = sorted(glob.glob(path + ".corrupt_*"))
@@ -595,7 +596,7 @@ def fill_check_allowed(now_ct, pending_path=None):
 
 
 def fill_check_idle(now_ct):
-    """Plain reason when a scheduled fill check has nothing to do now (then it writes no log and sends no alert),
+    """Plain reason when a scheduled fill check has nothing to do now (then it writes no log and no run-log row),
     else None (orders to send, superseded rows to drop, or a problem to report)."""
     import paper_trade
     if paper_trade.superseded_orders(now_ct):
@@ -704,7 +705,7 @@ def validate():
     return problems
 
 
-def wait_for_final_bar(mode, dry_run=False):
+def wait_for_final_bar(mode):
     """Full mode on a decision day: the decision needs today's completed daily bar (final after 4:30 PM ET)."""
     now = datetime.now(ET)
     ready = now.replace(hour=BAR_FINAL_ET[0], minute=BAR_FINAL_ET[1] + 1, second=0, microsecond=0)
@@ -714,8 +715,7 @@ def wait_for_final_bar(mode, dry_run=False):
     if wait > 20 * 60:
         return
     logging.info("  waiting %.0f min for today's final daily bar (after 4:30 PM ET = 3:30 PM CT) ...", wait / 60)
-    if not dry_run:
-        time.sleep(wait)
+    time.sleep(wait)
 
 
 def data_summary():
@@ -750,7 +750,7 @@ def sync_live(positions_path=None):
 
 
 def plan_steps(a, mode):
-    """The steps to run for this mode and the command-line filters (--only / --skip)."""
+    """The steps to run for this mode and the command-line filters (--only / --from / opt-in flags)."""
     names = [s[0] for s in STEPS]
     sel = []
     for i, step in enumerate(STEPS):
@@ -840,7 +840,7 @@ def main(argv=None):
         if _ckpt_on:
             clear_checkpoint()
 
-    def clock():                                            # the run's clock (= real time unless --now is given)
+    def clock():
         """The run's clock as ISO text (= real time unless --now is given)."""
         return (now + timedelta(seconds=time.time() - t_wall)).isoformat(timespec="seconds")
     state = load_state()
@@ -916,7 +916,7 @@ def main(argv=None):
         logging.info("  %-13s %s", "fill-check", "paper_trade.complete_unfilled_orders  [Alpaca LIVE (REAL MONEY): completes unfilled evening orders]")
     if a.trade:
         if gone is not None:
-            logging.info("SUPERSEDED: the %s decision never ran and its window closed - skipped (logged + alert)", gone.date())
+            logging.info("SUPERSEDED: the %s decision never ran and its window closed - skipped (run-log row)", gone.date())
         logging.info("TRADE: %s%s", {"evening": "due - ", "session": "due now - "}.get(how, "nothing to do - "), gate_why)
         if how not in ("evening", "session"):
             return 0
@@ -966,15 +966,15 @@ def report_superseded(prev, now_ct):
 def _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, clock, scheduled=False):
     """The --fill-check phase (under the fill-check lock). Returns the exit code."""
     import paper_trade
-    paper_trade.drop_superseded_orders(now)               # a newer decision replaced them: never sent (alerted)
+    paper_trade.drop_superseded_orders(now)               # a newer decision replaced them: never sent (run-log row)
     ok, reason, needs_investigation = fill_check_allowed(now)
     if not ok and needs_investigation:
         logging.warning("FILL CHECK: %s", reason)
-        if scheduled and state.get("fill_alert_on") == now.date().isoformat():
+        if scheduled and state.get("fill_problem_logged_on") == now.date().isoformat():
             return 1                                      # already logged today (launchd runs every 30 min)
         log_event("Fill check", "failed", "no", "The pending order list is damaged, so nothing was sent (no money "
                   "moved). Check Alpaca, then clear the live_pending_orders files in Reports. Log: Reports/logs", reason)
-        state.update(update_state(fill_alert_on=now.date().isoformat()))
+        state.update(update_state(fill_problem_logged_on=now.date().isoformat()))
         return 1
     if not ok:
         logging.info("FILL CHECK: %s - nothing to do", reason)
@@ -982,8 +982,7 @@ def _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, cl
     logging.info("=== fill-check (paper_trade.complete_unfilled_orders, LIVE - real money)")
     ckpt_write(run_id, saved_argv, mode, [], phase="fill-check")
     try:
-        import paper_trade
-        results = paper_trade.complete_unfilled_orders(dry_run=False)
+        results = paper_trade.complete_unfilled_orders()
         if results.empty:
             logging.info("  fill check: no pending orders")
         else:
@@ -992,18 +991,18 @@ def _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, cl
         state.update(update_state(last_fill_check_at=clock()))
     except Exception as e:                                # Alpaca/network down: the pending list is kept, nothing duplicated
         logging.warning("  fill check failed: %s", e)
-        if state.get("fill_alert_on") != now.date().isoformat():
+        if state.get("fill_problem_logged_on") != now.date().isoformat():
             log_event("Fill check", "failed", "no", "Couldn't reach Alpaca to finish the pending orders. Orders already "
                       "sent are saved and never sent twice; the rest waits. It tries again every 30 min in market hours - "
                       "nothing to do unless this keeps coming back. Log: Reports/logs", str(e))
-            state.update(update_state(fill_alert_on=now.date().isoformat()))
+            state.update(update_state(fill_problem_logged_on=now.date().isoformat()))
         ckpt_clear()
         return EXIT_REPORTED
     ckpt_clear()                                          # clean fill check - nothing to resume
     return 0
 
 
-def _trade(a, D, how, failures, state, clock, ckpt):
+def _trade(D, how, failures, state, clock, ckpt):
     """The --trade phase for decision D (under the trade lock). how = 'evening' (extended-hours limit orders, completed
     by the 9 AM check) or 'session' (a missed decision caught up in regular hours: orders staged, then sent at once as
     market orders under the fill-check lock). D is marked done (run_state last_decision) as soon as auto_trade returns,
@@ -1026,7 +1025,7 @@ def _trade(a, D, how, failures, state, clock, ckpt):
         return None, None
     try:
         try:
-            _orders, meta, results = paper_trade.auto_trade(target="auto", dry_run=False, decision=D, session=session)
+            _orders, meta, results = paper_trade.auto_trade(target="auto", decision=D, session=session)
         except Exception as e:
             logging.warning("  trade failed: %s", e)
             failures.append("trade")
@@ -1044,7 +1043,7 @@ def _trade(a, D, how, failures, state, clock, ckpt):
         if session and n_sent:
             logging.info("=== send now (paper_trade.complete_unfilled_orders: regular-hours market orders, 2 decimals)")
             try:
-                meta["sent_now"] = paper_trade.complete_unfilled_orders(dry_run=False)
+                meta["sent_now"] = paper_trade.complete_unfilled_orders()
                 for r in meta["sent_now"].itertuples():
                     logging.info("  %s %-6s %s shares -> %s", r.Side, r.Symbol, r.Shares, r.Status)
                 state.update(update_state(last_fill_check_at=clock()))
@@ -1139,7 +1138,7 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
     trade_results, trade_meta = None, None
     if a.trade:
         try:
-            trade_results, trade_meta = _trade(a, D, how, failures, state, clock, lambda: ckpt_write(
+            trade_results, trade_meta = _trade(D, how, failures, state, clock, lambda: ckpt_write(
                 run_id, saved_argv, mode, [n for n, ok, _ in ran if ok], phase="trade"))
         finally:
             release_trade_lock()

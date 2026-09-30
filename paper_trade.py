@@ -15,10 +15,10 @@ In submit mode the LIVE account's equity (unless --account-size is given) and po
 sells are sent before buys as DAY market orders (whole shares).
 
 Auto mode (used by run_all.py --trade): auto_trade() pulls LIVE positions + equity +
-cash, then plans with target="auto" (buys = Weight * equity, whole shares, capped at
+cash, then plans with target="auto" (buys = Weight * equity, 2-decimal shares, capped at
 Alpaca buying power - margin is disabled so buying power equals cash in practice; sells = the exact shares held, and only for stocks
-actually in the portfolio), and submits as extended-hours DAY limit orders at the planned
-closing price, so they can fill in the after-hours session. Before planning, the signal
+actually in the portfolio), and submits whole shares as extended-hours DAY limit orders at the planned
+closing price, so they can fill in the after-hours session (the fractional rest goes out at 9 AM). Before planning, the signal
 CSVs are verified fresh (as of today, CT; for a missed decision caught up later, as of the last complete session and
 not older than that decision) - stale data aborts the trade. A catch-up in regular hours stages its orders (send_now)
 and run_all sends them at once as market orders. Submitted orders are recorded
@@ -42,7 +42,7 @@ Targets come from Reports/strategy_picks.csv (written by main_signal_analysis.ip
   - `auto` (default) = provisional on a rebalance day (the decision day itself); midweek when the latest bar is a Mon/Wed
                     check that produced a swap or an exit; hold on a quiet mid-week day (no swap/exit at the
                     latest check) - every position is left unchanged, matching the backtest (no drift
-                    rebalance, and cash from a mid-week exit stays idle until Friday); otherwise current.
+                    rebalance, and cash from a mid-week exit stays idle until Friday).
 Earnings rule (backtest_engine.WINNER["earnings_block_days"] = 5): the targets leave out stocks not held with earnings
 within 5 calendar days. The live planner adds its own check for the LIVE account: a pick with earnings within 5 days is
 not newly bought or topped up (a held stock is never sold because of earnings).
@@ -78,7 +78,7 @@ from run_all import log_event                # noqa: E402  one plain row per eve
 
 
 def _fmt_shares(q):
-    """'4', '0.82', '1.05' - share counts for alerts (2 decimals max). Pure."""
+    """'4', '0.82', '1.05' - share counts for the run log (2 decimals max). Pure."""
     try:
         v = float(q)
     except (TypeError, ValueError):
@@ -765,7 +765,7 @@ def submit_paper_extended(orders, positions=None, record=None, client=None, orde
     entry dict(symbol, side, qty, limit_price, order_id) so the caller can persist it
     incrementally (a retry then skips already-submitted rows instead of duplicating them).
     Every submitted order carries a deterministic `client_order_id`
-    (pa-YYYYMMDD-SIDE-SYMBOL-qty-pricecents, via _client_order_id): a crash between the
+    (live-YYYYMMDD-SIDE-SYMBOL-qty-pricecents, via _client_order_id): a crash between the
     broker submit and the local record cannot duplicate the order on retry - the retry
     reconciles with the broker (see _evening_submitted_on_broker).
     `client`, when given, is the Alpaca client to use (otherwise one is created);
@@ -884,6 +884,7 @@ def _evening_submitted_on_broker(client, date_str):
 
 SELL_SETTLE_WAIT_SECS = 120  # bounded wait for evening SELL fills before sizing/submitting BUYs
 SELL_SETTLE_POLL_SECS = 10
+TERMINAL_STATUSES = {"filled", "canceled", "cancelled", "expired", "rejected", "done_for_day"}
 
 
 def _wait_for_terminal_all(client, order_ids, timeout_secs=SELL_SETTLE_WAIT_SECS,
@@ -895,7 +896,6 @@ def _wait_for_terminal_all(client, order_ids, timeout_secs=SELL_SETTLE_WAIT_SECS
     """
     import time
 
-    terminal = {"filled", "canceled", "cancelled", "expired", "rejected", "done_for_day"}
     state, remaining = {}, list(dict.fromkeys(order_ids))
     deadline = time.time() + timeout_secs
     while remaining:
@@ -910,7 +910,7 @@ def _wait_for_terminal_all(client, order_ids, timeout_secs=SELL_SETTLE_WAIT_SECS
                 except (TypeError, ValueError):
                     fq = 0.0
                 state[oid] = (st, fq)
-                if st not in terminal:
+                if st not in TERMINAL_STATUSES:
                     still.append(oid)
             except Exception:
                 state[oid] = ("gone", 0.0)  # gone from the broker - treat as terminal
@@ -1035,9 +1035,6 @@ def _morning_completion_plan(broker_by_cid, sym, side, qty, price, date_str):
     return cid, (qty if covered == 0 else _floor2(qty - covered)), None
 
 
-TERMINAL_STATUSES = {"filled", "canceled", "cancelled", "expired", "rejected", "done_for_day"}
-
-
 def _symbol_state(client, sym):
     """(shares held, [open orders]) for one symbol, read fresh from the broker right before
     a morning order; (None, None) when either read fails (the caller fails closed)."""
@@ -1056,39 +1053,6 @@ def _symbol_state(client, sym):
         return None, None
     return held, open_orders
 
-
-def write_pending_orders(pending_orders, meta, pending_path=PENDING_ORDERS_JSON):
-    """Record successfully submitted evening orders for the morning fill check (atomic write).
-
-    If a previous pending file still holds unprocessed orders, it is backed up to
-    <pending_path>.bak_<timestamp> (never silently overwritten) and a warning is printed.
-    Returns the backup path, or None when there was nothing to back up.
-    """
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    now_ct = datetime.now(ZoneInfo("America/Chicago"))
-    backup = None
-    if os.path.exists(pending_path):
-        try:
-            existing = json.load(open(pending_path)).get("orders", [])
-        except Exception:
-            existing = []
-        if existing:
-            backup = f"{pending_path}.bak_{now_ct.strftime('%Y%m%d_%H%M%S')}"
-            os.replace(pending_path, backup)
-            print(f"WARNING: {pending_path} still held {len(existing)} unprocessed order(s) - "
-                  f"backed up to {backup}; review it manually, it was NOT merged.")
-    payload = {"evening_date": now_ct.date().isoformat(),
-               "submitted_at_ct": now_ct.strftime("%Y-%m-%d %H:%M:%S"),
-               "target_source": meta.get("source"), "as_of": meta.get("as_of"),
-               "orders": pending_orders}
-    os.makedirs(os.path.dirname(pending_path), exist_ok=True)
-    tmp = pending_path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(payload, f, indent=1)
-    os.replace(tmp, pending_path)
-    return backup
 
 
 def _today_ct():
@@ -1196,7 +1160,7 @@ def superseded_orders(now, pending_path=None):
 
 
 def drop_superseded_orders(now=None, pending_path=None):
-    """Remove the superseded rows from the pending file and alert: they are never sent - the newer decision re-plans
+    """Remove the superseded rows from the pending file and log one run-log row: they are never sent - the newer decision re-plans
     the account. Unfinished orders of a decision can therefore only be completed until the next decision slot.
     Returns the dropped rows."""
     now, pending_path = now or _today_ct(), pending_path or PENDING_ORDERS_JSON
@@ -1229,7 +1193,6 @@ def _wait_terminal(client, order_id, tries=10, pause=0.5):
     """
     import time
 
-    terminal = {"filled", "canceled", "cancelled", "expired", "rejected", "done_for_day"}
     for _ in range(tries):
         try:
             cur = client.get_order(order_id)
@@ -1237,13 +1200,13 @@ def _wait_terminal(client, order_id, tries=10, pause=0.5):
             return False  # unreadable: cannot confirm the cancel - fail closed (retry later)
         raw = cur.status
         st = raw.value.lower() if hasattr(raw, "value") else str(raw).lower()
-        if st in terminal:
+        if st in TERMINAL_STATUSES:
             return True
         time.sleep(pause)
     return False
 
 
-def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG_CSV, dry_run=False):
+def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG_CSV):
     """Morning fill check for the previous evening's extended-hours orders (LIVE).
 
     Reads Reports/live_pending_orders.json (written by auto_trade), checks each order's fill
@@ -1267,7 +1230,6 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
 
     Fail closed: when the live positions cannot be read, the run aborts with RuntimeError
     (the pending file is kept for a retry) instead of completing SELL remainders unclamped.
-    A dry run never aborts on this (nothing is submitted).
 
     Crash-safe morning orders: each completion order carries a deterministic client_order_id
     (live-fill-YYYYMMDD-SIDE-SYMBOL-qty-...). A previous attempt that crashed between its
@@ -1277,7 +1239,6 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     The pending file is removed once every order reached a terminal state without a FAILED
     completion; if any completion failed, only the failed rows are kept (with per-row
     completion marks) so a retry never re-orders what already completed.
-    A dry run changes nothing: it neither submits, nor logs, nor removes the pending file.
     Appends the morning orders to Reports/live_orders_log.csv (same columns as the evening log).
     Returns a DataFrame [Symbol, Side, Shares, Order_ID, Status].
     """
@@ -1334,37 +1295,33 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                             key=lambda o: 0 if isinstance(o, dict) and
                             str(o.get("side")).upper() == "SELL" else 1)
     client = paper_trading_client()
-    if not dry_run:
-        # Market orders only go out while the regular session is open: a market order sent
-        # after the close (e.g. the Mac woke late) would queue for a later open at an
-        # unknown price. Nothing is sent and the pending file is kept.
-        try:
-            market_open = bool(client.get_clock().is_open)
-        except Exception:
-            market_open = False
-        if not market_open:
-            msg = "market closed (or clock unreadable) - nothing sent; pending orders kept"
-            waiting = [(o.get("symbol", "?"), o.get("qty")) for o in evening_orders if isinstance(o, dict)]
-            log_event("Fill check", "warning", "no",
-                      f"Market closed, so nothing was sent and no money moved. Still to finish: "
-                      f"{_list_syms(waiting)}. Nothing to do: it tries again every 30 min while the market is open. "
-                      f"List: Reports/live_pending_orders.json", details=msg)
-            return pd.DataFrame([(o.get("symbol", "?"), o.get("side", "?"), o.get("qty"), o.get("order_id"),
-                                  "WAITING: " + msg) for o in evening_orders if isinstance(o, dict)], columns=cols)
+    # Market orders only go out while the regular session is open: a market order sent
+    # after the close (e.g. the Mac woke late) would queue for a later open at an
+    # unknown price. Nothing is sent and the pending file is kept.
+    try:
+        market_open = bool(client.get_clock().is_open)
+    except Exception:
+        market_open = False
+    if not market_open:
+        msg = "market closed (or clock unreadable) - nothing sent; pending orders kept"
+        waiting = [(o.get("symbol", "?"), o.get("qty")) for o in evening_orders if isinstance(o, dict)]
+        log_event("Fill check", "warning", "no",
+                  f"Market closed, so nothing was sent and no money moved. Still to finish: "
+                  f"{_list_syms(waiting)}. Nothing to do: it tries again every 30 min while the market is open. "
+                  f"List: Reports/live_pending_orders.json", details=msg)
+        return pd.DataFrame([(o.get("symbol", "?"), o.get("side", "?"), o.get("qty"), o.get("order_id"),
+                              "WAITING: " + msg) for o in evening_orders if isinstance(o, dict)], columns=cols)
     try:  # live holdings, so a SELL remainder is clamped to the shares actually held
         live_positions = {str(p.symbol).upper(): float(p.qty) for p in client.get_all_positions()}
     except Exception as e:
-        if dry_run:
-            live_positions = None  # preview only: nothing is submitted, no clamping needed
-        else:
-            # Fail closed: without live holdings a SELL remainder cannot be clamped to the
-            # shares actually held. Abort (the pending file is kept for a retry) instead
-            # of completing unclamped.
-            raise RuntimeError(
-                f"ABORTED: cannot read live positions for the fill check ({e}) - kept for retry")
+        # Fail closed: without live holdings a SELL remainder cannot be clamped to the
+        # shares actually held. Abort (the pending file is kept for a retry) instead
+        # of completing unclamped.
+        raise RuntimeError(
+            f"ABORTED: cannot read live positions for the fill check ({e}) - kept for retry")
     # Crash-safety for the morning orders themselves (a submit followed by a crash before
     # the local record): match prior attempts on the broker by deterministic client id.
-    broker_by_cid = {} if dry_run else _broker_orders_by_client_id(client)
+    broker_by_cid = _broker_orders_by_client_id(client)
     if broker_by_cid is None:
         raise RuntimeError("ABORTED: cannot read broker orders to rule out duplicates - kept for retry")
     # Completion ids use the row's EVENING date, so a retry on any later day still finds them.
@@ -1440,7 +1397,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         if remaining <= 0 and not is_exit:
             results.append((sym, side, qty, oid, f"NO FILL (remainder <=0, filled {filled:g}/{qty})"))
             continue
-        if side == "SELL" and live_positions is not None:
+        if side == "SELL":
             # Never sell what the portfolio does not hold: clamp the remainder to the
             # shares actually held (the evening order may have filled partially, or the
             # position may have changed overnight). 2-decimal precision for market orders.
@@ -1453,15 +1410,6 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 results.append((sym, side, qty, oid,
                                 f"NO FILL (remainder <=0 held, filled {filled:g}/{qty})"))
                 continue
-        if side == "BUY":
-            # Never assume the morning market BUY will fit in buying power.
-            # Estimate cost at the evening limit price + 2% buffer (market orders can
-            # fill above the estimate); SKIP the completion if buying power cannot cover it.
-            # This is re-checked with fresh buying power right before submit (below).
-            pass  # buying-power check happens after the cancel/re-read, with fresh numbers
-        if dry_run:
-            results.append((sym, side, remaining, oid, f"WOULD COMPLETE ({status}, filled {filled:g}/{qty})"))
-            continue
         try:
             if oid:
                 try:  # the evening order should already be expired; cancel just in case it is still open
@@ -1606,7 +1554,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         except Exception as e:                      # e.g. Alpaca rejected the market order, or the network dropped
             _retry(o, sym, side, remaining, oid, str(e))
     results = pd.DataFrame(results, columns=cols)
-    if not dry_run and log_csv and not results.empty:
+    if log_csv and not results.empty:
         log = results.drop(columns=["Order_ID"], errors="ignore").copy()
         log["Submitted_At_CT"] = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d %H:%M:%S")
         log["Target_Source"] = f"fill-check ({pend.get('target_source')})"
@@ -1614,25 +1562,24 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         log["Equity"] = None
         os.makedirs(os.path.dirname(log_csv), exist_ok=True)
         log.to_csv(log_csv, mode="a", header=not os.path.exists(log_csv), index=False)
-    if not dry_run:
-        if to_retry:
-            # Keep only the failed rows (atomic rewrite) so a retry is exact-once.
-            pend["orders"] = to_retry
-            tmp = pending_path + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(pend, f, indent=1)
-            os.replace(tmp, pending_path)
-        elif not results.empty:
-            os.remove(pending_path)
+    if to_retry:
+        # Keep only the failed rows (atomic rewrite) so a retry is exact-once.
+        pend["orders"] = to_retry
+        tmp = pending_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(pend, f, indent=1)
+        os.replace(tmp, pending_path)
+    elif not results.empty:
+        os.remove(pending_path)
 
-    # --- readable summary, failure alerts, position reconciliation ---
+    # --- readable summary, run-log rows, position reconciliation ---
     _print_section("Fill-check results")
     if not results.empty:
         print(results.drop(columns=["Order_ID"], errors="ignore").to_string(index=False))
     n_failed = int(results["Status"].str.startswith("FAILED").sum())
     n_completed = int(results["Status"].str.contains("COMPLETED|FILLED", na=False).sum())
     print(f"\n  Completed/Filled: {n_completed}  |  Failed: {n_failed}  |  Kept for retry: {len(to_retry)}")
-    if n_failed and not dry_run:
+    if n_failed:
         failed = results[results["Status"].str.startswith("FAILED")]
         again = failed["Status"].str.contains("retrying", na=False)
         if again.any():
@@ -1647,7 +1594,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                       f"moved for these and they won't be retried. Place any you still want by hand in Alpaca. "
                       f"Log: Reports/live_orders_log.csv",
                       details="; ".join(f"{r.Symbol}: {r.Status}" for r in failed[~again].itertuples()))
-    if not dry_run and not results.empty:
+    if not results.empty:
         def _pairs(mask):
             return [(f"{r.Side.lower()} {r.Symbol}", r.Shares) for r in results[mask].itertuples()]
         done = _pairs(results["Status"].str.contains("COMPLETED|FILLED", na=False))
@@ -1660,7 +1607,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                       details="; ".join(f"{r.Side} {r.Symbol} {r.Shares}: {r.Status}"
                                       for r in results.itertuples()))
 
-    if not dry_run and not to_retry:
+    if not to_retry:
         # All completions done (or nothing needed doing): verify the portfolio
         # actually matches the strategy targets.
         _print_section("Position reconciliation (live vs strategy targets)")
@@ -1734,7 +1681,7 @@ def reconcile_positions(target_source="auto", tolerance_pct=1.0, symbols=None):
     cols = ["Symbol", "Target_Weight_%", "Actual_Weight_%", "Diff_pp", "Shares_Held", "Status"]
     try:
         targets, meta = load_targets(target_source)
-        positions, equity, cash, _ = get_live_positions_and_equity()
+        positions, equity, _, _ = get_live_positions_and_equity()
     except Exception:
         return pd.DataFrame(columns=cols), None
     if meta.get("source") == "hold" or targets.empty:
@@ -1784,8 +1731,7 @@ def _past_evening_cutoff(now=None):
     return now.strftime("%H:%M") >= cutoff
 
 
-def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=False, extended=True, decision=None,
-               session=False):
+def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=None, session=False):
     """Full auto flow for the pipeline: pull LIVE positions + equity, plan, optionally submit.
 
     - Pulls current stock positions, equity, cash and buying power from the Alpaca LIVE account.
@@ -1802,8 +1748,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
       held is SKIPPED (never submitted), and the sell quantity is clamped to the shares
       actually held. After-hours limit orders go out in WHOLE shares; the fractional rest
       is completed by the next morning's regular-hours fill check (market order, 2 decimals).
-    - If dry_run=True: returns (orders, meta, results_df) without submitting; results_df is empty.
-    - If extended=True (default): submits via submit_paper_extended_sequenced() - the SELLs go
+    - Submits via submit_paper_extended_sequenced() - the SELLs go
       first as DAY limit orders at the planned closing price with extended_hours=True; after a
       bounded wait for the sells to fill, buying power is re-read from the broker and each BUY is
       sent for the part that fits it now; the 9 AM check buys the rest from the cash free then.
@@ -1811,9 +1756,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
       Reports/live_pending_orders.json for the morning fill check (complete_unfilled_orders).
       Every order carries a deterministic client_order_id, so a crash between the broker submit
       and the local record cannot duplicate it on retry (the retry reconciles with the broker).
-    - If extended=False: submits via submit_paper() - regular-hours DAY market orders.
-    - If it is at or past 7:00 PM CT (extended hours are over), nothing is submitted regardless
-      of `extended`: the planned orders are staged in Reports/live_pending_orders.json with no
+    - If it is at or past 7:00 PM CT (extended hours are over), nothing is submitted: the planned orders are staged in Reports/live_pending_orders.json with no
       broker order id, and the morning fill check (complete_unfilled_orders) sends the full
       quantities as regular-hours market orders. Staged rows are reported as STAGED, never FAILED.
     - Idempotent retries: rows already submitted/staged earlier the same evening are recorded
@@ -1876,8 +1819,6 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
     skipped_bp = orders[orders["Side"] == "SKIP (no buying power)"]
     if not skipped_bp.empty:
         print(f"  Buying-power guard: {len(skipped_bp)} BUY row(s) SKIPPED - insufficient buying power")
-    if dry_run:
-        return orders, meta, pd.DataFrame(columns=["Symbol", "Side", "Shares", "Order_ID", "Status"])
     cols = ["Symbol", "Side", "Shares", "Order_ID", "Status"]
     drop_superseded_orders(pending_path=PENDING_ORDERS_JSON)
     defer = session or _past_evening_cutoff()
@@ -1916,13 +1857,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
     else:
         def _recorder(entry):
             record_pending_order(entry, meta, PENDING_ORDERS_JSON)  # incremental: a crash still leaves these recorded
-        if extended:
-            results = submit_paper_extended_sequenced(orders_to_send, positions=positions,
-                                                      record=_recorder, client=client,
-                                                      order_date=date_str)
-        else:
-            results = submit_paper(orders_to_send, positions=positions, client=client,
-                                   order_date=date_str)
+        results = submit_paper_extended_sequenced(orders_to_send, positions=positions,
+                                                  record=_recorder, client=client, order_date=date_str)
         if dup_rows:
             results = pd.concat([results, pd.DataFrame(dup_rows, columns=cols)], ignore_index=True)
     if log_csv and not results.empty:
@@ -1934,7 +1870,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
         os.makedirs(os.path.dirname(log_csv), exist_ok=True)
         log.to_csv(log_csv, mode="a", header=not os.path.exists(log_csv), index=False)
 
-    # --- readable summary + failure alerts ---
+    # --- readable summary + run-log rows ---
     _print_section("Results")
     if not results.empty:
         print(results.drop(columns=["Order_ID"], errors="ignore").to_string(index=False))
@@ -1981,15 +1917,11 @@ def main(argv=None):
     p.add_argument("--min-value", type=float, default=1.0, help="skip trades smaller than this many dollars")
     p.add_argument("--out", help="also write the order list to this CSV")
     p.add_argument("--submit", action="store_true", help="send the orders to the Alpaca LIVE account (REAL MONEY)")
-    p.add_argument("--paper", action="store_true", help="RETIRED: this script now trades LIVE; --paper is refused")
     p.add_argument("--fill-check", action="store_true",
                    help="morning fill check: complete unfilled extended-hours orders from the last auto_trade (LIVE)")
     p.add_argument("--live", action="store_true", help=argparse.SUPPRESS)
     a = p.parse_args(argv)
 
-    if a.paper:
-        sys.exit("Refusing: --paper is retired - this script now submits to the Alpaca LIVE "
-                 "account. Use --submit (without --paper) to proceed.")
     if a.submit and a.fractional:
         sys.exit("Refusing: submit mode uses whole shares only.")
     if a.fill_check:
@@ -1997,7 +1929,7 @@ def main(argv=None):
             sys.exit("Refusing: --fill-check needs --live as well (LIVE trading only).")
         if a.submit or a.fractional or a.account_size or a.positions or a.out or a.target != "auto":
             sys.exit("Refusing: --fill-check takes no other order options.")
-        results = complete_unfilled_orders(dry_run=False)
+        results = complete_unfilled_orders()
         if results.empty:
             print("No pending extended-hours orders - nothing to do.")
         else:

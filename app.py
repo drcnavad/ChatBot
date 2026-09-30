@@ -1275,7 +1275,7 @@ def _detail_group(title, stats_html, note=""):
             f'<div style="display:flex;flex-wrap:wrap;gap:10px 28px;">{stats_html}</div>{note_html}</div>')
 
 
-def render_stock_more(p, ticker, tdata, has_strategy, chart, events, x_start, x_end):
+def render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end):
     """Always-open detail card above the chart: moving averages, fundamentals/news, per-stock backtest."""
     latest = tdata.nlargest(1, 'Date').iloc[0]
     ma_stats = [(ma.upper().replace('_', ' '), fmt(num(latest[ma]), ",.2f", "$")) for ma in MA_COLS]
@@ -1685,7 +1685,7 @@ def main():
         ticker, tdata = render_stock_picker(p, jumped)
         render_stock_header(p, ticker, tdata)
         fig, has_strategy, chart, events, x_start, x_end = stock_chart_inputs(ticker, tdata)
-        render_stock_more(p, ticker, tdata, has_strategy, chart, events, x_start, x_end)
+        render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end)
         render_stock_figure(fig)
     with tab_details:
         render_details(p, ticker)

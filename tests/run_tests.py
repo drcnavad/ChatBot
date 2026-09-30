@@ -17,7 +17,7 @@
                          live- / live-fill- order id namespace, paper=False LIVE client from LIVE keys,
                          live ledgers, fail-closed signal status + buying-power guard, stable client order
                          ids + broker reconciliation, sequenced SELL-then-BUY submit, morning
-                         abort on unreadable positions, morning crash recovery, --paper retired
+                         abort on unreadable positions, morning crash recovery
   test_fill_check_fractional.py mocked: 2-decimal sizing (whole shares after hours, fractional rest
                          next morning, exact exits) + morning fill check: partial/full/no fill,
                          cancel confirmation, crash between cancel and replace, same-day rerun,

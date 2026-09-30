@@ -13,10 +13,6 @@ AGENTS="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
 mkdir -p "$AGENTS" "$HERE/../Reports/logs"
 
-# Retired: the old login catch-up job (now RunAtLoad + run_all.py --scheduled).
-launchctl bootout "$DOMAIN/com.stockanalysis.trade-catchup" 2>/dev/null || true
-[ -f "$AGENTS/com.stockanalysis.trade-catchup.plist" ] && mv "$AGENTS/com.stockanalysis.trade-catchup.plist" "$HOME/.Trash/"
-
 for f in "$HERE"/com.stockanalysis.*.plist; do
     label="$(basename "$f" .plist)"
     plutil -lint "$f" >/dev/null

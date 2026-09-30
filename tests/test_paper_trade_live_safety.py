@@ -13,7 +13,7 @@ Covers the live-specific safety properties:
 9. morning fill check aborts when live positions unreadable (pending kept)
 10. live pending/log paths are used (never the paper paths)
 11. paper_trading_client builds paper=False client from LIVE keys; missing keys -> SystemExit
-12. CLI: --paper retired+refused, --fill-check needs --live
+12. CLI: --fill-check needs --live
 
 Run: cd <folder> && python3 tests/test_paper_trade_live_safety.py
 """
@@ -183,7 +183,7 @@ check("extended: limit at close", r0.limit_price == 100.0)
 check("extended: live- client order id", r0.client_order_id.startswith("live-"), r0.client_order_id)
 check("extended: rows recorded incrementally", len(recorded) == 2 and recorded[0]["order_id"] is not None)
 # SELL clamp: plan says 10 but only 4 held
-res2 = paper_trade.submit_paper_extended(fake_orders_df(), positions={"AAA": 4}, client=fc, order_date="20260928")
+paper_trade.submit_paper_extended(fake_orders_df(), positions={"AAA": 4}, client=fc, order_date="20260928")
 check("extended: SELL clamped to held", fc.submitted[-2].qty == 4)
 # SELL not held -> skipped
 res3 = paper_trade.submit_paper_extended(fake_orders_df(), positions={}, client=fc, order_date="20260928")
@@ -203,7 +203,7 @@ check("market: live- id", m0.client_order_id.startswith("live-"))
 monkey = []
 patch_live(monkey, check_signal_freshness=lambda **k: (_ for _ in ()).throw(ValueError("STALE DATA")))
 try:
-    paper_trade.auto_trade(dry_run=True)
+    paper_trade.auto_trade()
     check("stale signals raise", False)
 except ValueError:
     check("stale signals raise", True)
@@ -226,7 +226,7 @@ orig_pend, orig_log = paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV
 paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV = pend, log
 fc = FakeClient()
 patch_live(monkey, paper_trading_client=lambda: fc)
-orders, meta, results = paper_trade.auto_trade(dry_run=False, log_csv=log)
+orders, meta, results = paper_trade.auto_trade(log_csv=log)
 paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV = orig_pend, orig_log
 for k, v in monkey.pop().items(): setattr(paper_trade, k, v)
 check("past-7PM: nothing submitted", len(fc.submitted) == 0)
@@ -261,7 +261,7 @@ patch_live(monkey, paper_trading_client=lambda: fc,
            _broker_orders_by_client_id=lambda c: {})
 orig_pend, orig_log = paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV
 paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV = pend, log
-res = paper_trade.complete_unfilled_orders(pending_path=pend, log_csv=log, dry_run=False)
+res = paper_trade.complete_unfilled_orders(pending_path=pend, log_csv=log)
 paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV = orig_pend, orig_log
 for k, v in monkey.pop().items(): setattr(paper_trade, k, v)
 by_sym = {r.Symbol: r.Status for r in res.itertuples()}
@@ -300,7 +300,7 @@ patch_live(monkey, paper_trading_client=lambda: fc,
                         tzinfo=__import__("zoneinfo").ZoneInfo("America/Chicago")))
 orig_pend, orig_log = paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV
 paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV = pend, log
-res = paper_trade.complete_unfilled_orders(pending_path=pend, log_csv=log, dry_run=False)
+res = paper_trade.complete_unfilled_orders(pending_path=pend, log_csv=log)
 paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV = orig_pend, orig_log
 for k, v in monkey.pop().items(): setattr(paper_trade, k, v)
 check("crash recovery: no duplicate submit", len(fc.submitted) == 0, str(len(fc.submitted)))
@@ -319,7 +319,7 @@ patch_live(monkey, paper_trading_client=lambda: DeadClient())
 orig_pend = paper_trade.PENDING_ORDERS_JSON
 paper_trade.PENDING_ORDERS_JSON = pend
 try:
-    paper_trade.complete_unfilled_orders(pending_path=pend, log_csv=os.path.join(tmp, "x.csv"), dry_run=False)
+    paper_trade.complete_unfilled_orders(pending_path=pend, log_csv=os.path.join(tmp, "x.csv"))
     check("unreadable positions aborts", False)
 except RuntimeError:
     check("unreadable positions aborts", True)
@@ -329,26 +329,6 @@ paper_trade.PENDING_ORDERS_JSON = orig_pend
 for k, v in monkey.pop().items(): setattr(paper_trade, k, v)
 check("pending file kept for retry", os.path.exists(pend))
 
-# ------------------------------------------------- 10: dry run changes nothing
-tmp = tempfile.mkdtemp()
-pend, log = os.path.join(tmp, "live_pending_orders.json"), os.path.join(tmp, "live_orders_log.csv")
-json.dump({"evening_date": "2026-09-28", "orders": [
-    {"symbol": "AAA", "side": "SELL", "qty": 10, "limit_price": 100.0, "order_id": "eve-1"}]}, open(pend, "w"))
-fc = FakeClient(positions={"AAA": 10},
-                orders_by_id={"eve-1": FakeOrder(id="eve-1", status="expired", filled_qty=0,
-                                                 client_order_id="live-20260928-SELL-AAA-10-10000")})
-monkey = []
-patch_live(monkey, paper_trading_client=lambda: fc,
-           _broker_orders_by_client_id=lambda c: {})
-orig_pend, orig_log = paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV
-paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV = pend, log
-res = paper_trade.complete_unfilled_orders(pending_path=pend, log_csv=log, dry_run=True)
-paper_trade.PENDING_ORDERS_JSON, paper_trade.ORDER_LOG_CSV = orig_pend, orig_log
-for k, v in monkey.pop().items(): setattr(paper_trade, k, v)
-check("dry run: nothing submitted", len(fc.submitted) == 0)
-check("dry run: pending file kept", os.path.exists(pend))
-check("dry run: nothing logged", not os.path.exists(log))
-check("dry run: WOULD COMPLETE shown", "WOULD COMPLETE" in res.iloc[0]["Status"])
 
 # ------------------------------------------------- 11: client is paper=False; missing keys
 seen = {}
@@ -374,16 +354,6 @@ except Exception as e:
 del os.environ["ALPACA_KEY_ID"]; del os.environ["ALPACA_SECRET_KEY"]
 
 # ------------------------------------------------- 12: CLI guards
-try:
-    paper_trade.main(["--paper"])
-    check("CLI --paper refused (retired flag)", False)
-except SystemExit:
-    check("CLI --paper refused (retired flag)", True)
-try:
-    paper_trade.main(["--submit", "--paper"])
-    check("CLI --submit --paper refused", False)
-except SystemExit:
-    check("CLI --submit --paper refused", True)
 try:
     paper_trade.main(["--fill-check"])
     check("CLI --fill-check without --live refused", False)
@@ -416,7 +386,7 @@ check("no pa- client id prefix", '"pa-' not in src and "'pa-" not in src)
 
 
 # ------------------------------------------------- 13: morning BUY buying-power guards
-def _morning_bp_case(bp, price, qty, expect_submit):
+def _morning_bp_case(bp, price, qty):
     tmp = tempfile.mkdtemp()
     pend = os.path.join(tmp, "live_pending_orders.json")
     json.dump({"evening_date": "2026-09-28", "submitted_at_ct": "x", "target_source": "auto",
@@ -432,26 +402,25 @@ def _morning_bp_case(bp, price, qty, expect_submit):
                _broker_orders_by_client_id=lambda c: {},
                _read_buying_power=lambda c: bp)
     res = paper_trade.complete_unfilled_orders(pending_path=pend,
-                                                   log_csv=os.path.join(tmp, "x.csv"),
-                                                   dry_run=False)
+                                                   log_csv=os.path.join(tmp, "x.csv"))
     for k, v in monkey.pop().items(): setattr(paper_trade, k, v)
     return res, fc, pend
 
-res, fc, pend = _morning_bp_case(100.0, 50.0, 5, False)  # need ~$252.50 (1% cushion), have $100
+res, fc, pend = _morning_bp_case(100.0, 50.0, 5)  # need ~$252.50 (1% cushion), have $100
 check("morning: short on cash -> buys the part that fits (100 / 50.50 = 1.98)",
       [getattr(o, "qty", None) for o in fc.submitted] == [1.98], [getattr(o, "qty", None) for o in fc.submitted])
 check("morning: short on cash -> partial noted, row done", "only 1.98 of 5 fit" in res.iloc[0]["Status"]
       and not os.path.exists(pend), res.iloc[0]["Status"])
-res, fc, pend = _morning_bp_case(0.5, 50.0, 5, False)  # not even $1 free
+res, fc, pend = _morning_bp_case(0.5, 50.0, 5)  # not even $1 free
 check("morning: no cash -> nothing sent", len(fc.submitted) == 0)
 check("morning: no cash -> NO FILL, not retried", res.iloc[0]["Status"].startswith("NO FILL")
       and not os.path.exists(pend), res.iloc[0]["Status"])
 
-res, fc, pend = _morning_bp_case(100000.0, 50.0, 5, True)  # plenty
+res, fc, pend = _morning_bp_case(100000.0, 50.0, 5)  # plenty
 check("morning: sufficient BP -> submitted", len(fc.submitted) == 1)
 check("morning: sufficient BP -> pending removed", not os.path.exists(pend))
 
-res, fc, pend = _morning_bp_case(float("nan"), 50.0, 5, False)  # unreadable BP
+res, fc, pend = _morning_bp_case(float("nan"), 50.0, 5)  # unreadable BP
 check("morning: unreadable BP -> not submitted", len(fc.submitted) == 0)
 check("morning: unreadable BP -> kept for retry", os.path.exists(pend))
 
