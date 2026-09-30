@@ -154,7 +154,7 @@ check("freshness: a changes file older than the picks is refused",
 # ------------------------------------------------------------------ a catch-up in regular hours stages everything (send_now)
 pend = os.path.join(tmp, "live_pending_orders.json")
 saved = {k: getattr(pt, k) for k in ("check_signal_freshness", "get_live_positions_and_equity", "plan_orders", "current_prices",
-                                     "paper_trading_client", "PENDING_ORDERS_JSON", "PICKS_CSV", "_notify", "_today_ct")}
+                                     "paper_trading_client", "PENDING_ORDERS_JSON", "PICKS_CSV", "log_event", "_today_ct")}
 seen = {}
 plan = pd.DataFrame([{"Symbol": "OLD", "Side": "SELL", "Shares": 10.0, "Price": 50.0, "Est_Value": 500.0},
                      {"Symbol": "AAA", "Side": "BUY", "Shares": 4.5, "Price": 110.0, "Est_Value": 495.0}], columns=pt.ORDER_COLUMNS)
@@ -166,7 +166,7 @@ try:
     pt.plan_orders = lambda *a, **k: (seen.setdefault("plan", k), (plan.copy(), {"source": "provisional", "as_of": "2026-10-02"}, None))[1]
     pt.paper_trading_client = lambda: (_ for _ in ()).throw(AssertionError("no broker client in a session catch-up"))
     pt.PENDING_ORDERS_JSON, pt.PICKS_CSV = pend, picks
-    pt._notify = lambda *a, **k: seen.setdefault("notify", a)
+    pt.log_event = lambda *a, **k: seen.setdefault("notify", a)
     pt._today_ct = lambda: t("2026-10-05 10:05")
     with redirect_stdout(io.StringIO()):
         _o, meta, res = pt.auto_trade(log_csv=None, decision=pd.Timestamp("2026-10-02"), session=True)
@@ -179,7 +179,7 @@ try:
     check("session catch-up: pending file marked send_now, rows carry the decision and time",
           data.get("send_now") is True and all(o["decision"] == "2026-10-02" and o["recorded_at"].startswith("2026-10-05T10:05")
                                                  for o in data["orders"]), data)
-    check("session catch-up: alert says it is traded now", "Catch-up" in seen.get("notify", ("",))[0], seen.get("notify"))
+    check("session catch-up: run-log row says it is traded now", "Catch-up trades" in (seen.get("notify") or ("",) * 4)[3], seen.get("notify"))
     check("fill gate: the staged catch-up orders may go at once",
           ra.fill_check_allowed(t("2026-10-05 10:06"), pending_path=pend)[0])
 finally:
@@ -238,7 +238,7 @@ try:
 finally:
     wd.run_pipeline = orig
 
-# a failed --trade: one plain alert (what happened, money moved?, what next) and the watchdog adds nothing
+# a failed --trade: one plain run-log row (what happened, money moved?, what next) and the watchdog adds nothing
 import paper_trade as _pt
 _saved_rec = _pt._todays_recorded_orders
 _pt._todays_recorded_orders = lambda *a, **k: set()
@@ -246,7 +246,7 @@ try:
     D0 = pd.Timestamp("2026-09-30")
     t, m = ra.trade_failure_text(D0, ["trade"], "can't reach Alpaca", {"decision_attempts": {"decision": "2026-09-30", "n": 1}}, True)
     check("trade failed: says no money moved and that it retries (try 2 of 3)",
-          "No orders went out, no money moved" in m and "try 2 of 3" in m, m)
+          "No orders went out, no money moved" in m and "try 2 of 3" in m and t == "no", (t, m))
     t, m = ra.trade_failure_text(D0, ["trade"], "x", {"decision_attempts": {"decision": "2026-09-30", "n": 3}}, True)
     check("trade failed 3rd time: says no more automatic tries + the command", "No more automatic tries" in m
           and "run_all.py --trade" in m, m)
@@ -254,22 +254,21 @@ try:
     check("pipeline broke before the trade: 'not placed ... No money moved'", "not placed" in m and "No money moved" in m, m)
     _pt._todays_recorded_orders = lambda *a, **k: {("AMD", "BUY"), ("MU", "SELL")}
     t, m = ra.trade_failure_text(D0, ["trade"], "network", {}, False)
-    check("trade failed after 2 orders went out: says so, never sent twice", "2 order(s) went out" in m
-          and "never sent twice" in m, m)
-    check("trade alerts fit a pop-up (<= 200 chars shown, title <= 40)", len(t) <= 40, t)
+    check("trade failed after 2 orders went out: says so, never sent twice, money_moved yes", "2 order(s) went out" in m
+          and "never sent twice" in m and t == "yes", (t, m))
 finally:
     _pt._todays_recorded_orders = _saved_rec
 
 wd.run_pipeline = lambda argv: (ra.EXIT_REPORTED, "Trade not placed ...\n")
-_saved_notify = ra._notify
-ra._notify = lambda *a, **k: NOTIFIED.append(a)
+_saved_log = ra.log_event
+ra.log_event = lambda *a, **k: NOTIFIED.append(a)
 NOTIFIED = []
 try:
     with redirect_stdout(io.StringIO()):
         rc = wd.main(["--trade", "--scheduled"])
-    check("watchdog: a failure run_all already reported -> exit 1, no retry, no second alert", rc == 1 and not NOTIFIED, NOTIFIED)
+    check("watchdog: a failure run_all already reported -> exit 1, no retry, no second row", rc == 1 and not NOTIFIED, NOTIFIED)
 finally:
-    wd.run_pipeline, ra._notify = orig, _saved_notify
+    wd.run_pipeline, ra.log_event = orig, _saved_log
 
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
 sys.exit(1 if FAIL else 0)

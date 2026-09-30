@@ -15,13 +15,13 @@ What it does on a failed run (exit code != 0):
     once from the step that produces that file, then resumes.
   * ANYTHING ELSE (code errors, strategy bugs, ...): does NOT touch the code. It optionally
     asks an LLM for a diagnosis + proposed fix (see below), writes
-    Reports/pipeline_diagnosis_<timestamp>.md, sends a macOS notification, and stops.
+    Reports/pipeline_diagnosis_<timestamp>.md, writes a row to Reports/run_log.csv, and stops.
     A human (Chirag) reviews the diagnosis and applies the fix.
 
 What it NEVER does (diagnose-only contract):
   * Never edits paper_trade.py, any notebook, or any other pipeline code.
   * Never places, cancels, or retries orders itself. Failures in the --trade or --fill-check
-    phases are never auto-retried: they go straight to diagnosis + notification, because
+    phases are never auto-retried: they go straight to diagnosis + a run-log row, because
     order submission is handled by the existing idempotent guards in paper_trade.py and a
     human should decide the next step.
   * Never invents pipeline steps or arguments; a resume is always `run_all.py --from <step>`
@@ -66,7 +66,7 @@ REPORTS = os.path.join(ROOT, "Reports")
 CT = ZoneInfo("America/Chicago")
 
 sys.path.insert(0, ROOT)
-import run_all                                                        # noqa: E402  (checkpoints, _notify, STEPS)
+import run_all                                                        # noqa: E402  (checkpoints, log_event, STEPS)
 
 MAX_TRIES = 3                       # total attempts for transient failures (1 initial + 2 retries)
 RETRY_BACKOFF_S = [60, 300, 900]    # wait between transient retries
@@ -251,7 +251,7 @@ def diagnose_with_llm(step, phase, log_tail, snapshot):
     """Ask the LLM for a diagnosis + proposed fix. Returns a dict, or None when unavailable.
 
     Diagnose-only: the result is written to a report for human review - it is never applied.
-    Never raises (any failure degrades to None so the raw notification still goes out). """
+    Never raises (any failure degrades to None so the plain run-log row is still written). """
     provider, model, key = _llm_provider()
     if not provider:
         return None
@@ -279,7 +279,7 @@ def diagnose_with_llm(step, phase, log_tail, snapshot):
             if getattr(e, "code", None) == 404 and m != models[-1]:
                 log("LLM model %s not found (404) - trying %s", m, models[models.index(m) + 1])
                 continue
-            log("LLM diagnosis failed (%s: %s) - falling back to raw notification", type(e).__name__, e)
+            log("LLM diagnosis failed (%s: %s) - falling back to the plain run-log row", type(e).__name__, e)
             return None
     try:
         d = json.loads(text)
@@ -331,11 +331,11 @@ def handle_failure(argv, tail, checkpoint):
         diagnosis = diagnose_with_llm(step or phase, phase, tail, snapshot)
         report = write_diagnosis_report(step or phase, phase, diagnosis, tail, snapshot)
         # Title keeps the phase name ("trade failed" / "fill-check failed").
-        run_all._notify(f"{phase} failed - check Alpaca",
-                        f"The {phase} run crashed; some orders may have gone out - check Alpaca > Orders. "
-                        f"Sent orders are saved and never sent twice; the scheduled job retries the rest. "
-                        + (f"Report: Reports/{os.path.basename(report)}" if report else "Log: Reports/logs"),
-                        details=(diagnosis or {}).get("diagnosis"))
+        run_all.log_event("Watchdog", "failed", "unknown",
+                          f"The {phase} run crashed; some orders may have gone out - check Alpaca > Orders. "
+                          f"Sent orders are saved and never sent twice; the scheduled job retries the rest. "
+                          + (f"Report: Reports/{os.path.basename(report)}" if report else "Log: Reports/logs"),
+                          details=(diagnosis or {}).get("diagnosis"))
         return 1
 
     kind, detail = classify_failure(tail)
@@ -349,9 +349,9 @@ def handle_failure(argv, tail, checkpoint):
     snapshot = alpaca_snapshot()
     diagnosis = diagnose_with_llm(step or "unknown", phase, tail, snapshot)
     report = write_diagnosis_report(step or "unknown", phase, diagnosis, tail, snapshot)
-    run_all._notify(f"Pipeline needs attention: step '{step}' failed",
-                    f"{(diagnosis or {}).get('diagnosis', 'see the run log')[:220]}"
-                    + (f" - report: {os.path.basename(report)}" if report else ""))
+    run_all.log_event("Watchdog", "failed", "no", f"Step '{step}' failed: "
+                      f"{(diagnosis or {}).get('diagnosis', 'see the run log')[:220]}"
+                      + (f" - report: {os.path.basename(report)}" if report else ""))
     return 1
 
 
@@ -375,8 +375,8 @@ def main(argv=None):
             if not (quiet and last_line.startswith("idle:")):
                 log("pipeline finished cleanly on attempt %d", tries)
             return 0
-        if rc == run_all.EXIT_REPORTED:    # a trade / fill-check problem run_all already explained in an alert
-            log("run_all reported the problem itself (exit %d) - no retry, no second alert", rc)
+        if rc == run_all.EXIT_REPORTED:    # a trade / fill-check problem run_all already wrote to the run log
+            log("run_all reported the problem itself (exit %d) - no retry, no second row", rc)
             return 1
         checkpoint = run_all.read_checkpoint()
         action = handle_failure(args, tail, checkpoint)
@@ -401,9 +401,9 @@ def main(argv=None):
         diagnosis = diagnose_with_llm(target or "unknown", checkpoint.get("phase", "steps"), tail, snapshot)
         report = write_diagnosis_report(target or "unknown", checkpoint.get("phase", "steps"),
                                         diagnosis, tail, snapshot)
-        run_all._notify("Pipeline needs attention: retries exhausted",
-                        f"step '{target}' still failing"
-                        + (f" - report: {os.path.basename(report)}" if report else ""))
+        run_all.log_event("Watchdog", "failed", "no",
+                          f"Step '{target}' still failing after the retries - look at the run log"
+                          + (f" - report: {os.path.basename(report)}" if report else ""))
         return 1
 
 

@@ -18,7 +18,7 @@ from enum import Enum
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
-os.environ["STOCK_ANALYSIS_NO_POPUPS"] = "1"
+os.environ.setdefault("STOCK_ANALYSIS_RUN_LOG", os.path.join(tempfile.gettempdir(), "sa_test_run_log.csv"))  # never the real run log
 
 
 class OrderSide(Enum):
@@ -203,7 +203,7 @@ g = run_all.fill_check_allowed(datetime(2026, 10, 5, 10, 5, tzinfo=CT), pending_
 check("gate: a daytime catch-up's orders (send_now) go at once, not next morning", g[0], g)
 check("superseded: a Monday-morning catch-up (Friday's decision) expires at Mon 3:15 PM",
       [o["symbol"] for o in pt.superseded_orders(datetime(2026, 10, 5, 15, 15, tzinfo=CT), p2)] == ["AAA"])
-pt._notify = lambda *a, **k: None
+pt.log_event = lambda *a, **k: None
 dropped = pt.drop_superseded_orders(datetime(2026, 10, 5, 15, 16, tzinfo=CT), p2)
 check("drop_superseded_orders: removes the rows (file gone when empty)", len(dropped) == 1 and not os.path.exists(p2))
 

@@ -19,9 +19,9 @@ Run: PYTHONPATH=. python tests/test_paper_trade_math_audit.py
 """
 import json
 import os
-os.environ.setdefault("STOCK_ANALYSIS_NO_POPUPS", "1")  # never pop real macOS alerts from tests
 import sys
 import tempfile
+os.environ.setdefault("STOCK_ANALYSIS_RUN_LOG", os.path.join(tempfile.gettempdir(), "sa_test_run_log.csv"))  # never the real run log
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)

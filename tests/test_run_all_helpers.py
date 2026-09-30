@@ -1,13 +1,12 @@
-"""Tests for the run_all.py notification helpers (no notebooks run, no broker calls).
+"""Tests for run_all.py helpers (no notebooks run, no broker calls).
 
-Covers: _notify never raises (even when osascript is missing), _notebook_error_summary
+Covers: _notebook_error_summary
 extracts cell/line/error from nbconvert output (with fallbacks), run_cmd returns
 (exit code, captured output).
-Run: PYTHONPATH=. python tests/test_run_all_notify.py
+Run: PYTHONPATH=. python tests/test_run_all_helpers.py
 """
 import os
 import sys
-from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -22,16 +21,6 @@ def check(ok, what):
     print(("PASS " if ok else "FAIL ") + what)
     if not ok:
         FAIL.append(what)
-
-
-def test_notify_never_raises():
-    with mock.patch("subprocess.run", side_effect=OSError("no osascript")):
-        try:
-            r._notify("Test title", "Test message")
-            ok = True
-        except Exception:
-            ok = False
-    check(ok, "_notify never raises even when osascript fails")
 
 
 def test_notebook_error_summary_traceback():
@@ -69,7 +58,6 @@ def test_run_cmd_returns_rc_and_output():
 
 
 if __name__ == "__main__":
-    test_notify_never_raises()
     test_notebook_error_summary_traceback()
     test_notebook_error_summary_nbconvert_error()
     test_notebook_error_summary_empty()
@@ -80,4 +68,4 @@ if __name__ == "__main__":
         for f in FAIL:
             print(" -", f)
         sys.exit(1)
-    print("PASS test_run_all_notify.py")
+    print("PASS test_run_all_helpers.py")

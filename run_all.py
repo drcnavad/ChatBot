@@ -171,8 +171,10 @@ XLSX_COLUMNS = ["Symbol", "Sector", "CurrentPrice", "FairValue_Composite", "PE_R
                 "TTM_ROE", "TTM_NetProfitMargin", "Debt_to_Equity"]
 
 
-# ----------------------------------------------------------------------------- notifications
-NO_POPUPS_ENV = "STOCK_ANALYSIS_NO_POPUPS"   # set to 1 to log alerts without macOS pop-ups (the tests do)
+# ----------------------------------------------------------------------------- run log (Reports/run_log.csv)
+RUN_LOG = os.environ.get("STOCK_ANALYSIS_RUN_LOG") or os.path.join(REPORTS, "run_log.csv")   # the tests point it elsewhere
+RUN_LOG_COLUMNS = ["time_ct", "run", "status", "money_moved", "message", "details"]
+RUN_LOG_KEEP = 1000                          # newest rows kept
 
 
 def _clip(text, limit):
@@ -181,27 +183,30 @@ def _clip(text, limit):
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "\u2026"
 
 
-def _notify(title, message, details=None):
-    """Tell the user the pipeline needs attention (macOS notification + loud log line).
-
-    Pop-up: title <= 40 chars, body <= 200 (macOS cuts longer text); `details` and the
-    full text only go to the log. Best effort: the log line is the primary channel (it
-    lands in Reports/logs/run_*.log and the launchd logs). STOCK_ANALYSIS_NO_POPUPS=1
-    skips the pop-up (the tests set it). Never raises."""
-    logging.info("NOTIFY: %s - %s%s", title, message, f" | details: {details}" if details else "")
-    if os.environ.get(NO_POPUPS_ENV, "").strip() not in ("", "0"):
-        return
+def log_event(run, status, money_moved, message, details=""):
+    """One plain-language row in Reports/run_log.csv for every real run event (finished, failed, orders sent, fill-check
+    actions; idle checks write nothing). status: ok / warning / failed. money_moved: yes / no / unknown. Also printed to
+    the run log. Keeps the newest RUN_LOG_KEEP rows. Never raises: a full disk must not stop a trade."""
+    import csv
+    row = [datetime.now(CT).strftime("%Y-%m-%d %H:%M:%S"), run, status, money_moved,
+           " ".join(str(message).split()), " ".join(str(details or "").split())]
+    (logging.info if logging.getLogger().handlers else print)(
+        f"RUN LOG: {run} | {status} | money moved: {money_moved} | {row[4]}" + (f" | {row[5]}" if row[5] else ""))
     try:
-        import subprocess as _sp
-        safe_title = _clip(title, 40).replace('"', "'").replace("\\", "")
-        safe_msg = _clip(message, 200).replace('"', "'").replace("\\", "")
-        r = _sp.run(["osascript", "-e",
-                     f'display notification "{safe_msg}" with title "{safe_title}" sound name "Basso"'],
-                    timeout=10, capture_output=True, text=True)
-        if r.returncode:
-            logging.warning("  notification not shown (osascript exit %s: %s)", r.returncode, (r.stderr or "").strip()[:200])
-    except Exception as e:                                  # the log line above is the fallback
-        logging.warning("  notification not shown (%s)", e)
+        new = not os.path.exists(RUN_LOG)
+        with open(RUN_LOG, "a", newline="") as f:           # appends are safe when two jobs write at once
+            w = csv.writer(f)
+            if new:
+                w.writerow(RUN_LOG_COLUMNS)
+            w.writerow(row)
+        with open(RUN_LOG, newline="") as f:
+            rows = list(csv.reader(f))
+        if len(rows) > RUN_LOG_KEEP + 100:                  # trim now and then, not on every write
+            with open(RUN_LOG + ".tmp", "w", newline="") as f:
+                csv.writer(f).writerows([RUN_LOG_COLUMNS] + rows[-RUN_LOG_KEEP:])
+            os.replace(RUN_LOG + ".tmp", RUN_LOG)
+    except Exception as e:
+        print(f"  run log not written ({e})", flush=True)
 
 
 def _notebook_error_summary(output, notebook):
@@ -378,7 +383,7 @@ SESSION_FROM = (9, 0)            # catch-up / completion market orders from 9:00
 SESSION_STOP_MIN = 15            # ... until 15 min before the close (2:45 PM CT; 11:45 AM on early-close days)
 MAX_DECISION_ATTEMPTS = 3        # launchd retries a decision whose run failed at most 3 times ...
 RETRY_GAP_MIN = 60               # ... at least 60 min apart
-EXIT_REPORTED = 3                # a trade / fill-check failure already alerted in plain words: the watchdog stays quiet
+EXIT_REPORTED = 3                # a trade / fill-check failure already in the run log in plain words: the watchdog stays quiet
 
 
 def _parse_ct(text):
@@ -949,12 +954,12 @@ def main(argv=None):
 
 
 def report_superseded(prev, now_ct):
-    """Log + alert once that decision `prev` never ran and is now replaced by the newer one. Returns the new state."""
+    """Log once (run log row) that decision `prev` never ran and is now replaced by the newer one. Returns the new state."""
     import backtest_engine as be
     D = be.last_decision_date(now_ct)
     msg = (f"The {prev:%a %b %d} {be.decision_kind(prev)} never ran (the Mac was asleep or off). It was skipped at "
            f"{be.decision_slot(D):%a %I:%M %p} CT, when the {D:%a %b %d} {be.decision_kind(D)} replaced it. No money moved.")
-    _notify("Missed decision skipped", msg)
+    log_event("Missed decision", "warning", "no", msg)
     return update_state(last_superseded=prev.date().isoformat())
 
 
@@ -966,9 +971,9 @@ def _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, cl
     if not ok and needs_investigation:
         logging.warning("FILL CHECK: %s", reason)
         if scheduled and state.get("fill_alert_on") == now.date().isoformat():
-            return 1                                      # already alerted today (launchd runs every 30 min)
-        _notify("Fill check needs you", "The pending order list is damaged, so nothing was sent (no money moved). Check "
-                "Alpaca, then clear the live_pending_orders files in Reports. Log: Reports/logs", details=reason)
+            return 1                                      # already logged today (launchd runs every 30 min)
+        log_event("Fill check", "failed", "no", "The pending order list is damaged, so nothing was sent (no money "
+                  "moved). Check Alpaca, then clear the live_pending_orders files in Reports. Log: Reports/logs", reason)
         state.update(update_state(fill_alert_on=now.date().isoformat()))
         return 1
     if not ok:
@@ -988,9 +993,9 @@ def _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, cl
     except Exception as e:                                # Alpaca/network down: the pending list is kept, nothing duplicated
         logging.warning("  fill check failed: %s", e)
         if state.get("fill_alert_on") != now.date().isoformat():
-            _notify("Fill check couldn't finish", "Couldn't reach Alpaca to finish the pending orders. Orders already sent "
-                    "are saved and never sent twice; the rest waits. It tries again every 30 min in market hours - nothing "
-                    "to do unless this keeps coming back. Log: Reports/logs", details=str(e))
+            log_event("Fill check", "failed", "no", "Couldn't reach Alpaca to finish the pending orders. Orders already "
+                      "sent are saved and never sent twice; the rest waits. It tries again every 30 min in market hours - "
+                      "nothing to do unless this keeps coming back. Log: Reports/logs", str(e))
             state.update(update_state(fill_alert_on=now.date().isoformat()))
         ckpt_clear()
         return EXIT_REPORTED
@@ -1064,9 +1069,7 @@ def _wait_for_lock(path, minutes=10):
 def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_path, ckpt_write, ckpt_clear, clock,
               D=None, how=None):
     """The notebook steps, the optional live sync and the --trade phase, then the summary. Returns the exit code."""
-    label = run_label(D, how)
-    _notify(f"{label} started", f"{label} started {_hm(now)} CT. Takes about "
-            f"{'15 min' if mode == 'full' else 'a minute'}. Nothing to do.")
+    label, errors = run_label(D, how), []
     if a.now is None:  # real runs only - the tests' fake clock never holds a sleep assertion
         _hold_sleep_assertion()
     env = dict(os.environ)
@@ -1111,11 +1114,8 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
         logging.info("--- %s %s (%.0fs)", name, "OK" if rc == 0 else f"FAILED (exit {rc})", time.time() - t0)
         if rc != 0:
             failures.append(name)
-            if kind == "notebook":
-                _notify(f"Notebook failed: {target.replace('.ipynb', '')}", _notebook_error_summary(out, target))
-            else:
-                detail = "; ".join(problems) if problems else f"exit code {rc}"
-                _notify(f"Pipeline step FAILED: {name}", f"{target or 'report checks'} - {detail}")
+            errors.append(_notebook_error_summary(out, target) if kind == "notebook" else
+                          f"{name}: {'; '.join(problems) if problems else f'exit code {rc}'}")
             if _stop_on_failure(name, a.keep_going):
                 break
             elif name in OPTIONAL_STEPS:
@@ -1180,18 +1180,21 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
         logging.info("  %s", info["next"])
     logging.info("  Next full online update: %s  |  log %s", next_full_update(now, state), os.path.relpath(log_path, ROOT))
     logging.info("=" * 78)
+    end, why_failed = datetime.fromisoformat(clock()), "; ".join(errors)
     if crit and a.trade:
-        _notify(*trade_failure_text(D, crit, (trade_meta or {}).get("error"), state, a.scheduled))
+        log_event(label, "failed", *trade_failure_text(D, crit, (trade_meta or {}).get("error"), state, a.scheduled),
+                  why_failed)
     elif crit:
-        _notify(f"{label} failed", f"{label} stopped at {_hm(datetime.fromisoformat(clock()))} CT: the "
-                f"{', '.join(crit)} step failed. No trades ran, no money moved. Log: Reports/logs")
+        log_event(label, "failed", "no", f"{label} stopped at {_hm(end)}: the {', '.join(crit)} step failed. No trades "
+                  f"ran, no money moved. Log: Reports/logs", why_failed)
     else:
-        _notify(*finished_text(label, datetime.fromisoformat(clock()), ran, failures, a.trade, how,
-                               trade_results, (trade_meta or {}).get("sent_now")))
+        log_event(label, "warning" if failures else "ok",
+                  *finished_text(label, end, ran, failures, a.trade, how, trade_results, (trade_meta or {}).get("sent_now")),
+                  why_failed)
     if not crit:
         ckpt_clear()            # clean run (warnings ok) - the watchdog has nothing to resume
     if a.trade and any(f in crit for f in ("trade", "trade_partial", "send_now")):
-        ckpt_clear()            # alerted above in plain words; the scheduled job decides any retry
+        ckpt_clear()            # in the run log above in plain words; the scheduled job decides any retry
         return EXIT_REPORTED
     return 1 if crit else 0
 
@@ -1202,7 +1205,7 @@ def _hm(t):
 
 
 def run_label(D, how):
-    """Plain name of the run for alerts: 'Wed check', 'Fri rebalance', 'Catch-up: Fri Oct 2 rebalance', 'Data refresh'."""
+    """Plain name of the run for the run log: 'Wed check', 'Fri rebalance', 'Catch-up: Fri Oct 2 rebalance', 'Data refresh'."""
     if D is None or how not in ("evening", "session"):
         return "Data refresh"
     import backtest_engine as be
@@ -1220,35 +1223,34 @@ def _count_sides(df, pattern):
 
 
 def finished_text(label, end, ran, failures, trade_run, how, trades, sent_now=None):
-    """(title, message) when a run ends without a critical failure: what ran, whether money moved, what's next,
+    """(money_moved, message) when a run ends without a critical failure: what ran, whether money moved, what's next,
     whether to act. Pure (except the decision calendar)."""
     import backtest_engine as be
     bad = [n for n, ok, _ in ran if not ok]
     names = ", ".join(failures) if len(", ".join(failures)) <= 25 else f"{len(failures)} optional steps"
     steps = (f"All {len(ran)} steps OK." if not failures else
              f"{len(ran) - len(bad)} of {len(ran)} steps OK ({names} failed - last good data used).")
+    moved = "yes"
     if not trade_run:
-        money = "Data refresh only - no trades, no money moved."
+        moved, money = "no", "Data refresh only - no trades, no money moved."
     elif how == "session" and _count_sides(sent_now, "^COMPLETED"):
         money = f"Catch-up orders sent at market: {_count_sides(sent_now, '^COMPLETED')} - money moves as they fill."
     elif _count_sides(trades, "^submitted"):
         money = (f"Orders sent: {_count_sides(trades, '^(submitted|STAGED)')} - money moves as they fill; small "
                  f"remainders go out at 9 AM.")
     elif _count_sides(trades, "^STAGED"):
-        money = f"Orders queued for 9 AM: {_count_sides(trades, '^STAGED')} - no money moved yet."
+        moved, money = "no", f"Orders queued for 9 AM: {_count_sides(trades, '^STAGED')} - no money moved yet."
     else:
-        money = "No trades needed - no orders, no money moved."
+        moved, money = "no", "No trades needed - no orders, no money moved."
     nxt = be.next_decision_slot(end)
     kind = {"full rebalance": "rebalance", "mid-week check": "check"}.get(be.decision_kind(nxt) if nxt else None)
     next_up = f"Next: {nxt:%a %b} {nxt.day} {kind} at {_hm(nxt)}." if kind else ""
-    msg = f"{label} done {_hm(end)}. {steps} {money} {next_up} Nothing to do."
-    if len(msg) > 200:                                    # macOS shows 200 characters: drop the least important part
-        msg = f"{label} done {_hm(end)}. {steps} {money} Nothing to do."
-    return f"{label} done", " ".join(msg.split())
+    return moved, " ".join(f"{label} done {_hm(end)}. {steps} {money} {next_up} Nothing to do.".split())
 
 
 def trade_failure_text(D, crit, error, state, scheduled):
-    """(title, message) for a --trade run that did not finish cleanly: what happened, whether money moved, what next."""
+    """(money_moved, message) for a --trade run that did not finish cleanly: what happened, whether money moved, what
+    to do."""
     import paper_trade
     att = state.get("decision_attempts") or {}
     n = int(att.get("n", 0)) if att.get("decision") == D.date().isoformat() else 0
@@ -1257,17 +1259,17 @@ def trade_failure_text(D, crit, error, state, scheduled):
              "No more automatic tries: once fixed, run python run_all.py --trade (the next decision replaces it otherwise).")
     if "trade_skipped" in crit:
         broke = ", ".join(f for f in crit if f != "trade_skipped")
-        return "Trade not placed", f"The {D:%a %b %d} trade was not placed: the data update failed ({broke}). No money moved. {again}"
+        return "no", f"The {D:%a %b %d} trade was not placed: the data update failed ({broke}). No money moved. {again}"
     if "trade" in crit:
         sent = len(paper_trade._todays_recorded_orders())
         moved = ("No orders went out, no money moved." if not sent else
                  f"{sent} order(s) went out before the error; they are saved and never sent twice - check Alpaca.")
-        return "Trade not placed", f"The {D:%a %b %d} trade stopped: {_clip(error or 'see the log', 90)}. {moved} {again}"
+        return ("yes" if sent else "no"), f"The {D:%a %b %d} trade stopped: {_clip(error or 'see the log', 90)}. {moved} {again}"
     if "send_now" in crit:
-        return ("Catch-up orders not sent yet", "The catch-up orders are saved; the fill check sends them within 30 min "
-                "(market hours). No money moved yet. Nothing to do unless this repeats.")
-    return ("Trade done with problems", "Some orders were not sent - see the other alert. The rest went out. "
-            "The failed ones are not retried; place them by hand if you still want them.")
+        return ("no", "The catch-up orders are saved; the fill check sends them within 30 min (market hours). No money "
+                "moved yet. Nothing to do unless this repeats.")
+    return ("yes", "Some orders were not sent - see the Trade row. The rest went out. The failed ones are not "
+            "retried; place them by hand if you still want them.")
 
 
 if __name__ == "__main__":

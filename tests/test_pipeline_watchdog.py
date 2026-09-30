@@ -127,14 +127,15 @@ class TestMainFlow(unittest.TestCase):
              mock.patch.object(wd, "alpaca_snapshot", return_value={}), \
              mock.patch.object(wd, "diagnose_with_llm", return_value={"diagnosis": "d"}) as diag, \
              mock.patch.object(wd, "write_diagnosis_report", return_value="/tmp/d.md") as rep, \
-             mock.patch.object(wd.run_all, "_notify") as notif:
+             mock.patch.object(wd.run_all, "log_event") as notif:
             rc = wd.main(["--trade"])
         self.assertEqual(rc, 1)
         self.assertEqual(rp.call_count, wd.MAX_TRIES)
         diag.assert_called_once()
         rep.assert_called_once()
         notif.assert_called_once()
-        self.assertIn("retries exhausted", notif.call_args[0][0])
+        self.assertEqual(notif.call_args[0][:3], ("Watchdog", "failed", "no"))
+        self.assertIn("still failing after the retries", notif.call_args[0][3])
 
     def test_trade_phase_never_retried(self):
         cp = dict(self.CP, phase="trade", failed_step=None)
@@ -143,15 +144,15 @@ class TestMainFlow(unittest.TestCase):
              mock.patch.object(wd, "alpaca_snapshot", return_value={"account": {"Equity": 1}}), \
              mock.patch.object(wd, "diagnose_with_llm", return_value={"diagnosis": "d"}) as diag, \
              mock.patch.object(wd, "write_diagnosis_report", return_value="/tmp/d.md"), \
-             mock.patch.object(wd.run_all, "_notify") as notif:
+             mock.patch.object(wd.run_all, "log_event") as notif:
             rc = wd.main(["--trade"])
         self.assertEqual(rc, 1)
         rp.assert_called_once()                       # exactly one attempt - no auto-retry
         diag.assert_called_once()                     # diagnosed, not fixed
         notif.assert_called_once()
-        self.assertIn("trade failed", notif.call_args[0][0])
-        self.assertLessEqual(len(notif.call_args[0][0]), 40)
-        self.assertIn("Alpaca", notif.call_args[0][1])
+        self.assertEqual(notif.call_args[0][:3], ("Watchdog", "failed", "unknown"))   # money may have moved
+        self.assertIn("The trade run crashed", notif.call_args[0][3])
+        self.assertIn("Alpaca", notif.call_args[0][3])
 
     def test_unknown_error_diagnosed_not_retried(self):
         with mock.patch.object(wd, "run_pipeline", return_value=(1, "KeyError: 'Strategy_Weight'")) as rp, \
@@ -159,7 +160,7 @@ class TestMainFlow(unittest.TestCase):
              mock.patch.object(wd, "alpaca_snapshot", return_value={}), \
              mock.patch.object(wd, "diagnose_with_llm", return_value={"diagnosis": "d"}), \
              mock.patch.object(wd, "write_diagnosis_report", return_value="/tmp/d.md"), \
-             mock.patch.object(wd.run_all, "_notify") as notif:
+             mock.patch.object(wd.run_all, "log_event") as notif:
             rc = wd.main(["--trade"])
         self.assertEqual(rc, 1)
         rp.assert_called_once()                       # code errors are never retried
@@ -177,7 +178,7 @@ class TestMainFlow(unittest.TestCase):
              mock.patch.object(wd, "alpaca_snapshot", return_value={}), \
              mock.patch.object(wd, "diagnose_with_llm", return_value={"diagnosis": "d"}), \
              mock.patch.object(wd, "write_diagnosis_report", return_value="/tmp/d.md"), \
-             mock.patch.object(wd.run_all, "_notify"):
+             mock.patch.object(wd.run_all, "log_event"):
             rc = wd.main(["--trade"])
         self.assertEqual(rc, 1)
         self.assertEqual(calls[0], ["--trade"])

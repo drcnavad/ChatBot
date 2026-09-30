@@ -19,9 +19,9 @@ Run: cd <folder> && python3 tests/test_paper_trade_live_safety.py
 """
 import json
 import os
-os.environ.setdefault("STOCK_ANALYSIS_NO_POPUPS", "1")  # never pop real macOS alerts from tests
 import sys
 import tempfile
+os.environ.setdefault("STOCK_ANALYSIS_RUN_LOG", os.path.join(tempfile.gettempdir(), "sa_test_run_log.csv"))  # never the real run log
 import types
 from enum import Enum as _Enum
 

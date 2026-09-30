@@ -5,7 +5,7 @@
                          and an independent re-implementation of the earnings rule
   test_rank_audit.py     saved ranks, scores, picks, mid-week decisions and earnings skips re-derived independently
   test_runner.py         run_all.py mode choice, trade gate + NewsAPI once-a-day guard (pure logic, no API calls)
-  test_run_all_notify.py run_all.py notifications: _notify never raises, _notebook_error_summary
+  test_run_all_helpers.py run_all.py helpers: _notebook_error_summary
                          extracts cell/line/error from nbconvert output, run_cmd returns (rc, output)
   test_run_all_optional.py run_all.py optional steps: upstream API failures (fundamentals /
                          processing / scoring / sentiment / earnings) never stop the pipeline or
@@ -33,20 +33,23 @@
                          superseded at the next slot; weekends wait for the open; holidays; send_now fill gate
   test_alpaca_api_names.py the REAL alpaca-py: every alpaca import / enum member the code uses exists and the
                          exact order + orders-list requests build (no network)
+  test_run_log.py        Reports/run_log.csv: one plain row per event (trim to 1000, never raises), trade /
+                         fill-check / finished rows (which run, steps OK, money moved, next, what to do)
   test_strategy_health.py  strategy_health.py: reference parsing, equity stats, trend/drawdown/Sharpe
                          bands, composite score levels, regime detection, fail-soft on missing files
                          (synthetic data, no network, no streamlit)
 Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
 import os
 import subprocess
+import tempfile
 import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_run_all_notify.py", "test_run_all_optional.py",
+TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_run_all_helpers.py", "test_run_all_optional.py",
          "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_live_safety.py", "test_fill_check_fractional.py",
-         "test_paper_trade_math_audit.py", "test_notifications.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
+         "test_paper_trade_math_audit.py", "test_run_log.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
          "test_strategy_health.py", "test_live_rules_audit.py", "test_catch_up.py",
          "test_alpaca_api_names.py"]
 
@@ -54,7 +57,8 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
 def main():
     fast = "--fast" in sys.argv
     env = dict(os.environ, PYTHONPATH=ROOT + os.pathsep + os.environ.get("PYTHONPATH", ""), PYTHONDONTWRITEBYTECODE="1",
-               PYTHONWARNINGS="ignore", STOCK_ANALYSIS_NO_POPUPS="1")  # tests never pop real alerts
+               PYTHONWARNINGS="ignore",   # tests never write the real Reports/run_log.csv
+               STOCK_ANALYSIS_RUN_LOG=os.path.join(tempfile.mkdtemp(), "run_log.csv"))
     results = []
     for t in TESTS:
         if fast and t in ("test_app.py", "test_dashboard_http.py"):

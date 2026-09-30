@@ -12,9 +12,9 @@ Run: cd <folder> && python3 tests/test_fill_check_fractional.py
 """
 import json
 import os
-os.environ.setdefault("STOCK_ANALYSIS_NO_POPUPS", "1")  # never pop real macOS alerts from tests
 import sys
 import tempfile
+os.environ.setdefault("STOCK_ANALYSIS_RUN_LOG", os.path.join(tempfile.gettempdir(), "sa_test_run_log.csv"))  # never the real run log
 import types
 from enum import Enum
 
@@ -68,8 +68,8 @@ sys.modules.update(mods)
 import pandas as pd
 import paper_trade as pt
 
-NOTES = []  # every alert text, checked for length/plain words at the end (no real pop-ups)
-pt._notify = lambda title, message, details=None: NOTES.append((title, message))
+NOTES = []  # every run-log row (status, message), checked at the end
+pt.log_event = lambda run, status, moved, message, details="": NOTES.append((status, message))
 PASS, FAIL = [], []
 
 
@@ -344,13 +344,13 @@ NOTES.clear()
 res1 = run(b, p)
 check("rejected market order: kept for retry (try 1), alert says it retries - don't place by hand",
       os.path.exists(p) and "retrying" in status_of(res1, "ANET")
-      and any("retrying" in t and "don't place" in m for t, m in NOTES), (status_of(res1, "ANET"), NOTES))
+      and any(t == "warning" and "don't place" in m for t, m in NOTES), (status_of(res1, "ANET"), NOTES))
 run(b, p)
 NOTES.clear()
 res3 = run(b, p)
 check(f"rejected market order: dropped after {pt.MAX_FILL_TRIES} tries, alert says place by hand",
       not os.path.exists(p) and "gave up" in status_of(res3, "ANET")
-      and any("by hand" in m and "No money" in m for t, m in NOTES), (status_of(res3, "ANET"), NOTES))
+      and any(t == "failed" and "by hand" in m and "No money" in m for t, m in NOTES), (status_of(res3, "ANET"), NOTES))
 
 # market closed (holiday / Mac woke after the close)
 o, r = eve("ANET", "BUY", 3.58, 3, "expired", 0)
@@ -389,8 +389,8 @@ b = Broker(orders=[o]); p = write_pending([r]); res = run(b, p)
 check("rest under $1: not ordered, not retried", not b.submitted and not os.path.exists(p)
       and "under $1" in status_of(res, "ANET"), status_of(res, "ANET"))
 
-bad = [n for n in NOTES if len(n[0]) > 40 or len(n[1]) > 200 or " pp" in n[1] or "DRIFT" in n[0] + n[1]]
-check(f"all {len(NOTES)} alerts raised here are short (title <= 40, body <= 200) and plain", NOTES and not bad, bad)
+bad = [n for n in NOTES if n[0] not in ("ok", "warning", "failed") or " pp" in n[1] or "DRIFT" in n[1]]
+check(f"all {len(NOTES)} run-log rows written here have a valid status and plain words", NOTES and not bad, bad)
 
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
 sys.exit(1 if FAIL else 0)

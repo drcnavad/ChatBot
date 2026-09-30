@@ -25,7 +25,7 @@ and run_all sends them at once as market orders. Submitted orders are recorded
 in Reports/live_pending_orders.json; the next trading morning, complete_unfilled_orders()
 (run_all.py --fill-check) checks their fills and completes any unfilled remainder with
 regular-hours market orders, then reconciles live positions against the strategy targets.
-Failures send a macOS notification + loud log alert. If auto_trade() runs at or after 7:00 PM CT (extended hours
+Every order event and failure is a plain-language row in Reports/run_log.csv. If auto_trade() runs at or after 7:00 PM CT (extended hours
 are over), it submits nothing and instead stages the planned orders in
 Reports/live_pending_orders.json (no broker order id); the morning fill check then sends
 the full quantities as regular-hours market orders. Evening submission is idempotent: rows
@@ -73,49 +73,8 @@ MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this 
 CASH_CUSHION = 0.01    # buys are sized to free cash / (1 + 1%) so market fills a bit above the estimate still fit
 
 
-# ----------------------------------------------------------------------------- notifications, terminal formatting, data freshness
-NO_POPUPS_ENV = "STOCK_ANALYSIS_NO_POPUPS"   # set to 1 to print alerts without macOS pop-ups (the tests do)
-NOTIFY_TITLE_MAX = 40                        # macOS cuts longer titles
-NOTIFY_BODY_MAX = 200                        # ...and longer bodies; full detail goes to the log
-
-
-def _clip(text, limit):
-    """Collapse whitespace and cut to `limit` characters (ending in an ellipsis). Pure."""
-    text = " ".join(str(text).split())
-    return text if len(text) <= limit else text[:limit - 1].rstrip() + "\u2026"
-
-
-def _popups_off():
-    return os.environ.get(NO_POPUPS_ENV, "").strip() not in ("", "0")
-
-
-def _notify(title, message, details=None):
-    """Alert the user (macOS notification + loud print).
-
-    title: short (<= 40 chars). message: plain words (<= 200 chars) saying what
-    happened, whether money moved / orders went out, the symbols, and what to do.
-    details: optional longer text that is only printed (it lands in Reports/logs and
-    the launchd logs). Set STOCK_ANALYSIS_NO_POPUPS=1 to skip the pop-up (tests do,
-    so running them never shows real alerts). Best effort: never raises.
-    """
-    title, message = _clip(title, NOTIFY_TITLE_MAX), _clip(message, NOTIFY_BODY_MAX)
-    banner = (f"\n{'!' * 70}\n  ALERT: {title}\n  {message}\n"
-              + (f"  Details: {details}\n" if details else "") + f"{'!' * 70}\n")
-    print(banner, flush=True)
-    if _popups_off():
-        return
-    try:
-        import subprocess
-        safe_title = title.replace('"', "'").replace("\\", "")
-        safe_msg = message.replace('"', "'").replace("\\", "")
-        r = subprocess.run(
-            ["osascript", "-e",
-             f'display notification "{safe_msg}" with title "{safe_title}" sound name "Basso"'],
-            timeout=10, capture_output=True, text=True)
-        if r.returncode:
-            print(f"  notification not shown (osascript exit {r.returncode}: {(r.stderr or '').strip()[:200]})", flush=True)
-    except Exception as e:  # the print above is the fallback
-        print(f"  notification not shown ({e})", flush=True)
+# ----------------------------------------------------------------------------- run log, terminal formatting, data freshness
+from run_all import log_event                # noqa: E402  one plain row per event in Reports/run_log.csv
 
 
 def _fmt_shares(q):
@@ -127,7 +86,7 @@ def _fmt_shares(q):
     return f"{round(v, 2):g}" if math.isfinite(v) else "?"
 
 
-def _list_syms(pairs, limit=3):
+def _list_syms(pairs, limit=10):
     """'ENPH 4, FIG 6, HIMS 15 +3 more' from (symbol, shares) pairs. Pure."""
     pairs = list(pairs)
     txt = ", ".join(f"{s} {_fmt_shares(q)}" for s, q in pairs[:limit])
@@ -135,9 +94,8 @@ def _list_syms(pairs, limit=3):
 
 
 def _trade_notice(results, prices=None):
-    """(title, body, details) for the evening trade alert, from a results DataFrame
-    (columns Symbol, Side, Shares, Status). prices: optional {symbol: price} for the
-    dollar estimate. Pure: safe to unit-test."""
+    """(money_moved, message, details) for the trade row of the run log, from a results DataFrame
+    (columns Symbol, Side, Shares, Status). prices: optional {symbol: price} for the dollar estimate. Pure."""
     prices = prices or {}
     ok = results["Status"].str.contains("submitted|STAGED", case=False, na=False)
     staged = ok & results["Status"].str.contains("STAGED", na=False)
@@ -158,24 +116,20 @@ def _trade_notice(results, prices=None):
 
     sells, buys = _pairs("SELL"), _pairs("BUY")
     if sent.any():
-        title = f"Trades sent: {len(sells)} sell, {len(buys)} buy"
+        head, moved = f"Trades sent: {len(sells)} sell, {len(buys)} buy", "yes"
         tail = ("Money moves as they fill; small leftovers finish at 9 AM. Nothing to do."
                 if not staged.any() else
                 f"{int(staged.sum())} small order(s) go out at 9 AM. Nothing to do.")
     elif results.loc[staged, "Status"].str.contains("catch-up", na=False).all():
-        title = f"Catch-up trades: {len(sells)} sell, {len(buys)} buy"
-        tail = "A missed decision, traded now with market orders. Nothing to do."
+        head, moved = f"Catch-up trades: {len(sells)} sell, {len(buys)} buy", "no"
+        tail = "A missed decision, sent now with market orders by the fill check. Nothing to do."
     else:
-        title = f"Trades queued: {len(sells)} sell, {len(buys)} buy"
+        head, moved = f"Trades queued: {len(sells)} sell, {len(buys)} buy", "no"
         tail = "Not sent yet, no money moved. They go out at the 9 AM check. Nothing to do."
-    for limit in (3, 2, 1):
-        parts = ([f"Sell {_list_syms(sells, limit)}{_usd(sells)}"] if sells else []) + \
-                ([f"Buy {_list_syms(buys, limit)}{_usd(buys)}"] if buys else [])
-        body = f"{'; '.join(parts)}. {tail} Log: Reports/live_orders_log.csv"
-        if len(body) <= NOTIFY_BODY_MAX:
-            break
+    parts = ([f"Sell {_list_syms(sells, 10)}{_usd(sells)}"] if sells else []) + \
+            ([f"Buy {_list_syms(buys, 10)}{_usd(buys)}"] if buys else [])
     details = "; ".join(f"{r.Side} {r.Symbol} {r.Shares} [{r.Status}]" for r in results[ok].itertuples())
-    return title, body, details
+    return moved, f"{head}. {'; '.join(parts)}. {tail} Log: Reports/live_orders_log.csv", details
 
 
 def _print_header(title):
@@ -1259,10 +1213,10 @@ def drop_superseded_orders(now=None, pending_path=None):
         os.replace(tmp, pending_path)
     else:
         os.remove(pending_path)
-    _notify("Old orders dropped",
-            f"{len(old)} unsent order(s) ({_list_syms([(o.get('symbol'), o.get('qty')) for o in old])}) belonged to an "
-            f"earlier decision; a newer decision replaced it, so they were not sent. No money moved.",
-            details="; ".join(f"{o.get('side')} {o.get('symbol')} {o.get('qty')} recorded {o.get('recorded_at') or o.get('evening_date')}"
+    log_event("Fill check", "warning", "no",
+              f"{len(old)} unsent order(s) ({_list_syms([(o.get('symbol'), o.get('qty')) for o in old])}) belonged to an "
+              f"earlier decision; a newer decision replaced it, so they were not sent. No money moved.",
+              details="; ".join(f"{o.get('side')} {o.get('symbol')} {o.get('qty')} recorded {o.get('recorded_at') or o.get('evening_date')}"
                               for o in old))
     return old
 
@@ -1391,10 +1345,10 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         if not market_open:
             msg = "market closed (or clock unreadable) - nothing sent; pending orders kept"
             waiting = [(o.get("symbol", "?"), o.get("qty")) for o in evening_orders if isinstance(o, dict)]
-            _notify("Fill check waiting: market closed",
-                    f"Market closed, so nothing was sent and no money moved. Still to finish: "
-                    f"{_list_syms(waiting)}. Nothing to do: it tries again every 30 min while the market is open. "
-                    f"List: Reports/live_pending_orders.json", details=msg)
+            log_event("Fill check", "warning", "no",
+                      f"Market closed, so nothing was sent and no money moved. Still to finish: "
+                      f"{_list_syms(waiting)}. Nothing to do: it tries again every 30 min while the market is open. "
+                      f"List: Reports/live_pending_orders.json", details=msg)
             return pd.DataFrame([(o.get("symbol", "?"), o.get("side", "?"), o.get("qty"), o.get("order_id"),
                                   "WAITING: " + msg) for o in evening_orders if isinstance(o, dict)], columns=cols)
     try:  # live holdings, so a SELL remainder is clamped to the shares actually held
@@ -1558,10 +1512,10 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 ids = ", ".join(str(getattr(x, "id", "?")) for x in open_now)
                 results.append((sym, side, to_order, oid,
                                 f"SKIP (open {sym} order already on Alpaca: {ids}) - kept for retry"))
-                _notify(f"Fill check: {sym} order already open",
-                        f"An open {sym} order is already on Alpaca, so nothing new was sent for {sym}. "
-                        f"Let it fill, or cancel it in Alpaca. Log: Reports/logs",
-                        details=f"open order id(s): {ids}")
+                log_event("Fill check", "warning", "no",
+                          f"An open {sym} order is already on Alpaca, so nothing new was sent for {sym}. "
+                          f"Let it fill, or cancel it in Alpaca. Log: Reports/logs",
+                          details=f"open order id(s): {ids}")
                 to_retry.append(o)
                 continue
             if side == "SELL":
@@ -1604,19 +1558,19 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     msg = (f"FAILED: no usable price for {sym} BUY {to_order:g} shares - "
                            f"affordability cannot be verified (dropped, needs review)")
                     results.append((sym, side, to_order, oid, msg))
-                    _notify(f"Fill check: {sym} buy not sent",
-                            f"{sym} buy of {_fmt_shares(to_order)} shares had no saved price, so it was NOT "
-                            f"sent (no money moved). Buy it by hand in Alpaca if you still want it. "
-                            f"Log: Reports/logs", details=msg)
+                    log_event("Fill check", "failed", "no",
+                              f"{sym} buy of {_fmt_shares(to_order)} shares had no saved price, so it was NOT "
+                              f"sent (no money moved). Buy it by hand in Alpaca if you still want it. "
+                              f"Log: Reports/logs", details=msg)
                     continue
                 if bp_now is None or not math.isfinite(bp_now) or bp_now < 0:
                     msg = (f"SKIP (morning buying power unreadable) - {sym} BUY {to_order:g} shares "
                            f"not completed")
                     results.append((sym, side, to_order, oid, msg))
-                    _notify(f"Fill check: {sym} buy on hold",
-                            f"Couldn't read your buying power, so the {sym} buy of {_fmt_shares(to_order)} "
-                            f"shares was NOT sent (no money moved). It tries again in 30 min. Log: Reports/logs",
-                            details=msg)
+                    log_event("Fill check", "warning", "no",
+                              f"Couldn't read your buying power, so the {sym} buy of {_fmt_shares(to_order)} "
+                              f"shares was NOT sent (no money moved). It tries again in 30 min. Log: Reports/logs",
+                              details=msg)
                     to_retry.append(o)
                     continue
                 unit = est_price * (1 + CASH_CUSHION)  # 1% cushion for market slippage/gaps
@@ -1630,10 +1584,10 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                                f"after ${reserved_buy_spend:,.2f} reserved) - {sym} BUY {to_order:g} shares "
                                f"not bought, not retried")
                         results.append((sym, side, to_order, oid, msg))
-                        _notify(f"Fill check: not enough cash for {sym}",
-                                f"{sym} buy of {_fmt_shares(to_order)} shares needs ~${est_cost:,.0f}; only "
-                                f"${max(spendable, 0):,.0f} is free. NOT sent, no money moved. Buy less by hand "
-                                f"in Alpaca if you want it.", details=msg)
+                        log_event("Fill check", "warning", "no",
+                                  f"{sym} buy of {_fmt_shares(to_order)} shares needs ~${est_cost:,.0f}; only "
+                                  f"${max(spendable, 0):,.0f} is free. NOT sent, no money moved. Buy less by hand "
+                                  f"in Alpaca if you want it.", details=msg)
                         continue
                     partial = f"; only {fit:g} of {to_order:g} fit in free cash"
                     to_order, est_cost = fit, fit * unit
@@ -1682,28 +1636,28 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         failed = results[results["Status"].str.startswith("FAILED")]
         again = failed["Status"].str.contains("retrying", na=False)
         if again.any():
-            _notify(f"Fill check: {int(again.sum())} order(s) retrying",
-                    f"Not sent yet: {_list_syms(zip(failed[again]['Symbol'], failed[again]['Shares']))}. No money "
-                    f"moved for these. It tries again in 30 min (up to {MAX_FILL_TRIES} times) - don't place them "
-                    f"by hand. Log: Reports/live_orders_log.csv",
-                    details="; ".join(f"{r.Symbol}: {r.Status}" for r in failed[again].itertuples()))
+            log_event("Fill check", "warning", "no",
+                      f"Not sent yet: {_list_syms(zip(failed[again]['Symbol'], failed[again]['Shares']))}. No money "
+                      f"moved for these. It tries again in 30 min (up to {MAX_FILL_TRIES} times) - don't place them "
+                      f"by hand. Log: Reports/live_orders_log.csv",
+                      details="; ".join(f"{r.Symbol}: {r.Status}" for r in failed[again].itertuples()))
         if (~again).any():
-            _notify(f"Fill check: {int((~again).sum())} order(s) failed",
-                    f"Not traded: {_list_syms(zip(failed[~again]['Symbol'], failed[~again]['Shares']))}. No money "
-                    f"moved for these and they won't be retried. Place any you still want by hand in Alpaca. "
-                    f"Log: Reports/live_orders_log.csv",
-                    details="; ".join(f"{r.Symbol}: {r.Status}" for r in failed[~again].itertuples()))
+            log_event("Fill check", "failed", "no",
+                      f"Not traded: {_list_syms(zip(failed[~again]['Symbol'], failed[~again]['Shares']))}. No money "
+                      f"moved for these and they won't be retried. Place any you still want by hand in Alpaca. "
+                      f"Log: Reports/live_orders_log.csv",
+                      details="; ".join(f"{r.Symbol}: {r.Status}" for r in failed[~again].itertuples()))
     if not dry_run and not results.empty:
         def _pairs(mask):
             return [(f"{r.Side.lower()} {r.Symbol}", r.Shares) for r in results[mask].itertuples()]
         done = _pairs(results["Status"].str.contains("COMPLETED|FILLED", na=False))
         if done:
             left = ("Nothing to do." if not (n_failed or to_retry)
-                    else f"{max(len(to_retry), n_failed)} not done - see the other alert.")
-            _notify("Fill check: orders filled",
-                    f"Filled (money moved): {_list_syms(done)}. {left} "
-                    f"Log: Reports/live_orders_log.csv",
-                    details="; ".join(f"{r.Side} {r.Symbol} {r.Shares}: {r.Status}"
+                    else f"{max(len(to_retry), n_failed)} not done - see the other rows.")
+            log_event("Fill check", "ok", "yes",
+                      f"Filled (money moved): {_list_syms(done)}. {left} "
+                      f"Log: Reports/live_orders_log.csv",
+                      details="; ".join(f"{r.Side} {r.Symbol} {r.Shares}: {r.Status}"
                                       for r in results.itertuples()))
 
     if not dry_run and not to_retry:
@@ -1718,22 +1672,22 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         if not report.empty:
             print(report.to_string(index=False))
         if ok is None:
-            _notify("Couldn't double-check holdings",
-                    "The 9 AM check finished, but targets or Alpaca couldn't be read to compare holdings. "
-                    "No orders were sent by this step. Glance at Alpaca once. Log: Reports/logs")
+            log_event("Fill check", "warning", "no",
+                      "The fill check finished, but targets or Alpaca couldn't be read to compare holdings. "
+                      "No orders were sent by this step. Glance at Alpaca once. Log: Reports/logs")
             print("\n  !! Could not compare holdings with targets (data unavailable).")
         elif not ok:
             drift = report[report["Status"] != "OK"]
             first = drift.iloc[0]
             more = f" (+{len(drift) - 1} more)" if len(drift) > 1 else ""
-            _notify(f"{first['Symbol']} off target after trades",
-                    f"After the trades, {first['Symbol']} is {first['Actual_Weight_%']:.1f}% of your account "
-                    f"vs {first['Target_Weight_%']:.1f}% planned{more}. An order may not have filled. "
-                    f"Check it in Alpaca. Log: Reports/logs",
-                    details="; ".join(f"{r['Symbol']}: {r['Actual_Weight_%']:.1f}% held vs "
+            log_event("Fill check", "warning", "no",
+                      f"After the trades, {first['Symbol']} is {first['Actual_Weight_%']:.1f}% of your account "
+                      f"vs {first['Target_Weight_%']:.1f}% planned{more}. An order may not have filled. "
+                      f"Check it in Alpaca. Log: Reports/logs",
+                      details="; ".join(f"{r['Symbol']}: {r['Actual_Weight_%']:.1f}% held vs "
                                       f"{r['Target_Weight_%']:.1f}% planned ({r['Status']})"
                                       for _, r in drift.iterrows()))
-            print("\n  !! A traded symbol is off target - notification sent, check Alpaca.")
+            print("\n  !! A traded symbol is off target - see Reports/run_log.csv, check Alpaca.")
         else:
             print("\n  Traded symbols match strategy targets (within 1 percentage point).")
     _print_header("MORNING LIVE FILL CHECK COMPLETE")
@@ -1889,17 +1843,17 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
         as_of_date = check_signal_freshness(decision=decision)
         print(f"  Signals fresh: as of {as_of_date}" + (f" (decision {pd.Timestamp(decision):%Y-%m-%d})" if decision is not None else " (today, CT)"))
     except ValueError as e:
-        _notify("Trade skipped: signals not fresh",
-                "Today's signal files weren't ready, so no orders were sent and no money moved. "
-                "Nothing to do if the next run works. Log: Reports/logs", details=str(e))
+        log_event("Trade", "failed", "no",
+                  "Today's signal files weren't ready, so no orders were sent and no money moved. "
+                  "Nothing to do if the next run works. Log: Reports/logs", details=str(e))
         raise
 
     try:
         positions, equity, cash, buying_power = get_live_positions_and_equity()
     except Exception as e:
-        _notify("Trade skipped: can't reach Alpaca",
-                "Couldn't read your Alpaca account, so no orders were sent and no money moved. "
-                "Check your internet or Alpaca's status page. Log: Reports/logs", details=str(e))
+        log_event("Trade", "failed", "no",
+                  "Couldn't read your Alpaca account, so no orders were sent and no money moved. "
+                  "Check your internet or Alpaca's status page. Log: Reports/logs", details=str(e))
         raise
     print(f"  Equity ${equity:,.2f}  |  Cash ${cash:,.2f}  |  Positions: {len(positions)} symbols")
 
@@ -1993,14 +1947,14 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, dry_run=Fals
         # Not retried automatically: a decision runs once (run_state last_decision), and failed rows are
         # not in the 9 AM list. Say so plainly.
         failed = results[results["Status"].str.startswith("FAILED")]
-        _notify(f"Trade: {n_failed} order(s) not sent",
-                f"Alpaca returned an error for: {_list_syms(zip(failed['Symbol'], failed['Shares']))}. "
-                f"Other orders are fine. Check Alpaca; place any you still want by hand. "
-                f"Log: Reports/live_orders_log.csv",
-                details="; ".join(f"{r.Side} {r.Symbol} {r.Shares}: {r.Status}" for r in failed.itertuples()))
+        log_event("Trade", "failed", "yes" if n_submitted else "no",
+                  f"{n_failed} order(s) not sent: Alpaca returned an error for: {_list_syms(zip(failed['Symbol'], failed['Shares']))}. "
+                  f"Other orders are fine. Check Alpaca; place any you still want by hand. "
+                  f"Log: Reports/live_orders_log.csv",
+                  details="; ".join(f"{r.Side} {r.Symbol} {r.Shares}: {r.Status}" for r in failed.itertuples()))
     if n_submitted:
         prices = dict(zip(orders["Symbol"].astype(str), pd.to_numeric(orders["Price"], errors="coerce")))
-        _notify(*_trade_notice(results, prices))
+        log_event("Trade", "ok", *_trade_notice(results, prices))
     _print_header("EVENING LIVE TRADE COMPLETE")
     return orders, meta, results
 
