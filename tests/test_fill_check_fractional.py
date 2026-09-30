@@ -37,8 +37,9 @@ class QueryOrderStatus(Enum):
     OPEN = "open"
 
 
-class SortDirection(Enum):
-    DESCENDING = "desc"
+class Sort(Enum):              # alpaca.common.enums.Sort
+    ASC = "asc"
+    DESC = "desc"
 
 
 class _Req:
@@ -52,9 +53,11 @@ class GetOrdersRequest(_Req): pass
 
 
 mods = {n: types.ModuleType(n) for n in ("alpaca", "alpaca.trading", "alpaca.trading.client",
-                                          "alpaca.trading.enums", "alpaca.trading.requests", "dotenv")}
+                                          "alpaca.trading.enums", "alpaca.trading.requests", "alpaca.common",
+                                          "alpaca.common.enums", "dotenv")}
 mods["alpaca.trading.enums"].__dict__.update(OrderSide=OrderSide, TimeInForce=TimeInForce,
-                                             QueryOrderStatus=QueryOrderStatus, SortDirection=SortDirection)
+                                             QueryOrderStatus=QueryOrderStatus)
+mods["alpaca.common.enums"].Sort = Sort
 mods["alpaca.trading.requests"].__dict__.update(MarketOrderRequest=MarketOrderRequest,
                                                 LimitOrderRequest=LimitOrderRequest,
                                                 GetOrdersRequest=GetOrdersRequest)

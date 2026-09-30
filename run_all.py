@@ -195,11 +195,13 @@ def _notify(title, message, details=None):
         import subprocess as _sp
         safe_title = _clip(title, 40).replace('"', "'").replace("\\", "")
         safe_msg = _clip(message, 200).replace('"', "'").replace("\\", "")
-        _sp.run(["osascript", "-e",
-                 f'display notification "{safe_msg}" with title "{safe_title}" sound name "Basso"'],
-                timeout=5, capture_output=True)
-    except Exception:
-        pass  # the log line above is the fallback
+        r = _sp.run(["osascript", "-e",
+                     f'display notification "{safe_msg}" with title "{safe_title}" sound name "Basso"'],
+                    timeout=10, capture_output=True, text=True)
+        if r.returncode:
+            logging.warning("  notification not shown (osascript exit %s: %s)", r.returncode, (r.stderr or "").strip()[:200])
+    except Exception as e:                                  # the log line above is the fallback
+        logging.warning("  notification not shown (%s)", e)
 
 
 def _notebook_error_summary(output, notebook):
@@ -965,7 +967,7 @@ def _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, cl
         logging.warning("FILL CHECK: %s", reason)
         if scheduled and state.get("fill_alert_on") == now.date().isoformat():
             return 1                                      # already alerted today (launchd runs every 30 min)
-        _notify("9 AM check needs you", "The 9 AM order list is damaged, so nothing was sent (no money moved). Check "
+        _notify("Fill check needs you", "The pending order list is damaged, so nothing was sent (no money moved). Check "
                 "Alpaca, then clear the live_pending_orders files in Reports. Log: Reports/logs", details=reason)
         state.update(update_state(fill_alert_on=now.date().isoformat()))
         return 1
@@ -1037,7 +1039,8 @@ def _trade(a, D, how, failures, state, clock, ckpt):
         if session and n_sent:
             logging.info("=== send now (paper_trade.complete_unfilled_orders: regular-hours market orders, 2 decimals)")
             try:
-                for r in paper_trade.complete_unfilled_orders(dry_run=False).itertuples():
+                meta["sent_now"] = paper_trade.complete_unfilled_orders(dry_run=False)
+                for r in meta["sent_now"].itertuples():
                     logging.info("  %s %-6s %s shares -> %s", r.Side, r.Symbol, r.Shares, r.Status)
                 state.update(update_state(last_fill_check_at=clock()))
             except Exception as e:                          # still pending (send_now): the fill-check job retries
@@ -1061,8 +1064,9 @@ def _wait_for_lock(path, minutes=10):
 def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_path, ckpt_write, ckpt_clear, clock,
               D=None, how=None):
     """The notebook steps, the optional live sync and the --trade phase, then the summary. Returns the exit code."""
-    _notify("Pipeline started",
-            f"{mode} mode ({why}) - {len([s for s in steps if s[0] not in skip])} steps")
+    label = run_label(D, how)
+    _notify(f"{label} started", f"{label} started {_hm(now)} CT. Takes about "
+            f"{'15 min' if mode == 'full' else 'a minute'}. Nothing to do.")
     if a.now is None:  # real runs only - the tests' fake clock never holds a sleep assertion
         _hold_sleep_assertion()
     env = dict(os.environ)
@@ -1176,22 +1180,71 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
         logging.info("  %s", info["next"])
     logging.info("  Next full online update: %s  |  log %s", next_full_update(now, state), os.path.relpath(log_path, ROOT))
     logging.info("=" * 78)
-    elapsed = time.time() - t_start
     if crit and a.trade:
         _notify(*trade_failure_text(D, crit, (trade_meta or {}).get("error"), state, a.scheduled))
     elif crit:
-        _notify("Pipeline FAILED", f"{mode} mode, {elapsed:.0f}s - failed: {', '.join(crit)}")
-    elif failures:
-        _notify("Pipeline finished with warnings",
-                f"{mode} mode, {elapsed:.0f}s - {', '.join(failures)} (main signals are fresh)")
+        _notify(f"{label} failed", f"{label} stopped at {_hm(datetime.fromisoformat(clock()))} CT: the "
+                f"{', '.join(crit)} step failed. No trades ran, no money moved. Log: Reports/logs")
     else:
-        _notify("Pipeline finished", f"{mode} mode, {elapsed:.0f}s - {len(ran)} steps ok")
+        _notify(*finished_text(label, datetime.fromisoformat(clock()), ran, failures, a.trade, how,
+                               trade_results, (trade_meta or {}).get("sent_now")))
     if not crit:
         ckpt_clear()            # clean run (warnings ok) - the watchdog has nothing to resume
     if a.trade and any(f in crit for f in ("trade", "trade_partial", "send_now")):
         ckpt_clear()            # alerted above in plain words; the scheduled job decides any retry
         return EXIT_REPORTED
     return 1 if crit else 0
+
+
+def _hm(t):
+    """'3:16 PM' (no leading zero)."""
+    return f"{t:%I:%M %p}".lstrip("0")
+
+
+def run_label(D, how):
+    """Plain name of the run for alerts: 'Wed check', 'Fri rebalance', 'Catch-up: Fri Oct 2 rebalance', 'Data refresh'."""
+    if D is None or how not in ("evening", "session"):
+        return "Data refresh"
+    import backtest_engine as be
+    kind = "rebalance" if be.decision_kind(D) == "full rebalance" else "check"
+    return f"{D:%a} {kind}" if how == "evening" else f"Catch-up: {D:%a %b} {D.day} {kind}"
+
+
+def _count_sides(df, pattern):
+    """'2 sells, 3 buys' for the rows whose Status matches `pattern` ('' when none)."""
+    if df is None or df.empty:
+        return ""
+    hit = df[df["Status"].astype(str).str.contains(pattern, case=False, na=False)]
+    n = {s: int((hit["Side"] == s).sum()) for s in ("SELL", "BUY")}
+    return ", ".join(f"{k} {w}{'s' if k != 1 else ''}" for w, k in (("sell", n["SELL"]), ("buy", n["BUY"])) if k)
+
+
+def finished_text(label, end, ran, failures, trade_run, how, trades, sent_now=None):
+    """(title, message) when a run ends without a critical failure: what ran, whether money moved, what's next,
+    whether to act. Pure (except the decision calendar)."""
+    import backtest_engine as be
+    bad = [n for n, ok, _ in ran if not ok]
+    names = ", ".join(failures) if len(", ".join(failures)) <= 25 else f"{len(failures)} optional steps"
+    steps = (f"All {len(ran)} steps OK." if not failures else
+             f"{len(ran) - len(bad)} of {len(ran)} steps OK ({names} failed - last good data used).")
+    if not trade_run:
+        money = "Data refresh only - no trades, no money moved."
+    elif how == "session" and _count_sides(sent_now, "^COMPLETED"):
+        money = f"Catch-up orders sent at market: {_count_sides(sent_now, '^COMPLETED')} - money moves as they fill."
+    elif _count_sides(trades, "^submitted"):
+        money = (f"Orders sent: {_count_sides(trades, '^(submitted|STAGED)')} - money moves as they fill; small "
+                 f"remainders go out at 9 AM.")
+    elif _count_sides(trades, "^STAGED"):
+        money = f"Orders queued for 9 AM: {_count_sides(trades, '^STAGED')} - no money moved yet."
+    else:
+        money = "No trades needed - no orders, no money moved."
+    nxt = be.next_decision_slot(end)
+    kind = {"full rebalance": "rebalance", "mid-week check": "check"}.get(be.decision_kind(nxt) if nxt else None)
+    next_up = f"Next: {nxt:%a %b} {nxt.day} {kind} at {_hm(nxt)}." if kind else ""
+    msg = f"{label} done {_hm(end)}. {steps} {money} {next_up} Nothing to do."
+    if len(msg) > 200:                                    # macOS shows 200 characters: drop the least important part
+        msg = f"{label} done {_hm(end)}. {steps} {money} Nothing to do."
+    return f"{label} done", " ".join(msg.split())
 
 
 def trade_failure_text(D, crit, error, state, scheduled):

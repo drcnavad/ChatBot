@@ -29,7 +29,7 @@ class OrderSide(Enum):
 class _E(Enum):
     ALL = "all"
     OPEN = "open"
-    DESCENDING = "desc"
+    DESC = "desc"
     DAY = "day"
 
 
@@ -43,8 +43,10 @@ class LimitOrderRequest(_Req): pass
 
 
 mods = {n: types.ModuleType(n) for n in ("alpaca", "alpaca.trading", "alpaca.trading.client",
-                                          "alpaca.trading.enums", "alpaca.trading.requests", "dotenv")}
-mods["alpaca.trading.enums"].__dict__.update(OrderSide=OrderSide, TimeInForce=_E, QueryOrderStatus=_E, SortDirection=_E)
+                                          "alpaca.trading.enums", "alpaca.trading.requests", "alpaca.common",
+                                          "alpaca.common.enums", "dotenv")}
+mods["alpaca.trading.enums"].__dict__.update(OrderSide=OrderSide, TimeInForce=_E, QueryOrderStatus=_E)
+mods["alpaca.common.enums"].Sort = _E
 mods["alpaca.trading.requests"].__dict__.update(MarketOrderRequest=MarketOrderRequest, LimitOrderRequest=LimitOrderRequest,
                                                 GetOrdersRequest=_Req)
 mods["alpaca.trading.client"].TradingClient = type("TradingClient", (), {})

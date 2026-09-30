@@ -31,6 +31,8 @@
                          (live endpoint allowlist, no order-placing code)
   test_catch_up.py       missed-decision catch-up: each decision runs once (3:15 PM slot or the next regular session),
                          superseded at the next slot; weekends wait for the open; holidays; send_now fill gate
+  test_alpaca_api_names.py the REAL alpaca-py: every alpaca import / enum member the code uses exists and the
+                         exact order + orders-list requests build (no network)
   test_strategy_health.py  strategy_health.py: reference parsing, equity stats, trend/drawdown/Sharpe
                          bands, composite score levels, regime detection, fail-soft on missing files
                          (synthetic data, no network, no streamlit)
@@ -45,7 +47,8 @@ ROOT = os.path.dirname(HERE)
 TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_run_all_notify.py", "test_run_all_optional.py",
          "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_live_safety.py", "test_fill_check_fractional.py",
          "test_paper_trade_math_audit.py", "test_notifications.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
-         "test_strategy_health.py", "test_live_rules_audit.py", "test_catch_up.py"]
+         "test_strategy_health.py", "test_live_rules_audit.py", "test_catch_up.py",
+         "test_alpaca_api_names.py"]
 
 
 def main():

@@ -108,12 +108,14 @@ def _notify(title, message, details=None):
         import subprocess
         safe_title = title.replace('"', "'").replace("\\", "")
         safe_msg = message.replace('"', "'").replace("\\", "")
-        subprocess.run(
+        r = subprocess.run(
             ["osascript", "-e",
              f'display notification "{safe_msg}" with title "{safe_title}" sound name "Basso"'],
-            timeout=5, capture_output=True)
-    except Exception:
-        pass  # the print above is the fallback
+            timeout=10, capture_output=True, text=True)
+        if r.returncode:
+            print(f"  notification not shown (osascript exit {r.returncode}: {(r.stderr or '').strip()[:200]})", flush=True)
+    except Exception as e:  # the print above is the fallback
+        print(f"  notification not shown ({e})", flush=True)
 
 
 def _fmt_shares(q):
@@ -892,10 +894,10 @@ def _broker_orders_by_client_id(client):
     aborts instead (it must never place an order it cannot de-duplicate).
     """
     try:
-        from alpaca.trading.enums import QueryOrderStatus, SortDirection
+        from alpaca.common.enums import Sort               # alpaca-py: the sort enum lives in alpaca.common
+        from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest
-        req = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500,
-                               direction=SortDirection.DESCENDING)
+        req = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500, direction=Sort.DESC)
         out = {}
         for o in client.get_orders(req):
             cid = getattr(o, "client_order_id", "") or ""
@@ -1389,7 +1391,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         if not market_open:
             msg = "market closed (or clock unreadable) - nothing sent; pending orders kept"
             waiting = [(o.get("symbol", "?"), o.get("qty")) for o in evening_orders if isinstance(o, dict)]
-            _notify("9 AM check waiting: market closed",
+            _notify("Fill check waiting: market closed",
                     f"Market closed, so nothing was sent and no money moved. Still to finish: "
                     f"{_list_syms(waiting)}. Nothing to do: it tries again every 30 min while the market is open. "
                     f"List: Reports/live_pending_orders.json", details=msg)
@@ -1556,7 +1558,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 ids = ", ".join(str(getattr(x, "id", "?")) for x in open_now)
                 results.append((sym, side, to_order, oid,
                                 f"SKIP (open {sym} order already on Alpaca: {ids}) - kept for retry"))
-                _notify(f"9 AM check: {sym} order already open",
+                _notify(f"Fill check: {sym} order already open",
                         f"An open {sym} order is already on Alpaca, so nothing new was sent for {sym}. "
                         f"Let it fill, or cancel it in Alpaca. Log: Reports/logs",
                         details=f"open order id(s): {ids}")
@@ -1602,7 +1604,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     msg = (f"FAILED: no usable price for {sym} BUY {to_order:g} shares - "
                            f"affordability cannot be verified (dropped, needs review)")
                     results.append((sym, side, to_order, oid, msg))
-                    _notify(f"9 AM check: {sym} buy not sent",
+                    _notify(f"Fill check: {sym} buy not sent",
                             f"{sym} buy of {_fmt_shares(to_order)} shares had no saved price, so it was NOT "
                             f"sent (no money moved). Buy it by hand in Alpaca if you still want it. "
                             f"Log: Reports/logs", details=msg)
@@ -1611,7 +1613,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     msg = (f"SKIP (morning buying power unreadable) - {sym} BUY {to_order:g} shares "
                            f"not completed")
                     results.append((sym, side, to_order, oid, msg))
-                    _notify(f"9 AM check: {sym} buy on hold",
+                    _notify(f"Fill check: {sym} buy on hold",
                             f"Couldn't read your buying power, so the {sym} buy of {_fmt_shares(to_order)} "
                             f"shares was NOT sent (no money moved). It tries again in 30 min. Log: Reports/logs",
                             details=msg)
@@ -1628,7 +1630,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                                f"after ${reserved_buy_spend:,.2f} reserved) - {sym} BUY {to_order:g} shares "
                                f"not bought, not retried")
                         results.append((sym, side, to_order, oid, msg))
-                        _notify(f"9 AM check: not enough cash for {sym}",
+                        _notify(f"Fill check: not enough cash for {sym}",
                                 f"{sym} buy of {_fmt_shares(to_order)} shares needs ~${est_cost:,.0f}; only "
                                 f"${max(spendable, 0):,.0f} is free. NOT sent, no money moved. Buy less by hand "
                                 f"in Alpaca if you want it.", details=msg)
@@ -1698,7 +1700,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         if done:
             left = ("Nothing to do." if not (n_failed or to_retry)
                     else f"{max(len(to_retry), n_failed)} not done - see the other alert.")
-            _notify("9 AM check: orders filled",
+            _notify("Fill check: orders filled",
                     f"Filled (money moved): {_list_syms(done)}. {left} "
                     f"Log: Reports/live_orders_log.csv",
                     details="; ".join(f"{r.Side} {r.Symbol} {r.Shares}: {r.Status}"

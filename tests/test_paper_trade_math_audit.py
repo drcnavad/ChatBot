@@ -47,9 +47,9 @@ class QueryOrderStatus(_Enum):
     CLOSED = "closed"
 
 
-class SortDirection(_Enum):
-    DESCENDING = "desc"
-    ASCENDING = "asc"
+class Sort(_Enum):             # alpaca.common.enums.Sort
+    DESC = "desc"
+    ASC = "asc"
 
 
 class _Req:
@@ -77,7 +77,10 @@ _requests = types.ModuleType("alpaca.trading.requests")
 _enums.OrderSide = OrderSide
 _enums.TimeInForce = TimeInForce
 _enums.QueryOrderStatus = QueryOrderStatus
-_enums.SortDirection = SortDirection
+_common = types.ModuleType("alpaca.common")
+_common_enums = types.ModuleType("alpaca.common.enums")
+_common_enums.Sort = Sort
+sys.modules.update({"alpaca.common": _common, "alpaca.common.enums": _common_enums})
 _requests.MarketOrderRequest = MarketOrderRequest
 _requests.LimitOrderRequest = LimitOrderRequest
 _requests.GetOrdersRequest = GetOrdersRequest
