@@ -12,7 +12,7 @@ ENV/
 # Streamlit
 .streamlit/secrets.toml
 
-# Jupyter Notebook (notebooks ARE tracked; only checkpoints are ignored)
+# Jupyter Notebook (notebooks ARE tracked; outputs are stripped on commit by nbstripout - see .gitattributes)
 .ipynb_checkpoints
 
 # Environment variables / secrets (all API keys live here)
@@ -32,26 +32,15 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Data files - only the reports the app / pipeline need are tracked
+# Data files: everything the pipeline (re)writes stays local - it is regenerated on every run.
+# Tracked seeds: the backtest reference results (written only by a manual backtest.ipynb run;
+# strategy_health.py, the app and run_all.py's output check read them).
 Reports/cache/
 Reports/*.csv
 Reports/*.xlsx
 Reports/*.pkl
-!Reports/signal_analysis.csv
-!Reports/news_cleaned_df.csv
-!Reports/earnings_date.csv
-!Reports/daily_rank.csv
-!Reports/complete_company_analysis.xlsx
-!Reports/strategy_picks.csv
 !Reports/backtest_summary.csv
-!Reports/factor_history.csv
 !Reports/backtest_per_stock.csv
-!Reports/strategy_changes.csv
-!Reports/strategy_holdings.csv
-!Reports/strategy_tracking.csv
-!Reports/sentiment_history.csv
-!Reports/strategy_decisions.csv
-!Reports/benchmark_prices.csv
 
 # Backup/duplicate app files
 app2.py
