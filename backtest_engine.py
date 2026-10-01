@@ -136,6 +136,18 @@ if WINNER.get("earnings_block_days"):             # no new buys shortly before e
     WINNER["name"] += f' + no new buys with earnings in the next {WINNER["earnings_block_days"]} days'
 
 
+# Live portfolio size: the live weights (signal_analysis / strategy_picks / changes / mid-week check, read by paper_trade.py
+# and the app) are the rule weights x LIVE_INVESTED, each rounded DOWN to a 2-decimal percent (9.87% = 0.0987), so a full
+# portfolio sums to at most 99% and rounding can never push it over 100%. The regime halving is already in the rule weights
+# (a regime-off week targets at most 49.5%). Backtests and the regression tests use the unscaled rule weights.
+LIVE_INVESTED = 0.99
+
+
+def live_weights(w):
+    """Rule weights (number, Series or DataFrame of fractions) -> live weights: x LIVE_INVESTED, floored to 0.0001."""
+    return np.floor(w * LIVE_INVESTED * 10_000) / 10_000
+
+
 def winner_max_per_sector():
     """Max names per sector implied by WINNER (same formula as rank_targets)."""
     return max(1, int(np.floor(WINNER["sector_cap"] * WINNER["n"])))

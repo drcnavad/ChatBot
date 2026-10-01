@@ -70,7 +70,9 @@ ORDER_COLUMNS = ["Symbol", "Side", "Shares", "Price", "Est_Value", "Current_Shar
                  "Target_Weight_%", "Target_Value"]
 NO_TRADE_BAND = 0.01   # Friday rebalance: a target holding within 1 percentage point of its weight is not traded
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
-CASH_CUSHION = 0.01    # buys are sized to free cash / (1 + 1%) so market fills a bit above the estimate still fit
+CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills a bit above the estimate still fit.
+                       # A cap, not a second scale-down: weights already sum to <= 99% (backtest_engine.LIVE_INVESTED),
+                       # and 99% of equity always fits under it, so the account ends ~99% invested, not ~98%.
 
 
 # ----------------------------------------------------------------------------- run log, terminal formatting, data freshness

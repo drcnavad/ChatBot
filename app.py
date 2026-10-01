@@ -783,7 +783,7 @@ def event_hover(e):
     text += f"<br>Decided at the close {e.Decision:%a %b %d} · {when}"
     bits = ([f"Rank #{e.Rank:.0f}"] if pd.notna(e.Rank) else []) + ([f"Score {e.Score:.1f}"] if pd.notna(e.Score) else [])
     if pd.notna(e.Weight):
-        bits.append(f"{'Portfolio weight' if e.Kind == 'entry' else 'Weight sold'} {e.Weight * 100:.1f}%")
+        bits.append(f"{'Portfolio weight' if e.Kind == 'entry' else 'Weight sold'} {e.Weight * 100:.2f}%")
     if bits:
         text += "<br>" + " · ".join(bits)
     if e.Regime_On == 0:
@@ -903,7 +903,7 @@ def render_picks_table(p):
         "Symbol": held.index,
         "Signal": [p.sig_off.get(s, "—") for s in held.index],
         "Rank": held["Strategy_Rank"].round(0).to_numpy(),
-        "Portfolio weight %": (w * 100).round(1).to_numpy(),
+        "Portfolio weight %": (w * 100).round(2).to_numpy(),
         "Sector": [symbol_sector.get(s, "—") for s in held.index],
         "Next earnings": last_next_earnings(list(held.index))["Next ED"].to_numpy(),
         "Why": [p.why_off.get(s, "") for s in held.index],
@@ -1493,7 +1493,7 @@ def render_rules_and_changes(p):
     earn = sub["Reason"].astype(str).str.startswith("earnings in")
     if not st.checkbox("Show Neutral (sector cap) names too", value=False, key="changes_all"):
         sub, earn = sub[(sub["Status"] != "not selected") | earn], earn[(sub["Status"] != "not selected") | earn]
-    sub[["Old_Weight", "New_Weight"]] = (sub[["Old_Weight", "New_Weight"]] * 100).round(1)
+    sub[["Old_Weight", "New_Weight"]] = (sub[["Old_Weight", "New_Weight"]] * 100).round(2)
     order = {"add": 0, "drop": 1, "hold": 2, "not selected": 3}
     sub = sub.sort_values(["Status", "Rank"], key=lambda s: s.map(order) if s.name == "Status" else s)
     sub["Signal"] = sub["Status"].map({"add": "Bullish (Buy)", "hold": "Hold", "drop": "Bearish (Sell)",
@@ -1510,7 +1510,7 @@ def render_holdings_and_tracking():
     holdings = read_report_csv(HOLDINGS_CSV)
     if holdings is not None and not holdings.empty:
         h = holdings.copy()
-        h["Weight"] = (h["Weight"] * 100).round(1)
+        h["Weight"] = (h["Weight"] * 100).round(2)
         h = h.drop(columns=["ATR_Stop", "Dist_to_Stop_%"], errors="ignore")
         st.markdown("**Holdings · P&L since entry**")
         st.dataframe(h.rename(columns={"Weight": "Portfolio weight %", "PnL_%": "P&L %", "Days_Held": "Days held",

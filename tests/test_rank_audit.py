@@ -174,6 +174,7 @@ def audit(D, compare_col):
     w = inv / inv.sum() * len(picked) / 10
     if int(day.Regime_On.iloc[0]) == 0:
         w *= 0.5
+    w = np.floor(w * be.LIVE_INVESTED * 10_000) / 10_000     # live weights: x 99%, each rounded down to 0.01%
     actual = t[compare_col].fillna(0)
     held = sorted(actual.index[actual > 0])
     print(f"(e) walk-down picks: {picked}  (skipped for sector cap before slot 10: {skipped})"
