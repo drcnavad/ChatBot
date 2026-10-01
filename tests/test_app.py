@@ -1,6 +1,8 @@
 """App regression (Streamlit AppTest, no browser, no network): the page renders without exceptions, HTML in markdown renders
 as HTML (no escaped tags / code blocks / unbalanced tags), the price chart draws Close + all MAs on a date axis, the displayed
-rank == Strategy_Rank and the portfolio slot == position among the picks, the Strategy tab widgets work, captions name the live
+rank == Strategy_Rank and the portfolio slot == position among the picks, the dated decision badge / "Strategy rank ·
+<latest close>" / "<rebalance day> plan" chip agree with strategy_changes / signal_analysis / strategy_picks (and with the
+"Latest signals" and "Last decision" tables in Details), the Strategy tab widgets work, captions name the live
 rules, the rank tiers render with a ?symbol= link per ranked stock, and the holdings-alert module still builds
 (strategy holdings + a temporary positions file, deleted afterwards; the dashboard banner itself was removed).
 Run: python tests/run_tests.py  (or python tests/test_app.py)"""
@@ -124,7 +126,7 @@ for sym in TICKERS:
     page_ok(at, sym)
     price_chart_ok(at, sym)
     hero = next((m.value for m in at.markdown if 'class="sa-hero"' in m.value), "")
-    rk = re.search(r"Rank today.*?sa-stat-val[^>]*>([^<]*)<", hero)
+    rk = re.search(r"Strategy rank.*?sa-stat-val[^>]*>([^<]*)<", hero)
     sl = re.search(r"Portfolio slot.*?sa-stat-val[^>]*>([^<]*)<", hero)
     r = latest.loc[sym, "Strategy_Rank"]
     want_rk = f"#{r:.0f} / {int(latest['Strategy_Rank'].notna().sum())}" if pd.notna(r) else "—"
@@ -132,13 +134,80 @@ for sym in TICKERS:
     expect(rk and sl and rk.group(1) == want_rk and sl.group(1) == want_sl,
            f"{sym}: header rank/slot {rk and rk.group(1)!r}/{sl and sl.group(1)!r}, expected {want_rk!r}/{want_sl!r}")
 
+# ---------------------------------------------------------------- decision badge / rank label / plan chip / Details tables agree
+# decision in force = strategy_changes.csv (what the app reads); today's rank = latest signal_analysis; plan = strategy_picks
+CH = pd.read_csv("Reports/strategy_changes.csv", parse_dates=["Date"])
+CH = CH[CH.Symbol.notna()]
+dec_day = CH.Date.iloc[0]
+PK = pd.read_csv("Reports/strategy_picks.csv", parse_dates=["As_Of", "Last_Rebalance"])
+as_of = PK.As_Of.iloc[0]
+plan_day = as_of if as_of == PK.Last_Rebalance.iloc[0] else None
+if plan_day is None:
+    d = as_of
+    for _ in range(6):
+        d, kind, _f = be.next_decision(d)
+        if kind == "full rebalance":
+            plan_day = d; break
+prev = SIG[SIG.Date < plan_day]; prev = prev[prev.Date == prev.Date.max()]
+held_into = set(prev.loc[prev.Strategy_Weight.fillna(0) > 0, "Symbol"])
+pw = PK.set_index("Symbol").Provisional_Weight.fillna(0)
+def want_plan(sym):
+    w = pw.get(sym, 0.0) * 100
+    return (f"Keep {w:.2f}%" if sym in held_into else f"Buy {w:.2f}%") if w > 0 else ("Sell" if sym in held_into else "not picked")
+WORD = {"add": "Buy", "hold": "Hold", "drop": "Sold"}
+st_ = CH.set_index("Symbol").Status
+picks_for = {"drop": CH[CH.Status == "drop"].Symbol.tolist(), "hold": CH[CH.Status == "hold"].Symbol.tolist()}
+cases = (["FTNT"] if "FTNT" in st_.index else []) + picks_for["drop"][:1] + picks_for["hold"][:1] \
+    + [s for s in pw.index if pw[s] > 0 and s not in held_into][:1]
+fmt = lambda d: f"{d:%a %b} {d.day}"
+for sym in dict.fromkeys(cases):
+    at = at.selectbox(key="ticker_dropdown").set_value(sym).run()
+    hero = next((m.value for m in at.markdown if 'class="sa-hero"' in m.value), "")
+    badges = [re.sub("<[^>]+>", "", b) for b in re.findall(r'<span class="sa-badge[^"]*"[^>]*>[^<]*</span>', hero)]
+    word = WORD.get(st_.get(sym), None)
+    want_badge = f"Strategy decision · {fmt(dec_day)}: " + (word or "")
+    expect(bool(badges) and badges[0].startswith(want_badge), f"{sym}: badge {badges[:1]} should start {want_badge!r}")
+    want_chip = f"{fmt(plan_day)} plan: {want_plan(sym)}"
+    expect(want_chip in badges, f"{sym}: plan chip {badges[1:]} != {want_chip!r}")
+    rk = re.search(r"Strategy rank · ([^<ⓘ]*?)\s*ⓘ?</div><div class=\"sa-stat-val\"[^>]*>([^<]*)<", hero)
+    r = latest.loc[sym, "Strategy_Rank"]
+    expect(rk and rk.group(1) == f"{fmt(SIG.Date.max())} close" and rk.group(2).startswith(f"#{r:.0f} /"),
+           f"{sym}: rank label {rk and rk.groups()} vs latest {fmt(SIG.Date.max())} rank {r}")
+    tabs = {tuple(d.value.columns): d.value for d in at.dataframe}
+    lt = next((v for c, v in tabs.items() if "Signal today" in c), None)
+    ld = next((v for c, v in tabs.items() if any(x.startswith("Rank at ") for x in c)), None)
+    expect(lt is not None and ld is not None, f"{sym}: Latest signals / Last decision tables missing")
+    if lt is not None and ld is not None:
+        a = lt.set_index("Symbol").loc[sym]
+        expect(int(a["Rank today"]) == int(r) and a[f"{fmt(plan_day)} plan"] == want_plan(sym)
+               and abs(a["Score today"] - latest.loc[sym, "Strategy_Score"]) < 0.06,
+               f"{sym}: Latest signals row {a.to_dict()} disagrees")
+        rank_then = f"Rank at {dec_day:%b} {dec_day.day} decision"
+        ld = ld.set_index("Symbol")
+        b = ld.loc[sym] if sym in ld.index else None          # the default filter shows the portfolio & changes only
+        expect(b is None and word is None or b is not None and int(b["Rank today"]) == int(r) and b["Next rebalance plan"] == want_plan(sym) and b["Signal"] == word
+               and int(b[rank_then]) == int(CH.set_index("Symbol").Rank[sym]),
+               f"{sym}: Last decision row {b.to_dict()} disagrees")
+    print(f"   {sym}: {badges} · rank {rk and rk.groups()} OK")
+exp_titles = [f"Latest signals · {fmt(SIG.Date.max())} close", f"Last decision · {fmt(dec_day)}"]
+labels = [e.label for e in at.expander]
+expect(labels[:1] == exp_titles[:1] and any(l.startswith(exp_titles[1]) for l in labels),
+       f"Details expanders {labels[:3]} should start with {exp_titles}")
+lt_all = next((d.value for d in at.dataframe if "Signal today" in d.value.columns), pd.DataFrame())
+expect(set(lt_all.get("Symbol", [])) == set(latest.index), "Latest signals should list every stock of the latest close")
+
 # Rank tab: newest column == Strategy_Rank; slots == picks
 html_tbl = next((m.value for m in at.markdown if "<thead>" in m.value and "Trend" in m.value), None)
 if html_tbl:
     rt = pd.read_html(io.StringIO(html_tbl))[0]
-    col = SIG.Date.max().strftime("%m/%d")
+    # newest column = the latest DECISION day (Fri / Mon / Wed); a Thursday close is not one
+    dcols = [c for c in rt.columns if re.fullmatch(r"\d\d/\d\d", str(c))]
+    col = dcols[0]
+    dday = SIG.Date[SIG.Date.dt.strftime("%m/%d") == col].max()
+    expect(dday == SIG.loc[SIG.Date.dt.strftime("%m/%d").isin(dcols), "Date"].max(), f"Rank tab newest column {col} not first")
+    ranks_then = SIG[SIG.Date == dday].set_index("Symbol")["Strategy_Rank"]
     x = rt.set_index("Symbol")[col].dropna().astype(int)
-    expect((x - latest["Strategy_Rank"].reindex(x.index)).abs().sum() == 0, "Rank tab column != Strategy_Rank")
+    expect((x - ranks_then.reindex(x.index)).abs().sum() == 0, f"Rank tab column {col} != that day's Strategy_Rank")
     ts = rt[rt.Slot.astype(str) != "—"].set_index("Symbol").Slot.astype(int).to_dict()
     expect(ts == exp_slot, f"Rank tab slots {ts} != {exp_slot}")
 else:

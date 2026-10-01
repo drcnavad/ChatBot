@@ -85,7 +85,9 @@ def rules_text():
             + f"- **What:** hold the top 10 stocks by Strategy Score (0.5 × Technical + 0.5 × Relative Strength {RS_LABEL}), score > 0, max {SECTOR_MAX} per sector.\n"
             f"- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger position).\n"
             f"- **Market filter:** if QQQ closes at or below its 200-day average, every position is halved (50% cash).\n"
-            f"- **Signals:** Bullish (Buy) = enters the top 10 · Hold = stays · Bearish (Sell) = leaves.\n"
+            f"- **Signals** (the strategy's decision, dated): Buy = enters the portfolio · Hold = stays · Sold = leaves · "
+            f"Watch = ranked but not picked · Score below 0 = not eligible. The plan chip = what the next Friday rebalance "
+            f"would do at the latest close.\n"
             + ("- **Mon/Wed check:** " + MIDWEEK_NOTE.strip() + "\n" if MIDWEEK else "")
             + ("- **Exit rule:** " + EXIT_NOTE.strip() + "\n" if EXIT_BELOW else "")
             + ("- **Earnings:** " + EARNINGS_NOTE.strip() + "\n" if EARNINGS else ""))
@@ -590,11 +592,12 @@ def ai_analysis_dialog(ticker, ticker_df, signal, why):
 # =====================================================================================================================
 # 6. Plain-language signals (display only; the CSV values stay unchanged)
 # =====================================================================================================================
-SIGNAL_COLOR = {"Bullish (Buy)": "#15803d", "Hold": "#2563eb", "Bearish (Sell)": "#b91c1c", "Bearish": "#b91c1c",
-                "Neutral": "#b45309", "Neutral (sector cap)": "#b45309", "Not ranked": "#64748b"}
-SIGNAL_BADGE = {"Bullish (Buy)": "sa-badge-bull", "Hold": "sa-badge-holdpos", "Bearish (Sell)": "sa-badge-bear",
-                "Bearish": "sa-badge-bear", "Neutral": "sa-badge-hold", "Neutral (sector cap)": "sa-badge-hold",
+SIGNAL_COLOR = {"Buy": "#15803d", "Hold": "#2563eb", "Sold": "#b91c1c", "Score below 0": "#b91c1c",
+                "Watch": "#b45309", "Watch (sector limit)": "#b45309", "Not ranked": "#64748b"}
+SIGNAL_BADGE = {"Buy": "sa-badge-bull", "Hold": "sa-badge-holdpos", "Sold": "sa-badge-bear",
+                "Score below 0": "sa-badge-bear", "Watch": "sa-badge-hold", "Watch (sector limit)": "sa-badge-hold",
                 "Not ranked": "sa-badge-grey"}
+PLAN_BADGE = {"Buy": "sa-badge-bull", "Keep": "sa-badge-holdpos", "Sell": "sa-badge-bear"}
 
 
 def plain_reason(signal, reason, rank=None, score=None):
@@ -616,7 +619,7 @@ def plain_reason(signal, reason, rank=None, score=None):
         by = re.search(r"replaced by (\S+)", reason)
         return (f"mid-week swap: fell to {'rank ' + m.group(1) if m else 'no longer qualifying'} "
                 f"(below {MIDWEEK['exit_below'] if MIDWEEK else 15})" + (f", replaced by {by.group(1)}" if by else ""))
-    if signal == "Bullish (Buy)":
+    if signal == "Buy":
         rk = int(m.group(1)) if m else (int(rank) if rank is not None and pd.notna(rank) else None)
         if "sector cap relaxed" in reason:
             return f"made the portfolio at rank {rk} (free slot filled from the top {MAX_PICK or 20}, sector limit relaxed)"
@@ -626,7 +629,7 @@ def plain_reason(signal, reason, rank=None, score=None):
     if signal == "Hold":
         return f"in top 10, rank {r}" if rank is not None and pd.notna(rank) and rank <= 10 else \
             f"still selected at rank {r} (higher-ranked stocks skipped by the sector limit)"
-    if signal == "Bearish (Sell)":
+    if signal == "Sold":
         if reason.startswith("score"):
             return f"score fell below 0 ({sc})"
         if "picks only from ranks" in reason:
@@ -638,13 +641,27 @@ def plain_reason(signal, reason, rank=None, score=None):
         if reason.startswith("not eligible"):
             return "not enough data / not eligible"
         return reason or "left the top 10"
-    if signal == "Neutral (sector cap)":
+    if signal == "Watch (sector limit)":
         return f"rank {r} but skipped: already {SECTOR_MAX} stocks from this sector"
-    if signal == "Neutral":
+    if signal == "Watch":
         return f"rank {r}, positive score but outside top 10 — watch"
-    if signal == "Bearish":
+    if signal == "Score below 0":
         return f"score below 0 ({sc})"
     return "benchmark / not enough history to rank"
+
+
+def decision_tag(signal, reason):
+    """Short reason shown in brackets on the dated decision badge, e.g. 'Sold (sector limit)'."""
+    reason = "" if reason is None or (isinstance(reason, float) and pd.isna(reason)) else str(reason)
+    if signal == "Sold":
+        for key, tag in (("mid-week exit", "mid-week exit"), ("mid-week swap out", "mid-week swap"), ("skipped", "sector limit"),
+                         ("picks only from ranks", f"rank worse than {MAX_PICK}"), ("outside top", "outside top 10"),
+                         ("score", "score below 0"), ("not eligible", "not eligible")):
+            if key in reason:
+                return tag
+    if signal == "Buy" and reason.startswith("mid-week swap in"):
+        return "mid-week swap"
+    return ""
 
 
 def signal_board(df):
@@ -670,17 +687,17 @@ def signal_board(df):
         rank = d["Rank"] if d is not None and pd.notna(d["Rank"]) else r.get("Strategy_Rank")
         status = d["Status"] if d is not None else None
         if status == "add":
-            sig, weight = "Bullish (Buy)", d["New_Weight"]
+            sig, weight = "Buy", d["New_Weight"]
         elif status == "hold":
             sig, weight = "Hold", d["New_Weight"]
         elif status == "drop":
-            sig, weight = "Bearish (Sell)", d["Old_Weight"]
+            sig, weight = "Sold", d["Old_Weight"]
         elif d is not None and str(d["Reason"]).startswith("skipped"):
-            sig, weight = "Neutral (sector cap)", 0.0
+            sig, weight = "Watch (sector limit)", 0.0
         elif pd.isna(score):
             sig, weight = "Not ranked", np.nan
         else:
-            sig, weight = ("Bearish" if score <= 0 else "Neutral"), 0.0
+            sig, weight = ("Score below 0" if score <= 0 else "Watch"), 0.0
         ned = next_ed.get(sym, "")
         soon = ""
         if ned:
@@ -690,14 +707,54 @@ def signal_board(df):
         rows.append({"Symbol": sym, "Signal": sig, "Rank": rank, "Score": score,
                      "Portfolio weight %": weight * 100 if pd.notna(weight) else np.nan, "Sector": sector or "—",
                      "Why": plain_reason(sig, d["Reason"] if d is not None else None, rank, score),
+                     "Tag": decision_tag(sig, d["Reason"] if d is not None else None),
                      "Next earnings": ned, "Earnings soon": soon})
     board = pd.DataFrame(rows, columns=["Symbol", "Signal", "Rank", "Score", "Portfolio weight %", "Sector", "Why",
-                                        "Next earnings", "Earnings soon"])
+                                        "Next earnings", "Earnings soon", "Tag"])
     board = board.sort_values(["Rank", "Symbol"], na_position="last").reset_index(drop=True)
-    picked = board["Signal"].isin(["Bullish (Buy)", "Hold"])
+    picked = board["Signal"].isin(["Buy", "Hold"])
     board.insert(2, "Portfolio slot", "—")
     board.loc[picked, "Portfolio slot"] = [str(i) for i in range(1, int(picked.sum()) + 1)]
     return board, date
+
+
+def next_full_rebalance(day):
+    """Date of the first full (Friday) rebalance after `day` (backtest_engine's decision calendar), or None."""
+    try:
+        from backtest_engine import next_decision
+        for _ in range(6):
+            day, kind, _fill = next_decision(pd.Timestamp(day))
+            if kind == "full rebalance":
+                return day
+    except Exception:
+        pass
+    return None
+
+
+def rebalance_plan(df):
+    """(rebalance date, as-of date, {SYMBOL: (action, weight %)}) for the next full rebalance.
+
+    Provisional_Weight in strategy_picks.csv = the full rebalance computed at the latest close - the numbers the trade
+    step (paper_trade.py) trades on the rebalance day. Action vs the holdings going into that rebalance: Buy (new),
+    Keep (stays, brought to the weight) or Sell (leaves); a stock not listed is not picked."""
+    picks = read_report_csv(PICKS_CSV)
+    if picks is None or picks.empty or "Provisional_Weight" not in picks.columns:
+        return None, None, {}
+    as_of, last_reb = pd.Timestamp(picks["As_Of"].iloc[0]), pd.Timestamp(picks["Last_Rebalance"].iloc[0])
+    day = as_of if as_of == last_reb else next_full_rebalance(as_of)
+    before = df[df["Date"] < day] if day is not None else df
+    prev = before[before["Date"] == before["Date"].max()]
+    held = set(prev.loc[prev["Strategy_Weight"].fillna(0) > 0, "Symbol"])
+    plan = {s: ("Keep" if s in held else "Buy", w * 100)
+            for s, w in zip(picks["Symbol"], picks["Provisional_Weight"].fillna(0.0)) if w > 0}
+    plan.update({s: ("Sell", 0.0) for s in held if s not in plan})
+    return day, as_of, plan
+
+
+def plan_text(plan, sym):
+    """'Buy 14.23%' / 'Keep 9.14%' / 'Sell' / 'not picked'."""
+    action, w = plan.get(sym, (None, 0.0))
+    return f"{action} {w:.2f}%" if action in ("Buy", "Keep") else (action or "not picked")
 
 
 def next_decision_date(latest_day):
@@ -777,10 +834,10 @@ def strategy_events(ticker_df, decisions, symbol):
 
 def event_hover(e):
     """Hover text for an entry/exit marker on the price chart."""
-    sig = "Bullish (Buy)" if e.Kind == "entry" else "Bearish (Sell)"
+    sig = "Buy" if e.Kind == "entry" else "Sold"
     text = f"<b>{sig}</b>: {html.escape(plain_reason(sig, e.Reason, e.Rank, e.Score))}"
-    when = f"filled at the open {e.Fill:%a %b %d}" if pd.notna(e.Fill) else "fills at the next open (pending)"
-    text += f"<br>Decided at the close {e.Decision:%a %b %d} · {when}"
+    when = f"filled at the open {e.Fill:%a %b %-d}" if pd.notna(e.Fill) else "fills at the next open (pending)"
+    text += f"<br>Decided at the close {e.Decision:%a %b %-d} · {when}"
     bits = ([f"Rank #{e.Rank:.0f}"] if pd.notna(e.Rank) else []) + ([f"Score {e.Score:.1f}"] if pd.notna(e.Score) else [])
     if pd.notna(e.Weight):
         bits.append(f"{'Portfolio weight' if e.Kind == 'entry' else 'Weight sold'} {e.Weight * 100:.2f}%")
@@ -791,22 +848,34 @@ def event_hover(e):
     return text
 
 
+RS_COLORS = {"stock": "#1d4ed8", "market": "#64748b", "sector": "#d97706"}   # stock blue, SPY grey, sector ETF orange
+
+
+def performance_names(symbol):
+    """Display names of the comparison lines: {'stock': 'FTNT', 'market': 'SPY (market)', 'sector': 'XLK (Technology sector)'}."""
+    etf, sector = sector_etf_for(symbol), symbol_sector.get(symbol)
+    names = {"stock": symbol, "market": "SPY (market)"}
+    if etf and etf != symbol:
+        names["sector"] = f"{etf} ({sector} sector)" if sector else f"{etf} (sector ETF)"
+    return names
+
+
 def relative_strength_lines(chart, symbol):
-    """Price ratio of the stock vs its sector ETF and vs SPY, rebased to 100 at the start of the chart window."""
+    """% price change since the start of the chart window: the stock, SPY and its sector ETF -> {key: (name, series)}."""
     bench = load_benchmarks()
     if bench is None:
         return {}
     b = bench.reindex(chart.index).ffill()
-    etf = sector_etf_for(symbol)
+    names, refs = performance_names(symbol), {"stock": None, "market": "SPY", "sector": sector_etf_for(symbol)}
     lines = {}
-    for label, ref in ((f"vs {etf} (sector ETF)", etf), ("vs SPY", "SPY")):
-        if not ref or ref == symbol or ref not in b.columns:
+    for key, name in names.items():
+        if key != "stock" and (refs[key] not in b.columns):
             continue
-        ratio = (chart["Close"] / b[ref]).replace([np.inf, -np.inf], np.nan)
-        first = ratio.first_valid_index()
-        if first is not None:
-            lines[label] = ratio / ratio.loc[first] * 100
-    return lines
+        px = (chart["Close"] if key == "stock" else b[refs[key]]).replace([np.inf, -np.inf], np.nan)
+        first = px.first_valid_index()
+        if first is not None and px.loc[first]:
+            lines[key] = (name, (px / px.loc[first] - 1) * 100)
+    return lines if len(lines) > 1 else {}
 
 
 def daily_status(weight, score):
@@ -815,7 +884,7 @@ def daily_status(weight, score):
         return "Not ranked"
     if weight is not None and pd.notna(weight) and weight > 0:
         return "Hold"
-    return "Bearish" if score <= 0 else "Neutral"
+    return "Score below 0" if score <= 0 else "Watch"
 
 
 def legacy_periods(mask):
@@ -840,11 +909,15 @@ def build_page():
     latest = latest_rows(df, mtime)
     board_off, off_date = signal_board(df)
     next_dec, next_kind = next_decision_date(df["Date"].max())
+    plan_day, plan_asof, plan = rebalance_plan(df)
     return SimpleNamespace(
         df=df, mtime=mtime, latest=latest, by_symbol=latest.set_index("Symbol"),
         options=latest.sort_values('combined_signal', ascending=False)['Symbol'].tolist(),  # dropdown: best score first
         rank_change=day_rank_change(df, mtime),
-        board_off=board_off, off_date=off_date,
+        board_off=board_off.drop(columns="Tag"), off_date=off_date,
+        tag_off=dict(zip(board_off["Symbol"], board_off["Tag"])),
+        rank_off=dict(zip(board_off["Symbol"], board_off["Rank"])),
+        plan_day=plan_day, plan_asof=plan_asof, plan=plan,
         sig_off=dict(zip(board_off["Symbol"], board_off["Signal"])),
         why_off=dict(zip(board_off["Symbol"], board_off["Why"])),
         slot_off=dict(zip(board_off["Symbol"], board_off["Portfolio slot"])),
@@ -890,8 +963,8 @@ def render_key_metrics(p):
     la = p.by_symbol
     c = st.columns(3)
     c[0].metric("Stocks held", int((la["Strategy_Weight"] > 0).sum()))
-    c[1].metric("Last decision", f"{p.off_date:%a %b %d}")
-    c[2].metric("Next decision", f"{p.next_dec:%a %b %d}" if p.next_dec is not None else "—", help=p.next_kind or None)
+    c[1].metric("Last decision", f"{p.off_date:%a %b %-d}")
+    c[2].metric("Next decision", f"{p.next_dec:%a %b %-d}" if p.next_dec is not None else "—", help=p.next_kind or None)
 
 
 def render_picks_table(p):
@@ -902,12 +975,12 @@ def render_picks_table(p):
     table = pd.DataFrame({
         "Symbol": held.index,
         "Signal": [p.sig_off.get(s, "—") for s in held.index],
-        "Rank": held["Strategy_Rank"].round(0).to_numpy(),
+        "Rank today": held["Strategy_Rank"].round(0).to_numpy(),
         "Portfolio weight %": (w * 100).round(2).to_numpy(),
         "Sector": [symbol_sector.get(s, "—") for s in held.index],
         "Next earnings": last_next_earnings(list(held.index))["Next ED"].to_numpy(),
         "Why": [p.why_off.get(s, "") for s in held.index],
-    }).sort_values(["Portfolio weight %", "Rank"], ascending=[False, True]).reset_index(drop=True)
+    }).sort_values(["Portfolio weight %", "Rank today"], ascending=[False, True]).reset_index(drop=True)
     event = st.dataframe(table, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
                          key="summary_tbl", column_config={"Why": st.column_config.TextColumn("Why", width="large")})
     open_symbol(table, event, "summary")
@@ -930,7 +1003,7 @@ def render_earnings_line(p):
             'box-shadow:0 1px 3px rgba(15,23,42,.07);">'
             '<div style="font-family:\'JetBrains Mono\',monospace;font-weight:700;'
             f'font-size:1.05rem;color:#0f766e;">{esc(s)}</div>'
-            f'<div style="font-size:0.82rem;font-weight:600;color:#0f172a;margin-top:3px;">{d:%a %b %d}</div>'
+            f'<div style="font-size:0.82rem;font-weight:600;color:#0f172a;margin-top:3px;">{d:%a %b %-d}</div>'
             f'<div style="font-size:0.72rem;color:#64748b;margin-top:2px;">{esc(t)} \u00b7 {sub}</div>'
             "</div></a>")
     show_html('<div style="font-size:0.95rem;font-weight:700;margin:8px 0 6px 0;">Earnings \u00b7 next 7 days</div>'
@@ -942,6 +1015,7 @@ def render_summary(p):
     render_key_metrics(p)
     render_picks_table(p)
     render_earnings_line(p)
+    st.caption(f"Every stock's rank, score and plan at the latest close: 🔎 Details tab → **{latest_signals_title(p)}**.")
 
 
 # =====================================================================================================================
@@ -950,7 +1024,7 @@ def render_summary(p):
 def ticker_label(p, s):
     r = p.by_symbol.loc[s]
     rank, score = r.get('Strategy_Rank'), r['combined_signal']
-    parts = [s, p.sig_off.get(s, "Not ranked")]
+    parts = [s, f"{p.sig_off.get(s, 'Not ranked')} ({p.off_date:%b %-d})"]
     if pd.notna(rank):
         parts.append(f"rank #{rank:.0f}")
     parts.append(f"score {score:.0f}" if pd.notna(score) else "score —")
@@ -1034,11 +1108,24 @@ def render_stock_header(p, ticker, tdata):
         chips.append(("Earnings within 2 sessions", "sa-badge-hold"))
     chips_html = "".join(f'<span class="sa-badge {c}" style="font-weight:600;font-size:0.72rem;">{esc(t)}</span>' for t, c in chips)
     next_ed = last_next_earnings([ticker])['Next ED'].iloc[0]
+    day = pd.Timestamp(latest["Date"])
+    rank_then = p.rank_off.get(ticker)
+    badge = f"Strategy decision · {p.off_date:%a %b %-d}: {status}" + (f" ({p.tag_off[ticker]})" if p.tag_off.get(ticker) else "")
+    plan_html = ""
+    if ticker in symbol_sector or ticker in p.plan:                      # tradable stocks only (not the QQQ benchmark)
+        action = p.plan.get(ticker, ("not picked",))[0]
+        when = f"{p.plan_day:%a %b %-d}" if p.plan_day is not None else "Next rebalance"
+        tip = (f"Full rebalance computed at the {p.plan_asof:%a %b %-d} close (strategy_picks.csv, the numbers the trade "
+               f"step uses). Final at the {when} close; trades at the next open." if p.plan_asof is not None else "")
+        plan_html = (f'<span class="sa-badge {PLAN_BADGE.get(action, "sa-badge-grey")}" title="{esc(tip)}">'
+                     f'{esc(when + " plan: " + plan_text(p.plan, ticker))}</span>')
     stats = [
         stat_html("Strategy score", fmt(score, ".1f")),
-        stat_html("Rank today", f"#{rank:.0f} / {n_ranked}" if rank is not None else "—",
-                  tip=f"Position by strategy score among the {n_ranked} ranked stocks at the latest close (1 = best)"),
-        stat_html(f"Portfolio slot · {p.off_date:%b %d}", f"{slot} of 10" if slot != "—" else "— (not picked)",
+        stat_html(f"Strategy rank · {day:%a %b %-d} close", f"#{rank:.0f} / {n_ranked}" if rank is not None else "—",
+                  tip=f"Position by strategy score among the {n_ranked} ranked stocks at the {day:%a %b %-d} close (1 = best)"
+                      + (f". At the {p.off_date:%a %b %-d} decision it was #{rank_then:.0f}." if rank_then is not None
+                         and pd.notna(rank_then) else "")),
+        stat_html(f"Portfolio slot · {p.off_date:%b %-d}", f"{slot} of 10" if slot != "—" else "— (not picked)",
                   tip="Position among the 10 stocks picked at the last decision, in rank order. The picks skip stocks "
                       f"whose sector already has {SECTOR_MAX}, so the slot can be smaller than the rank."),
         stat_html("Portfolio weight", fmt(weight * 100 if weight > 0 else None, ".1f", suffix="%")),
@@ -1049,7 +1136,7 @@ def render_stock_header(p, ticker, tdata):
     hold = row_for(HOLDINGS_CSV, ticker) if weight > 0 else None
     if hold is not None:
         stats += [
-            stat_html("Held since", f"{pd.Timestamp(hold['Entry_Date']):%b %d} · {int(hold['Days_Held'])} sessions"
+            stat_html("Held since", f"{pd.Timestamp(hold['Entry_Date']):%b %-d} · {int(hold['Days_Held'])} sessions"
                       if pd.notna(hold['Entry_Date']) else "—"),
             stat_html("P&L since entry", fmt(num(hold['PnL_%']), "+.1f", suffix="%"), sign_color(num(hold['PnL_%']))),
         ]
@@ -1060,7 +1147,8 @@ def render_stock_header(p, ticker, tdata):
               <div class="sa-sym">{esc(ticker)}</div>
               <div class="sa-price" title="Latest completed daily bar — the strategy's official price">{fmt(num(latest['Close']), ",.2f", "$")}</div>
               {live_html}
-              <span class="sa-badge {SIGNAL_BADGE.get(status, 'sa-badge-grey')}" title="Official signal from the decisions in force">{esc(status)}</span>
+              <span class="sa-badge {SIGNAL_BADGE.get(status, 'sa-badge-grey')}" title="The strategy's decision in force (last decision)">{esc(badge)}</span>
+              {plan_html}
               {chips_html}
             </div>
             <div class="sa-stats">{"".join(stats)}</div>
@@ -1080,9 +1168,10 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
         + (["rsi", "macd"] if show_classic else [])
     height_of = {"price": 0.44, "score": 0.20, "rs": 0.18, "rsi": 0.11, "macd": 0.11}
     titles = {
-        "price": "<b>Price · Bullish (Buy) ▲ / Bearish (Sell) ▼ signals · shaded = Hold</b>",
+        "price": "<b>Price · Buy ▲ / Sold ▼ decisions · shaded = Hold</b>",
         "score": "Strategy score (green) = 0.5 × Technical (grey) + 0.5 × Strength vs sector/SPY (red)",
-        "rs": "Strength vs sector ETF / SPY · price ratio rebased to 100 (rising = beating it)",
+        "rs": ("<b>Performance since " + f"{x_start:%b %-d, %Y}" + "</b> (% price change): " + " · ".join(
+            f'<span style="color:{RS_COLORS[k]};">━ {name}</span>' for k, (name, _s) in rs_lines.items())),
         "rsi": "RSI", "macd": "MACD",
     }
     heights = [height_of[x] for x in panels]
@@ -1114,8 +1203,8 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
 
     # Entry / exit markers (filled = executed at that open, hollow = pending next open)
     shown = events[events['Fill'].fillna(x_end) >= x_start] if len(events) else events
-    for kind, marker, color, name in (("entry", "triangle-up", "#15803d", "Bullish (Buy) · bought at next open"),
-                                      ("exit", "triangle-down", "#b91c1c", "Bearish (Sell) · sold at next open")):
+    for kind, marker, color, name in (("entry", "triangle-up", "#15803d", "Buy · bought at next open"),
+                                      ("exit", "triangle-down", "#b91c1c", "Sold · sold at next open")):
         e = shown[shown['Kind'] == kind] if len(shown) else shown
         if e.empty:
             continue
@@ -1151,7 +1240,7 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
         ned = pd.Timestamp(ned)
         x_right = max(x_end, ned) + pd.Timedelta(days=4)
         fig.add_vline(x=ned, line=dict(color='#f97316', width=1.2, dash='dash'), row="all", col=1)
-        fig.add_annotation(x=ned, y=1, xref="x", yref="y domain", text=f"next earnings {ned:%b %d}", showarrow=False,
+        fig.add_annotation(x=ned, y=1, xref="x", yref="y domain", text=f"next earnings {ned:%b %-d}", showarrow=False,
                            yanchor="bottom", xanchor="right", font=dict(size=10, color='#c2410c'))
 
     # Live price marker (display only): a single dot at today's date so the price panel reaches the current
@@ -1192,10 +1281,11 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
         fig.add_hline(y=0, line=dict(color='rgba(100,116,139,0.5)', width=1, dash='dot'), row=r, col=1)
     if "rs" in row_of:
         r = row_of["rs"]
-        for (label, series), color in zip(rs_lines.items(), ("#16a34a", "#dc2626")):
-            fig.add_trace(go.Scatter(x=series.index, y=series, name=label, mode='lines', line=dict(color=color, width=1.75),
-                                     showlegend=False, hovertemplate=f'<b>{label}</b> %{{y:.1f}}<extra></extra>'), row=r, col=1)
-        fig.add_hline(y=100, line=dict(color='rgba(100,116,139,0.5)', width=1, dash='dot'), row=r, col=1)
+        for key, (label, series) in rs_lines.items():
+            fig.add_trace(go.Scatter(x=series.index, y=series, name=label, mode='lines',
+                                     line=dict(color=RS_COLORS[key], width=2.25 if key == "stock" else 1.5),
+                                     showlegend=False, hovertemplate=f'<b>{label}</b> %{{y:+.1f}}%<extra></extra>'), row=r, col=1)
+        fig.add_hline(y=0, line=dict(color='rgba(100,116,139,0.5)', width=1, dash='dot'), row=r, col=1)
     if "rsi" in row_of:
         r = row_of["rsi"]
         fig.add_trace(go.Scatter(x=chart.index, y=chart['RSI'], name='RSI', line=dict(color='#ff7f0e', width=1.5), mode='lines',
@@ -1247,15 +1337,19 @@ def stock_chart_inputs(ticker, tdata):
     return fig, has_strategy, chart, events, x_start, x_end
 
 
-def render_stock_figure(fig):
+def render_stock_figure(fig, ticker):
     """The price chart itself, under the always-open detail block."""
+    names = performance_names(ticker)
     st.plotly_chart(fig, width="stretch", config={
         'displaylogo': False, 'scrollZoom': False, 'doubleClick': 'reset',
         'modeBarButtonsToRemove': ['pan2d', 'select2d', 'lasso2d', 'autoScale2d', 'zoomIn2d', 'zoomOut2d']})
     st.caption("**How to read the panels** \u00b7 **Strategy score** \u2014 above 0 is good (an above-average "
                "stock) and rising is better; below 0 and falling is bad. "
-               "\u00b7 **Strength** \u2014 rising green means beating its sector, rising red means beating SPY; "
-               "falling lines mean it is lagging.")
+               f"\u00b7 **Performance** \u2014 % price change since the chart start: **{ticker}** (blue) vs "
+               + " and ".join(f"**{name}** ({color})" for name, color in ((names.get("market"), "grey"),
+                                                                          (names.get("sector"), "orange")) if name)
+               + f". {ticker}'s line above the others = it has beaten them since then; the gap widening = "
+               "it is getting stronger than the market / its sector.")
 
 
 def _mini_stat(label, value, color="#0f172a"):
@@ -1306,7 +1400,7 @@ def render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end
     ]
     fund_note = ("Context only (latest day, not part of the backtested rules) \u00b7 fundamentals: "
                  + (f"quarter ending {fiscal:%Y-%m-%d}" if pd.notna(fiscal) else "none on file")
-                 + (f" \u00b7 newest relevant news {last_news:%b %d}" if pd.notna(last_news)
+                 + (f" \u00b7 newest relevant news {last_news:%b %-d}" if pd.notna(last_news)
                     else " \u00b7 no relevant news in the last 10 days"))
 
     bt_stats, bt_notes, explainer_html = [], [], ""
@@ -1314,7 +1408,7 @@ def render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end
         n_entries = int(((events['Kind'] == 'entry') & (events['Fill'].fillna(x_end) >= x_start)).sum()) if len(events) else 0
         held_share = (chart['Strategy_Weight'].fillna(0) > 0).mean() * 100
         bt_notes.append(f"Last 12 months: held on {held_share:.0f}% of sessions, "
-                        f"{n_entries} Bullish (Buy) signal{'' if n_entries == 1 else 's'}.")
+                        f"{n_entries} Buy decision{'' if n_entries == 1 else 's'}.")
     ps = row_for(PER_STOCK_CSV, ticker)
     if ps is not None and pd.notna(ps.get("First bar")):
         trades = int(ps["Closed trades"])
@@ -1365,22 +1459,62 @@ def render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end
 # =====================================================================================================================
 # 12. Details tab
 # =====================================================================================================================
+def latest_signals_title(p):
+    return f"Latest signals · {p.df['Date'].max():%a %b %-d} close"
+
+
+def render_latest_signals(p):
+    """Every stock at the LATEST close (signal_analysis.csv) + the next-rebalance plan (strategy_picks.csv)."""
+    day = p.df["Date"].max()
+    la = p.latest[p.latest["Date"] == day].set_index("Symbol")
+    plan_when = f"{p.plan_day:%a %b %-d}" if p.plan_day is not None else "next"
+    decided_today = pd.Timestamp(p.off_date) == pd.Timestamp(day)
+    rows = []
+    for sym, r in la.iterrows():
+        w = num(r.get("Strategy_Weight")) or 0.0
+        rows.append({"Symbol": sym,
+                     "Signal today": p.sig_off.get(sym, "Not ranked") if decided_today else daily_status(w, r.get("Strategy_Score")),
+                     "Rank today": r.get("Strategy_Rank"), "Score today": r.get("Strategy_Score"),
+                     f"{plan_when} plan": plan_text(p.plan, sym) if sym in symbol_sector or sym in p.plan else "—",
+                     "Held now %": w * 100 if w > 0 else np.nan, "Sector": symbol_sector.get(sym, "—")})
+    table = pd.DataFrame(rows).sort_values(["Rank today", "Symbol"], na_position="last").reset_index(drop=True)
+    table["Rank today"] = table["Rank today"].round(0).astype("Int64")
+    st.caption(f"Every stock at the {day:%a %b %-d} close (Reports/signal_analysis.csv) · Signal today = "
+               + ("the decision made at this close" if decided_today else
+                  "no decision today: Hold = in the portfolio, Watch = ranked but not held, Score below 0 = not eligible")
+               + f" · {plan_when} plan = what the {plan_when} full rebalance would do at this close (Reports/strategy_picks.csv, "
+               "the numbers the trade step uses; final at that close). Click a row to open the stock.")
+    event = st.dataframe(table.round({"Score today": 1, "Held now %": 2}), hide_index=True, width="stretch",
+                         on_select="rerun", selection_mode="single-row", key="latest_signals_tbl")
+    open_symbol(table, event, "latest_signals")
+
+
 def render_all_signals(p):
     """Every stock with its signal (the decisions in force) in one table; click a row to open the stock."""
-    st.caption(f"Decisions in force (last decision {p.off_date:%a %b %d}).")
-    board = p.board_off.copy()
-    board.insert(3, "Rank change", board["Symbol"].map(lambda s: p.rank_change.get(s, (np.nan,))[0]))
+    today = p.df["Date"].max()
+    plan_when = f"{p.plan_day:%a %b %-d}" if p.plan_day is not None else "next"
+    st.caption(f"Decisions in force (last decision {p.off_date:%a %b %-d}). Rank at {p.off_date:%b %-d} decision = the rank "
+               f"the decision used; Rank today = at the {today:%a %b %-d} close. Next rebalance plan = what the {plan_when} "
+               "rebalance would do at the latest close (the numbers the trade step uses).")
+    rank_then = f"Rank at {p.off_date:%b %-d} decision"
+    board = p.board_off.rename(columns={"Rank": rank_then})
+    board[rank_then] = board[rank_then].round(0).astype("Int64")
+    board.insert(4, "Rank today", board["Symbol"].map(p.by_symbol["Strategy_Rank"]).round(0).astype("Int64"))
+    board.insert(5, "Next rebalance plan", [plan_text(p.plan, s) if s in symbol_sector or s in p.plan else "—"
+                                            for s in board["Symbol"]])
+    board.insert(6, "Rank change", board["Symbol"].map(lambda s: p.rank_change.get(s, (np.nan,))[0]))
     counts = board["Signal"].value_counts()
-    filters = {"Portfolio & changes": ["Bullish (Buy)", "Hold", "Bearish (Sell)"],
-               "Watch list (Neutral)": ["Neutral", "Neutral (sector cap)"],
+    filters = {"Portfolio & changes": ["Buy", "Hold", "Sold"],
+               "Watch list": ["Watch", "Watch (sector limit)"],
                "All stocks": list(SIGNAL_COLOR)}
     show = st.radio("Show", list(filters), horizontal=True, key="signals_filter", label_visibility="collapsed")
     part = board[board["Signal"].isin(filters[show])].reset_index(drop=True)
-    st.caption(f"Bullish (Buy) {counts.get('Bullish (Buy)', 0)} · Hold {counts.get('Hold', 0)} · "
-               f"Bearish (Sell) {counts.get('Bearish (Sell)', 0)} · Neutral {counts.get('Neutral', 0) + counts.get('Neutral (sector cap)', 0)} · "
-               f"Bearish (score below 0) {counts.get('Bearish', 0)}. Rank = position among all ranked stocks (Rank change: + = moved up "
+    st.caption(f"Buy {counts.get('Buy', 0)} · Hold {counts.get('Hold', 0)} · "
+               f"Sold {counts.get('Sold', 0)} · Watch {counts.get('Watch', 0) + counts.get('Watch (sector limit)', 0)} · "
+               f"Score below 0 {counts.get('Score below 0', 0)}. Ranks = position among all ranked stocks (Rank change: + = moved up "
                "since the last decision day); Portfolio slot = position among the 10 picks. Click a row to open the stock on the Dashboard tab.")
-    event = st.dataframe(part.round({"Rank": 0, "Score": 1, "Portfolio weight %": 1}), hide_index=True, width="stretch",
+    event = st.dataframe(part.round({"Score": 1, "Portfolio weight %": 2}), hide_index=True,
+                         width="stretch",
                          on_select="rerun", selection_mode="single-row", key=f"sig_tbl_{show}",
                          column_config={"Why": st.column_config.TextColumn("Why", width="large")})
     open_symbol(part, event, "signals")
@@ -1391,8 +1525,8 @@ def render_rank_history(p, ticker):
     pivot = rank_pivot(p.df, p.mtime, 20)
     date_cols = [c for c in pivot.columns if c not in ("Symbol", "Trend")]
     pivot = pivot.merge(last_next_earnings(pivot["Symbol"].tolist()), on="Symbol", how="left")
-    short = {"Bullish (Buy)": "Buy", "Hold": "Hold", "Bearish (Sell)": "Sell", "Neutral": "Neutral",
-             "Neutral (sector cap)": "Neutral (cap)", "Bearish": "Bearish", "Not ranked": ""}
+    short = {"Buy": "Buy", "Hold": "Hold", "Sold": "Sold", "Watch": "Watch",
+             "Watch (sector limit)": "Watch (limit)", "Score below 0": "Score < 0", "Not ranked": ""}
 
     def signal_text(sym):
         return short.get(p.sig_off.get(sym, "Not ranked"), "")
@@ -1439,7 +1573,7 @@ def render_rank_history(p, ticker):
         sel_bg = "background-color:#e8f0fe;" if row['Symbol'] == ticker else ""
         cells = [f'<td style="font-weight:600;text-align:left;padding:6px 8px;position:sticky;left:0;z-index:1;'
                  f'background:{"#e8f0fe" if sel_bg else "#ffffff"};">{row["Symbol"]}</td>',
-                 td(esc(row['Signal']), {"Buy": GREEN, "Hold": "#2563eb", "Sell": RED, "Bearish": RED}.get(
+                 td(esc(row['Signal']), {"Buy": GREEN, "Hold": "#2563eb", "Sold": RED, "Score < 0": RED}.get(
                      row['Signal'].split(" →")[0], AMBER if row['Signal'] else TEXT), "700", sel_bg),
                  td(esc(str(row['Slot'])), "#1d4ed8" if row['Slot'] != "—" else TEXT, "700" if row['Slot'] != "—" else "400", sel_bg)]
         for col, lo, hi in (("Last ED", -10, 0), ("Next ED", 0, 7)):
@@ -1474,14 +1608,14 @@ def render_rules_and_changes(p):
     if mw is not None and len(mw):
         last_day = mw["Event_Date"].iloc[-1]
         acts = set(mw.loc[mw["Event_Date"] == last_day, "Action"])
-        mw_val = (f"{pd.Timestamp(last_day):%a %b %d} · "
+        mw_val = (f"{pd.Timestamp(last_day):%a %b %-d} · "
                   + (" + ".join(x for x, k in (("swap", "SWAP"), ("exit", "SELL")) if k in acts) or "no trade"))
     else:
         mw_val = "none yet this week" if MIDWEEK else "off"
     c = st.columns(3)
-    c[0].metric("Last weekly rebalance", f"{reb_days.max():%a %b %d}" if not reb_days.empty else "—")
+    c[0].metric("Last weekly rebalance", f"{reb_days.max():%a %b %-d}" if not reb_days.empty else "—")
     c[1].metric("Last mid-week check", mw_val)
-    c[2].metric("Next decision", f"{p.next_kind} · {p.next_dec:%a %b %d}" if p.next_dec is not None else "—")
+    c[2].metric("Next decision", f"{p.next_kind} · {p.next_dec:%a %b %-d}" if p.next_dec is not None else "—")
     st.markdown(rules_text())
 
     changes = read_report_csv(CHANGES_CSV)
@@ -1491,13 +1625,13 @@ def render_rules_and_changes(p):
     st.markdown("**What changed at the latest decision**")
     sub = changes[changes["Symbol"].notna()].copy()
     earn = sub["Reason"].astype(str).str.startswith("earnings in")
-    if not st.checkbox("Show Neutral (sector cap) names too", value=False, key="changes_all"):
+    if not st.checkbox("Show Watch (sector limit) names too", value=False, key="changes_all"):
         sub, earn = sub[(sub["Status"] != "not selected") | earn], earn[(sub["Status"] != "not selected") | earn]
     sub[["Old_Weight", "New_Weight"]] = (sub[["Old_Weight", "New_Weight"]] * 100).round(2)
     order = {"add": 0, "drop": 1, "hold": 2, "not selected": 3}
     sub = sub.sort_values(["Status", "Rank"], key=lambda s: s.map(order) if s.name == "Status" else s)
-    sub["Signal"] = sub["Status"].map({"add": "Bullish (Buy)", "hold": "Hold", "drop": "Bearish (Sell)",
-                                       "not selected": "Neutral (sector cap)"}).where(~earn, "Not bought (earnings)")
+    sub["Signal"] = sub["Status"].map({"add": "Buy", "hold": "Hold", "drop": "Sold",
+                                       "not selected": "Watch (sector limit)"}).where(~earn, "Not bought (earnings)")
     sub["Why"] = [plain_reason(g, rs, rk, sc) for g, rs, rk, sc in zip(sub["Signal"], sub["Reason"], sub["Rank"], sub["Score"])]
     st.dataframe(sub[["Symbol", "Signal", "Why", "Rank", "Score", "Sector", "Old_Weight", "New_Weight"]]
                  .rename(columns={"Old_Weight": "Old portfolio weight %", "New_Weight": "New portfolio weight %"}).round(2),
@@ -1570,7 +1704,9 @@ def render_data_and_settings(p):
 
 
 def render_details(p, ticker):
-    with st.expander("All signals (every stock)", expanded=True):
+    with st.expander(latest_signals_title(p), expanded=True):
+        render_latest_signals(p)
+    with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=False):
         render_all_signals(p)
     with st.expander("Rank history · last 20 decision days", expanded=False):
         render_rank_history(p, ticker)
@@ -1686,7 +1822,7 @@ def main():
         render_stock_header(p, ticker, tdata)
         fig, has_strategy, chart, events, x_start, x_end = stock_chart_inputs(ticker, tdata)
         render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end)
-        render_stock_figure(fig)
+        render_stock_figure(fig, ticker)
     with tab_details:
         render_details(p, ticker)
     with tab_health:
