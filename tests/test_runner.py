@@ -23,11 +23,11 @@ def expect(ok, what):
         FAIL.append(what)
 
 
-cases = [("2026-09-28 15:40", {}, "full"),        # Monday after 3:15 PM CT
-         ("2026-09-28 15:10", {}, "quick"),       # Monday before 3:15 PM CT
+cases = [("2026-09-28 15:40", {}, "full"),        # Monday after 2:30 PM CT
+         ("2026-09-28 14:20", {}, "quick"),       # Monday before 2:30 PM CT
          ("2026-09-29 16:00", {}, "quick"),       # Tuesday
          ("2026-09-30 17:00", {}, "full"),        # Wednesday evening
-         ("2026-10-02 15:15", {}, "full"),        # Friday exactly 3:15 PM CT
+         ("2026-10-02 14:30", {}, "full"),        # Friday exactly 2:30 PM CT
          ("2026-09-26 16:00", {}, "quick"),       # Saturday
          ("2026-11-26 16:00", {}, "quick"),       # Thanksgiving (Thursday anyway)
          ("2026-12-25 16:00", {}, "quick"),       # Christmas Friday = holiday
@@ -51,9 +51,11 @@ for d, want in [("2026-10-02", "full rebalance"), ("2026-09-30", "mid-week check
     got = r.decision_day(datetime.fromisoformat(d).date())
     expect(got == want, f"decision_day {d} -> {got}")
 # the --trade gate (full catch-up cases: tests/test_catch_up.py)
-expect(r.decision_gate(t("2026-10-02 16:30"), {})[1] == "evening", "trade gate: Friday after 3:15 PM with nothing on record -> trade")
+expect(r.decision_gate(t("2026-10-02 16:30"), {})[1] == "evening", "trade gate: Friday after 2:30 PM with nothing on record -> trade")
+expect(r.decision_gate(t("2026-10-02 14:30"), {"last_decision": "2026-09-30"})[1] == "session",
+       "trade gate: Friday 2:30 PM -> trade now in regular hours")
 expect(r.decision_gate(t("2026-10-02 14:00"), {"last_decision": "2026-09-30"})[1] is None,
-       "trade gate: before 3:15 PM with Wednesday done -> nothing (login at 2 PM does not trade)")
+       "trade gate: before 2:30 PM with Wednesday done -> nothing (login at 2 PM does not trade)")
 expect(r.decision_gate(t("2026-10-02 18:00"), {"last_decision": "2026-10-02"})[1] is None,
        "trade gate: this decision already ran -> nothing")
 att = {"decision_attempts": {"decision": "2026-10-02", "n": 1, "at": "2026-10-02T15:15:07-05:00"}}

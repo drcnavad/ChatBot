@@ -74,7 +74,8 @@ def rules_text():
     band = WINNER.get("rebalance_band")
     days = " and ".join(MIDWEEK["days"]) if MIDWEEK else ""
     return (f"**Strategy rules ({STRATEGY_TAG})**\n"
-            "- **When:** decisions use the closing prices (the pipeline starts at 3:15 PM CT and waits for the final bar): "
+            "- **When:** decisions use the prices at about 2:30 PM CT, 30 min before the close (the pipeline starts at 2:30 PM CT "
+            "and trades in market hours: sells first, then buys sized from the cash free after the sells; any rest at 9 AM CT): "
             "the Friday rebalance (the week's last trading day)"
             + (f" and the {days} checks (the next trading day after a holiday)" if MIDWEEK else "") + ".\n"
             f"- **Score:** {W_TECH:g} × Technical + {1 - W_TECH:g} × Relative Strength {RS_LABEL}. Only stocks with a score "
@@ -760,7 +761,7 @@ def _fallback_reason(kind, row, n=10):
 def strategy_events(ticker_df, decisions, symbol):
     """Entries/exits and held periods of the live strategy for one ticker.
 
-    Strategy_Weight on day d is the target decided at d's close (orders go out that evening), so an entry/exit is the
+    Strategy_Weight on day d is the target decided at d's close (orders go out that day at 2:30 PM CT), so an entry/exit is the
     first day the weight turns >0 / back to 0; its marker sits on the following session ("Fill"). Reasons, rank and score come from
     Reports/strategy_decisions.csv. Returns (events, periods) with periods = [(first held session, last held session)]."""
     t = ticker_df.sort_values("Date")[["Date", "Close", "Strategy_Weight", "Strategy_Rank", "Strategy_Score", "Regime_On"]]
@@ -807,7 +808,7 @@ def event_hover(e):
     """Hover text for an entry/exit marker on the price chart."""
     sig = "Buy" if e.Kind == "entry" else "Sold"
     text = f"<b>{sig}</b>: {html.escape(plain_reason(sig, e.Reason, e.Rank, e.Score))}"
-    text += f"<br>Decided at the close {e.Decision:%a %b %-d} · orders go out that evening" + ("" if pd.notna(e.Fill) else " (pending)")
+    text += f"<br>Decided at the close {e.Decision:%a %b %-d} · orders go out that day" + ("" if pd.notna(e.Fill) else " (pending)")
     bits = ([f"Rank #{e.Rank:.0f}"] if pd.notna(e.Rank) else []) + ([f"Score {e.Score:.1f}"] if pd.notna(e.Score) else [])
     if pd.notna(e.Weight):
         bits.append(f"{'Portfolio weight' if e.Kind == 'entry' else 'Weight sold'} {e.Weight * 100:.2f}%")
@@ -1063,7 +1064,7 @@ def render_stock_header(p, ticker, tdata):
         action = p.plan.get(ticker, ("not picked",))[0]
         when = f"{p.plan_day:%a %b %-d}" if p.plan_day is not None else "Next rebalance"
         tip = (f"Full rebalance computed at the {p.plan_asof:%a %b %-d} close (strategy_picks.csv, the numbers the trade "
-               f"step uses). Final at the {when} close; orders go out that evening." if p.plan_asof is not None else "")
+               f"step uses). Final at the {when} close; orders go out that day at 2:30 PM CT." if p.plan_asof is not None else "")
         plan_html = (f'<span class="sa-badge {PLAN_BADGE.get(action, "sa-badge-grey")}" title="{esc(tip)}">'
                      f'{esc(when + " plan: " + plan_text(p.plan, ticker))}</span>')
     stats = [
@@ -1554,7 +1555,7 @@ def render_rules_and_changes(p):
     st.dataframe(sub[["Symbol", "Signal", "Why", "Rank", "Score", "Sector", "Old_Weight", "New_Weight"]]
                  .rename(columns={"Old_Weight": "Old portfolio weight %", "New_Weight": "New portfolio weight %"}).round(2),
                  width="stretch", hide_index=True)
-    st.caption(f"Decision date {sub['Date'].iloc[0] if len(sub) else '—'} · orders go out that evening (see the rules above).")
+    st.caption(f"Decision date {sub['Date'].iloc[0] if len(sub) else '—'} · orders go out that day at 2:30 PM CT (see the rules above).")
 
 
 def render_data_and_settings(p):

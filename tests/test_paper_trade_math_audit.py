@@ -375,7 +375,9 @@ def test_morning_buy_cumulative_cash_reserved():
         check(got == [("AAA", 60), ("BBB", 39.0)],
               f"morning: first BUY in full ($6,060 with cushion), second cut to what is left: 3,940 / 101 = 39 (got {got})")
         check(sum(q * 100.0 * 1.01 for _, q in got) <= 10000.0, "morning: both BUYs together stay within buying power")
-        check(not os.path.exists(pp), "morning: the part that did not fit is not retried (pending file removed)")
+        left = json.load(open(pp))["orders"] if os.path.exists(pp) else []
+        check([(o["symbol"], o["qty"], o["order_id"]) for o in left] == [("BBB", 21.0, None)],
+              f"morning: the part that did not fit (21) waits for the next fill check (got {left})")
 
 
 def test_morning_malformed_row_dropped():

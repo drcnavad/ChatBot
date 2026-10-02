@@ -29,7 +29,7 @@
   test_alpaca_paper_reads.py mocked tests for alpaca_paper.py's read-only views: open_orders,
                          market_clock, portfolio_history parsing + the read-only guardrails
                          (live endpoint allowlist, no order-placing code)
-  test_catch_up.py       missed-decision catch-up: each decision runs once (3:15 PM slot or the next regular session),
+  test_catch_up.py       missed-decision catch-up: each decision runs once (2:30 PM slot or the next regular session),
                          superseded at the next slot; weekends wait for the open; holidays; send_now fill gate
   test_alpaca_api_names.py the REAL alpaca-py: every alpaca import / enum member the code uses exists and the
                          exact order + orders-list requests build (no network)

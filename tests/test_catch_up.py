@@ -1,8 +1,8 @@
-"""Missed-decision catch-up (2026-09-28): every decision runs exactly once - at its 3:15 PM CT slot or, if the Mac was
+"""Missed-decision catch-up (2026-09-28): every decision runs exactly once - at its 2:30 PM CT slot or, if the Mac was
 asleep/off, at the next regular session - and is superseded (skipped + alert) once the next decision slot arrives.
 
 Mocks and temp files only - no network, no broker calls, no pop-ups, the real Reports/run_state.json is never written.
-  * decision_gate: missed Fri -> Sat waits -> Mon 9:30 catch-up -> Mon 3:15 PM superseded; missed Mon -> Tue; missed
+  * decision_gate: missed Fri -> Sat waits -> Mon 9:30 catch-up -> Mon 2:30 PM superseded; missed Mon -> Tue; missed
     Wed -> Thu/Fri; already done -> nothing; launchd retries limited; holidays (Thu Dec 24 rebalance, Labor Day) and the
     early close (Fri Nov 27).
   * the catch-up trades the missed decision's own picks (load_targets(decision)) and the freshness check accepts its
@@ -56,9 +56,18 @@ check("Fri 10/2 8 PM (extended hours over): waits for Monday", gate("2026-10-02 
 check("Sat 10/3: waits for the Monday open (no weekend orders)", gate("2026-10-03 11:00", "2026-09-30") == ("2026-10-02", "wait"))
 check("Mon 10/5 8:45 AM: still waits (catch-up from 9:00 AM CT)", gate("2026-10-05 08:45", "2026-09-30") == ("2026-10-02", "wait"))
 check("Mon 10/5 9:30 AM: caught up now with market orders", gate("2026-10-05 09:30", "2026-09-30") == ("2026-10-02", "session"))
-check("Mon 10/5 2:50 PM: too close to the close and the next slot -> nothing", gate("2026-10-05 14:50", "2026-09-30")[1] is None)
-check("Mon 10/5 3:15 PM: Monday's check runs instead ...", gate("2026-10-05 15:15", "2026-09-30") == ("2026-10-05", "evening"))
-check("... and Friday is reported superseded (once)", superseded("2026-10-05 15:15", "2026-09-30") == "2026-10-02")
+check("Mon 10/5 2:20 PM: Friday still caught up (before Monday's 2:30 PM slot)", gate("2026-10-05 14:20", "2026-09-30") == ("2026-10-02", "session"))
+check("Mon 10/5 2:40 PM: too close to Monday's slot for Friday -> Monday's check runs instead, in market hours ...",
+      gate("2026-10-05 14:40", "2026-09-30") == ("2026-10-05", "session"))
+check("... and Friday is reported superseded (once)", superseded("2026-10-05 14:40", "2026-09-30") == "2026-10-02")
+# the day's own decision: market orders from the 2:30 PM slot until 5 min before the close, then extended hours
+check("Mon 10/5 2:30 PM (Friday done): Monday's check, regular hours", gate("2026-10-05 14:30", "2026-10-02") == ("2026-10-05", "session"))
+check("Mon 10/5 2:54 PM: still regular hours", gate("2026-10-05 14:54", "2026-10-02") == ("2026-10-05", "session"))
+check("Mon 10/5 2:55 PM (5 min before the close): extended-hours orders", gate("2026-10-05 14:55", "2026-10-02") == ("2026-10-05", "evening"))
+check("Mon 10/5 3:15 PM: extended-hours orders", gate("2026-10-05 15:15", "2026-10-02") == ("2026-10-05", "evening"))
+check("trade_how: re-checked at trade time (pipeline finished 2:43 PM -> regular hours, 2:57 PM -> extended hours)",
+      ra.trade_how(pd.Timestamp("2026-10-05"), t("2026-10-05 14:43")) == "session"
+      and ra.trade_how(pd.Timestamp("2026-10-05"), t("2026-10-05 14:57")) == "evening")
 check("superseded is reported only once", ra.superseded_decision(t("2026-10-05 15:20"), {"last_decision": "2026-09-30",
                                                                     "last_superseded": "2026-10-02"}) is None)
 check("nothing superseded when Friday ran", superseded("2026-10-05 15:15", "2026-10-02") is None)
@@ -67,14 +76,14 @@ check("nothing superseded when Friday ran", superseded("2026-10-05 15:15", "2026
 check("missed Mon 9/28 -> Tue 9/29 10 AM catch-up", gate("2026-09-29 10:00", "2026-09-25") == ("2026-09-28", "session"))
 check("missed Mon 9/28 -> Tue 8 PM waits for Wednesday", gate("2026-09-29 20:00", "2026-09-25") == ("2026-09-28", "wait"))
 check("missed Mon 9/28 -> Wed 9/30 10 AM still catches up", gate("2026-09-30 10:00", "2026-09-25") == ("2026-09-28", "session"))
-check("missed Mon 9/28 -> Wed 3:15 PM superseded, Wednesday runs",
-      gate("2026-09-30 15:15", "2026-09-25") == ("2026-09-30", "evening") and superseded("2026-09-30 15:15", "2026-09-25") == "2026-09-28")
+check("missed Mon 9/28 -> Wed 2:40 PM superseded, Wednesday runs",
+      gate("2026-09-30 14:40", "2026-09-25") == ("2026-09-30", "session") and superseded("2026-09-30 14:40", "2026-09-25") == "2026-09-28")
 check("missed Wed 9/30 -> Thu 10/1 10 AM catch-up", gate("2026-10-01 10:00", "2026-09-28") == ("2026-09-30", "session"))
 check("missed Wed 9/30 -> Fri 10/2 11 AM catch-up", gate("2026-10-02 11:00", "2026-09-28") == ("2026-09-30", "session"))
-check("missed Wed 9/30 -> Fri 3:15 PM superseded", superseded("2026-10-02 15:15", "2026-09-28") == "2026-09-30")
+check("missed Wed 9/30 -> Fri 2:40 PM superseded", superseded("2026-10-02 14:40", "2026-09-28") == "2026-09-30")
 
 # ------------------------------------------------------------------ never twice
-for when in ("2026-10-02 16:00", "2026-10-02 20:00", "2026-10-03 11:00", "2026-10-05 09:30", "2026-10-05 15:14"):
+for when in ("2026-10-02 16:00", "2026-10-02 20:00", "2026-10-03 11:00", "2026-10-05 09:30", "2026-10-05 14:29"):
     check(f"Friday done -> nothing at {when}", gate(when, "2026-10-02")[1] is None)
 att = {"last_decision": "2026-09-30", "decision_attempts": {"decision": "2026-10-02", "n": 3, "at": "2026-10-05T10:00:00-05:00"}}
 check("launchd: 3 failed attempts -> no more automatic retries", ra.decision_gate(t("2026-10-05 12:00"), att, scheduled=True)[1] is None)
@@ -85,15 +94,16 @@ check("Thu 12/24 rebalance (Christmas Friday) 3:20 PM: evening run", gate("2026-
 check("Thu 12/24 4:30 PM (early close: extended hours end 4 PM CT): waits", gate("2026-12-24 16:30", "2026-12-23") == ("2026-12-24", "wait"))
 check("Fri 12/25 holiday: waits", gate("2026-12-25 10:00", "2026-12-23") == ("2026-12-24", "wait"))
 check("Mon 12/28 10 AM: Thursday's rebalance caught up", gate("2026-12-28 10:00", "2026-12-23") == ("2026-12-24", "session"))
-check("Mon 12/28 3:15 PM: superseded by Monday's check", superseded("2026-12-28 15:15", "2026-12-23") == "2026-12-24")
+check("Mon 12/28 2:40 PM: superseded by Monday's check", superseded("2026-12-28 14:40", "2026-12-23") == "2026-12-24")
 check("Fri 9/4 rebalance, Mon 9/7 Labor Day: Mon waits", gate("2026-09-07 10:00", "2026-09-02") == ("2026-09-04", "wait"))
 check("... Tue 9/8 10 AM caught up", gate("2026-09-08 10:00", "2026-09-02") == ("2026-09-04", "session"))
-check("... Tue 9/8 3:15 PM superseded by the Tuesday check",
-      gate("2026-09-08 15:15", "2026-09-02") == ("2026-09-08", "evening") and superseded("2026-09-08 15:15", "2026-09-02") == "2026-09-04")
+check("... Tue 9/8 2:40 PM superseded by the Tuesday check",
+      gate("2026-09-08 14:40", "2026-09-02") == ("2026-09-08", "session") and superseded("2026-09-08 14:40", "2026-09-02") == "2026-09-04")
 check("missed Wed 11/25, Thanksgiving Thu: waits for Fri 11/27", gate("2026-11-26 10:00", "2026-11-23") == ("2026-11-25", "wait"))
 check("Fri 11/27 (1 PM ET close) 11:30 AM: caught up", gate("2026-11-27 11:30", "2026-11-23") == ("2026-11-25", "session"))
 check("Fri 11/27 11:50 AM (within 15 min of the close): nothing", gate("2026-11-27 11:50", "2026-11-23")[1] is None)
 check("Fri 11/27 rebalance 3:40 PM: evening (extended hours to 4 PM CT)", gate("2026-11-27 15:40", "2026-11-25") == ("2026-11-27", "evening"))
+check("Fri 11/27 rebalance 2:31 PM (market closed at noon CT): extended-hours orders", gate("2026-11-27 14:31", "2026-11-25") == ("2026-11-27", "evening"))
 check("Fri 11/27 rebalance 4:10 PM: waits for Mon 11/30", gate("2026-11-27 16:10", "2026-11-25") == ("2026-11-27", "wait"))
 
 # ------------------------------------------------------------------ mode of a catch-up run
@@ -148,6 +158,9 @@ check("freshness: Mon 10 AM refuses Thursday's files", not fresh("2026-10-01", "
 check("freshness: Wed 10 AM needs Tuesday's files for Monday's decision", fresh("2026-09-29", "2026-09-28", "2026-09-30 10:00")
       and not fresh("2026-09-28", "2026-09-28", "2026-09-30 10:00"))
 check("freshness: after 4:30 PM ET the evening needs today's files", not fresh("2026-10-02", "2026-10-02", "2026-10-05 16:00"))
+check("freshness: the 2:30 PM decision run (2:43 PM) needs today's files (the bar as of then) ...",
+      fresh("2026-10-05", "2026-10-05", "2026-10-05 14:43") and not fresh("2026-10-02", "2026-10-05", "2026-10-05 14:43"))
+check("... but before the 2:30 PM slot today's decision is not ready", not fresh("2026-10-05", "2026-10-05", "2026-10-05 14:20"))
 check("freshness: a changes file older than the picks is refused",
       not fresh("2026-10-02", "2026-10-02", "2026-10-05 10:00", chg_date="2026-10-01"))
 
@@ -182,6 +195,16 @@ try:
     check("session catch-up: run-log row says it is traded now", "Catch-up trades" in (seen.get("notify") or ("",) * 4)[3], seen.get("notify"))
     check("fill gate: the staged catch-up orders may go at once",
           ra.fill_check_allowed(t("2026-10-05 10:06"), pending_path=pend)[0])
+    # the day's own decision at the 2:30 PM slot: the same regular-hours path, not called a catch-up
+    os.remove(pend)
+    write("2026-10-05", "2026-10-02")
+    pt._today_ct = lambda: t("2026-10-05 14:43")
+    seen.pop("notify", None)
+    with redirect_stdout(io.StringIO()):
+        _o, meta, res = pt.auto_trade(log_csv=None, decision=pd.Timestamp("2026-10-05"), session=True)
+    check("2:30 PM run: orders STAGED to go now (not a catch-up), run log says 'Trades', sells first then buys from free cash",
+          res["Status"].eq("STAGED for regular-hours market orders now").all() and "Trades: 1 sell, 1 buy" in seen["notify"][3]
+          and "sells first" in seen["notify"][3] and json.load(open(pend)).get("send_now") is True, (res.to_dict("records"), seen["notify"]))
 finally:
     for k, v in saved.items():
         setattr(pt, k, v)

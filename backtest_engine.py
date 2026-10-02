@@ -265,10 +265,13 @@ def apply_history_start(bars):
 
 
 def drop_partial_last_bar(bars, now=None, close_buffer_min=30):
-    """Drop today's bar if the US session (16:00 ET + buffer) has not finished yet."""
+    """Drop today's bar if the US session (16:00 ET + buffer) has not finished yet - except on a decision day from its
+    decision slot (2:30 PM CT) on: that decision is made on today's bar as of then (the price ~30 min before the close)."""
     now = now or datetime.now(EASTERN)
     today = pd.Timestamp(now.date())
     session_done = (now.hour * 60 + now.minute) >= (16 * 60 + close_buffer_min)
+    if not session_done and decision_bar_ready(now):
+        session_done = True
     if not session_done and (bars["Date"] == today).any():
         return bars[bars["Date"] < today].reset_index(drop=True), True
     return bars, False
@@ -1609,7 +1612,7 @@ def next_decision(latest, days=None):
 
 
 # ----------------------------------------------------------------------------- decision calendar (live schedule)
-DECISION_TIME_CT = (15, 15)                    # each decision is made and traded at 3:15 PM CT on its session
+DECISION_TIME_CT = (14, 30)                    # each decision is made and traded at 2:30 PM CT (30 min before the close)
 CENTRAL = ZoneInfo("America/Chicago")
 
 
@@ -1630,13 +1633,13 @@ def decision_kind(d):
 
 
 def decision_slot(d):
-    """The decision's scheduled time: 3:15 PM CT on session d (tz-aware)."""
+    """The decision's scheduled time: 2:30 PM CT on session d (tz-aware)."""
     d = pd.Timestamp(d)
     return datetime(d.year, d.month, d.day, *DECISION_TIME_CT, tzinfo=CENTRAL)
 
 
 def last_decision_date(t):
-    """The latest decision session whose 3:15 PM CT slot is at or before t (tz-aware), as a Timestamp."""
+    """The latest decision session whose 2:30 PM CT slot is at or before t (tz-aware), as a Timestamp."""
     d = pd.Timestamp(t.astimezone(CENTRAL).date())
     for _ in range(15):
         if decision_kind(d) and decision_slot(d) <= t:
@@ -1646,7 +1649,7 @@ def last_decision_date(t):
 
 
 def next_decision_slot(t):
-    """The first decision slot (3:15 PM CT) strictly after t (tz-aware). A missed decision can be caught up until then."""
+    """The first decision slot (2:30 PM CT) strictly after t (tz-aware). A missed decision can be caught up until then."""
     d = pd.Timestamp(t.astimezone(CENTRAL).date())
     for _ in range(15):
         if decision_kind(d) and decision_slot(d) > t:
@@ -1655,11 +1658,20 @@ def next_decision_slot(t):
     return None
 
 
+def decision_bar_ready(t):
+    """True when today (at t, tz-aware) is a decision day and its decision slot has passed: the decision uses today's
+    bar as of then, before it is final. A naive t is read as US Eastern (like drop_partial_last_bar's `now`)."""
+    t = t if t.tzinfo else t.replace(tzinfo=EASTERN)
+    d = pd.Timestamp(t.astimezone(CENTRAL).date())
+    return bool(decision_kind(d)) and t >= decision_slot(d)
+
+
 def last_complete_session(t):
-    """The latest session whose daily bar is final at t (after 4:30 PM ET, the drop_partial_last_bar rule)."""
+    """The latest session whose daily bar the pipeline uses at t (the drop_partial_last_bar rule): today after 4:30 PM ET
+    (final bar), or on a decision day from its 2:30 PM CT slot (the bar as of then); else the previous session."""
     et = t.astimezone(EASTERN)
     d = pd.Timestamp(et.date())
-    if is_session(d) and (et.hour, et.minute) >= (16, 30):
+    if is_session(d) and ((et.hour, et.minute) >= (16, 30) or decision_bar_ready(t)):
         return d
     return pd.Timestamp(pd.date_range(end=d - pd.Timedelta(days=1), periods=1, freq=NYSE_SESSION)[0])
 

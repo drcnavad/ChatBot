@@ -194,15 +194,15 @@ check("gate: Mon 10/5 2:50 PM (15 min before the close) -> waits, no alert", not
       and not gate(2026, 10, 5, 14, 50)[2])
 check("gate: Sat 10/10 -> no run, no alert", not gate(2026, 10, 10)[0] and not gate(2026, 10, 10)[2])
 exp = lambda when: [o["symbol"] for o in pt.superseded_orders(datetime.fromisoformat(when).replace(tzinfo=CT), p)]
-check("superseded: Friday's leftovers can be completed until Mon 3:15 PM", exp("2026-10-05 15:14") == [])
-check("superseded: from Mon 3:15 PM (the next decision) they are dropped, never sent", exp("2026-10-05 15:15") == ["AAA"])
+check("superseded: Friday's leftovers can be completed until Mon 2:30 PM", exp("2026-10-05 14:29") == [])
+check("superseded: from Mon 2:30 PM (the next decision) they are dropped, never sent", exp("2026-10-05 14:30") == ["AAA"])
 p2 = pending([{"symbol": "AAA", "side": "BUY", "qty": 1, "limit_price": 100.0, "order_id": None,
                "recorded_at": "2026-10-05T10:02:00-05:00"}], "2026-10-05")
 json.dump({**json.load(open(p2)), "send_now": True}, open(p2, "w"))
 g = run_all.fill_check_allowed(datetime(2026, 10, 5, 10, 5, tzinfo=CT), pending_path=p2)
 check("gate: a daytime catch-up's orders (send_now) go at once, not next morning", g[0], g)
-check("superseded: a Monday-morning catch-up (Friday's decision) expires at Mon 3:15 PM",
-      [o["symbol"] for o in pt.superseded_orders(datetime(2026, 10, 5, 15, 15, tzinfo=CT), p2)] == ["AAA"])
+check("superseded: a Monday-morning catch-up (Friday's decision) expires at Mon 2:30 PM",
+      [o["symbol"] for o in pt.superseded_orders(datetime(2026, 10, 5, 14, 30, tzinfo=CT), p2)] == ["AAA"])
 pt.log_event = lambda *a, **k: None
 dropped = pt.drop_superseded_orders(datetime(2026, 10, 5, 15, 16, tzinfo=CT), p2)
 check("drop_superseded_orders: removes the rows (file gone when empty)", len(dropped) == 1 and not os.path.exists(p2))

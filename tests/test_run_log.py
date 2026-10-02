@@ -199,23 +199,24 @@ check("couldn't read holdings: its own warning row, no drift row",
 # ------------------------------------------------------------------ run_all finished rows (plain words)
 CT = ZoneInfo("America/Chicago")
 wed, fri = pd.Timestamp("2026-09-30"), pd.Timestamp("2026-10-02")
-check("labels: Wed check / Fri rebalance / catch-up / data refresh",
-      [run_all.run_label(wed, "evening"), run_all.run_label(fri, "evening"), run_all.run_label(fri, "session"),
-       run_all.run_label(None, None)] == ["Wed check", "Fri rebalance", "Catch-up: Fri Oct 2 rebalance", "Data refresh"])
+check("labels: Wed check / Fri rebalance (2:30 PM, regular hours) / catch-up / data refresh",
+      [run_all.run_label(wed, "evening"), run_all.run_label(fri, "session", datetime(2026, 10, 2, 14, 43, tzinfo=CT)),
+       run_all.run_label(fri, "session", datetime(2026, 10, 5, 9, 31, tzinfo=CT)), run_all.run_label(None, None)]
+      == ["Wed check", "Fri rebalance", "Catch-up: Fri Oct 2 rebalance", "Data refresh"])
 ran7 = [(n, True, 1.0) for n in "abcdefg"]
 table = lambda *r: pd.DataFrame(list(r), columns=["Symbol", "Side", "Shares", "Order_ID", "Status"])
 end = datetime(2026, 9, 30, 15, 31, tzinfo=CT)
 moved, m = run_all.finished_text("Wed check", end, ran7, [], True, "evening", table())
 check("Wed, no swap: done + all OK + no money moved + next + nothing to do",
       moved == "no" and m == ("Wed check done 3:31 PM. All 7 steps OK. No trades needed - no orders, no money "
-                              "moved. Next: Fri Oct 2 rebalance at 3:15 PM. Nothing to do."), m)
+                              "moved. Next: Fri Oct 2 rebalance at 2:30 PM. Nothing to do."), m)
 sent = table(("ENPH", "SELL", 4, "1", "submitted (accepted)"), ("FIG", "SELL", 6, "2", "submitted (new)"),
              ("AMD", "BUY", 3, "3", "submitted (new) + 0.58 fractional rest next morning"),
              ("TEM", "BUY", 0.8, None, "STAGED for morning market (<1 whole share after hours)"))
 moved, m = run_all.finished_text("Fri rebalance", datetime(2026, 10, 2, 15, 32, tzinfo=CT), ran7, [], True, "evening", sent)
 check("Fri, orders sent: money moved, counts, 9 AM remainders, next = Mon check", moved == "yes"
       and "Orders sent: 2 sells, 2 buys - money moves as they fill; small remainders go out at 9 AM." in m
-      and "Next: Mon Oct 5 check at 3:15 PM." in m and m.endswith("Nothing to do."), m)
+      and "Next: Mon Oct 5 check at 2:30 PM." in m and m.endswith("Nothing to do."), m)
 moved, m = run_all.finished_text("Fri rebalance", datetime(2026, 10, 2, 19, 5, tzinfo=CT), ran7, [], True, "evening",
                                  table(("AMD", "BUY", 3, None, "STAGED for morning market (past 7 PM CT - not submitted)")))
 check("past 7 PM: queued for 9 AM, no money moved yet", moved == "no"
@@ -225,7 +226,13 @@ done = table(("ENPH", "SELL", 4, "m1", "COMPLETED via market (staged, filled 0/4
 moved, m = run_all.finished_text("Catch-up: Fri Oct 2 rebalance", datetime(2026, 10, 5, 9, 31, tzinfo=CT), ran7, [], True,
                                  "session", table(("AMD", "BUY", 3.58, None, "STAGED ... (catch-up)")), done)
 check("catch-up: sent at market now, counts, money moved", moved == "yes"
-      and "Catch-up orders sent at market: 1 sell, 1 buy - money moves as they fill." in m, m)
+      and "Catch-up orders sent at market (sells first): 1 sell, 1 buy - money moves as they fill; any rest goes out at 9 AM CT."
+      in m, m)
+moved, m = run_all.finished_text("Fri rebalance", datetime(2026, 10, 2, 14, 46, tzinfo=CT), ran7, [], True,
+                                 "session", table(("AMD", "BUY", 3.58, None, "STAGED for regular-hours market orders now")), done)
+check("2:30 PM run: sent at market in regular hours (not called a catch-up), money moved", moved == "yes"
+      and m.startswith("Fri rebalance done 2:46 PM.")
+      and "Orders sent at market (sells first): 1 sell, 1 buy - money moves as they fill; any rest goes out at 9 AM CT." in m, m)
 moved, m = run_all.finished_text("Data refresh", end, [("main", True, 1), ("validate", True, 1)], [], False, None, None)
 check("refresh only: no trades, no money moved", moved == "no" and "Data refresh only - no trades, no money moved." in m, m)
 moved, m = run_all.finished_text("Wed check", end, ran7[:6] + [("sentiment", False, 1.0)], ["sentiment"], True,

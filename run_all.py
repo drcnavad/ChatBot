@@ -1,7 +1,7 @@
 """ONE command for the whole Stock Analysis pipeline:   python run_all.py      (or open run_all.ipynb and Run All)
 
 It picks the mode by itself (clock in US Central time):
-  FULL   on a strategy decision day after 3:15 PM CT, when the full online update has not run yet today. Decision days =
+  FULL   on a strategy decision day after 2:30 PM CT, when the full online update has not run yet today. Decision days =
          the Friday rebalance (the week's last session, e.g. Thursday when Friday is a holiday) and the Mon/Wed checks
          (the first session on/after Mon/Wed, e.g. Tuesday after a Monday holiday) - backtest_engine.next_decision:
            fundamentals  company_report_autofetch.py - Alpha Vantage rotation, max 12 stocks = max 24 calls (free limit 25/day)
@@ -30,16 +30,19 @@ so the evening trade still runs on fresh signals. Only a main or validate failur
                                       #  unless within 1 point of equity (no-trade band); no new buy / top-up
                                       #  of a pick with earnings within 5 days; Mon/Wed = swaps/exits only;
                                       #  non-targets sold entirely; sells sent first; logs to Reports/live_orders_log.csv).
-                                      # A decision (Fri rebalance / Mon-Wed check, holiday-shifted) is due at 3:15 PM CT
+                                      # A decision (Fri rebalance / Mon-Wed check, holiday-shifted) is due at 2:30 PM CT
                                       # on its day and runs ONCE (run_state last_decision, Reports/.trade.lock):
-                                      #  - its evening (until 7 PM CT, 4 PM on early closes): WHOLE-share extended-hours
-                                      #    DAY limit orders at the close; the 9 AM --fill-check completes the rest (2 decimals);
+                                      #  - its own day in market hours (until 5 min before the close): regular-hours market
+                                      #    orders at once (2 decimals), sells first, buys sized from the buying power after
+                                      #    the sells; a buy rest that did not fit goes out at the next fill check (9 AM CT);
+                                      #  - later that day (until 7 PM CT, 4 PM on early closes): WHOLE-share extended-hours
+                                      #    DAY limit orders at the plan price; the 9 AM --fill-check completes the rest;
                                       #  - missed (Mac asleep/off): caught up at the next regular session (9:00 AM CT to
                                       #    15 min before the close) with the missed decision's own picks, sized at current
                                       #    prices, sent at once as regular-hours market orders (2 decimals); evenings,
                                       #    nights, weekends and holidays wait for the next session;
                                       #  - superseded (skipped, one Reports/run_log.csv row) once the next decision slot arrives.
-    python run_all.py --trade --scheduled   # what launchd runs (see launchd/; at 3:15 PM, login, wake and every 30 min):
+    python run_all.py --trade --scheduled   # what launchd runs (see launchd/; at 2:30 PM, login, wake and every 30 min):
                                       # like --trade, but a start with nothing due prints one "idle:" line (no log, no
                                       # run-log row), and a failed decision is retried at most 3 times, 60+ min apart.
     python run_all.py --fill-check    # send the pending orders (Reports/live_pending_orders.json) as regular-hours market
@@ -62,7 +65,7 @@ State: Reports/run_state.json - the runner's memory (all values are ISO timestam
     last_fill_check_at ............. last fill check that sent orders
     last_run_at / last_mode ......... last invocation (any mode)
 Logs: Reports/logs/run_*.log (last 30 kept); launchd output: Reports/logs/launchd_*.log.
-Schedule (launchd, see launchd/install_schedule.sh): --trade --scheduled Mon-Fri 3:15 PM CT, --fill-check --scheduled
+Schedule (launchd, see launchd/install_schedule.sh): --trade --scheduled Mon-Fri 2:30 PM CT, --fill-check --scheduled
 Mon-Fri 9:00 AM CT; both also at login (RunAtLoad), once on wake for a slot missed in sleep, and every 30 min.
 By default no orders are placed. Alpaca account endpoints are only called with --sync-live (3 read-only GETs via
 alpaca_paper.py), --trade (paper_trade.auto_trade(): reads positions + equity, then submits extended-hours DAY
@@ -88,7 +91,8 @@ LOG_DIR = os.path.join(REPORTS, "logs")
 STATE_FILE = os.path.join(REPORTS, "run_state.json")
 CHECKPOINT_FILE = os.path.join(REPORTS, ".pipeline_checkpoint.json")   # watchdog resume point (see pipeline_watchdog.py)
 CT, ET = ZoneInfo("America/Chicago"), ZoneInfo("America/New_York")
-FULL_AFTER = (15, 15)                  # 3:15 PM CT - the scheduled pipeline/trade time
+FULL_AFTER = (14, 30)                  # 2:30 PM CT - the scheduled pipeline/trade time (== backtest_engine.DECISION_TIME_CT)
+SLOT_TEXT = f"{FULL_AFTER[0] - 12}:{FULL_AFTER[1]:02d} PM CT"
 NEWS_MIN_GAP_H = 24                    # NewsAPI free tier: 100 requests/day, one run = len(stock_symbols) (N_CALLS)
 BAR_FINAL_ET = (16, 30)                # the pipeline treats the daily bar as final after 4:30 PM ET (3:30 PM CT)
 NB_TIMEOUT = 3600
@@ -333,7 +337,7 @@ def decision_day(d):
 
 
 def full_window(now_ct):
-    """(True, why) when the automatic full update / trade is due by the clock: a decision day after 3:15 PM CT."""
+    """(True, why) when the automatic full update / trade is due by the clock: a decision day after 2:30 PM CT."""
     if not is_trading_day(now_ct.date()):
         return False, f"{now_ct:%a %b %d} is not a trading day"
     kind = decision_day(now_ct.date())
@@ -346,7 +350,7 @@ def full_window(now_ct):
 
 def choose_mode(now_ct, state, force_full=False, force_quick=False, decision=None):
     """'full' or 'quick' plus a plain reason. decision = a missed decision being caught up now (see decision_gate):
-    full when no full update ran since that decision's 3:15 PM slot."""
+    full when no full update ran since that decision's 2:30 PM slot."""
     if force_quick:
         return "quick", "--quick"
     if force_full:
@@ -389,6 +393,7 @@ def fundamentals_allowed(now_ct, state, force=False):
 # ----------------------------------------------------------------------------- decisions: run once, catch up if missed
 SESSION_FROM = (9, 0)            # catch-up / completion market orders from 9:00 AM CT (30 min after the open) ...
 SESSION_STOP_MIN = 15            # ... until 15 min before the close (2:45 PM CT; 11:45 AM on early-close days)
+DECISION_STOP_MIN = 5            # the day's own decision (2:30 PM run) still trades in regular hours until 5 min before the close
 MAX_DECISION_ATTEMPTS = 3        # launchd retries a decision whose run failed at most 3 times ...
 RETRY_GAP_MIN = 60               # ... at least 60 min apart
 EXIT_REPORTED = 3                # a trade / fill-check failure already in the run log in plain words: the watchdog stays quiet
@@ -403,15 +408,22 @@ def _parse_ct(text):
     return t if t.tzinfo else t.replace(tzinfo=CT)
 
 
-def in_session(now_ct):
-    """True in the regular-hours window for market orders: a trading day from 9:00 AM CT until 15 min before the close."""
+def in_session(now_ct, stop_min=SESSION_STOP_MIN):
+    """True in the regular-hours window for market orders: a trading day from 9:00 AM CT until `stop_min` min before the close."""
     import backtest_engine as be
     d = now_ct.date()
     if not is_trading_day(d):
         return False
     close = datetime(d.year, d.month, d.day, 12 if be.is_early_close(d) else 15, 0, tzinfo=CT)
     start = datetime(d.year, d.month, d.day, *SESSION_FROM, tzinfo=CT)
-    return start <= now_ct < close - timedelta(minutes=SESSION_STOP_MIN)
+    return start <= now_ct < close - timedelta(minutes=stop_min)
+
+
+def trade_how(D, now_ct):
+    """How the day's own decision D trades at now_ct: 'session' (regular hours: market orders now, sells first) until
+    5 min before the close, then 'evening' (extended-hours limit orders, completed by the 9 AM check). Checked again
+    right before the trade, as the pipeline takes ~13 min."""
+    return "session" if in_session(now_ct, DECISION_STOP_MIN) else "evening"
 
 
 def next_session_start(now_ct):
@@ -427,12 +439,14 @@ def next_session_start(now_ct):
 def decision_gate(now_ct, state, scheduled=False):
     """(D, how, why): what a --trade run does now. Also shown by --dry-run, so the schedule can be tested safely.
 
-    D = the latest decision (Timestamp) whose 3:15 PM CT slot has passed; None when it already ran (run_state
+    D = the latest decision (Timestamp) whose 2:30 PM CT slot has passed; None when it already ran (run_state
     'last_decision' - a decision never runs twice) or, for launchd runs, when its retries are used up or too recent.
-    how = 'evening': D is today and extended hours are still open -> pipeline, then whole-share extended-hours limit
-                     orders; the 9 AM check completes the fractional rest (the normal evening run).
-          'session': D was missed (Mac asleep/off) and the market is open -> pipeline, then regular-hours market orders
-                     in 2-decimal shares now, from D's picks (its point-in-time ranks) sized at current prices.
+    how = 'session': D is today and the market is open (until 5 min before the close; the normal 2:30 PM run), or D
+                     was missed (Mac asleep/off) and the market is open -> pipeline, then regular-hours market orders
+                     in 2-decimal shares now (sells first, buys sized from the buying power after the sells), from
+                     D's picks (its point-in-time ranks) sized at current prices.
+          'evening': D is today, past that window and extended hours are still open -> pipeline, then whole-share
+                     extended-hours limit orders; the 9 AM check completes the fractional rest.
           'wait':    D was missed and the market is closed (evening, night, weekend, holiday) -> nothing now; it runs at
                      the next session's 9:00 AM CT, unless the next decision slot comes first (then it is superseded).
     """
@@ -455,8 +469,10 @@ def decision_gate(now_ct, state, scheduled=False):
             return None, None, f"the {label} failed at {last:%I:%M %p}; next retry after {last + timedelta(minutes=RETRY_GAP_MIN):%I:%M %p} CT"
     until = be.next_decision_slot(now_ct)
     sup = f"superseded at {until:%a %b %d %I:%M %p} CT" if until else ""
+    if now_ct.date() == D.date() and trade_how(D, now_ct) == "session":
+        return D, "session", f"{label} after {SLOT_TEXT}, regular-hours orders"
     if now_ct.date() == D.date() and not paper_trade._past_evening_cutoff(now_ct):
-        return D, "evening", f"{label} after 3:15 PM CT"
+        return D, "evening", f"{label} after {SLOT_TEXT}, extended-hours orders"
     if in_session(now_ct):
         return D, "session", f"catch-up of the missed {label} now, regular-hours market orders ({sup} if not run)"
     start = next_session_start(now_ct)
@@ -617,8 +633,8 @@ def next_full_update(now_ct, state):
     for k in range(0, 10):
         d = (now_ct + timedelta(days=k)).replace(hour=FULL_AFTER[0], minute=FULL_AFTER[1], second=0, microsecond=0)
         if full_window(d)[0] and d.date().isoformat() != state.get("last_full_date"):
-            return ("today" if k == 0 else f"{d:%a %b} {d.day}") + " after 3:15 PM CT"
-    return "the next decision day after 3:15 PM CT"
+            return ("today" if k == 0 else f"{d:%a %b} {d.day}") + f" after {SLOT_TEXT}"
+    return f"the next decision day after {SLOT_TEXT}"
 
 
 # ----------------------------------------------------------------------------- execution
@@ -1022,9 +1038,13 @@ def _trade(D, how, failures, state, clock, ckpt):
     ckpt()
     if reason:
         logging.warning("=== trade %s", reason)
+    now_ct = datetime.fromisoformat(clock())
+    if D.date() == now_ct.date() and how in ("session", "evening"):
+        how = trade_how(D, now_ct)                         # the pipeline took a while: check the window again
     session = how == "session"
     logging.info("=== trade %s (paper_trade.auto_trade, LIVE - real money)",
-                 f"catch-up of the {D:%a %b %d} decision" if session else f"{D:%a %b %d} evening")
+                 (f"{D:%a %b %d} decision, regular hours" if D.date() == now_ct.date() else
+                  f"catch-up of the {D:%a %b %d} decision") if session else f"{D:%a %b %d} evening")
     import paper_trade
     if session and not _wait_for_lock(FILL_LOCK):
         logging.warning("  a fill check has held its lock for 10 min - trade not started (retried by the next run)")
@@ -1075,7 +1095,7 @@ def _wait_for_lock(path, minutes=10):
 def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_path, ckpt_write, ckpt_clear, clock,
               D=None, how=None):
     """The notebook steps, the optional live sync and the --trade phase, then the summary. Returns the exit code."""
-    label, errors = run_label(D, how), []
+    label, errors = run_label(D, how, now), []
     if a.now is None:  # real runs only - the tests' fake clock never holds a sleep assertion
         _hold_sleep_assertion()
     env = dict(os.environ)
@@ -1210,13 +1230,14 @@ def _hm(t):
     return f"{t:%I:%M %p}".lstrip("0")
 
 
-def run_label(D, how):
+def run_label(D, how, now_ct=None):
     """Plain name of the run for the run log: 'Wed check', 'Fri rebalance', 'Catch-up: Fri Oct 2 rebalance', 'Data refresh'."""
     if D is None or how not in ("evening", "session"):
         return "Data refresh"
     import backtest_engine as be
     kind = "rebalance" if be.decision_kind(D) == "full rebalance" else "check"
-    return f"{D:%a} {kind}" if how == "evening" else f"Catch-up: {D:%a %b} {D.day} {kind}"
+    today = D.date() == (now_ct or datetime.now(CT)).date()
+    return f"{D:%a} {kind}" if how == "evening" or today else f"Catch-up: {D:%a %b} {D.day} {kind}"
 
 
 def _count_sides(df, pattern):
@@ -1240,7 +1261,8 @@ def finished_text(label, end, ran, failures, trade_run, how, trades, sent_now=No
     if not trade_run:
         moved, money = "no", "Data refresh only - no trades, no money moved."
     elif how == "session" and _count_sides(sent_now, "^COMPLETED"):
-        money = f"Catch-up orders sent at market: {_count_sides(sent_now, '^COMPLETED')} - money moves as they fill."
+        money = (f"{'Catch-up orders' if label.startswith('Catch-up') else 'Orders'} sent at market (sells first): "
+                 f"{_count_sides(sent_now, '^COMPLETED')} - money moves as they fill; any rest goes out at 9 AM CT.")
     elif _count_sides(trades, "^submitted"):
         money = (f"Orders sent: {_count_sides(trades, '^(submitted|STAGED)')} - money moves as they fill; small "
                  f"remainders go out at 9 AM.")
@@ -1272,8 +1294,8 @@ def trade_failure_text(D, crit, error, state, scheduled):
                  f"{sent} order(s) went out before the error; they are saved and never sent twice - check Alpaca.")
         return ("yes" if sent else "no"), f"The {D:%a %b %d} trade stopped: {_clip(error or 'see the log', 90)}. {moved} {again}"
     if "send_now" in crit:
-        return ("no", "The catch-up orders are saved; the fill check sends them within 30 min (market hours). No money "
-                "moved yet. Nothing to do unless this repeats.")
+        return ("no", "The orders are saved; the fill check sends them in market hours (within 30 min, or 9 AM CT the "
+                "next trading day). No money moved yet. Nothing to do unless this repeats.")
     return ("yes", "Some orders were not sent - see the Trade row. The rest went out. The failed ones are not "
             "retried; place them by hand if you still want them.")
 

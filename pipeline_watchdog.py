@@ -2,7 +2,7 @@
 
 Usage (drop-in replacement for run_all.py - every argument is passed straight through):
 
-    python pipeline_watchdog.py --trade          # decision run (3:15 PM CT, or a missed decision's catch-up;
+    python pipeline_watchdog.py --trade          # decision run (2:30 PM CT, or a missed decision's catch-up;
                                                  #  launchd adds --scheduled and runs it every 30 min, idle unless due)
     python pipeline_watchdog.py --fill-check     # fill check (from 9:00 AM CT in regular hours; launchd: --scheduled)
 

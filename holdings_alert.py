@@ -3,7 +3,7 @@
 Reads the pipeline outputs (Reports/signal_analysis.csv, Reports/strategy_midweek_check.csv) and, if present, the user's real
 holdings in my_positions.csv (project root; same format as `paper_trade.py --positions`: Symbol,Shares - Shares optional,
 an optional Weight column in % or as a fraction). Returns ONE plain line per action, e.g.
-  "Swap at the Mon Sep 28 close: sell X and buy Y (rank 2), same dollar amount. Orders go out Mon Sep 28 evening, any rest
+  "Swap at the Mon Sep 28 close: sell X and buy Y (rank 2), same dollar amount. Orders go out Mon Sep 28 at 2:30 PM CT, any rest
    Tue Sep 29 at 9 AM CT."                                                           (Mon/Wed check day)
   "Sell TRGP (rank 45) at the Mon Sep 28 close, hold cash until Friday. Orders go out ..."   (Mon/Wed check day, mid-week exit)
   "With today's ranks the swap rule would sell ANET and buy RBRK (rank 1). Next check: ..."   (other days)
@@ -92,14 +92,11 @@ def read_positions(path):
 
 
 def last_completed_session(now=None):
-    """Latest NYSE session whose daily bar is final (after 4:30 PM ET, same buffer as the pipeline)."""
+    """Latest NYSE session whose daily bar the pipeline uses (be.last_complete_session: final after 4:30 PM ET, or a
+    decision day's bar from its 2:30 PM CT slot)."""
     now = pd.Timestamp(datetime.now(tz=ET)) if now is None else pd.Timestamp(now)
     now = now.tz_localize(ET) if now.tzinfo is None else now.tz_convert(ET)
-    today = now.tz_localize(None).normalize()
-    sess = pd.date_range(today - pd.Timedelta(days=12), today, freq=be.NYSE_SESSION)
-    if len(sess) and sess[-1] == today and now.hour * 60 + now.minute < 16 * 60 + 30:
-        sess = sess[:-1]
-    return sess[-1]
+    return be.last_complete_session(now.to_pydatetime())
 
 
 # ----------------------------------------------------------------------------- one day's ranks (same symbol order as the engine)
@@ -227,7 +224,7 @@ def build_alert(sig=None, positions_path=None, use_positions=True, now=None):
     fill = be.next_sessions(D, 1)[0]
     nxt_d, nxt_kind, _nxt_fill = be.next_decision(D)
     next_txt = f"Next check: {_day(nxt_d)}" + (" (full rebalance)." if nxt_kind == "full rebalance" else ".")
-    orders_txt = f" Orders go out {_day(D)} evening, any rest {_day(fill)} at 9 AM CT."   # the live trade step's timing
+    orders_txt = f" Orders go out {_day(D)} at 2:30 PM CT, any rest {_day(fill)} at 9 AM CT."   # the live trade step's timing
 
     def holdings_at(d):
         """{symbol: weight} the strategy held on day d."""

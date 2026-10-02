@@ -389,20 +389,23 @@ check("no pa- client id prefix", '"pa-' not in src and "'pa-" not in src)
 
 
 # ------------------------------------------------- 13: morning BUY buying-power guards
-def _morning_bp_case(bp, price, qty):
-    tmp = tempfile.mkdtemp()
-    pend = os.path.join(tmp, "live_pending_orders.json")
-    json.dump({"evening_date": "2026-09-28", "submitted_at_ct": "x", "target_source": "auto",
-               "as_of": "2026-09-28", "orders": [
-        {"symbol": "BBB", "side": "BUY", "qty": qty, "limit_price": price, "order_id": "eve-9"}]},
-              open(pend, "w"))
-    fc = FakeClient(positions={},
-                    orders_by_id={"eve-9": FakeOrder(id="eve-9", status="expired", filled_qty=0,
-                                                    client_order_id="live-20260928-BUY-BBB")})
+def _morning_bp_case(bp, price, qty, pend=None, fc=None):
+    """One fill check with buying power `bp`; pass `pend`/`fc` again to run the next check on the same file/broker."""
+    if pend is None:
+        pend = os.path.join(tempfile.mkdtemp(), "live_pending_orders.json")
+        json.dump({"evening_date": "2026-09-28", "submitted_at_ct": "x", "target_source": "auto",
+                   "as_of": "2026-09-28", "orders": [
+            {"symbol": "BBB", "side": "BUY", "qty": qty, "limit_price": price, "order_id": "eve-9"}]},
+                  open(pend, "w"))
+    tmp = os.path.dirname(pend)
+    if fc is None:
+        fc = FakeClient(positions={},
+                        orders_by_id={"eve-9": FakeOrder(id="eve-9", status="expired", filled_qty=0,
+                                                        client_order_id="live-20260928-BUY-BBB")})
     monkey = []
     patch_live(monkey, paper_trading_client=lambda: fc,
                _wait_terminal=lambda c, oid, **k: True,
-               _broker_orders_by_client_id=lambda c: {},
+               _broker_orders_by_client_id=lambda c: {o.client_order_id: o for o in fc.orders_by_id.values() if o.client_order_id},
                _read_buying_power=lambda c: bp)
     res = paper_trade.complete_unfilled_orders(pending_path=pend,
                                                    log_csv=os.path.join(tmp, "x.csv"))
@@ -412,12 +415,22 @@ def _morning_bp_case(bp, price, qty):
 res, fc, pend = _morning_bp_case(100.0, 50.0, 5)  # need ~$252.50 (1% cushion), have $100
 check("morning: short on cash -> buys the part that fits (100 / 50.50 = 1.98)",
       [getattr(o, "qty", None) for o in fc.submitted] == [1.98], [getattr(o, "qty", None) for o in fc.submitted])
-check("morning: short on cash -> partial noted, row done", "only 1.98 of 5 fit" in res.iloc[0]["Status"]
-      and not os.path.exists(pend), res.iloc[0]["Status"])
+left = json.load(open(pend))["orders"] if os.path.exists(pend) else []
+check("morning: short on cash -> partial noted; the rest (3.02) stays for the next fill check (9 AM CT), no order id",
+      "only 1.98 of 5 fit" in res.iloc[0]["Status"] and len(left) == 1 and left[0]["qty"] == 3.02
+      and left[0]["order_id"] is None and left[0]["rest_of"] == "ord-1", (res.iloc[0]["Status"], left))
+res2, fc, pend = _morning_bp_case(1000.0, 50.0, 5, pend, fc)   # next check: cash is free now
+check("next check: buys the rest once, with its own live-rest- id",
+      [(o.qty, o.client_order_id.split("-")[1]) for o in fc.submitted] == [(1.98, "fill"), (3.02, "rest")]
+      and not os.path.exists(pend), [(o.qty, o.client_order_id) for o in fc.submitted])
 res, fc, pend = _morning_bp_case(0.5, 50.0, 5)  # not even $1 free
 check("morning: no cash -> nothing sent", len(fc.submitted) == 0)
-check("morning: no cash -> NO FILL, not retried", res.iloc[0]["Status"].startswith("NO FILL")
-      and not os.path.exists(pend), res.iloc[0]["Status"])
+check("morning: no cash -> WAITING, kept for the next fill check", res.iloc[0]["Status"].startswith("WAITING")
+      and os.path.exists(pend), res.iloc[0]["Status"])
+res, fc, pend = _morning_bp_case(0.5, 50.0, 5, pend, fc)
+res, fc, pend = _morning_bp_case(0.5, 50.0, 5, pend, fc)
+check("morning: still no cash at the 3rd check -> NO FILL, dropped (bounded)", res.iloc[0]["Status"].startswith("NO FILL")
+      and not os.path.exists(pend) and len(fc.submitted) == 0, res.iloc[0]["Status"])
 
 res, fc, pend = _morning_bp_case(100000.0, 50.0, 5)  # plenty
 check("morning: sufficient BP -> submitted", len(fc.submitted) == 1)

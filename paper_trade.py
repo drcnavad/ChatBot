@@ -123,9 +123,11 @@ def _trade_notice(results, prices=None):
         tail = ("Money moves as they fill; small leftovers finish at 9 AM. Nothing to do."
                 if not staged.any() else
                 f"{int(staged.sum())} small order(s) go out at 9 AM. Nothing to do.")
-    elif results.loc[staged, "Status"].str.contains("catch-up", na=False).all():
-        head, moved = f"Catch-up trades: {len(sells)} sell, {len(buys)} buy", "no"
-        tail = "A missed decision, sent now with market orders by the fill check. Nothing to do."
+    elif results.loc[staged, "Status"].str.contains("orders now", na=False).all():
+        catch = results.loc[staged, "Status"].str.contains("catch-up", na=False).any()
+        head, moved = f"{'Catch-up trades' if catch else 'Trades'}: {len(sells)} sell, {len(buys)} buy", "no"
+        tail = (("A missed decision, sent" if catch else "Sent") + " now as market orders: sells first, then buys "
+                "sized from the cash free after the sells; any rest goes out at 9 AM CT. Nothing to do.")
     else:
         head, moved = f"Trades queued: {len(sells)} sell, {len(buys)} buy", "no"
         tail = "Not sent yet, no money moved. They go out at the 9 AM check. Nothing to do."
@@ -1078,16 +1080,17 @@ def submit_paper_extended_sequenced(orders, positions=None, record=None, client=
     return pd.concat([sell_results, buy_results], ignore_index=True)
 
 
-def _morning_completion_plan(broker_by_cid, sym, side, qty, price, date_str):
+def _morning_completion_plan(broker_by_cid, sym, side, qty, price, date_str, kind="fill"):
     """(client_order_id, qty_to_order, prior_order): crash-safe morning completion plan.
 
     A crash between the morning submit and the local record leaves the completion order
     on the broker. If a prior attempt's order already covers the quantity, returns
     (None, 0, prior_order) so the caller marks it completed instead of duplicating.
     Otherwise the already-filled part is subtracted and a fresh deterministic id
-    (suffixed -rN when needed) is returned for the rest.
+    (suffixed -rN when needed) is returned for the rest. kind="rest" (live-rest-...) for a BUY rest that did not fit
+    in the cash of an earlier check, so its ids never collide with that check's own order.
     """
-    base = _client_order_id(sym, side, qty, price, date_str, kind="fill")
+    base = _client_order_id(sym, side, qty, price, date_str, kind=kind)
     cid, n, covered = base, 2, 0.0
     while cid in broker_by_cid:
         prior = broker_by_cid[cid]
@@ -1194,8 +1197,8 @@ def record_pending_order(entry, meta, pending_path=PENDING_ORDERS_JSON):
 
 
 def _order_expiry(row, pend):
-    """When a pending row is superseded: the first decision slot (3:15 PM CT) after it was recorded (rows without
-    recorded_at: after 3:15 PM CT on their evening date). None when it cannot be told."""
+    """When a pending row is superseded: the first decision slot (2:30 PM CT) after it was recorded (rows without
+    recorded_at: after 2:30 PM CT on their evening date). None when it cannot be told."""
     from datetime import datetime
 
     import backtest_engine as be
@@ -1394,7 +1397,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     # Completion ids use the row's EVENING date, so a retry on any later day still finds them.
     fill_date = str(pend.get("evening_date") or _today_ct().date().isoformat()).replace("-", "")
     results = []
-    to_retry = []  # rows whose completion FAILED - only these are kept for a retry
+    to_retry = []  # rows kept for the next fill check: FAILED completions, cash waits and BUY rests
     morning_sell_ids = []  # market SELL completions submitted by this run (waited on before BUYs)
     sells_settled = False  # ... have been waited on before the first BUY affordability check
     reserved_buy_spend = 0.0  # estimated cost of BUY completions already submitted this run
@@ -1510,7 +1513,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             # of submitting a duplicate.
             cid, to_order, prior = _morning_completion_plan(
                 broker_by_cid, sym, side, remaining, o.get("limit_price") or 0,
-                str(o.get("evening_date") or "").replace("-", "") or fill_date)
+                str(o.get("evening_date") or "").replace("-", "") or fill_date, kind="rest" if o.get("rest_of") else "fill")
             if prior is not None:
                 o["completed_order_id"] = str(prior.id)  # retry-safety: this row is done
                 _save_pending()
@@ -1552,15 +1555,17 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 # a missing or invalid price can never be verified, so that row is dropped
                 # loudly instead of being submitted blind or retried forever.
                 if not sells_settled:
-                    if morning_sell_ids:
+                    if morning_sell_ids:   # market sells fill in seconds; bounded wait so the buys see their cash
                         _wait_for_terminal_all(client, morning_sell_ids,
-                                               timeout_secs=60, poll_secs=5)
+                                               timeout_secs=SELL_SETTLE_WAIT_SECS, poll_secs=5)
                     sells_settled = True
                 if bp_base is None:
                     try:
                         bp_base = _read_buying_power(client)
                     except Exception:
                         bp_base = None
+                    if bp_base is not None:
+                        print(f"  Buying power after the sells: ${bp_base:,.2f}")
                 bp_now = bp_base
                 est_price = _safe_number(o.get("limit_price"))
                 if est_price > 0 and to_order * est_price < 1.0:
@@ -1594,6 +1599,15 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 if est_cost > spendable:
                     # Buy the part that fits (2 decimals, rounded down); the rest is not bought.
                     fit = _floor2(max(spendable, 0.0) / unit)
+                    if fit * est_price < 1.0 and int(_safe_number(o.get("cash_waits"), 0)) < MAX_FILL_TRIES - 1:
+                        # No cash free yet (e.g. a sell still filling): kept for the next fill check (9 AM CT at
+                        # the latest), at most MAX_FILL_TRIES checks, never past the next decision.
+                        o["cash_waits"] = int(_safe_number(o.get("cash_waits"), 0)) + 1
+                        results.append((sym, side, to_order, oid,
+                                        f"WAITING (not enough cash now: need ~${est_cost:,.2f}, free ${spendable:,.2f}) "
+                                        f"- kept for the next fill check (9 AM CT at the latest)"))
+                        to_retry.append(o)
+                        continue
                     if fit * est_price < 1.0:
                         msg = (f"NO FILL (not enough cash: need ~${est_cost:,.2f}, free ${spendable:,.2f} "
                                f"after ${reserved_buy_spend:,.2f} reserved) - {sym} BUY {to_order:g} shares "
@@ -1604,13 +1618,23 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                                   f"${max(spendable, 0):,.0f} is free. NOT sent, no money moved. Buy less by hand "
                                   f"in Alpaca if you want it.", details=msg)
                         continue
+                    rest = _floor2(to_order - fit)
                     partial = f"; only {fit:g} of {to_order:g} fit in free cash"
+                    if rest * est_price >= 1.0:   # the rest goes to the next fill check (9 AM CT at the latest)
+                        rest_row = {k: v for k, v in o.items() if k not in ("completed_order_id", "tries", "cash_waits")}
+                        rest_row.update(qty=rest, order_qty=None, order_id=None, exit=False, rest_of=sym)
+                        rest_row["evening_date"] = o.get("evening_date") or pend.get("evening_date")
+                        partial += f" - the rest ({rest:g}) goes to the next fill check (9 AM CT at the latest)"
                     to_order, est_cost = fit, fit * unit
             req = MarketOrderRequest(symbol=sym, qty=to_order, time_in_force=TimeInForce.DAY,
                                      side=OrderSide.SELL if side == "SELL" else OrderSide.BUY,
                                      client_order_id=cid)
             m = client.submit_order(req)
             o["completed_order_id"] = str(m.id)  # retry-safety: this row is done
+            if partial and "the rest" in partial:
+                rest_row["rest_of"] = str(m.id)
+                to_retry.append(rest_row)
+                pend["orders"] = pend.get("orders", []) + [rest_row]   # saved with the marks (crash-safe)
             _save_pending()
             if side == "SELL":
                 morning_sell_ids.append(str(m.id))  # waited on before the first BUY
@@ -1918,7 +1942,9 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         # morning fill check sends them as regular-hours fractional market orders.
         results = pd.concat([_stage_orders_for_morning(
             orders_to_send, positions, lambda e: record_pending_order(e, meta, PENDING_ORDERS_JSON),
-            "STAGED for regular-hours market orders now (catch-up)" if session
+            ("STAGED for regular-hours market orders now"
+             + ("" if decision is not None and pd.Timestamp(decision).date() == _today_ct().date() else " (catch-up)"))
+            if session
             else "STAGED for morning market (past 7 PM CT - not submitted)"),
             pd.DataFrame(dup_rows, columns=cols)], ignore_index=True)
     else:
