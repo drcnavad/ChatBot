@@ -969,7 +969,7 @@ def _wait_for_terminal_all(client, order_ids, timeout_secs=SELL_SETTLE_WAIT_SECS
         still = []
         for oid in remaining:
             try:
-                o = client.get_order(oid)
+                o = client.get_order_by_id(oid)
                 raw = o.status
                 st = raw.value.lower() if hasattr(raw, "value") else str(raw).lower()
                 try:
@@ -1262,7 +1262,7 @@ def _wait_terminal(client, order_id, tries=10, pause=0.5):
 
     for _ in range(tries):
         try:
-            cur = client.get_order(order_id)
+            cur = client.get_order_by_id(order_id)
         except Exception:
             return False  # unreadable: cannot confirm the cancel - fail closed (retry later)
         raw = cur.status
@@ -1433,7 +1433,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             status, filled = "staged", 0.0
         else:
             try:
-                alp = client.get_order(oid)
+                alp = client.get_order_by_id(oid)
             except Exception as e:
                 _retry(o, sym, side, qty, oid, f"cannot read order: {e}")
                 continue
@@ -1480,7 +1480,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         try:
             if oid:
                 try:  # the evening order should already be expired; cancel just in case it is still open
-                    client.cancel_order(oid)
+                    client.cancel_order_by_id(oid)
                 except Exception:
                     pass
                 if not _wait_terminal(client, oid):
@@ -1489,7 +1489,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     _retry(o, sym, side, remaining, oid, "evening order still open after cancel")
                     continue
                 try:  # re-read: it may have filled while the cancel was processed
-                    chk = client.get_order(oid)
+                    chk = client.get_order_by_id(oid)
                     filled = _safe_number(chk.filled_qty)
                     raw = chk.status
                     status = raw.value.lower() if hasattr(raw, "value") else str(raw).lower()

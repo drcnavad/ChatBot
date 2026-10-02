@@ -277,16 +277,13 @@ class FakeBroker:
         self.orders[o.id] = o
         return o
 
-    def get_order(self, oid):
-        return self.orders[oid]
-
     def get_order_by_id(self, oid):
         return self.orders[oid]
 
     def get_orders(self, *a, **k):
         return []
 
-    def cancel_order(self, oid):
+    def cancel_order_by_id(self, oid):
         pass
 
 

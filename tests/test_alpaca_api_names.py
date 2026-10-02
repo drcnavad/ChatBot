@@ -81,5 +81,16 @@ for name, build in builds.items():
     except Exception as e:
         check(f"builds {name}", False, e)
 
+# Every broker / market-data method the code calls exists on the real clients (the fakes in the other tests could hide a
+# wrong name: client.get_order / cancel_order do not exist - the real ones are get_order_by_id / cancel_order_by_id).
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.trading.client import TradingClient
+for f, src in sources():
+    if f not in ("paper_trade.py", "alpaca_paper.py", "run_all.py", "live_trade.ipynb", "backtest_engine.py"):
+        continue
+    for name in sorted(set(re.findall(r"\b(?:client|data_client|market_data_client\(\))\.(\w+)\(", src))):
+        check(f"{f}: client.{name}() exists on the real Alpaca client",
+              hasattr(TradingClient, name) or hasattr(StockHistoricalDataClient, name))
+
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
 sys.exit(1 if FAIL else 0)

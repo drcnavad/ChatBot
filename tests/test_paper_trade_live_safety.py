@@ -128,8 +128,8 @@ class FakeClient:
                       client_order_id=getattr(req, "client_order_id", ""))
         self.orders_by_id[o.id] = o
         return o
-    def get_order(self, oid): return self.orders_by_id[oid]
-    def cancel_order(self, oid): self.canceled.append(oid)
+    def get_order_by_id(self, oid): return self.orders_by_id[oid]
+    def cancel_order_by_id(self, oid): self.canceled.append(oid)
     def get_orders(self, req): return list(self.orders_list)
     def get_clock(self): return types.SimpleNamespace(is_open=True)
 

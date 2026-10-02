@@ -135,7 +135,7 @@ class FakeClient:
 
     def __init__(self):
         self.submitted = []      # request objects, in submission order
-        self.orders = {}         # id -> FakeOrder (for get_order)
+        self.orders = {}         # id -> FakeOrder (for get_order_by_id)
         self.all_orders = []     # for get_orders
         self.positions = []      # [(symbol, qty)]
         self.buying_power = 100000.0
@@ -153,10 +153,10 @@ class FakeClient:
         self.all_orders.append(o)
         return o
 
-    def get_order(self, oid):
+    def get_order_by_id(self, oid):
         return self.orders[oid]
 
-    def cancel_order(self, oid):
+    def cancel_order_by_id(self, oid):
         if oid in self.orders:
             self.orders[oid].status = "canceled"
 

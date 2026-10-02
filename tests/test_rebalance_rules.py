@@ -127,9 +127,9 @@ class Broker:
     def get_clock(self): return types.SimpleNamespace(is_open=True)
     def get_account(self): return types.SimpleNamespace(buying_power=str(self.bp), equity="10000", cash=str(self.bp))
     def get_all_positions(self): return [types.SimpleNamespace(symbol=s, qty=str(q)) for s, q in self.positions.items()]
-    def get_order(self, oid): return self.orders[oid]
+    def get_order_by_id(self, oid): return self.orders[oid]
     def get_orders(self, req=None): return list(self.orders.values())
-    def cancel_order(self, oid): self.orders[oid].status = "canceled"
+    def cancel_order_by_id(self, oid): self.orders[oid].status = "canceled"
 
     def submit_order(self, req):
         price = req.limit_price if hasattr(req, "limit_price") else PRICES[req.symbol] * self.slip

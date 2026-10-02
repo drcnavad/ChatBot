@@ -157,7 +157,7 @@ class Broker:
     def get_clock(self): return types.SimpleNamespace(is_open=True)
     def get_account(self): return types.SimpleNamespace(buying_power="5000", equity="10000", cash="5000")
     def get_all_positions(self): return [types.SimpleNamespace(symbol=s, qty=str(q)) for s, q in self.held.items()]
-    def get_order(self, oid): return self.orders()[0]
+    def get_order_by_id(self, oid): return self.orders()[0]
 
     def orders(self):
         return [types.SimpleNamespace(id="e1", symbol="ANET", side="BUY", qty=5, status="filled", filled_qty=5,
@@ -165,7 +165,7 @@ class Broker:
 
     def get_orders(self, req=None): return self.orders()
     def submit_order(self, req): raise AssertionError("no order may be sent in this test")
-    def cancel_order(self, oid): raise AssertionError("no cancel in this test")
+    def cancel_order_by_id(self, oid): raise AssertionError("no cancel in this test")
 
 
 def morning(held, reconcile_ok=True):

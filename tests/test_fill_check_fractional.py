@@ -104,14 +104,14 @@ class Broker:
 
     def get_account(self): return types.SimpleNamespace(buying_power=str(self.bp), equity="1000000", cash=str(self.bp))
     def get_all_positions(self): return [types.SimpleNamespace(symbol=s, qty=str(q)) for s, q in self.positions.items()]
-    def get_order(self, oid): return self.orders[oid]
+    def get_order_by_id(self, oid): return self.orders[oid]
 
     def get_orders(self, req=None):
         if not self.orders_readable:
             raise ConnectionError("broker unreachable")
         return list(self.orders.values())
 
-    def cancel_order(self, oid):
+    def cancel_order_by_id(self, oid):
         self.canceled.append(oid)
         if self.cancel_works and self.orders[oid].status not in pt.TERMINAL_STATUSES:
             self.orders[oid].status = "canceled"
