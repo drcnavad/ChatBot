@@ -3,11 +3,12 @@
 Reads the pipeline outputs (Reports/signal_analysis.csv, Reports/strategy_midweek_check.csv) and, if present, the user's real
 holdings in my_positions.csv (project root; same format as `paper_trade.py --positions`: Symbol,Shares - Shares optional,
 an optional Weight column in % or as a fraction). Returns ONE plain line per action, e.g.
-  "Swap at the Tue Sep 29 open: sell X and buy Y (rank 2), same dollar amount."      (Mon/Wed check day)
-  "Sell TRGP (rank 45) at the Tue Sep 29 open, hold cash until Friday."              (Mon/Wed check day, mid-week exit)
+  "Swap at the Mon Sep 28 close: sell X and buy Y (rank 2), same dollar amount. Orders go out Mon Sep 28 evening, any rest
+   Tue Sep 29 at 9 AM CT."                                                           (Mon/Wed check day)
+  "Sell TRGP (rank 45) at the Mon Sep 28 close, hold cash until Friday. Orders go out ..."   (Mon/Wed check day, mid-week exit)
   "With today's ranks the swap rule would sell ANET and buy RBRK (rank 1). Next check: ..."   (other days)
   "No swap with today's ranks. Next check: Mon Sep 28."
-  "Full rebalance at the Mon Sep 28 open: sell ...; buy ..."                         (Friday / week's last session)
+  "Full rebalance at the Fri Sep 25 close: sell ...; buy .... Orders go out ..."   (Friday / week's last session)
 Tickers link to the app (http://localhost:8502/?symbol=XXX). The swap rule is backtest_engine.midweek_swap_pairs (the exact
 function the strategy uses: top 3 in, below rank 15 out, weight inheritance; max 4 per sector unless WINNER['cap_soft'] (T20,
 live: a top-3 stock always qualifies)), followed by the mid-week exit
@@ -226,6 +227,7 @@ def build_alert(sig=None, positions_path=None, use_positions=True, now=None):
     fill = be.next_sessions(D, 1)[0]
     nxt_d, nxt_kind, _nxt_fill = be.next_decision(D)
     next_txt = f"Next check: {_day(nxt_d)}" + (" (full rebalance)." if nxt_kind == "full rebalance" else ".")
+    orders_txt = f" Orders go out {_day(D)} evening, any rest {_day(fill)} at 9 AM CT."   # the live trade step's timing
 
     def holdings_at(d):
         """{symbol: weight} the strategy held on day d."""
@@ -264,14 +266,14 @@ def build_alert(sig=None, positions_path=None, use_positions=True, now=None):
     ex_rule = exit_below()
     none_txt = "No swap or exit" if ex_rule else "No swap"
 
-    if is_reb:                                              # week's last session: full rebalance at the next open
+    if is_reb:                                              # week's last session: full rebalance at this close
         new = holdings_at(D)
         old = holdings_at(P) if positions is None else held_now
         sells = sorted((s for s in old if s not in new), key=lambda s: -(dday.rank_of(s) or 999))
         buys = sorted((s for s in new if s not in old), key=lambda s: dday.rank_of(s) or 999)
-        seg = [f"Full rebalance at the {_day(fill)} open: sell "]
+        seg = [f"Full rebalance at the {_day(D)} close: sell "]
         seg += _join([T(s) for s in sells]) if sells else ["nothing"]
-        seg += ["; buy "] + (_join([T(s) for s in buys]) if buys else ["nothing"]) + ["."]
+        seg += ["; buy "] + (_join([T(s) for s in buys]) if buys else ["nothing"]) + ["." + orders_txt]
         skipped = blocked_picks(dday, new, old)
         if skipped:
             seg += [f" Not bought (earnings within {be.WINNER['earnings_block_days']} days): " + "; ".join(skipped) + "."]
@@ -285,9 +287,9 @@ def build_alert(sig=None, positions_path=None, use_positions=True, now=None):
         swaps, _, _, exits = evaluate(dday, held_chk)
         lines = []
         if swaps:
-            lines.append(pair_line(f"Swap at the {_day(fill)} open: ", swaps, dday, ", same dollar amount."))
+            lines.append(pair_line(f"Swap at the {_day(D)} close: ", swaps, dday, ", same dollar amount." + orders_txt))
         if exits:
-            lines.append(["Sell "] + sells_seg(exits, dday) + [f" at the {_day(fill)} open, hold cash until {cash_until(D)}."])
+            lines.append(["Sell "] + sells_seg(exits, dday) + [f" at the {_day(D)} close, hold cash until {cash_until(D)}." + orders_txt])
         if lines:
             out.update(level="red", lines=lines)
         else:
@@ -304,11 +306,11 @@ def build_alert(sig=None, positions_path=None, use_positions=True, now=None):
             lines = []
             if missed:
                 lines.append(pair_line(f"The {_day(C)} check called for: ", missed, cday,
-                                       f" (not done per your positions file; next open {_day(fill)})."))
+                                       f" (not done per your positions file; next trading session {_day(fill)})."))
             if missed_exits:
                 lines.append([f"The {_day(C)} check called for selling "] + sells_seg(missed_exits, cday)
-                             + [f" and holding cash until {cash_until(C)} (still held per your positions file; next open "
-                                f"{_day(fill)})."])
+                             + [f" and holding cash until {cash_until(C)} (still held per your positions file; next trading "
+                                f"session {_day(fill)})."])
             if lines:
                 out.update(level="red", lines=lines)
                 return out
