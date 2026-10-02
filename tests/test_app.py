@@ -126,8 +126,9 @@ at = AppTest.from_file("app.py", default_timeout=180).run()
 page_ok(at, "initial")
 opts = [o.split("  ·  ")[0] for o in at.selectbox(key="ticker_dropdown").options]  # labels are "SYM · rank · score"; compare raw symbols
 _short_now = set(SHORT["Symbol"]) & set(sm.tradable_symbols)
-expect(len(opts) == len(sm.tradable_symbols) - len(_short_now) + 1, f"dropdown has {len(opts)} options")
-expect(not (_short_now & set(opts)), f"short-history stocks must not be in the ranked dropdown: {_short_now & set(opts)}")
+expect(len(opts) == len(sm.tradable_symbols) + 1, f"dropdown has {len(opts)} options")   # ranked stocks + QQQ + short-history ones
+expect(opts[-len(SHORT):] == SHORT["Symbol"].tolist() if len(SHORT) else True, "short-history stocks should close the dropdown")
+expect(not (_short_now & set(SIG.Symbol)), f"short-history stocks must never be scored/ranked: {_short_now & set(SIG.Symbol)}")
 for sym in TICKERS:
     at = at.selectbox(key="ticker_dropdown").set_value(sym).run()
     page_ok(at, sym)
@@ -200,20 +201,8 @@ exp_titles = [f"Latest signals · {fmt(SIG.Date.max())} close", f"Last decision 
 labels = [e.label for e in at.expander]
 expect(labels[:1] == exp_titles[:1] and any(l.startswith(exp_titles[1]) for l in labels),
        f"Details expanders {labels[:3]} should start with {exp_titles}")
-# short history: one "Reference only" section right after Latest signals when there is such a stock, none otherwise
-_ref_labels = [l for l in labels if l.startswith("Reference only, not traded yet (short history)")]
-if len(SHORT):
-    _as_of = pd.Timestamp(pd.to_datetime(SHORT["As_Of"]).max())
-    expect(_ref_labels == [f"Reference only, not traded yet (short history) · {fmt(_as_of)} close"] and labels[1] == _ref_labels[0],
-           f"short-history section missing / misplaced / duplicated: {labels[:4]}")
-    _ref_tbl = next((d.value for d in at.dataframe if "Can join from (est.)" in d.value.columns), pd.DataFrame())
-    expect(set(_ref_tbl.get("Symbol", [])) == set(SHORT["Symbol"]), "short-history table should list exactly the reference stocks")
-    _elsewhere = [d.value for d in at.dataframe if "Symbol" in d.value.columns and "Can join from (est.)" not in d.value.columns
-                  and set(SHORT["Symbol"]) & set(d.value["Symbol"])]
-    expect(not _elsewhere, "a short-history stock shows up in another table (it must appear in one place only)")
-    print(f"   short-history section OK: {sorted(SHORT['Symbol'])}")
-else:
-    expect(not _ref_labels, "short-history section should be hidden when no stock is short on history")
+# short history: no Details section any more; the stocks sit in the clickable stock list (see the rank tiers test)
+expect(not any(l.startswith("Reference only") for l in labels), f"stale short-history Details section: {labels}")
 lt_all = next((d.value for d in at.dataframe if "Signal today" in d.value.columns), pd.DataFrame())
 expect(set(lt_all.get("Symbol", [])) == set(latest.index), "Latest signals should list every stock of the latest close")
 
@@ -240,9 +229,11 @@ else:
 expect(not any(r.key == "changes_view" for r in at.radio), "stale changes_view preview radio still present")
 expect(not any(r.key == "signals_view" for r in at.radio), "stale signals_view preview radio still present")
 at = at.checkbox(key="changes_all").check().run(); page_ok(at, "changes_all")
-at = at.text_area(key="order_positions").input("MRK,10\nAMD,5\nBAD LINE").run(); page_ok(at, "order preview positions")
-for tgt in ("midweek", "auto"):
-    at = at.selectbox(key="order_target").set_value(tgt).run(); page_ok(at, f"order target {tgt}")
+# the Holdings risk and Order preview expanders were removed from the Details tab
+expect(not any(t.key == "order_positions" for t in at.text_area), "stale order preview positions box still present")
+expect(not any(s.key == "order_target" for s in at.selectbox), "stale order preview target selectbox still present")
+expect(not any(e.label in ("Holdings risk", "Order preview (nothing is sent)") for e in at.expander),
+       "stale Holdings risk / Order preview expander still present")
 # the Backtest results expander (and its bt_segment selectbox) was removed from the app
 # (live Alpaca P&L is the real number now; the backtest was a research artifact)
 expect(not any(s.key == "bt_segment" for s in at.selectbox), "stale bt_segment selectbox still present")
@@ -304,8 +295,8 @@ if be.WINNER.get("earnings_block_days"):
 tier_md = [m.value for m in at.markdown if "Rank 1 to 20" in m.value and "?symbol=" in m.value]
 expect(len(tier_md) == 1, f"rank tier block found: {len(tier_md)}")
 blob = tier_md[0] if tier_md else ""
-parts = re.split(r"<b>(Rank 1 to 20|Rank 21 to 50|Rank 51\+):</b>", blob)
-expect(len(parts) == 7, f"tier headers/bodies: {len(parts)} parts")
+parts = re.split(r"<b>(Rank 1 to 20|Rank 21 to 50|Rank 51\+|Not traded yet \(short history, not ranked\)):</b>", blob)
+expect(len(parts) == 7 + 2 * bool(len(SHORT)), f"tier headers/bodies: {len(parts)} parts")
 bodies = dict(zip(parts[1::2], parts[2::2]))
 def want_tier(sym):
     r = latest.loc[sym, "Strategy_Rank"]
@@ -315,6 +306,27 @@ for sym in latest[latest.Strategy_Rank.notna()].index:
     expect(sym in syms, f"{sym} (rank {latest.loc[sym, 'Strategy_Rank']:.0f}) not in its tier {want_tier(sym)!r}")
 all_linked = set(re.findall(r"\?symbol=([A-Z0-9.]+)", blob))
 expect(all_linked <= set(opts), f"tier links outside the dropdown: {sorted(all_linked - set(opts))}")
+
+# short-history stocks: listed with their rough signal, and a click (?symbol=) opens a stock view that renders
+if len(SHORT):
+    sh_body = bodies.get("Not traded yet (short history, not ranked)", "")
+    for _, r in SHORT.iterrows():
+        expect(f"?symbol={r.Symbol}" in sh_body and f"(rough {r.Rough_Signal}, less reliable)" in sh_body,
+               f"{r.Symbol} missing from the short-history row: {sh_body[:200]}")
+        at2 = AppTest.from_file("app.py", default_timeout=180)
+        at2.query_params["symbol"] = r.Symbol
+        at2.run()
+        page_ok(at2, f"click {r.Symbol}")
+        expect(at2.selectbox(key="ticker_dropdown").value == r.Symbol, f"{r.Symbol}: click did not open the stock")
+        warn = " ".join(w.value for w in at2.warning)
+        expect(f"Not traded yet (short history): {int(r.Days_Of_History)} of" in warn, f"{r.Symbol}: short-history note missing")
+        mets = {m.label: m.value for m in at2.metric}
+        expect(mets.get("Rough signal (less reliable)") == r.Rough_Signal and "RSI 14" in mets and "MA 50" in mets,
+               f"{r.Symbol}: stock view metrics {mets}")
+        expect(not any(d for d in at2.dataframe if "Symbol" in d.value.columns and r.Symbol in set(d.value["Symbol"])),
+               f"{r.Symbol} shows up in a table (it must appear in the stock list only)")
+        charts = [json.loads(c.proto.spec) for c in at2.get("plotly_chart")]
+        print(f"   {r.Symbol} click OK · metrics {mets} · price chart {'yes' if any(any(t.get('name') == 'Close' for t in f['data']) for f in charts) else 'unavailable (yfinance)'}")
 
 print("\nAPP TESTS OK" if not FAIL else f"\nAPP TEST FAILURES ({len(FAIL)}): {FAIL}")
 sys.exit(1 if FAIL else 0)

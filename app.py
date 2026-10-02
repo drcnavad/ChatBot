@@ -5,12 +5,13 @@ Page layout, top to bottom:
   1. Title bar + ONE-line holdings alert (what to do today).
   2. "Dashboard" tab: a compact summary (key numbers, current picks, earnings this week)
      and the single-stock view. Open any stock directly with  http://localhost:8502/?symbol=NVDA
-  3. "Details" tab: everything else (all signals, rank history, rules and decisions, holdings risk,
-     order preview, backtest results, data freshness), each in its own expander.
+  3. "Details" tab: everything else (latest signals, all signals, rank history, rules and decisions,
+     data freshness), each in its own expander.
 
 The app only READS the Reports/*.csv files written by `python run_all.py` for strategy data. It never places orders and never calls
 a paid data API (the optional "AI analysis" button uses the Hugging Face token from .env). The stock header additionally
-shows a display-only live quote from yfinance (free); it never feeds back into signals, picks, backtests, or orders.
+shows a display-only live quote from yfinance (free), and yfinance also draws the price chart of stocks too new to trade
+(short history); neither ever feeds back into signals, picks, backtests, or orders.
 """
 import html
 import os
@@ -903,9 +904,13 @@ def build_page():
     board_off, off_date = signal_board(df)
     next_dec, next_kind = next_decision_date(df["Date"].max())
     plan_day, plan_asof, plan = rebalance_plan(df)
+    ref = load_short_history()
+    short = (ref if ref is not None else pd.DataFrame(columns=["Symbol"])).set_index("Symbol")
     return SimpleNamespace(
         df=df, mtime=mtime, latest=latest, by_symbol=latest.set_index("Symbol"),
-        options=latest.sort_values('combined_signal', ascending=False)['Symbol'].tolist(),  # dropdown: best score first
+        options=latest.sort_values('combined_signal', ascending=False)['Symbol'].tolist()   # dropdown: best score first,
+        + [s for s in short.index if s not in set(latest['Symbol'])],                       # then short-history stocks
+        short=short,
         rank_change=day_rank_change(df, mtime),
         board_off=board_off.drop(columns="Tag"), off_date=off_date,
         tag_off=dict(zip(board_off["Symbol"], board_off["Tag"])),
@@ -983,6 +988,8 @@ def render_summary(p):
 # 11. Dashboard tab: single-stock view
 # =====================================================================================================================
 def ticker_label(p, s):
+    if s in p.short.index:
+        return f"{s}  ·  not traded yet (short history)  ·  rough {p.short.loc[s, 'Rough_Signal']} (less reliable)  ·  not ranked"
     r = p.by_symbol.loc[s]
     rank, score = r.get('Strategy_Rank'), r['combined_signal']
     parts = [s, f"{p.sig_off.get(s, 'Not ranked')} ({p.off_date:%b %-d})"]
@@ -1012,6 +1019,9 @@ def render_rank_tiers(p):
                 link = f'<b style="background:#dbeafe;border-radius:6px;padding:1px 5px;">{link}</b>'
             links.append(link)
         rows.append(f'<div style="margin:3px 0;"><b>{title}:</b> {" \u00b7 ".join(links) or "\u2014"}</div>')
+    if len(p.short):
+        links = [f"{symbol_link(s)} (rough {esc(str(r['Rough_Signal']))}, less reliable)" for s, r in p.short.iterrows()]
+        rows.append(f'<div style="margin:3px 0;"><b>Not traded yet (short history, not ranked):</b> {" \u00b7 ".join(links)}</div>')
     show_html('<div style="font-size:0.92rem;line-height:2.0;">' + "".join(rows) + "</div>")
 
 
@@ -1034,7 +1044,7 @@ def render_stock_picker(p, jumped):
     ticker = pick_col.selectbox("Ticker", options=p.options, format_func=lambda s: ticker_label(p, s),
                                 key="ticker_dropdown", label_visibility="collapsed")
     tdata = p.df[p.df['Symbol'] == ticker]
-    if ai_col.button("Generate AI Analysis", type="primary", width="stretch", key="generate_ai_btn"):
+    if ticker not in p.short.index and ai_col.button("Generate AI Analysis", type="primary", width="stretch", key="generate_ai_btn"):
         ai_analysis_dialog(ticker, tdata, p.sig_off.get(ticker, 'Not ranked'), p.why_off.get(ticker, ''))
     return ticker, tdata
 
@@ -1456,24 +1466,49 @@ def load_short_history():
     return None if d is None or d.empty else d
 
 
-def render_short_history(ref):
-    """Reference only: stocks in the list that are too new to be scored, ranked or bought (fewer than 200 trading days)."""
-    cols = {"Symbol": "Symbol", "Name": "Name", "Sector": "Sector", "First_Trade": "First traded",
-            "History": "Days of history", "Est_Eligible_Date": "Can join from (est.)", "Last_Close": "Last close",
-            "Return_Since_First_Close_%": "Since first close %", "Return_21d_%": "21-day %", "Return_63d_%": "63-day %",
-            "RSI_14": "RSI 14", "MA_10": "MA 10", "MA_30": "MA 30", "MA_50": "MA 50", "Close_vs_MA_50_%": "vs MA 50 %",
-            "Off_High_%": "Below high %", "Rough_Signal": "Rough signal (short history, less reliable)"}
-    t = ref.assign(History=[f"{int(a)} of {int(b)}" for a, b in zip(ref["Days_Of_History"], ref["Days_Needed"])])
-    t = t[[c for c in cols if c in t.columns]].rename(columns=cols)
-    for c in ("First traded", "Can join from (est.)"):
-        t[c] = pd.to_datetime(t[c]).dt.strftime("%a %b %-d, %Y")
-    st.caption("In your stock list, but with fewer than 200 trading days of prices, so the strategy does not score, rank or "
-               "buy them yet - shown for reference only. Each joins the ranking by itself on its 200th trading day (estimated "
-               "date, assuming it trades every market day). Moving averages and returns use only the days it has traded.")
-    st.dataframe(t, hide_index=True, width="stretch")
-    st.caption("Rough signal: Buy if the close is above the 10-day, the 10-day above the 30-day and the 30-day above the 50-day "
-               "average with RSI 50-70; Sell if the close is below both the 30- and 50-day averages or RSI is under 40; "
-               "otherwise Hold. Less reliable than the real signal (no 200-day history) and never used for trading.")
+@st.cache_data(ttl=3600)
+def short_history_closes(symbol, start):
+    """Display-only daily closes from yfinance for a stock too new to trade; None when unavailable."""
+    if not _YF_OK:
+        return None
+    try:
+        df = _yf.download(symbol, start=start, interval="1d", progress=False, auto_adjust=True)
+        closes = df["Close"]
+        closes = (closes.iloc[:, 0] if isinstance(closes, pd.DataFrame) else closes).dropna()
+        return closes if len(closes) else None
+    except Exception:
+        return None
+
+
+def render_short_stock(sym, r):
+    """Stock view for a stock in the list with fewer than 200 trading days: never scored, ranked or traded.
+    Numbers come from Reports/short_history_reference.csv; the chart is display-only (yfinance)."""
+    day = lambda d: f"{pd.Timestamp(d):%a %b %-d, %Y}"
+    section(f"{sym} · {r['Name']}")
+    st.warning(f"Not traded yet (short history): {int(r['Days_Of_History'])} of {int(r['Days_Needed'])} trading days, "
+               f"first traded {day(r['First_Trade'])}. The strategy does not score, rank or buy it until its 200th trading day "
+               f"(about {day(r['Est_Eligible_Date'])}, est.).")
+    c = st.columns(6)
+    c[0].metric(f"Close · {pd.Timestamp(r['Last_Date']):%a %b %-d}", f"${r['Last_Close']:,.2f}")
+    c[1].metric("Rough signal (less reliable)", r["Rough_Signal"])
+    c[2].metric("RSI 14", f"{r['RSI_14']:.1f}")
+    for i, n in enumerate((10, 30, 50)):
+        c[3 + i].metric(f"MA {n}", f"${r[f'MA_{n}']:,.2f}")
+    st.caption(f"Since first close {r['Return_Since_First_Close_%']:+.1f}% · 21-day {r['Return_21d_%']:+.1f}% · "
+               f"63-day {r['Return_63d_%']:+.1f}% · {abs(r['Off_High_%']):.1f}% below its high of ${r['High_Since_First']:,.2f}. "
+               "Rough signal: Buy if the close is above the 10-day, the 10-day above the 30-day and the 30-day above the 50-day "
+               "average with RSI 50-70; Sell if the close is below both the 30- and 50-day averages or RSI is under 40; otherwise "
+               "Hold. Less reliable than the real signal (no 200-day history) and never used for trading.")
+    closes = short_history_closes(sym, str(r["First_Trade"]))
+    if closes is None:
+        st.caption("Price chart unavailable right now (yfinance).")
+        return
+    fig = go.Figure(go.Scatter(x=closes.index, y=closes, name="Close", line=dict(color="#0f172a")))
+    for n, color in ((10, "#2563eb"), (30, "#16a34a"), (50, "#d97706")):
+        fig.add_trace(go.Scatter(x=closes.index, y=closes.rolling(n).mean(), name=f"MA {n}", line=dict(color=color, width=1)))
+    fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10), xaxis=dict(type="date"),
+                      title=f"{sym} daily close (display only, yfinance)")
+    st.plotly_chart(fig, width="stretch", key=f"short_chart_{sym}")
 
 
 def render_all_signals(p):
@@ -1626,60 +1661,6 @@ def render_rules_and_changes(p):
     st.caption(f"Decision date {sub['Date'].iloc[0] if len(sub) else '—'} · filled at the next open.")
 
 
-def render_holdings_and_tracking():
-    """Per-holding P&L since entry."""
-    holdings = read_report_csv(HOLDINGS_CSV)
-    if holdings is not None and not holdings.empty:
-        h = holdings.copy()
-        h["Weight"] = (h["Weight"] * 100).round(2)
-        h = h.drop(columns=["ATR_Stop", "Dist_to_Stop_%"], errors="ignore")
-        st.markdown("**Holdings · P&L since entry**")
-        st.dataframe(h.rename(columns={"Weight": "Portfolio weight %", "PnL_%": "P&L %", "Days_Held": "Days held",
-                                       "Vol_63d_%": "Vol 63d %"}).round(2),
-                     width="stretch", hide_index=True)
-        st.caption("Entry = next open after the decision that added the stock (before costs).")
-
-
-def parse_positions(text):
-    """'SYMBOL,SHARES' lines -> ({symbol: shares}, ignored_lines)."""
-    positions, bad = {}, []
-    for line in text.splitlines():
-        parts = [x.strip() for x in line.replace(";", ",").split(",")]
-        if len(parts) == 2 and parts[0]:
-            try:
-                positions[parts[0].upper()] = float(parts[1])
-            except ValueError:
-                bad.append(line)
-    return positions, bad
-
-
-def render_order_preview():
-    """Share counts to reach the target weights (nothing is sent anywhere)."""
-    try:
-        from paper_trade import plan_orders
-        c = st.columns(2)
-        acct = c[0].number_input("Account size ($)", min_value=100.0, value=25_000.0, step=1_000.0, key="acct_size")
-        src = c[1].selectbox("Target weights", ["auto", "current", "provisional", "midweek"], key="order_target",
-                             help="current = decisions in force; provisional = if fully rebalanced at the latest close; "
-                                  "midweek = only the swap(s) and rank exits (sell only) of today's Mon/Wed check; auto = "
-                                  "provisional on a Friday rebalance day, midweek on a Mon/Wed check with a swap or exit, otherwise current")
-        text = st.text_area("Current positions (optional, one per line: SYMBOL,SHARES)", key="order_positions", height=80)
-        positions, bad = parse_positions(text)
-        for line in bad:
-            st.warning(f"Ignored line: {line}")
-        orders, meta, _targets = plan_orders(src, acct, positions, PICKS_CSV, SIGNAL_CSV, MIDWEEK_CSV)
-        if meta["source"] == "midweek":
-            for msg in meta["swaps"]["Message"]:
-                st.info(msg)
-        invested = "—" if meta["invested"] is None else f"{meta['invested']:.0%}"
-        st.caption(f"Targets: {meta['source']} weights as of {meta['as_of']} (last weekly rebalance {meta['last_rebalance']}, "
-                   f"last decision {meta['last_decision']}), {invested} invested · priced at the latest close · whole shares")
-        st.dataframe(orders.round(2), width="stretch", hide_index=True)
-        st.caption("Preview only \u2014 the scheduled pipeline submits these automatically; nothing is sent from this page.")
-    except Exception as e:
-        st.warning(f"Order preview unavailable: {e}")
-
-
 def render_data_and_settings(p):
     """Data freshness table."""
     st.dataframe(p.freshness, width="stretch", hide_index=True)
@@ -1693,21 +1674,12 @@ def render_data_and_settings(p):
 def render_details(p, ticker):
     with st.expander(latest_signals_title(p), expanded=True):
         render_latest_signals(p)
-    short = load_short_history()
-    if short is not None:   # hidden when every stock in the list has enough history
-        as_of = pd.to_datetime(short["As_Of"]).max()
-        with st.expander(f"Reference only, not traded yet (short history) · {as_of:%a %b %-d} close", expanded=True):
-            render_short_history(short)
     with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=False):
         render_all_signals(p)
     with st.expander("Rank history · last 20 decision days", expanded=False):
         render_rank_history(p, ticker)
     with st.expander("Rules and latest decisions", expanded=False):
         render_rules_and_changes(p)
-    with st.expander("Holdings risk", expanded=False):
-        render_holdings_and_tracking()
-    with st.expander("Order preview (nothing is sent)", expanded=False):
-        render_order_preview()
     with st.expander("Data freshness and settings", expanded=False):
         render_data_and_settings(p)
 
@@ -1811,10 +1783,13 @@ def main():
     with tab_main:
         render_summary(p)
         ticker, tdata = render_stock_picker(p, jumped)
-        render_stock_header(p, ticker, tdata)
-        fig, has_strategy, chart, events, x_start, x_end = stock_chart_inputs(ticker, tdata)
-        render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end)
-        render_stock_figure(fig, ticker)
+        if ticker in p.short.index:
+            render_short_stock(ticker, p.short.loc[ticker])
+        else:
+            render_stock_header(p, ticker, tdata)
+            fig, has_strategy, chart, events, x_start, x_end = stock_chart_inputs(ticker, tdata)
+            render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end)
+            render_stock_figure(fig, ticker)
     with tab_details:
         render_details(p, ticker)
     with tab_health:
