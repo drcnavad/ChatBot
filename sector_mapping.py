@@ -6,19 +6,19 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS_DIR = os.path.join(PROJECT_ROOT, "Reports")
 
 ## symbols to analyze
-stock_symbols = ['AAPL', 'ADBE', 'AFRM', 'AMZN', 'ANET', "AMD", 'APP', 'AVAV',
+stock_symbols = ['AAPL', 'AMZN', 'ANET', "AMD", 'APP', 'AVAV',
 'AVGO', 'BIIB', 'BKR', 'CDNS', 'COIN', 'CRM',
 'CRWV', 'CVLT', 'DASH', 'ENPH', 'FIG',
 'FTNT', 'GOOGL', 'GTLB', 'HAL', 'HIMS', 'HOOD', 'INTU',
 'IREN', 'LRCX', 'MCK', 'MRK', 'META', 'MRVL',
-'MSFT', 'MU', 'NFLX', 'NOW', 'NVDA', 'ORCL', 'PANW',
+'MSFT', 'NFLX', 'NOW', 'NVDA', 'ORCL', 'PANW',
 'RCL', 'REGN',
-'SLB', 'SNOW', 'SOFI', 'TEAM', 'TSLA', 'UBER',
+'SLB', 'SNOW', 'TEAM', 'TSLA', 'UBER',
 'UI', 'UNH', 'UPST', 'VEEV', 'VRT', 'ZS', 'UMAC', 'NOC', 'QQQ',
-'MDB', 'LMT', 'U', 'CRCL', 'TWLO',
+ 'LMT', 'U', 'CRCL', 'TWLO',
 # High beta (> 2)
 'ACHR', 'ALAB', 'APLD', 'ARM', 'ASTS', 'CIFR', 'CVNA', 'IONQ', 'JOBY',
-'MARA', 'MSTR', 'NVTS', 'RDDT', 'RKLB', 'SHOP', 'SMCI', 'SOUN', 'TEM']
+'MARA', 'NVTS', 'RDDT', 'RKLB', 'SHOP', 'SMCI', 'SOUN', 'TEM', 'TTWO']
 stock_symbols = list(dict.fromkeys(stock_symbols))  # de-duplicate, keep order
 # NOTE: IREN is mapped to 'Energy' below (bitcoin miner / AI data centers) - questionable, kept as-is.
 
@@ -151,6 +151,7 @@ symbol_sector = {
     'TMUS': 'Communication Services',
     'TSLA': 'Consumer Discretionary',
     'TTD': 'Communication Services',
+    'TTWO': 'Technology',
     'TWLO': 'Technology',
     'TXN': 'Technology',
     'TYL': 'Technology',
@@ -377,6 +378,7 @@ symbol_name = {
     'RDDT': 'Reddit, Inc.',
     'RKLB': 'Rocket Lab Corporation',
     'SMCI': 'Super Micro Computer, Inc.',
+    'TTWO': 'Take-Two Interactive Software, Inc.'
 }
 
 
@@ -469,7 +471,7 @@ BENCHMARK_SYMBOLS = ["SPY", "QQQ"]
 # Tradable universe = stock_symbols minus ETFs (QQQ is a benchmark, not a stock)
 tradable_symbols = [s for s in dict.fromkeys(stock_symbols) if s not in BENCHMARK_SYMBOLS]
 
-# Extra fundamentals watchlist (formerly hard-coded in company_report_autofetch.py)
+# Extra fundamentals watchlist: company_report_autofetch.py fetches these + tradable_symbols
 fundamentals_watchlist = [
     "AAPL", "ADBE", "AFRM", "AMD", "AMZN", "ANET", "APP", "AVAV", "AVGO", "AXON",
     "BBAI", "BIIB", "BKR", "CDNS", "COIN", "CRM", "CRSP", "CRWD", "CRWV", "CVLT",
