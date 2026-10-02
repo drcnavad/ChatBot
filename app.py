@@ -1462,7 +1462,7 @@ def render_short_history(ref):
             "History": "Days of history", "Est_Eligible_Date": "Can join from (est.)", "Last_Close": "Last close",
             "Return_Since_First_Close_%": "Since first close %", "Return_21d_%": "21-day %", "Return_63d_%": "63-day %",
             "RSI_14": "RSI 14", "MA_10": "MA 10", "MA_30": "MA 30", "MA_50": "MA 50", "Close_vs_MA_50_%": "vs MA 50 %",
-            "Off_High_%": "Below high %"}
+            "Off_High_%": "Below high %", "Rough_Signal": "Rough signal (short history, less reliable)"}
     t = ref.assign(History=[f"{int(a)} of {int(b)}" for a, b in zip(ref["Days_Of_History"], ref["Days_Needed"])])
     t = t[[c for c in cols if c in t.columns]].rename(columns=cols)
     for c in ("First traded", "Can join from (est.)"):
@@ -1471,6 +1471,9 @@ def render_short_history(ref):
                "buy them yet - shown for reference only. Each joins the ranking by itself on its 200th trading day (estimated "
                "date, assuming it trades every market day). Moving averages and returns use only the days it has traded.")
     st.dataframe(t, hide_index=True, width="stretch")
+    st.caption("Rough signal: Buy if the close is above the 10-day, the 10-day above the 30-day and the 30-day above the 50-day "
+               "average with RSI 50-70; Sell if the close is below both the 30- and 50-day averages or RSI is under 40; "
+               "otherwise Hold. Less reliable than the real signal (no 200-day history) and never used for trading.")
 
 
 def render_all_signals(p):

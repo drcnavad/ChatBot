@@ -789,7 +789,17 @@ SHORT_HISTORY_NOTE = "Reference only - not traded yet (short history)"
 SHORT_HISTORY_COLUMNS = ["As_Of", "Symbol", "Name", "Sector", "Status", "First_Trade", "Days_Of_History", "Days_Needed",
                          "Days_To_Go", "Est_Eligible_Date", "Last_Date", "Last_Close", "Return_Since_First_Close_%",
                          "Return_21d_%", "Return_63d_%", "RSI_14", "MA_10", "MA_30", "MA_50", "Close_vs_MA_50_%",
-                         "High_Since_First", "Off_High_%"]
+                         "High_Since_First", "Off_High_%", "Rough_Signal"]
+def rough_signal(close, ma10, ma30, ma50, rsi):
+    """Rough Buy / Hold / Sell for a short-history stock (display only, never traded): Buy if close > ma_10 > ma_30 > ma_50 and
+    RSI 50-70; Sell if close < ma_30 and < ma_50, or RSI < 40; otherwise (or a value missing) Hold."""
+    if any(pd.isna(v) for v in (close, ma10, ma30, ma50, rsi)):
+        return "Hold"
+    if close > ma10 > ma30 > ma50 and 50 <= rsi <= 70:
+        return "Buy"
+    if (close < ma30 and close < ma50) or rsi < 40:
+        return "Sell"
+    return "Hold"
 
 
 def short_history_symbols(bars, symbols=None, min_bars=MIN_BARS):
@@ -837,7 +847,8 @@ def short_history_reference(bars, symbols=None, min_bars=MIN_BARS):
                      "RSI_14": round(float(rsi), 1) if pd.notna(rsi) else np.nan,
                      "MA_10": ma(10), "MA_30": ma(30), "MA_50": ma(50),
                      "Close_vs_MA_50_%": round((c.iloc[-1] / ma(50) - 1) * 100, 2) if n >= 50 else np.nan,
-                     "High_Since_First": round(hi, 2), "Off_High_%": round((c.iloc[-1] / hi - 1) * 100, 2)})
+                     "High_Since_First": round(hi, 2), "Off_High_%": round((c.iloc[-1] / hi - 1) * 100, 2),
+                     "Rough_Signal": rough_signal(c.iloc[-1], ma(10), ma(30), ma(50), rsi)})
     return pd.DataFrame(rows, columns=SHORT_HISTORY_COLUMNS)
 
 
