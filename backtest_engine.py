@@ -53,88 +53,68 @@ DATA_START = "2023-06-01"    # warm-up for ma_200 and 252-bar rescaling windows 
 LONG_CACHE, LONG_START = "bars_daily_long.pkl", "2020-06-01"   # long bar history for the backtest and the tests
 RS_WINDOWS = (21, 63, 126)
 RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
-REGIME_SYMBOL, REGIME_MA = "SPY", 200
 
-# The live rules (WINNER). History: C6 = weekly top-10 ranking + SOFT regime (at a rebalance where QQQ closes below its
-# 200-day average, all weights are halved) won the 2022-04 -> now walk-forward tests. Tested 2026-09-24 and not adopted:
-# max 2 per sector (statistically tied with 4, lagged the last 12 months; Reports/strategy_comparison_sector_caps.csv),
-# max 5-8 / no cap (failed the never-seen 2022-24 period), rank buffers, score exits, minimum holds, stops, thresholds.
-# The universe is hand-picked with hindsight, which inflates absolute backtest returns. Backtest: backtest.ipynb.
+# The live rules. The backtest (backtest.ipynb), the daily pipeline (main_signal_analysis.ipynb), the trade step
+# (paper_trade.py) and the dashboard all read this one dict. Change a rule here, then run `python run_all.py`.
 WINNER = {
-    "name": "C6: weekly top-10 ranking, max 4 per sector + soft QQQ regime",
-    "tag": "C6",
-    "n": 10,                # number of names held
-    "w_tech": 0.5,          # score = 0.5 * Technical_Score + 0.5 * RS_score
-    "use_regime": True,     # regime is used in SOFT mode (see regime_scale)
-    "regime_symbol": "QQQ", # regime = QQQ close > its 200-day SMA
-    "regime_scale": 0.5,    # regime off at a rebalance -> weights x 0.5 (no hard block on new names)
-    "min_score": 0.0,       # only names with score > 0
-    "sector_cap": 0.4,      # max 40% of names per sector (= 4 of 10); 0.2 (cap 2, C6b) tested 2026-09-24, not adopted
-    "vol_sizing": True,     # inverse 63-day volatility weights
-    "buffer_rank": None,    # rank buffer did not help in the walk-forward
-    "atr_stop_k": 3.0,      # ATR multiple shown as a risk reference in the app (not an automatic exit)
-    "rs_benchmark": "etf",  # relative-strength benchmark: 'etf' (live) | 'sector_median' | 'median_all' (tested 2026-09-24, see relative_strength)
-    # Mid-week swap (LIVE since 2026-09-24, user decision; variant D of Reports/rebalance_frequency_test.csv, +438% / Sharpe 1.46
-    # vs +391% / 1.40 weekly-only, 2022-04 -> 2026-09, 0.1%/side). At the Mon and Wed closes (first session on/after that
-    # weekday if it is a holiday, skipped when it is the week's last session = the Friday rebalance): if a NOT-held stock ranks in
-    # the top `enter_top` AND a held stock ranks below `exit_below`, the worst-ranked held stock is sold and the best new
-    # entrant bought with the same weight (sector cap respected; repeated while pairs qualify); filled at the next open.
-    # REVERT: set "midweek_swap": None and rerun `python run_all.py` -> plain weekly C6-U91 (tag loses "-MW").
+    "n": 10,                # stocks held
+    "w_tech": 0.5,          # score = 0.5 x technical score + 0.5 x relative strength
+    "use_regime": True,     # soft market regime (below)
+    "regime_symbol": "QQQ", # regime is on while QQQ closes above its 200-day average
+    "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
+    "min_score": 0.0,       # only stocks with a score above 0 can be picked
+    "sector_cap": 0.4,      # at most 40% of the picks per sector (= 4 of 10)
+    "vol_sizing": True,     # weights proportional to 1 / 63-day volatility
+    "buffer_rank": None,    # no rank buffer (tested, did not help)
+    "atr_stop_k": 3.0,      # ATR multiple of the stop level in strategy_holdings.csv (reference only, never an automatic exit)
+    "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF ('sector_median' / 'median_all': tested, not live)
+    # Mon/Wed close checks: if a stock that is not held ranks in the top 3 and a holding ranks below 15, sell the
+    # worst-ranked holding and buy the new stock with the same weight. Filled at the next open.
     "midweek_swap": {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]},
-    # Mid-week exit (LIVE from 2026-09-25, user decision; variant S3 of Reports/sell_rule_test.csv: +421.6% / Sharpe 1.47 / max DD
-    # -32.2% / never-seen Sharpe 0.82 vs plain MW +438.1% / 1.46 / -31.8% / 0.84). At each Mon/Wed check, AFTER the swap step
-    # above: every holding ranked worse than this (or no longer qualifying) is sold at the next open and the cash stays idle
-    # until the Friday rebalance. Needs "midweek_swap" on. Tag gets "30" (C6-U91-MW30).
-    # REVERT: set "midweek_exit_below": None and rerun `python run_all.py` -> plain C6-U91-MW.
-    "midweek_exit_below": 30,
-    # Selection from ranks 1-20 only (LIVE from 2026-09-25, user decision, not a tested rule). Weekly: walk ranks 1..20 with the
-    # max-4-per-sector cap; if fewer than n are filled, fill the rest from the unused ranks 1..20 in rank order IGNORING the
-    # sector cap; never pick worse than rank 20; fewer than n qualifying names -> the rest stays cash. Mid-week (cap_soft):
-    # a non-held top-3 stock always qualifies regardless of sector and replaces the worst-ranked holding below 15.
-    # Tag gets "-T20" (C6-U91-T20-MW30); "-T20H" if cap_soft is False (hard cap inside the top 20), "-SC" for cap_soft alone.
-    # REVERT: "max_pick_rank": None and "cap_soft": False, then `python run_all.py` -> C6-U91-MW30.
-    "max_pick_rank": 20,
-    "cap_soft": True,
-    # Earnings rule (LIVE from 2026-09-25, user decision, not a tested rule): a stock that is NOT held is not bought when its
-    # next earnings date E is within the next N calendar days after the decision date d (d < E <= d + N), at the Friday
-    # rebalance and at the Mon/Wed swap. Its slot goes to the next eligible stock within ranks 1-20 (same T20 logic; none ->
-    # cash); a top-3 swap candidate with earnings is skipped. Dates: Reports/earnings_date.csv. Tag gets "-E5".
-    # REVERT: "earnings_block_days": None, then `python run_all.py`.
-    "earnings_block_days": 5,
-    # Friday rebalance band (LIVE from 2026-09-28, user decision): at the weekly rebalance EVERY pick is brought back to its
-    # weight (bought up or trimmed) unless it is within this many percentage points of equity (a held pick with earnings
-    # in the E5 window is not bought up); Mon/Wed checks trade only swaps and exits. paper_trade.NO_TRADE_BAND must equal this (tests check it). simulate(band=)
-    # models it. REVERT (backtest only): None = the old rule, only adds and exits are traded and holds are never resized.
+    "midweek_exit_below": 30,   # Mon/Wed: sell a holding ranked worse than 30; the cash waits for Friday
+    "max_pick_rank": 20,        # Friday picks come from ranks 1-20 only (fewer qualifying stocks -> the rest stays cash)
+    "cap_soft": True,           # if the sector cap leaves slots empty, fill them from ranks 1-20 anyway; top-3 swaps ignore the cap
+    "earnings_block_days": 5,   # no new buy (or top-up) when earnings are due within 5 days (Reports/earnings_date.csv)
+    # Friday: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).
     "rebalance_band": 0.01,
 }
 
+TRADABLE = list(sector_mapping.tradable_symbols)
+SECTOR_ETFS = list(sector_mapping.sector_etfs)
+BENCHMARKS = list(sector_mapping.BENCHMARK_SYMBOLS)
+SHORT_HISTORY_CSV = REPORTS_DIR / "short_history_reference.csv"   # stocks too new to score (main_signal_analysis.ipynb)
 
-# Universe label: when the tested universe expansion is switched on (sector_mapping.EXPANDED_UNIVERSE), tracking rows and the
-# app say e.g. "C6-U142" so rows from the 78-stock universe stay distinguishable. No effect while the switch is None.
-# LIVE: EXPANDED_UNIVERSE = "u91" -> tag C6-U91 (since 2026-10-01, user decision: the 96 below minus ADBE AFRM MU SOFI MDB MSTR,
-# plus TTWO). 2026-09-24 .. 09-30: "u96" -> C6-U96 (high_beta_91 + CRDO NBIS LITE CLS RBRK; ranks 1-10, max 4 per sector, RS vs
-# sector ETF). Earlier on 2026-09-24: "high_beta_91" (a different 91-stock list, also tagged C6-U91; no tracking rows) and None -> C6 (78).
-if getattr(sector_mapping, "EXPANDED_UNIVERSE", None):
-    WINNER["tag"] = f'{WINNER["tag"]}-U{len(sector_mapping.tradable_symbols)}'
-    WINNER["name"] = f'{WINNER["name"]} (expanded universe, {len(sector_mapping.tradable_symbols)} stocks)'
-if WINNER.get("rs_benchmark", "etf") != "etf":   # median-based relative strength (tested 2026-09-24, not live)
-    WINNER["tag"] += {"sector_median": "-MED", "median_all": "-MEDALL"}[WINNER["rs_benchmark"]]
-    WINNER["name"] += f' [RS vs {WINNER["rs_benchmark"].replace("_", " ")}]'
-if WINNER.get("max_pick_rank") or WINNER.get("cap_soft"):   # picks from ranks 1..20, soft sector cap (live from 2026-09-25)
-    WINNER["tag"] += (f'-T{WINNER["max_pick_rank"]}' + ("" if WINNER.get("cap_soft") else "H")) if WINNER.get("max_pick_rank") else "-SC"
-    WINNER["name"] += ((f' [picks from ranks 1-{WINNER["max_pick_rank"]} only' if WINNER.get("max_pick_rank") else " [")
-                       + ("; sector cap relaxed to fill the 10 slots; top-3 swaps ignore the cap]" if WINNER.get("cap_soft") else "]"))
-if WINNER.get("midweek_swap"):                   # mid-week swap on top of the weekly rebalance (live since 2026-09-24)
-    _mw = WINNER["midweek_swap"]
-    WINNER["tag"] += "-MW"
-    WINNER["name"] += (f' + mid-week swap ({"/".join(_mw["days"])} close: top {_mw["enter_top"]} in, '
-                       f'below rank {_mw["exit_below"]} out)')
-    if WINNER.get("midweek_exit_below"):         # mid-week exit to cash (live from 2026-09-25)
-        WINNER["tag"] += str(WINNER["midweek_exit_below"])
-        WINNER["name"] += f' + mid-week exit (sell if worse than rank {WINNER["midweek_exit_below"]}, cash until Friday)'
-if WINNER.get("earnings_block_days"):             # no new buys shortly before earnings (live from 2026-09-25)
-    WINNER["tag"] += f'-E{WINNER["earnings_block_days"]}'
-    WINNER["name"] += f' + no new buys with earnings in the next {WINNER["earnings_block_days"]} days'
+
+def scored_stock_count():
+    """Stocks the strategy scores: the list minus the short-history stocks of the latest run."""
+    try:
+        short = set(pd.read_csv(SHORT_HISTORY_CSV)["Symbol"])
+    except (OSError, KeyError, pd.errors.EmptyDataError):
+        short = set()
+    return len([s for s in TRADABLE if s not in short])
+
+
+def winner_label(n_stocks):
+    """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'C6-U91-T20-MW30-E5'."""
+    S, mw = WINNER, WINNER.get("midweek_swap")
+    tag = f"C6-U{n_stocks}"
+    name = f"C6: weekly top-{S['n']} ranking, max {winner_max_per_sector()} per sector + soft QQQ regime ({n_stocks} stocks)"
+    if S.get("rs_benchmark", "etf") != "etf":
+        tag += {"sector_median": "-MED", "median_all": "-MEDALL"}[S["rs_benchmark"]]
+        name += f' [RS vs {S["rs_benchmark"].replace("_", " ")}]'
+    if S.get("max_pick_rank") or S.get("cap_soft"):
+        tag += (f'-T{S["max_pick_rank"]}' + ("" if S.get("cap_soft") else "H")) if S.get("max_pick_rank") else "-SC"
+        name += ((f' [picks from ranks 1-{S["max_pick_rank"]} only' if S.get("max_pick_rank") else " [")
+                 + ("; sector cap relaxed to fill the 10 slots; top-3 swaps ignore the cap]" if S.get("cap_soft") else "]"))
+    if mw:
+        tag += "-MW" + (str(S["midweek_exit_below"]) if S.get("midweek_exit_below") else "")
+        name += f' + mid-week swap ({"/".join(mw["days"])} close: top {mw["enter_top"]} in, below rank {mw["exit_below"]} out)'
+        if S.get("midweek_exit_below"):
+            name += f' + mid-week exit (sell if worse than rank {S["midweek_exit_below"]}, cash until Friday)'
+    if S.get("earnings_block_days"):
+        tag += f'-E{S["earnings_block_days"]}'
+        name += f' + no new buys with earnings in the next {S["earnings_block_days"]} days'
+    return tag, name
 
 
 # Live portfolio size: the live weights (signal_analysis / strategy_picks / changes / mid-week check, read by paper_trade.py
@@ -164,9 +144,14 @@ def winner_rank_args(regime):
                 max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")))
 
 
-TRADABLE = list(sector_mapping.tradable_symbols)
-SECTOR_ETFS = list(sector_mapping.sector_etfs)
-BENCHMARKS = list(sector_mapping.BENCHMARK_SYMBOLS)
+WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
+
+
+def rules_version():
+    """Rules version stored in signal_analysis.csv (older rows of the same version keep their BUY/SELL/HOLD)."""
+    S = WINNER
+    v = ("v4-mw30" if S.get("midweek_exit_below") else "v4-mw") if S.get("midweek_swap") else "v3"
+    return v + ("-t20" if S.get("max_pick_rank") else "") + (f"-e{S['earnings_block_days']}" if S.get("earnings_block_days") else "")
 
 
 # ----------------------------------------------------------------------------- calendar
@@ -289,19 +274,9 @@ def drop_partial_last_bar(bars, now=None, close_buffer_min=30):
     return bars, False
 
 
-def missing_from_cache(cache_name=LONG_CACHE):
-    """Symbols of sector_mapping (tradable + benchmarks + sector ETFs) with no bars in the backtest cache, e.g. a stock just
-    added to sector_mapping.py. [] = complete. (Removed stocks may stay in the cache: everything ranks TRADABLE only.)"""
-    path = CACHE_DIR / cache_name
-    want = TRADABLE + BENCHMARKS + SECTOR_ETFS
-    if not path.exists():
-        return sorted(want)
-    return sorted(set(want) - set(pd.read_pickle(path)["Symbol"].unique()))
-
-
 def ensure_long_cache(cache_name=LONG_CACHE, start=LONG_START, data_client=None):
     """A stock added to sector_mapping.py gets its backtest history automatically: the bars of every missing symbol
-    (missing_from_cache) are fetched from Alpaca's free market data, `start` -> the cache's last date, and appended; the
+    are fetched from Alpaca's free market data, `start` -> the cache's last date, and appended; the
     other symbols are untouched. Returns the symbols added. Raises a clear error naming the missing stocks when the fetch
     fails (no keys / network); a symbol Alpaca has no bars for is reported (warning) and skipped."""
     path = CACHE_DIR / cache_name
@@ -784,7 +759,6 @@ def build_technical(bars, symbols=None):
 
 
 # ----------------------------------------------------------------------------- short history (too new to trade)
-SHORT_HISTORY_CSV = REPORTS_DIR / "short_history_reference.csv"
 SHORT_HISTORY_NOTE = "Reference only - not traded yet (short history)"
 SHORT_HISTORY_COLUMNS = ["As_Of", "Symbol", "Name", "Sector", "Status", "First_Trade", "Days_Of_History", "Days_Needed",
                          "Days_To_Go", "Est_Eligible_Date", "Last_Date", "Last_Close", "Return_Since_First_Close_%",
@@ -939,9 +913,9 @@ def relative_strength(close_w, symbols=None, benchmark=None):
     return rs_score, sector_rs63
 
 
-def regime_series(close_w, symbol=REGIME_SYMBOL, ma=REGIME_MA):
-    """Market filter: True while the regime symbol (QQQ) closes above its moving average."""
-    c = close_w[symbol]
+def regime_series(close_w, symbol=None, ma=200):
+    """Market filter: True while the regime symbol (WINNER["regime_symbol"], QQQ) closes above its 200-day average."""
+    c = close_w[symbol or WINNER["regime_symbol"]]
     return (c > c.rolling(ma).mean()).fillna(False)
 
 
@@ -1752,7 +1726,7 @@ def backtest_inputs(refresh=False):
     return {"close": close, "open": opn, "score": 0.5 * tech_score + 0.5 * rs, "tiebreak": rs, "universe": U,
             "eligible": bool_wide(tech, "eligible", idx, U),
             "vol": volatility(close[U]),
-            "regime": regime_series(close, "QQQ"), "weekly": weekly_rebalance_days(idx, live=True)}
+            "regime": regime_series(close), "weekly": weekly_rebalance_days(idx, live=True)}
 
 
 def run_rules(inp, start=WALK_FORWARD_START, live_sizing=False, **overrides):

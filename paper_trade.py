@@ -628,7 +628,7 @@ def build_hold_orders(positions, prices=None):
 
 def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signal_csv=SIGNAL_CSV, midweek_csv=MIDWEEK_CSV,
                 min_value=1.0, fractional=False, decision=None, live_prices=None):
-    """(orders, meta, targets) for any target source; used by the CLI and the app's order preview. No broker calls.
+    """(orders, meta, targets) for any target source; used by the CLI, the live trade step and live_trade.ipynb. No broker calls.
     decision: see load_targets. live_prices {symbol: price}: size with these (a daytime catch-up) instead of the closes."""
     targets, meta = load_targets(source, picks_csv, midweek_csv, decision=decision)
     positions = positions or {}

@@ -2,12 +2,11 @@
 as HTML (no escaped tags / code blocks / unbalanced tags), the price chart draws Close + all MAs on a date axis, the displayed
 rank == Strategy_Rank and the portfolio slot == position among the picks, the dated decision badge / "Strategy rank ·
 <latest close>" / "<rebalance day> plan" chip agree with strategy_changes / signal_analysis / strategy_picks (and with the
-"Latest signals" and "Last decision" tables in Details), the Strategy tab widgets work, captions name the live
-rules, the rank tiers render with a ?symbol= link per ranked stock, and the holdings-alert module still builds
+"Latest signals" and "Last decision" tables in Details), the Strategy tab widgets work, the rules text matches
+backtest_engine.WINNER, removed sections stay gone, the rank tiers render with a ?symbol= link per ranked stock, and the holdings-alert module still builds
 (strategy holdings + a temporary positions file, deleted afterwards; the dashboard banner itself was removed).
 Run: python tests/run_tests.py  (or python tests/test_app.py)"""
 import base64
-import io
 import json
 import os
 import re
@@ -206,23 +205,6 @@ expect(not any(l.startswith("Reference only") for l in labels), f"stale short-hi
 lt_all = next((d.value for d in at.dataframe if "Signal today" in d.value.columns), pd.DataFrame())
 expect(set(lt_all.get("Symbol", [])) == set(latest.index), "Latest signals should list every stock of the latest close")
 
-# Rank tab: newest column == Strategy_Rank; slots == picks
-html_tbl = next((m.value for m in at.markdown if "<thead>" in m.value and "Trend" in m.value), None)
-if html_tbl:
-    rt = pd.read_html(io.StringIO(html_tbl))[0]
-    # newest column = the latest DECISION day (Fri / Mon / Wed); a Thursday close is not one
-    dcols = [c for c in rt.columns if re.fullmatch(r"\d\d/\d\d", str(c))]
-    col = dcols[0]
-    dday = SIG.Date[SIG.Date.dt.strftime("%m/%d") == col].max()
-    expect(dday == SIG.loc[SIG.Date.dt.strftime("%m/%d").isin(dcols), "Date"].max(), f"Rank tab newest column {col} not first")
-    ranks_then = SIG[SIG.Date == dday].set_index("Symbol")["Strategy_Rank"]
-    x = rt.set_index("Symbol")[col].dropna().astype(int)
-    expect((x - ranks_then.reindex(x.index)).abs().sum() == 0, f"Rank tab column {col} != that day's Strategy_Rank")
-    ts = rt[rt.Slot.astype(str) != "—"].set_index("Symbol").Slot.astype(int).to_dict()
-    expect(ts == exp_slot, f"Rank tab slots {ts} != {exp_slot}")
-else:
-    expect(False, "Rank tab table not found")
-
 # ---------------------------------------------------------------- Strategy tab widgets and captions
 # the "if rebalanced at latest close" / "if the week ended today" preview views were removed from the app
 # (the pipeline runs on decision days only, so there is nothing hypothetical left to show)
@@ -241,6 +223,20 @@ expect(any(m.label == "Last mid-week check" for m in at.metric), "metric 'Last m
 blob = "\n".join(str(t.value) for t in list(at.markdown) + list(at.caption))
 mwc = pd.read_csv("Reports/strategy_midweek_check.csv")
 expect("run_pipeline" not in blob, "old command 'run_pipeline' still shown in the app")
+# the Rank history expander was removed
+expect(not any(e.label.startswith("Rank history") for e in at.expander), "stale Rank history expander still present")
+# the rules shown match the live config (backtest_engine.WINNER), in one place
+W, mw = be.WINNER, be.WINNER["midweek_swap"]
+rules = next((m.value for m in at.markdown if m.value.startswith("**Strategy rules")), "")
+for want in (f"Strategy rules ({W['tag']})", f"{W['w_tech']:g} × Technical", f"at least {be.MIN_BARS} trading days",
+             f"the {W['n']} best-ranked stocks from ranks 1–{W['max_pick_rank']}", f"max {be.winner_max_per_sector()} per sector",
+             f"scaled to {be.LIVE_INVESTED:.0%} invested", f"{W['regime_symbol']} at or below its 200-day average",
+             "every weight is halved" if W["regime_scale"] == 0.5 else "every weight is multiplied",
+             f"within {W['rebalance_band'] * 100:g} percentage point", f"top {mw['enter_top']}", f"below rank {mw['exit_below']}",
+             f"worse than {W['midweek_exit_below']}", f"within {W['earnings_block_days']} calendar days", "after-hours limit orders",
+             "9 AM CT", "2-decimal shares", "never runs twice"):
+    expect(want in rules, f"rules text is missing {want!r}")
+expect("next open" not in blob, "outdated 'next open' wording (orders go out the same evening)")
 
 # ---------------------------------------------------------------- holdings alert (strategy + temporary positions file)
 box = [m.value for m in at.markdown if "sa-alert " in m.value]

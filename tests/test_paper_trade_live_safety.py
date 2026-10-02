@@ -362,8 +362,10 @@ except SystemExit:
 # --live --fill-check with no pending file: clean no-op, no broker client created
 tmp = tempfile.mkdtemp()
 ghost = os.path.join(tmp, "ghost_pending.json")
-orig_pend, orig_ptc = paper_trade.PENDING_ORDERS_JSON, paper_trade.paper_trading_client
+orig_pend, orig_ptc, orig_cuo = paper_trade.PENDING_ORDERS_JSON, paper_trade.paper_trading_client, paper_trade.complete_unfilled_orders
 paper_trade.PENDING_ORDERS_JSON = ghost
+# the CLI calls complete_unfilled_orders() with its default path (bound at import = the real Reports file): point it at the ghost
+paper_trade.complete_unfilled_orders = lambda pending_path=None, log_csv=None: orig_cuo(ghost, os.path.join(tmp, "log.csv"))
 paper_trade.paper_trading_client = lambda: (_ for _ in ()).throw(AssertionError("client must not be created"))
 try:
     r = paper_trade.main(["--live", "--fill-check"])
@@ -372,6 +374,7 @@ except AssertionError as e:
     check("CLI --live --fill-check no-op without pending file", False, str(e))
 finally:
     paper_trade.PENDING_ORDERS_JSON, paper_trade.paper_trading_client = orig_pend, orig_ptc
+    paper_trade.complete_unfilled_orders = orig_cuo
 # ledger constants point at the live files
 check("PENDING_ORDERS_JSON is the live ledger",
       paper_trade.PENDING_ORDERS_JSON.endswith("live_pending_orders.json"))

@@ -2,11 +2,11 @@
 Stock Analysis dashboard (Streamlit).
 
 Page layout, top to bottom:
-  1. Title bar + ONE-line holdings alert (what to do today).
+  1. Title bar.
   2. "Dashboard" tab: a compact summary (key numbers, current picks, earnings this week)
      and the single-stock view. Open any stock directly with  http://localhost:8502/?symbol=NVDA
-  3. "Details" tab: everything else (latest signals, all signals, rank history, rules and decisions,
-     data freshness), each in its own expander.
+  3. "Details" tab: everything else (latest signals, the last decision, the strategy rules and decisions, data freshness),
+     each in its own expander.
 
 The app only READS the Reports/*.csv files written by `python run_all.py` for strategy data. It never places orders and never calls
 a paid data API (the optional "AI analysis" button uses the Hugging Face token from .env). The stock header additionally
@@ -31,7 +31,7 @@ from dotenv import load_dotenv
 from plotly.subplots import make_subplots
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, ROOT)  # project modules (backtest_engine, holdings_alert, paper_trade) importable from any cwd
+sys.path.insert(0, ROOT)  # project modules (backtest_engine, sector_mapping) importable from any cwd
 
 
 # =====================================================================================================================
@@ -46,10 +46,10 @@ except Exception:  # deployed without the pipeline modules: relative strength vs
         return None
 
 try:
-    from backtest_engine import WINNER, winner_max_per_sector
+    from backtest_engine import LIVE_INVESTED, MIN_BARS, WINNER, winner_max_per_sector
     SECTOR_MAX = winner_max_per_sector()
 except Exception:
-    WINNER, SECTOR_MAX = {}, 4
+    WINNER, SECTOR_MAX, LIVE_INVESTED, MIN_BARS = {}, 4, 0.99, 200
 
 STRATEGY_TAG = WINNER.get("tag", "C6")
 RS_LABEL = {"etf": "vs sector ETF and SPY",
@@ -62,36 +62,50 @@ MAX_PICK = WINNER.get("max_pick_rank")                               # picks onl
 CAP_SOFT = bool(WINNER.get("cap_soft"))                              # sector limit relaxed to fill 10 slots
 EARNINGS = WINNER.get("earnings_block_days")                         # no new buys with earnings within N days (None = off)
 
-MIDWEEK_NOTE = (f"Mid-week swap: at the {' and '.join(MIDWEEK['days'])} closes (next session if a holiday), if a stock that is not "
-                f"held ranks in the top {MIDWEEK['enter_top']} and a held stock has fallen below rank {MIDWEEK['exit_below']}, "
-                "the worst-ranked held stock is sold and the new one bought with the same dollar amount at the next open "
-                + ("(any sector: the sector limit does not block it). " if CAP_SOFT else f"(max {SECTOR_MAX} per sector still applies). ")
-                if MIDWEEK else "")
-EXIT_NOTE = (f"Mid-week exit: after the swap step, any holding ranked worse than {EXIT_BELOW} (or no longer ranked) is sold at the "
-             "next open and the cash stays idle until the Friday rebalance. " if EXIT_BELOW else "")
-EARNINGS_NOTE = (f"Earnings rule: at the Friday rebalance and the mid-week checks a "
-                 f"stock that is not held is not bought if its next earnings date is within the next {EARNINGS} calendar days; "
-                 f"its slot goes to the next eligible stock, else cash. "
-                 f"A held stock is never sold because of earnings, and it is not topped up at the Friday rebalance "
-                 f"before its earnings. "
-                 if EARNINGS else "")
+N_PICKS = WINNER.get("n", 10)                                        # portfolio size (top 10)
+W_TECH = WINNER.get("w_tech", 0.5)                                   # score = W_TECH x technical + (1 - W_TECH) x RS
+REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day average"   # market filter off
+SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
+HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
 
 
 def rules_text():
-    """The live trading rules in plain words."""
+    """The live trading rules in plain words, in one place (numbers from backtest_engine.WINNER)."""
+    band = WINNER.get("rebalance_band")
+    days = " and ".join(MIDWEEK["days"]) if MIDWEEK else ""
     return (f"**Strategy rules ({STRATEGY_TAG})**\n"
-            f"- **When:** Friday rebalance + Mon/Wed checks at the close (a holiday moves them to the nearest session).\n"
-            + (f"- **Rebalance:** every pick is brought back to its weight unless within {WINNER['rebalance_band']:.0%} of equity.\n"
-               if WINNER.get("rebalance_band") else "")
-            + f"- **What:** hold the top 10 stocks by Strategy Score (0.5 × Technical + 0.5 × Relative Strength {RS_LABEL}), score > 0, max {SECTOR_MAX} per sector.\n"
-            f"- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger position).\n"
-            f"- **Market filter:** if QQQ closes at or below its 200-day average, every position is halved (50% cash).\n"
-            f"- **Signals** (the strategy's decision, dated): Buy = enters the portfolio · Hold = stays · Sold = leaves · "
-            f"Watch = ranked but not picked · Score below 0 = not eligible. The plan chip = what the next Friday rebalance "
-            f"would do at the latest close.\n"
-            + ("- **Mon/Wed check:** " + MIDWEEK_NOTE.strip() + "\n" if MIDWEEK else "")
-            + ("- **Exit rule:** " + EXIT_NOTE.strip() + "\n" if EXIT_BELOW else "")
-            + ("- **Earnings:** " + EARNINGS_NOTE.strip() + "\n" if EARNINGS else ""))
+            "- **When:** decisions use the closing prices (the pipeline starts at 3:15 PM CT and waits for the final bar): "
+            "the Friday rebalance (the week's last trading day)"
+            + (f" and the {days} checks (the next trading day after a holiday)" if MIDWEEK else "") + ".\n"
+            f"- **Score:** {W_TECH:g} × Technical + {1 - W_TECH:g} × Relative Strength {RS_LABEL}. Only stocks with a score "
+            f"above {WINNER.get('min_score', 0):g} and at least {MIN_BARS} trading days of prices are ranked "
+            "(newer stocks are listed as not traded yet).\n"
+            f"- **Friday picks:** the {N_PICKS} best-ranked stocks" + (f" from ranks 1–{MAX_PICK}" if MAX_PICK else "")
+            + f", max {SECTOR_MAX} per sector"
+            + (f"; slots the sector limit leaves empty are filled from ranks 1–{MAX_PICK or 20} anyway" if CAP_SOFT else "")
+            + "; fewer qualifying stocks = the rest in cash. Stocks that are not picked are sold.\n"
+            f"- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger), scaled to {LIVE_INVESTED:.0%} invested, "
+            "each weight rounded down to 0.01%.\n"
+            + (f"- **Market filter:** with {REGIME_OFF} at a rebalance, every weight is {HALVED}.\n" if SCALE else "")
+            + (f"- **Rebalance:** every pick is brought back to its weight unless it is within {band * 100:g} percentage point "
+               "of it; overweight holdings are trimmed so new buys get their full weight.\n" if band else "")
+            + (f"- **{days} swap:** if a stock that is not held ranks in the top {MIDWEEK['enter_top']} and a held stock has "
+               f"fallen below rank {MIDWEEK['exit_below']}, the worst-ranked held stock is sold and the new one bought for "
+               "the same dollar amount (repeated while both are true; "
+               + ("the sector limit does not apply" if CAP_SOFT else f"max {SECTOR_MAX} per sector still applies") + ").\n"
+               if MIDWEEK else "")
+            + (f"- **{days} exit:** after the swaps, any holding ranked worse than {EXIT_BELOW} (or no longer ranked) is "
+               "sold; the cash waits for the Friday rebalance.\n" if EXIT_BELOW else "")
+            + (f"- **Earnings:** a stock that is not held is not bought when its next earnings date is within {EARNINGS} "
+               "calendar days; on Friday its slot goes to the next eligible stock (else cash), mid-week it is just not bought. "
+               "A held stock is never sold because of earnings, and it is not topped up before them.\n" if EARNINGS else "")
+            + "- **Orders:** sells go first. The same evening (until 7 PM CT): whole-share after-hours limit orders at the "
+            "closing price (later than that, they wait for 9 AM). The 9 AM CT check the next trading day sends the rest as "
+            "market orders (2-decimal shares). A missed decision is caught up at the next market session with market orders, "
+            "unless the next decision is already due; a decision never runs twice.\n"
+            "- **Signals** (the strategy's decision, dated): Buy = enters the portfolio · Hold = stays · Sold = leaves · "
+            f"Watch = ranked but not picked · Score below {WINNER.get('min_score', 0):g} = not eligible. The plan chip = what "
+            "the next Friday rebalance would do at the latest close.\n")
 
 
 # =====================================================================================================================
@@ -336,44 +350,6 @@ def day_rank_change(_df, mtime: float):
     return {s: (int(y[s]) - int(t[s]), int(t[s])) for s in common}
 
 
-def rank_trend(ranks_old_to_new):
-    """Rank momentum (information only, not a trade rule): Bullish = 4+ rank improvements in a row ending today,
-    Bearish = 3+ declines in a row, otherwise Hold. Runs over decision days."""
-    vals = list(ranks_old_to_new)
-    if len(vals) < 4:
-        return "Hold"
-    improve = worsen = 0
-    for i in range(len(vals) - 1, 0, -1):
-        if vals[i] < vals[i - 1] and not worsen:
-            improve += 1
-        elif vals[i] > vals[i - 1] and not improve:
-            worsen += 1
-        else:
-            break
-    return "Bullish" if improve >= 4 else ("Bearish" if worsen >= 3 else "Hold")
-
-
-@st.cache_data(ttl=3600)
-def rank_pivot(_df, mtime: float, n_days=20):
-    """Symbol x last-n decision-day rank table (newest first) + Trend."""
-    df = _df
-    dec = df[(df["Rebalance_Day"] == 1) | (df["Midweek_Check"] == 1)]
-    work = dec[['Symbol', 'Date', 'combined_signal']].dropna(subset=['combined_signal'])
-    dates = sorted(work['Date'].unique())[-n_days:]
-    work = work[work['Date'].isin(dates)].sort_values('combined_signal', ascending=False).drop_duplicates(subset=['Symbol', 'Date'])
-    if 'Strategy_Rank' in df.columns:  # the pipeline's rank (ties: higher RS, then A-Z), identical to the header/chart
-        work = work.merge(df[['Symbol', 'Date', 'Strategy_Rank']].drop_duplicates(['Symbol', 'Date']), on=['Symbol', 'Date'], how='left')
-    by_score = work.groupby('Date')['combined_signal'].rank(ascending=False, method='first')
-    work['rank'] = (work['Strategy_Rank'].fillna(by_score) if 'Strategy_Rank' in work else by_score).astype(int)
-    pivot = work.pivot(index='Symbol', columns='Date', values='rank')
-    pivot = pivot.reindex(sorted(pivot.columns, reverse=True), axis=1)
-    trend = pivot.apply(lambda row: rank_trend(int(v) for v in row.iloc[::-1] if pd.notna(v)), axis=1)
-    pivot.columns = [pd.Timestamp(c).strftime("%m/%d") for c in pivot.columns]
-    pivot["Trend"] = trend
-    return pivot.sort_index().rename_axis("Symbol").reset_index()
-
-
-# --- Earnings / fundamentals / news ---
 @st.cache_data(ttl=3600)
 def _load_earnings(mtime: float):
     ed = pd.read_csv(EARNINGS_CSV)
@@ -617,11 +593,12 @@ def plain_reason(signal, reason, rank=None, score=None):
         rk = int(m.group(1)) if m else (int(rank) if rank is not None and pd.notna(rank) else None)
         if "sector cap relaxed" in reason:
             return f"made the portfolio at rank {rk} (free slot filled from the top {MAX_PICK or 20}, sector limit relaxed)"
-        if rk is not None and rk > 10:
-            return f"made the portfolio at rank {rk} (higher-ranked stocks were skipped by the {SECTOR_MAX}-per-sector limit)"
-        return f"made the top 10 at rank {rk if rk is not None else r}"
+        if rk is not None and rk > N_PICKS:
+            return (f"made the portfolio at rank {rk} (higher-ranked stocks were skipped by the {SECTOR_MAX}-per-sector limit"
+                    + (" or the earnings rule)" if EARNINGS else ")"))
+        return f"made the top {N_PICKS} at rank {rk if rk is not None else r}"
     if signal == "Hold":
-        return f"in top 10, rank {r}" if rank is not None and pd.notna(rank) and rank <= 10 else \
+        return f"in top {N_PICKS}, rank {r}" if rank is not None and pd.notna(rank) and rank <= N_PICKS else \
             f"still selected at rank {r} (higher-ranked stocks skipped by the sector limit)"
     if signal == "Sold":
         if reason.startswith("score"):
@@ -631,14 +608,14 @@ def plain_reason(signal, reason, rank=None, score=None):
         if reason.startswith("skipped"):
             return f"skipped: already {SECTOR_MAX} stocks from this sector"
         if "outside top" in reason:
-            return f"fell to rank {m.group(1) if m else r}, outside top 10"
+            return f"fell to rank {m.group(1) if m else r}, outside top {N_PICKS}"
         if reason.startswith("not eligible"):
             return "not enough data / not eligible"
-        return reason or "left the top 10"
+        return reason or f"left the top {N_PICKS}"
     if signal == "Watch (sector limit)":
         return f"rank {r} but skipped: already {SECTOR_MAX} stocks from this sector"
     if signal == "Watch":
-        return f"rank {r}, positive score but outside top 10 — watch"
+        return f"rank {r}, positive score but outside top {N_PICKS} — watch"
     if signal == "Score below 0":
         return f"score below 0 ({sc})"
     return "benchmark / not enough history to rank"
@@ -649,7 +626,7 @@ def decision_tag(signal, reason):
     reason = "" if reason is None or (isinstance(reason, float) and pd.isna(reason)) else str(reason)
     if signal == "Sold":
         for key, tag in (("mid-week exit", "mid-week exit"), ("mid-week swap out", "mid-week swap"), ("skipped", "sector limit"),
-                         ("picks only from ranks", f"rank worse than {MAX_PICK}"), ("outside top", "outside top 10"),
+                         ("picks only from ranks", f"rank worse than {MAX_PICK}"), ("outside top", f"outside top {N_PICKS}"),
                          ("score", "score below 0"), ("not eligible", "not eligible")):
             if key in reason:
                 return tag
@@ -783,8 +760,8 @@ def _fallback_reason(kind, row, n=10):
 def strategy_events(ticker_df, decisions, symbol):
     """Entries/exits and held periods of the live strategy for one ticker.
 
-    Strategy_Weight on day d is the target decided at d's close and filled at the next open, so an entry/exit is the
-    first day the weight turns >0 / back to 0 and the fill is the following session. Reasons, rank and score come from
+    Strategy_Weight on day d is the target decided at d's close (orders go out that evening), so an entry/exit is the
+    first day the weight turns >0 / back to 0; its marker sits on the following session ("Fill"). Reasons, rank and score come from
     Reports/strategy_decisions.csv. Returns (events, periods) with periods = [(first held session, last held session)]."""
     t = ticker_df.sort_values("Date")[["Date", "Close", "Strategy_Weight", "Strategy_Rank", "Strategy_Score", "Regime_On"]]
     t = t.reset_index(drop=True)
@@ -830,15 +807,14 @@ def event_hover(e):
     """Hover text for an entry/exit marker on the price chart."""
     sig = "Buy" if e.Kind == "entry" else "Sold"
     text = f"<b>{sig}</b>: {html.escape(plain_reason(sig, e.Reason, e.Rank, e.Score))}"
-    when = f"filled at the open {e.Fill:%a %b %-d}" if pd.notna(e.Fill) else "fills at the next open (pending)"
-    text += f"<br>Decided at the close {e.Decision:%a %b %-d} · {when}"
+    text += f"<br>Decided at the close {e.Decision:%a %b %-d} · orders go out that evening" + ("" if pd.notna(e.Fill) else " (pending)")
     bits = ([f"Rank #{e.Rank:.0f}"] if pd.notna(e.Rank) else []) + ([f"Score {e.Score:.1f}"] if pd.notna(e.Score) else [])
     if pd.notna(e.Weight):
         bits.append(f"{'Portfolio weight' if e.Kind == 'entry' else 'Weight sold'} {e.Weight * 100:.2f}%")
     if bits:
         text += "<br>" + " · ".join(bits)
     if e.Regime_On == 0:
-        text += "<br>Market filter OFF that week (QQQ below its 200-day average): positions halved"
+        text += f"<br>Market filter OFF that week ({REGIME_OFF}): positions {HALVED}"
     return text
 
 
@@ -947,7 +923,7 @@ def render_top_bar(p):
         <div class="sa-topbar">
           <div>
             <h1>Stock Analysis</h1>
-            <p>Weekly top-10 ranking{" + Mon/Wed swap check" if MIDWEEK else ""} · technical + strength vs sector/SPY</p>
+            <p>Weekly top-{N_PICKS} ranking{" + Mon/Wed swap check" if MIDWEEK else ""} · technical + strength vs sector/SPY</p>
           </div>
           <div class="sa-chip">Updated {esc(updated + note)}</div>
         </div>""")
@@ -1087,7 +1063,7 @@ def render_stock_header(p, ticker, tdata):
         action = p.plan.get(ticker, ("not picked",))[0]
         when = f"{p.plan_day:%a %b %-d}" if p.plan_day is not None else "Next rebalance"
         tip = (f"Full rebalance computed at the {p.plan_asof:%a %b %-d} close (strategy_picks.csv, the numbers the trade "
-               f"step uses). Final at the {when} close; trades at the next open." if p.plan_asof is not None else "")
+               f"step uses). Final at the {when} close; orders go out that evening." if p.plan_asof is not None else "")
         plan_html = (f'<span class="sa-badge {PLAN_BADGE.get(action, "sa-badge-grey")}" title="{esc(tip)}">'
                      f'{esc(when + " plan: " + plan_text(p.plan, ticker))}</span>')
     stats = [
@@ -1140,7 +1116,7 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
     height_of = {"price": 0.44, "score": 0.20, "rs": 0.18, "rsi": 0.11, "macd": 0.11}
     titles = {
         "price": "<b>Price · Buy ▲ / Sold ▼ decisions · shaded = Hold</b>",
-        "score": "Strategy score (green) = 0.5 × Technical (grey) + 0.5 × Strength vs sector/SPY (red)",
+        "score": f"Strategy score (green) = {W_TECH:g} × Technical (grey) + {1 - W_TECH:g} × Strength vs sector/SPY (red)",
         "rs": ("<b>Performance since " + f"{x_start:%b %-d, %Y}" + "</b> (% price change): " + " · ".join(
             f'<span style="color:{RS_COLORS[k]};">━ {name}</span>' for k, (name, _s) in rs_lines.items())),
         "rsi": "RSI", "macd": "MACD",
@@ -1172,10 +1148,10 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
         fig.add_trace(go.Scatter(x=[x_start], y=[None], mode="markers", name="Hold (shaded period)", hoverinfo="skip",
                                  marker=dict(symbol="square", size=12, color="rgba(37,99,235,0.25)")), row=1, col=1)
 
-    # Entry / exit markers (filled = executed at that open, hollow = pending next open)
+    # Entry / exit markers on the session after the decision (hollow = decided at the latest close, orders pending)
     shown = events[events['Fill'].fillna(x_end) >= x_start] if len(events) else events
-    for kind, marker, color, name in (("entry", "triangle-up", "#15803d", "Buy · bought at next open"),
-                                      ("exit", "triangle-down", "#b91c1c", "Sold · sold at next open")):
+    for kind, marker, color, name in (("entry", "triangle-up", "#15803d", "Buy (strategy decision)"),
+                                      ("exit", "triangle-down", "#b91c1c", "Sold (strategy decision)")):
         e = shown[shown['Kind'] == kind] if len(shown) else shown
         if e.empty:
             continue
@@ -1192,9 +1168,9 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
     regime_off = chart[(chart['Rebalance_Day'] == 1) & (chart['Regime_On'] == 0)]
     if len(regime_off):
         fig.add_trace(go.Scatter(
-            x=regime_off.index, y=[top_y] * len(regime_off), mode='markers', name='Market filter OFF (positions halved)',
+            x=regime_off.index, y=[top_y] * len(regime_off), mode='markers', name=f'Market filter OFF (positions {HALVED})',
             marker=dict(symbol='diamond', size=8, color='#d97706'),
-            hovertemplate='<b>Market filter OFF</b> %{x|%b %d}: QQQ below its 200-day average,<br>all positions halved that week<extra></extra>'),
+            hovertemplate=f'<b>Market filter OFF</b> %{{x|%b %d}}: {REGIME_OFF},<br>all positions {HALVED} that week<extra></extra>'),
             row=1, col=1)
 
     # While held: entry price dotted line
@@ -1314,8 +1290,8 @@ def render_stock_figure(fig, ticker):
     st.plotly_chart(fig, width="stretch", config={
         'displaylogo': False, 'scrollZoom': False, 'doubleClick': 'reset',
         'modeBarButtonsToRemove': ['pan2d', 'select2d', 'lasso2d', 'autoScale2d', 'zoomIn2d', 'zoomOut2d']})
-    st.caption("**How to read the panels** \u00b7 **Strategy score** \u2014 above 0 is good (an above-average "
-               "stock) and rising is better; below 0 and falling is bad. "
+    st.caption("**How to read the panels** \u00b7 **Strategy score** \u2014 above 0 is good (a positive trend and "
+               "stronger than its peers on balance; only stocks above 0 can be picked) and rising is better; below 0 and falling is bad. "
                f"\u00b7 **Performance** \u2014 % price change since the chart start: **{ticker}** (blue) vs "
                + " and ".join(f"**{name}** ({color})" for name, color in ((names.get("market"), "grey"),
                                                                           (names.get("sector"), "orange")) if name)
@@ -1534,93 +1510,13 @@ def render_all_signals(p):
     st.caption(f"Buy {counts.get('Buy', 0)} · Hold {counts.get('Hold', 0)} · "
                f"Sold {counts.get('Sold', 0)} · Watch {counts.get('Watch', 0) + counts.get('Watch (sector limit)', 0)} · "
                f"Score below 0 {counts.get('Score below 0', 0)}. Ranks = position among all ranked stocks (Rank change: + = moved up "
-               "since the last decision day); Portfolio slot = position among the 10 picks. Click a row to open the stock on the Dashboard tab.")
+               f"since the last decision day); Portfolio slot = position among the {N_PICKS} picks. Click a row to open the stock on the Dashboard tab.")
     event = st.dataframe(part.round({"Score": 1, "Portfolio weight %": 2}), hide_index=True,
                          width="stretch",
                          on_select="rerun", selection_mode="single-row", key=f"sig_tbl_{show}",
                          column_config={"Why": st.column_config.TextColumn("Why", width="large")})
     open_symbol(part, event, "signals")
 
-
-def render_rank_history(p, ticker):
-    """Symbol x last-20 decision-day rank table (HTML, the selected stock highlighted)."""
-    pivot = rank_pivot(p.df, p.mtime, 20)
-    date_cols = [c for c in pivot.columns if c not in ("Symbol", "Trend")]
-    pivot = pivot.merge(last_next_earnings(pivot["Symbol"].tolist()), on="Symbol", how="left")
-    short = {"Buy": "Buy", "Hold": "Hold", "Sold": "Sold", "Watch": "Watch",
-             "Watch (sector limit)": "Watch (limit)", "Score below 0": "Score < 0", "Not ranked": ""}
-
-    def signal_text(sym):
-        return short.get(p.sig_off.get(sym, "Not ranked"), "")
-
-    pivot["Signal"] = pivot["Symbol"].map(signal_text)
-    pivot["Slot"] = pivot["Symbol"].map(p.slot_off).fillna("—")
-    table = pivot[["Symbol", "Signal", "Slot", "Last ED", "Next ED", "Trend"] + date_cols]
-    st.caption("Rank 1 = highest Strategy Score, recomputed on decision days (Fri + Mon/Wed; shifted for holidays) among all ranked stocks "
-               f"({int(p.latest['Strategy_Rank'].notna().sum())} today; QQQ is a benchmark). Slot = position among the 10 picks. "
-               "Signal = the decision in force. Trend = rank momentum "
-               "(Bullish = 4+ better decision days in a row, Bearish = 3+ worse decision days), information only. "
-               "Earnings dates: last ≤10 days red, next ≤7 days green.")
-    today = pd.Timestamp.now().normalize()
-    GREEN, RED, AMBER, TEXT = "#1a7f37", "#c41e3a", "#9e6a03", "#374151"
-
-    def streak_flags(row):
-        """Mark rank cells inside a 4+ step improving run (Bullish) or a 3+ step worsening run (Bearish)."""
-        cols = [c for c in reversed(date_cols) if pd.notna(row[c])]
-        ranks = [int(row[c]) for c in cols]
-        flags, n, i = {}, len(ranks), 0
-        while i < n - 1:
-            j = i
-            while j + 1 < n and ranks[j + 1] < ranks[j]:
-                j += 1
-            if j - i >= 4:
-                flags.update({cols[k]: "Bullish" for k in range(i, j + 1)})
-                i = j + 1
-                continue
-            j = i
-            while j + 1 < n and ranks[j + 1] > ranks[j]:
-                j += 1
-            if j - i >= 3:
-                for k in range(i, j + 1):
-                    flags.setdefault(cols[k], "Bearish")
-                i = j + 1
-                continue
-            i += 1
-        return flags
-
-    def td(text, color=TEXT, weight="400", extra=""):
-        return f'<td style="{extra}color:{color};font-weight:{weight};text-align:center;padding:6px 8px;white-space:nowrap;">{text}</td>'
-
-    def row_html(row):
-        sel_bg = "background-color:#e8f0fe;" if row['Symbol'] == ticker else ""
-        cells = [f'<td style="font-weight:600;text-align:left;padding:6px 8px;position:sticky;left:0;z-index:1;'
-                 f'background:{"#e8f0fe" if sel_bg else "#ffffff"};">{row["Symbol"]}</td>',
-                 td(esc(row['Signal']), {"Buy": GREEN, "Hold": "#2563eb", "Sold": RED, "Score < 0": RED}.get(
-                     row['Signal'].split(" →")[0], AMBER if row['Signal'] else TEXT), "700", sel_bg),
-                 td(esc(str(row['Slot'])), "#1d4ed8" if row['Slot'] != "—" else TEXT, "700" if row['Slot'] != "—" else "400", sel_bg)]
-        for col, lo, hi in (("Last ED", -10, 0), ("Next ED", 0, 7)):
-            d = pd.to_datetime(row[col], errors="coerce")
-            hit = pd.notna(d) and today + pd.Timedelta(days=lo) <= d <= today + pd.Timedelta(days=hi)
-            cells.append(td(row[col] or "", (RED if col == "Last ED" else GREEN) if hit else TEXT, "700" if hit else "400", sel_bg))
-        cells.append(td(row['Trend'], {"Bullish": GREEN, "Bearish": RED}.get(row['Trend'], AMBER),
-                        "700" if row['Trend'] != "Hold" else "600", sel_bg))
-        flags = streak_flags(row)
-        for c in date_cols:
-            flag = flags.get(c)
-            cells.append(td("" if pd.isna(row[c]) else int(row[c]), {"Bullish": GREEN, "Bearish": RED}.get(flag, TEXT),
-                            "700" if flag else "400", sel_bg))
-        return f"<tr>{''.join(cells)}</tr>"
-
-    thead = "".join(f'<th style="position:sticky;top:0;background:#f1f5f9;padding:8px;text-align:center;font-size:0.8rem;'
-                    f'color:#374151;border-bottom:1px solid #e2e8f0;white-space:nowrap;">{c}</th>' for c in table.columns)
-    body = "".join(row_html(row) for _, row in table.iterrows())
-    show_html(f"""
-        <div style="max-height:520px;overflow:auto;border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;">
-          <table style="border-collapse:collapse;width:100%;font-size:0.85rem;font-family:Arial,sans-serif;">
-            <thead><tr>{thead}</tr></thead>
-            <tbody>{body}</tbody>
-          </table>
-        </div>""")
 
 
 def render_rules_and_changes(p):
@@ -1658,7 +1554,7 @@ def render_rules_and_changes(p):
     st.dataframe(sub[["Symbol", "Signal", "Why", "Rank", "Score", "Sector", "Old_Weight", "New_Weight"]]
                  .rename(columns={"Old_Weight": "Old portfolio weight %", "New_Weight": "New portfolio weight %"}).round(2),
                  width="stretch", hide_index=True)
-    st.caption(f"Decision date {sub['Date'].iloc[0] if len(sub) else '—'} · filled at the next open.")
+    st.caption(f"Decision date {sub['Date'].iloc[0] if len(sub) else '—'} · orders go out that evening (see the rules above).")
 
 
 def render_data_and_settings(p):
@@ -1671,13 +1567,11 @@ def render_data_and_settings(p):
         st.success("All report files are within their expected refresh window.")
 
 
-def render_details(p, ticker):
+def render_details(p):
     with st.expander(latest_signals_title(p), expanded=True):
         render_latest_signals(p)
     with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=False):
         render_all_signals(p)
-    with st.expander("Rank history · last 20 decision days", expanded=False):
-        render_rank_history(p, ticker)
     with st.expander("Rules and latest decisions", expanded=False):
         render_rules_and_changes(p)
     with st.expander("Data freshness and settings", expanded=False):
@@ -1791,7 +1685,7 @@ def main():
             render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end)
             render_stock_figure(fig, ticker)
     with tab_details:
-        render_details(p, ticker)
+        render_details(p)
     with tab_health:
         render_health()
 

@@ -290,9 +290,25 @@ class FakeBroker:
         pass
 
 
-picks = pd.read_csv(os.path.join(ROOT, "Reports", "strategy_picks.csv"))
+# Fake portfolio (no live Reports files): 7 kept picks (most inside the 1-point band, some above target -> the trim fix;
+# SLB 1.5 points under -> bought up), 3 new picks, 3 dropped holdings. Old weights and targets both sum to 99%.
+#        symbol  sector         close  old weight  target
+BOOK = [("FTNT", "Technology", 180.95, 0.125, 0.120), ("SNOW", "Technology", 341.04, 0.115, 0.110),
+        ("NVDA", "Technology", 187.62, 0.100, 0.105), ("COF", "Financials", 210.40, 0.108, 0.100),
+        ("SLB", "Energy", 34.25, 0.085, 0.100), ("LMT", "Industrials", 498.10, 0.100, 0.095),
+        ("MRK", "Health Care", 85.30, 0.090, 0.095), ("NFLX", "Communication Services", 1189.50, 0.0, 0.090),
+        ("AMZN", "Consumer Discretionary", 222.40, 0.0, 0.090), ("GOOGL", "Communication Services", 245.10, 0.0, 0.085),
+        ("AAPL", "Technology", 255.45, 0.090, 0.0), ("MSFT", "Technology", 517.90, 0.090, 0.0),
+        ("META", "Communication Services", 727.05, 0.087, 0.0)]
+picks = pd.DataFrame([{"Strategy": "test", "Regime_On": 1, "Symbol": s, "Sector": sec, "Held": int(w > 0), "Strategy_Weight": w,
+                       "Provisional_Weight": t, "Strategy_Score": 50.0 - i, "Strategy_Rank": float(i + 1), "Technical_Score": 50.0,
+                       "RS_Score": 50.0, "Close": c, "Next_Earnings": "2026-11-20"} for i, (s, sec, c, w, t) in enumerate(BOOK)])
 PX = dict(zip(picks.Symbol, picks.Close))
 tmp = tempfile.mkdtemp()
+SIGNAL_CSV = os.path.join(tmp, "signal_analysis.csv")     # prices for held non-picks
+EARNINGS_CSV = os.path.join(tmp, "earnings_date.csv")     # no earnings within 5 days
+picks.assign(Date="2026-10-01")[["Date", "Symbol", "Close"]].to_csv(SIGNAL_CSV, index=False)
+pd.DataFrame({"Symbol": picks.Symbol, "Earnings Date": "2026-11-20", "Time": "PM"}).to_csv(EARNINGS_CSV, index=False)
 
 
 def run_day(day, last_reb, positions, cash, changes_rows=None, midweek_rows=None):
@@ -305,10 +321,11 @@ def run_day(day, last_reb, positions, cash, changes_rows=None, midweek_rows=None
     pd.DataFrame(midweek_rows or [], columns=["As_Of", "Event", "Event_Date", "Action", "Sell", "Buy", "Message", "Sell_Rank",
                                                "Buy_Rank", "Weight_%"]).to_csv(paths["midweek"], index=False)
     broker = FakeBroker(positions, cash)
-    plan0, status0 = pt.plan_orders, pt.latest_signal_status
+    plan0, status0, prices0, earn0 = pt.plan_orders, pt.latest_signal_status, pt.latest_prices, pt.earnings_blocked
     saved = {k: getattr(pt, k) for k in ("check_signal_freshness", "get_live_positions_and_equity", "_past_evening_cutoff",
                                          "paper_trading_client", "_todays_recorded_orders", "PENDING_ORDERS_JSON",
-                                         "plan_orders", "latest_signal_status", "SELL_SETTLE_POLL_SECS")}
+                                         "plan_orders", "latest_signal_status", "SELL_SETTLE_POLL_SECS", "latest_prices",
+                                         "earnings_blocked")}
     acct = broker.get_account()
     try:
         pt.check_signal_freshness = lambda **k: day
@@ -320,6 +337,8 @@ def run_day(day, last_reb, positions, cash, changes_rows=None, midweek_rows=None
         pt.SELL_SETTLE_POLL_SECS = 0
         pt.plan_orders = lambda *a, **k: plan0(*a, picks_csv=paths["picks"], midweek_csv=paths["midweek"], **k)
         pt.latest_signal_status = lambda changes_csv=None, as_of=None: status0(paths["changes"], as_of)
+        pt.latest_prices = lambda symbols, signal_csv=None: prices0(symbols, SIGNAL_CSV)
+        pt.earnings_blocked = lambda symbols, as_of, earnings_csv=None: earn0(symbols, as_of, EARNINGS_CSV)
         orders, meta, results = pt.auto_trade(log_csv=None)
     finally:
         for k, v in saved.items():
@@ -327,11 +346,8 @@ def run_day(day, last_reb, positions, cash, changes_rows=None, midweek_rows=None
     return orders, meta, results, broker, float(acct.equity)
 
 
-sa = pd.read_csv(os.path.join(ROOT, "Reports", "signal_analysis.csv"), usecols=["Date", "Symbol", "Strategy_Weight", "Close"])
-now = sa[sa.Date == sa.Date.max()]
-hold_now = now[now.Strategy_Weight.fillna(0) > 0]
 EQ = 100000.0
-pos = {s: int(w * EQ / c) for s, w, c in zip(hold_now.Symbol, hold_now.Strategy_Weight, hold_now.Close)}   # whole shares
+pos = {r.Symbol: int(r.Strategy_Weight * EQ / r.Close) for r in picks.itertuples() if r.Held}   # whole shares at the old weights
 cash0 = EQ - sum(q * PX[s] for s, q in pos.items())
 
 # Fri 10/2: the full rebalance (decision = the Thursday-close plan; Friday's real ranks can differ)

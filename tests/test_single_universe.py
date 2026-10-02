@@ -124,7 +124,8 @@ import run_all  # noqa: E402
 import strategy_health as sh  # noqa: E402
 
 check("backtest/live engine universe == sector_mapping.tradable_symbols", be.TRADABLE == list(sm.tradable_symbols))
-check("strategy tag U-count == len(tradable_symbols)", f"-U{len(sm.tradable_symbols)}-" in be.WINNER["tag"] + "-", be.WINNER["tag"])
+check("strategy tag U-count == stocks scored (the list minus short-history stocks)",
+      be.WINNER["tag"].startswith(f"C6-U{be.scored_stock_count()}-"), be.WINNER["tag"])
 check("strategy_health.LIVE_STRATEGY == the engine tag", sh.LIVE_STRATEGY == be.WINNER["tag"], (sh.LIVE_STRATEGY, be.WINNER["tag"]))
 # company_report_autofetch.py is checked from its source (importing it would load .env for the Alpha Vantage key)
 _af = ast.parse(open("company_report_autofetch.py", encoding="utf-8").read())
@@ -142,7 +143,8 @@ check("news / earnings call counts come from the list", run_all.N_CALLS == len(s
 check("every tradable stock has a sector and a name in sector_mapping",
       all(sm.symbol_sector.get(s) and sm.symbol_name.get(s) for s in sm.tradable_symbols),
       [s for s in sm.tradable_symbols if not (sm.symbol_sector.get(s) and sm.symbol_name.get(s))])
-miss = be.missing_from_cache() if (be.CACHE_DIR / be.LONG_CACHE).exists() else []
+_cache = be.CACHE_DIR / be.LONG_CACHE
+miss = sorted(set(be.TRADABLE + be.BENCHMARKS + be.SECTOR_ETFS) - set(be.pd.read_pickle(_cache)["Symbol"])) if _cache.exists() else []
 check("backtest bar cache has every stock of the list (a new stock is fetched by be.ensure_long_cache on the next run)",
       not miss, f"missing {miss}: run the pipeline or python -c \"import backtest_engine as be; be.ensure_long_cache()\"")
 

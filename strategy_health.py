@@ -42,12 +42,12 @@ ROLL_WINDOW = 63          # sessions for the rolling Sharpe
 WARMUP_MIN = 10           # sessions before any score is shown
 FULL_MIN = 63             # sessions before the score is out of "provisional"
 def _live_tag():
-    """The live strategy tag, computed by backtest_engine from the rules + len(sector_mapping.tradable_symbols)
-    (e.g. C6-U91-T20-MW30-E5): adding or removing a stock in sector_mapping.py changes the U-count by itself."""
+    """The live strategy tag from backtest_engine (e.g. C6-U91-T20-MW30-E5). U = the stocks actually scored: the list in
+    sector_mapping.py minus the ones with under 200 days of history, so the count changes by itself."""
     try:
         import backtest_engine as be
         return be.WINNER["tag"]
-    except Exception:   # engine not importable: same label from the stock list (the rules part as in WINNER)
+    except Exception:   # engine not importable: rough label from the stock list (short-history stocks not removed)
         import sector_mapping as sm
         return f"C6-U{len(sm.tradable_symbols)}-T20-MW30-E5"
 
