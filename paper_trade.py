@@ -468,6 +468,13 @@ def build_orders(targets, account_size, positions=None, prices=None, min_value=1
     return orders.sort_values(["Side", "Symbol"], key=lambda s: s.map(order).fillna(3) if s.name == "Side" else s).reset_index(drop=True)
 
 
+def invested_after(orders):
+    """Dollars held after the plan at the plan prices: Target_Shares x Price, and for rows without a Target_Shares (a
+    fail-closed HOLD or a SKIP - nothing is traded) the shares already held. Display only (dry-run summary)."""
+    shares = pd.to_numeric(orders["Target_Shares"], errors="coerce").fillna(pd.to_numeric(orders["Current_Shares"], errors="coerce"))
+    return float((shares.fillna(0) * pd.to_numeric(orders["Price"], errors="coerce").fillna(0)).sum())
+
+
 def build_swap_orders(swaps, account_size, positions=None, prices=None, fractional=False):
     """Orders for mid-week swaps: SELL every share of `Sell`, BUY `Buy` with the same dollars (shares x latest close).
     Exit rows (Action SELL, no Buy): SELL every share of `Sell` only - the cash stays idle until the weekly rebalance.
@@ -1970,7 +1977,7 @@ def main(argv=None):
         print(f"\nBuys ${buys:,.2f} · Sells ${sells:,.2f} (swaps: same dollars, whole shares; exits: sell only - "
               "the cash stays idle until the Friday rebalance)")
     else:
-        held_after = (orders["Target_Shares"].fillna(0) * orders["Price"].fillna(0)).sum()
+        held_after = invested_after(orders)
         print(f"\nBuys ${buys:,.2f} · Sells ${sells:,.2f} · invested after ≈ ${held_after:,.2f} · cash after ≈ ${account_size - held_after:,.2f}")
     if a.out:
         orders.to_csv(a.out, index=False)

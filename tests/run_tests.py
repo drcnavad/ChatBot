@@ -37,6 +37,8 @@
                          fill-check / finished rows (which run, steps OK, money moved, next, what to do)
   test_live_weights.py   live weights: 99% target, each rounded down to a 2-decimal percent (never over 100%),
                          halving on top, build_orders still rejects >100%, the 1% cushion does not trim a 99% plan
+  test_band_hold.py      band-hold rebalance math (above / below / mixed band holds, worst case, regime off, E5 skip,
+                         sector cap, rounding, 99% once, sells fund buys) + fake-broker runs of Fri 10/2 and Mon 10/5
   test_strategy_health.py  strategy_health.py: reference parsing, equity stats, trend/drawdown/Sharpe
                          bands, composite score levels, regime detection, fail-soft on missing files
                          (synthetic data, no network, no streamlit)
@@ -53,7 +55,7 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
          "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_live_safety.py", "test_fill_check_fractional.py",
          "test_paper_trade_math_audit.py", "test_run_log.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
          "test_strategy_health.py", "test_live_rules_audit.py", "test_catch_up.py",
-         "test_alpaca_api_names.py", "test_live_weights.py"]
+         "test_alpaca_api_names.py", "test_live_weights.py", "test_band_hold.py"]
 
 
 def main():

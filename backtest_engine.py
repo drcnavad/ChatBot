@@ -864,8 +864,8 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
     "exit" is a symbol whose target went to 0: its position is closed entirely. A "hold" (target
     positive on both decisions) is left untouched, so positions drift with prices between decisions.
     The book starts flat, so at `start` every positive target is an add.
-    rebalance: kept for backward compatibility; trading is driven by target changes, so the flag no
-    longer affects behavior.
+    rebalance: the weekly decision days. With band=None it has no effect (trading is driven by target changes);
+    with a band, the day after a rebalance day is when every held pick is brought back to its weight.
     A holding whose bars end (delisted) is liquidated at the last available close (normal cost) on
     the first session with no bars, instead of being carried at a frozen price.
     Accounting starts flat with equity 1.0 just before the open of `start`; the order from the
