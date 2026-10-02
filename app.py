@@ -1693,7 +1693,7 @@ def render_health():
     rep = sh.build_report(*sh.default_paths(ROOT))
     ref = rep["ref"]
     st.markdown("**Strategy health** — live account vs the backtest "
-                f"(C6-U96-T20-MW30-E5 walk-forward: Sharpe {ref['sharpe']:.2f}, max DD {ref['max_dd_pct']:.1f}%, "
+                f"({sh.LIVE_STRATEGY} walk-forward: Sharpe {ref['sharpe']:.2f}, max DD {ref['max_dd_pct']:.1f}%, "
                 f"win rate {ref['win_rate_pct']:.1f}%, CAGR {ref['cagr_pct']:.1f}%)")
     if rep["data_state"] == "empty":
         st.info("No live account history yet — `Reports/live_account_history.csv` is written by the pipeline's "

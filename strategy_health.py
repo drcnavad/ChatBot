@@ -1,8 +1,8 @@
 """Strategy health monitor: is the live strategy behaving like its backtest said it would?
 
-The backtest (Reports/backtest_summary.csv, live config C6-U96-T20-MW30-E5, walk-forward
-2022-04-01 -> 2026-09-24) says:
-    Sharpe 1.35 | never-seen Sharpe 0.60 | Max drawdown -30.8% | Win rate 45.5% | CAGR 43.4%
+The backtest (Reports/backtest_summary.csv, live config C6-U91-T20-MW30-E5, live 99% weights, walk-forward
+2022-04-01 -> 2026-09-24; rerun 2026-10-01 for the 91-stock universe) says:
+    Sharpe 1.42 | never-seen Sharpe 0.76 | Max drawdown -26.9% | Win rate 56.3% | CAGR 45.3%
 This module compares the LIVE account against those reference stats and answers:
 "normal pain, or is the edge gone?"
 
@@ -41,12 +41,12 @@ import pandas as pd
 ROLL_WINDOW = 63          # sessions for the rolling Sharpe
 WARMUP_MIN = 10           # sessions before any score is shown
 FULL_MIN = 63             # sessions before the score is out of "provisional"
-LIVE_STRATEGY = "C6-U96-T20-MW30-E5"
+LIVE_STRATEGY = "C6-U91-T20-MW30-E5"   # == backtest_engine.WINNER["tag"] (checked in tests/test_strategy_health.py)
 
-# --- reference fallbacks (from backtest_summary.csv walk-forward row, 2026-09-25) ---
+# --- reference fallbacks (from backtest_summary.csv walk-forward row, 2026-10-01: C6-U91, live 99% weights) ---
 # Used only if the CSV is missing; the CSV is the authority when present.
-_REF_FALLBACK = {"sharpe": 1.3483, "sharpe_neverseen": 0.5958, "max_dd_pct": -30.7608,
-                 "win_rate_pct": 45.4545, "cagr_pct": 43.4459, "qqq_sharpe": 0.8458}
+_REF_FALLBACK = {"sharpe": 1.4178, "sharpe_neverseen": 0.7637, "max_dd_pct": -26.9070,
+                 "win_rate_pct": 56.3043, "cagr_pct": 45.2852, "qqq_sharpe": 0.8458}
 
 
 def load_reference(summary_csv):

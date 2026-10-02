@@ -31,7 +31,7 @@ FAIL = []
 MD = MarkdownIt("commonmark", {"html": True})
 VOID = {"br", "img", "hr", "meta", "link", "input"}
 MA_NAMES = ["MA 10", "MA 30", "MA 50", "MA 100", "MA 200"]
-TICKERS = ["MRK", "AAPL", "QQQ", "APA", "TRGP", "CRDO", "RBRK", "COF"]   # original 78, U91 and U96 names + the benchmark
+TICKERS = ["MRK", "AAPL", "QQQ", "APA", "TRGP", "CRDO", "RBRK", "COF"]   # original 78, high-beta and emerging-tech additions + the benchmark
 SIG = pd.read_csv("Reports/signal_analysis.csv", parse_dates=["Date"])
 DEC = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
 

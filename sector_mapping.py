@@ -382,7 +382,7 @@ symbol_name = {
 }
 
 
-# --- Universe expansion: tested 2026-09-24; "u96" (= high_beta_91 + 5 emerging tech) LIVE by user decision (see EXPANDED_UNIVERSE) ------------------------------------------------------------------
+# --- Universe expansion: tested 2026-09-24; "u91" (= base list + high_beta_91 additions + 5 emerging tech) LIVE by user decision (see EXPANDED_UNIVERSE) ------------------------------------------------------------------
 # Fixed rule (not hand-picked): for every sector with fewer than 10 stocks above, add the largest holdings of that sector's
 # SPDR ETF by ETF weight (SSGA daily holdings files, "As of 23-Sep-2026"), skipping names already listed and second share
 # classes (GOOG, FOX, NWS); Technology already had 42, so nothing was added there. All added names have Alpaca daily bars
@@ -391,15 +391,20 @@ symbol_name = {
 # Reports/universe_expansion_comparison.csv.
 # ONE-STEP GO-LIVE: set EXPANDED_UNIVERSE = "fast_sectors_98" (see below), "existing_sectors" (+24 names in the 7 sectors already covered) or "all_sectors"
 # (+64: also 10 each for Consumer Staples, Materials, Real Estate, Utilities), then run `python run_all.py`.
-EXPANDED_UNIVERSE = "u96"   # LIVE since 2026-09-24 (user decision): tag C6-U96 = "high_beta_91" + 5 emerging-tech names = 96 stocks.
-# (With backtest_engine.WINNER["midweek_swap"] on - live since 2026-09-24 - the tag becomes C6-U96-MW.)
-#   History of this switch (all 2026-09-24, user decisions):
+EXPANDED_UNIVERSE = "u91"   # LIVE since 2026-10-01 (user decision): tag C6-U91 = the stock_symbols list above (ADBE AFRM MU SOFI MDB MSTR
+# removed, TTWO added) + the high_beta_91 additions + 5 emerging-tech names = 91 stocks. The tag counts the stocks (backtest_engine).
+# (With backtest_engine.WINNER["midweek_swap"] on - live since 2026-09-24 - the tag becomes C6-U91-MW...; live: C6-U91-T20-MW30-E5.)
+# 2026-09-24 .. 09-30 the same groups on the old base list were "u96" (96 stocks, tag C6-U96); docs/universe_u91_vs_u96.py compares them.
+#   History of this switch (2026-09-24 user decisions, then the 2026-10-01 list change):
 #     None           -> the original 78 stocks (tag C6)
-#     "high_beta_91" -> 78 + 13 names with 2019-2021 beta >= 1.5 (tag C6-U91). It FAILED the pre-declared never-seen 2022-04..2024-09
+#     "high_beta_91" -> 78 + 13 names with 2019-2021 beta >= 1.5 (then tagged C6-U91; NOT today's C6-U91). It FAILED the pre-declared never-seen 2022-04..2024-09
 #                       test (Sharpe 0.72 vs 0.92 for the 78) and was adopted by user choice for its recent strength.
-#     "u96"          -> U91 + CRDO NBIS LITE CLS RBRK (Technology; tag C6-U96). HINDSIGHT: picked on 2026-09-24 news after large
-#                       run-ups, so any backtest including them is flattered.
-#   REVERT: EXPANDED_UNIVERSE = "high_beta_91" (U91) or None (78), then `python run_all.py` (tracking rows keep their Rules label).
+#     "u96"          -> high_beta_91 + CRDO NBIS LITE CLS RBRK (Technology; tag C6-U96). HINDSIGHT: picked on 2026-09-24 news after
+#                       large run-ups, so any backtest including them is flattered.
+#     "u91" (2026-10-01) -> same groups, base list without ADBE AFRM MU SOFI MDB MSTR, with TTWO (91 stocks, tag C6-U91). HINDSIGHT again:
+#                       chosen after seeing 2026 results; MU and MSTR were big past winners.
+#   REVERT to U96: restore the 6 names / drop TTWO in stock_symbols (git show 80ef6d0~1:sector_mapping.py), then `python run_all.py`
+#   (tracking rows keep their Rules label).
 #   "fast_sectors_98" (+20 = 98, user revision 2026-09-24): keep the 78, add 5 names to each of the 4 sector ETFs with the highest
 #   beta to SPY over 2019-2021 among XLE/XLF/XLI/XLY/XLV/XLB (XLE 1.32, XLF 1.19, XLI 1.10, XLB 1.08; XLY 1.00 and XLV 0.82 not
 #   chosen; Communication Services / Staples / Utilities / Real Estate / Technology get nothing). Per sector: top 30 holdings not
@@ -433,7 +438,7 @@ for _sector, _syms in {**EXPANSION_EXISTING_SECTORS, **EXPANSION_NEW_SECTORS}.it
         symbol_name.setdefault(_s, _EXPANSION_NAMES.get(_s, _s))
 #   "high_beta_91" / "high_beta_84" (user revision 2026-09-24): only the U98 additions with 2019-2021 beta >= 1.5 (13 names -> 91)
 #   or >= 1.75 (6 names -> 84); betas in Reports/universe_expansion_u98_added.csv.
-# "u96" (user decision 2026-09-24): U91 + 5 emerging-tech names, all Technology (XLK). Short histories are handled by the 200-bar
+# "u91" (was "u96" until 2026-10-01; user decision 2026-09-24): high_beta_91 + 5 emerging-tech names, all Technology (XLK). Short histories are handled by the 200-bar
 # eligibility rule (CRDO listed 2022-01-27, RBRK IPO 2024-04-25); NBIS bars before 2024-10-21 are Yandex N.V. history incl. a flat,
 # zero-volume 2022-24 trading halt, so they are cut by HISTORY_START (applied in backtest_engine.fetch_daily_bars / load_bars).
 EXPANSION_EMERGING_TECH = ['CRDO', 'NBIS', 'LITE', 'CLS', 'RBRK']
@@ -453,10 +458,10 @@ for _sector, _syms in EXPANSION_FAST_SECTORS.items():
         symbol_sector[_s] = _sector
         symbol_name.setdefault(_s, _FAST_NAMES.get(_s, _EXPANSION_NAMES.get(_s, _s)))
 if EXPANDED_UNIVERSE:
-    assert EXPANDED_UNIVERSE in ("existing_sectors", "all_sectors", "fast_sectors_98", "high_beta_91", "high_beta_84", "u96"), EXPANDED_UNIVERSE
+    assert EXPANDED_UNIVERSE in ("existing_sectors", "all_sectors", "fast_sectors_98", "high_beta_91", "high_beta_84", "u91"), EXPANDED_UNIVERSE
     _groups = ([{k: [x for x in v if x in _HIGH_BETA["high_beta_91"]] for k, v in EXPANSION_FAST_SECTORS.items()},
                 {'Technology': EXPANSION_EMERGING_TECH}]
-               if EXPANDED_UNIVERSE == "u96" else
+               if EXPANDED_UNIVERSE == "u91" else
                [{k: [x for x in v if x in _HIGH_BETA[EXPANDED_UNIVERSE]] for k, v in EXPANSION_FAST_SECTORS.items()}]
                if EXPANDED_UNIVERSE in _HIGH_BETA else
                [EXPANSION_FAST_SECTORS] if EXPANDED_UNIVERSE == "fast_sectors_98" else

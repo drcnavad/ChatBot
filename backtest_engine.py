@@ -79,20 +79,20 @@ WINNER = {
     # weekday if it is a holiday, skipped when it is the week's last session = the Friday rebalance): if a NOT-held stock ranks in
     # the top `enter_top` AND a held stock ranks below `exit_below`, the worst-ranked held stock is sold and the best new
     # entrant bought with the same weight (sector cap respected; repeated while pairs qualify); filled at the next open.
-    # REVERT: set "midweek_swap": None and rerun `python run_all.py` -> plain weekly C6-U96 (tag loses "-MW").
+    # REVERT: set "midweek_swap": None and rerun `python run_all.py` -> plain weekly C6-U91 (tag loses "-MW").
     "midweek_swap": {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]},
     # Mid-week exit (LIVE from 2026-09-25, user decision; variant S3 of Reports/sell_rule_test.csv: +421.6% / Sharpe 1.47 / max DD
     # -32.2% / never-seen Sharpe 0.82 vs plain MW +438.1% / 1.46 / -31.8% / 0.84). At each Mon/Wed check, AFTER the swap step
     # above: every holding ranked worse than this (or no longer qualifying) is sold at the next open and the cash stays idle
-    # until the Friday rebalance. Needs "midweek_swap" on. Tag gets "30" (C6-U96-MW30).
-    # REVERT: set "midweek_exit_below": None and rerun `python run_all.py` -> plain C6-U96-MW.
+    # until the Friday rebalance. Needs "midweek_swap" on. Tag gets "30" (C6-U91-MW30).
+    # REVERT: set "midweek_exit_below": None and rerun `python run_all.py` -> plain C6-U91-MW.
     "midweek_exit_below": 30,
     # Selection from ranks 1-20 only (LIVE from 2026-09-25, user decision, not a tested rule). Weekly: walk ranks 1..20 with the
     # max-4-per-sector cap; if fewer than n are filled, fill the rest from the unused ranks 1..20 in rank order IGNORING the
     # sector cap; never pick worse than rank 20; fewer than n qualifying names -> the rest stays cash. Mid-week (cap_soft):
     # a non-held top-3 stock always qualifies regardless of sector and replaces the worst-ranked holding below 15.
-    # Tag gets "-T20" (C6-U96-T20-MW30); "-T20H" if cap_soft is False (hard cap inside the top 20), "-SC" for cap_soft alone.
-    # REVERT: "max_pick_rank": None and "cap_soft": False, then `python run_all.py` -> C6-U96-MW30.
+    # Tag gets "-T20" (C6-U91-T20-MW30); "-T20H" if cap_soft is False (hard cap inside the top 20), "-SC" for cap_soft alone.
+    # REVERT: "max_pick_rank": None and "cap_soft": False, then `python run_all.py` -> C6-U91-MW30.
     "max_pick_rank": 20,
     "cap_soft": True,
     # Earnings rule (LIVE from 2026-09-25, user decision, not a tested rule): a stock that is NOT held is not bought when its
@@ -111,8 +111,9 @@ WINNER = {
 
 # Universe label: when the tested universe expansion is switched on (sector_mapping.EXPANDED_UNIVERSE), tracking rows and the
 # app say e.g. "C6-U142" so rows from the 78-stock universe stay distinguishable. No effect while the switch is None.
-# LIVE since 2026-09-24 (user decision): EXPANDED_UNIVERSE = "u96" -> tag C6-U96 (U91 + CRDO NBIS LITE CLS RBRK; ranks 1-10, max 4 per
-# sector, RS vs sector ETF). Before that: "high_beta_91" -> C6-U91, None -> C6 (78 stocks).
+# LIVE: EXPANDED_UNIVERSE = "u91" -> tag C6-U91 (since 2026-10-01, user decision: the 96 below minus ADBE AFRM MU SOFI MDB MSTR,
+# plus TTWO). 2026-09-24 .. 09-30: "u96" -> C6-U96 (high_beta_91 + CRDO NBIS LITE CLS RBRK; ranks 1-10, max 4 per sector, RS vs
+# sector ETF). Earlier on 2026-09-24: "high_beta_91" (a different 91-stock list, also tagged C6-U91; no tracking rows) and None -> C6 (78).
 if getattr(sector_mapping, "EXPANDED_UNIVERSE", None):
     WINNER["tag"] = f'{WINNER["tag"]}-U{len(sector_mapping.tradable_symbols)}'
     WINNER["name"] = f'{WINNER["name"]} (expanded universe, {len(sector_mapping.tradable_symbols)} stocks)'
@@ -139,7 +140,8 @@ if WINNER.get("earnings_block_days"):             # no new buys shortly before e
 # Live portfolio size: the live weights (signal_analysis / strategy_picks / changes / mid-week check, read by paper_trade.py
 # and the app) are the rule weights x LIVE_INVESTED, each rounded DOWN to a 2-decimal percent (9.87% = 0.0987), so a full
 # portfolio sums to at most 99% and rounding can never push it over 100%. The regime halving is already in the rule weights
-# (a regime-off week targets at most 49.5%). Backtests and the regression tests use the unscaled rule weights.
+# (a regime-off week targets at most 49.5%). The regression tests use the unscaled rule weights; backtest.ipynb trades the
+# live weights (run_rules(..., live_sizing=True), since 2026-10-01).
 LIVE_INVESTED = 0.99
 
 
@@ -1607,9 +1609,11 @@ def backtest_inputs(refresh=False):
             "regime": regime_series(close, "QQQ"), "weekly": weekly_rebalance_days(idx, live=True)}
 
 
-def run_rules(inp, start=WALK_FORWARD_START, **overrides):
+def run_rules(inp, start=WALK_FORWARD_START, live_sizing=False, **overrides):
     """Backtest WINNER (optionally with some keys changed, e.g. run_rules(inp, midweek_exit_below=None)) from `start`.
     Fills follow the live planner (WINNER['rebalance_band']; None = adds and exits only).
+    live_sizing=True trades the LIVE weights (live_weights: rule weights x LIVE_INVESTED = 99%, floored to 0.01%) instead of
+    the rule weights - what paper_trade.py actually buys; the selection is the same either way.
     Returns {"res": simulate() output, "targets", "checks": mid-week check log, "decisions": decision log}."""
     saved = dict(WINNER)
     try:
@@ -1622,6 +1626,8 @@ def run_rules(inp, start=WALK_FORWARD_START, **overrides):
         WINNER.clear()
         WINNER.update(saved)
     full = tgt.reindex(index=inp["close"].index, columns=inp["close"].columns).fillna(0.0)
+    if live_sizing:
+        full = live_weights(full)
     block = (earnings_days_ahead(full.index, list(full.columns), load_earnings(), block_days)
              if band is not None and block_days else None)
     res = simulate(inp["open"], inp["close"], full, start, rebalance=inp["weekly"], cost=COST, band=band, block=block)

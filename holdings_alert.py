@@ -1,4 +1,4 @@
-"""Holdings alert for the live rules C6-U96-T20-MW30-E5 (presentation only - the strategy logic lives in backtest_engine).
+"""Holdings alert for the live rules C6-U91-T20-MW30-E5 (presentation only - the strategy logic lives in backtest_engine).
 
 Reads the pipeline outputs (Reports/signal_analysis.csv, Reports/strategy_midweek_check.csv) and, if present, the user's real
 holdings in my_positions.csv (project root; same format as `paper_trade.py --positions`: Symbol,Shares - Shares optional,
@@ -15,7 +15,7 @@ backtest_engine.midweek_exit_sells (WINNER["midweek_exit_below"] = 30: any holdi
 Friday rebalance; None = off). Earnings rule (WINNER["earnings_block_days"] = 5): a stock that is not held is not bought
 when its next earnings date (Reports/earnings_date.csv) is within 5 calendar days after the decision date; the alert names
 such skipped stocks ("MU rank 2 not bought: earnings in 5 days (Wed Sep 30)"). Held stocks are never sold for earnings.
-Stocks outside the 96-stock universe count as not ranked (below rank 15 and worse than 30). No network calls.
+Stocks outside the live universe (sector_mapping.tradable_symbols, 91 stocks) count as not ranked (below rank 15 and worse than 30). No network calls.
 
     python holdings_alert.py                 # print the alert (uses my_positions.csv if it exists)
     python holdings_alert.py --positions f.csv | --strategy

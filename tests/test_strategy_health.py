@@ -27,8 +27,8 @@ def _tmp(csv_text):
 
 # --- reference parsing ---------------------------------------------------------------
 SUMMARY = """Strategy,Period,Start,End,Total Return %,CAGR %,Sharpe,Max DD %,Trades,Win rate %,Median trade %,Median hold (sessions)
-C6-U96-T20-MW30-E5,Walk-forward,2022-04-01,2026-09-24,399.9,43.45,1.3483,-30.76,1021.0,45.45,-0.74,6.0
-C6-U96-T20-MW30-E5,Never-seen 2022-04 → 2024-09,2022-04-01,2024-09-16,33.2,12.42,0.5958,-29.33,,,,
+C6-U91-T20-MW30-E5,Walk-forward,2022-04-01,2026-09-24,399.9,43.45,1.3483,-30.76,1021.0,45.45,-0.74,6.0
+C6-U91-T20-MW30-E5,Never-seen 2022-04 → 2024-09,2022-04-01,2024-09-16,33.2,12.42,0.5958,-29.33,,,,
 QQQ buy & hold,Walk-forward,2022-04-01,2026-09-24,110.1,18.11,0.8458,-29.07,,,,
 """
 p = _tmp(SUMMARY)
@@ -42,7 +42,12 @@ expect(abs(ref["qqq_sharpe"] - 0.8458) < 1e-9, "ref qqq sharpe")
 os.remove(p)
 
 ref_missing = sh.load_reference("/nonexistent/file.csv")
-expect(abs(ref_missing["sharpe"] - 1.3483) < 1e-9, "fallback ref used when CSV missing")
+expect(abs(ref_missing["sharpe"] - 1.4178) < 1e-9, "fallback ref used when CSV missing")
+import backtest_engine as be  # noqa: E402  (settings only)
+expect(sh.LIVE_STRATEGY == be.WINNER["tag"], f"strategy_health.LIVE_STRATEGY {sh.LIVE_STRATEGY} != live tag {be.WINNER['tag']}")
+_real = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Reports", "backtest_summary.csv")
+if os.path.exists(_real):   # the saved backtest must carry the live tag, or the health page silently falls back
+    expect((pd.read_csv(_real)["Strategy"] == sh.LIVE_STRATEGY).any(), f"Reports/backtest_summary.csv has no {sh.LIVE_STRATEGY} rows")
 
 
 def _hist(prices, start="2026-09-28"):
