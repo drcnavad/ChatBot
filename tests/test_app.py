@@ -31,7 +31,10 @@ FAIL = []
 MD = MarkdownIt("commonmark", {"html": True})
 VOID = {"br", "img", "hr", "meta", "link", "input"}
 MA_NAMES = ["MA 10", "MA 30", "MA 50", "MA 100", "MA 200"]
-TICKERS = ["MRK", "AAPL", "QQQ", "APA", "TRGP", "CRDO", "RBRK", "COF"]   # original 78, high-beta and emerging-tech additions + the benchmark
+_FIRST_PER_SECTOR = {}
+for _s in sm.tradable_symbols:                 # from the stock list: the first stock of each sector (up to 7) + the benchmark
+    _FIRST_PER_SECTOR.setdefault(sm.symbol_sector.get(_s), _s)
+TICKERS = list(_FIRST_PER_SECTOR.values())[:7] + ["QQQ"]
 SIG = pd.read_csv("Reports/signal_analysis.csv", parse_dates=["Date"])
 DEC = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
 

@@ -1,5 +1,5 @@
 """Regression: the LIVE engine (backtest_engine.winner_targets) reproduces the tested backtests exactly, on the live universe
-(sector_mapping.tradable_symbols; 91 stocks since 2026-10-01 = tag C6-U91):
+(sector_mapping.tradable_symbols; pinned for the 91-stock list of 2026-10-01 = tag C6-U91, see PINNED_UNIVERSE):
   1. plain C6-U91-MW (Mon/Wed top 3 in / below 15 out):  +463.17%, Sharpe 1.4156, never-seen 0.7617
   2. C6-U91-MW30 (+ sell anything worse than rank 30 at the Mon/Wed checks): +466.67%, Sharpe 1.4423, never-seen 0.7584
   3. C6-U91-T20-MW30 (picks only from ranks 1-20, sector cap relaxed to fill 10 slots, top-3 swaps ignore the cap):
@@ -14,6 +14,7 @@
 Compares targets, swap and sell logs with the independent re-implementation in tests/backtest_setup.py, and the live
 pipeline's decision history (Reports/strategy_decisions.csv) with the test over the overlapping window.
 Run: python tests/run_tests.py  (or PYTHONPATH=. python tests/test_midweek_repro.py)"""
+import hashlib
 import os
 import sys
 
@@ -26,13 +27,19 @@ import backtest_engine as be
 import backtest_setup as g
 
 # (exit_below, t20, earnings rule) -> (total return %, Sharpe) at 0.1%/side, and the never-seen 2022-04 -> 2024-09 Sharpe
-# pinned for the 91-stock universe (C6-U91); a different universe changes them - re-baseline only after the exactness checks pass
-UNIVERSE = 91
+# pinned for ONE stock list (C6-U91 of 2026-10-01, fingerprint below). After a stock is added to / removed from
+# sector_mapping.py the pins are skipped (loudly) - the exactness checks against the independent re-implementation and the
+# live history still run; re-baseline the numbers deliberately once they pass.
+PINNED_UNIVERSE = "82c08da0d768"   # sha1 of the sorted tradable_symbols, first 12 hex
+FINGERPRINT = hashlib.sha1(",".join(sorted(g.U)).encode()).hexdigest()[:12]
+PINNED = FINGERPRINT == PINNED_UNIVERSE
 EXPECTED = {(None, False, False): (463.17, 1.4156), (30, False, False): (466.67, 1.4423), (30, True, False): (451.51, 1.3227),
             (30, True, True): (414.17, 1.2700)}
 EXPECTED_NEVER_SEEN = {(None, False, False): 0.7617, (30, False, False): 0.7584, (30, True, False): 0.5887,
                        (30, True, True): 0.5887}
-assert len(g.U) == UNIVERSE, f"live universe has {len(g.U)} stocks, the pins are for {UNIVERSE}: re-baseline deliberately"
+if not PINNED:
+    print(f"SKIP PINNED NUMBERS: the stock list changed ({len(g.U)} stocks, fingerprint {FINGERPRINT} != {PINNED_UNIVERSE}); "
+          f"exactness checks still run - re-baseline EXPECTED / PINNED_UNIVERSE once they pass")
 MW = {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]}
 
 
@@ -64,7 +71,7 @@ def check(exit_all, t20=False, e5=False):
     if e5:
         skips = [c for c in chk if "earnings in" in str(c.get("Note", ""))]
         print(f"[{label}] mid-week checks where an earnings block stopped a swap: {len(skips)}")
-    if EXPECTED[(exit_all, t20, e5)] is not None:
+    if PINNED and EXPECTED[(exit_all, t20, e5)] is not None:
         assert (round(m["Total Return %"], 2), round(m["Sharpe"], 4)) == EXPECTED[(exit_all, t20, e5)], m
         assert round(ns["Sharpe"], 4) == EXPECTED_NEVER_SEEN[(exit_all, t20, e5)], ns
     if exit_all is not None:
@@ -85,8 +92,15 @@ swaps_test, sells_test = {(None, False, False): plain, (30, False, False): mw30,
                           (30, True, True): e5}[(live_exit, live_t20, live_e5)]
 
 # --- the live pipeline output (shorter data window) agrees with the test over the overlap ---
-if be.WINNER.get("midweek_swap"):
-    dec = pd.read_csv(os.path.join(be.REPORTS_DIR, "strategy_decisions.csv"), parse_dates=["Date"])
+_dec_path = os.path.join(be.REPORTS_DIR, "strategy_decisions.csv")
+_sa = pd.read_csv(os.path.join(be.REPORTS_DIR, "signal_analysis.csv"), usecols=["Date", "Symbol"])
+_run_list = set(_sa.loc[_sa.Date == _sa.Date.max(), "Symbol"]) - set(be.BENCHMARKS)   # the list of the last pipeline run
+_list_changed = _run_list != set(g.U)
+if _list_changed:
+    print(f"SKIP live-history check: the stock list changed since the last main_signal_analysis run (added "
+          f"{sorted(set(g.U) - _run_list)}, removed {sorted(_run_list - set(g.U))}) - it runs again after the next pipeline run")
+if be.WINNER.get("midweek_swap") and not _list_changed:
+    dec = pd.read_csv(_dec_path, parse_dates=["Date"])
     first_live = dec.Date.min() + pd.Timedelta(days=7)          # after the first live weekly decision
     adds = dec[(dec.Status == "add") & dec.Reason.astype(str).str.startswith("mid-week swap in")]
     live_pairs = {(d, s, r.split("replaces ")[1].split(" ")[0]) for d, s, r in zip(adds.Date, adds.Symbol, adds.Reason) if d >= first_live}

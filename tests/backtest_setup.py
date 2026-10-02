@@ -15,7 +15,9 @@ warnings.filterwarnings("ignore")
 
 U = list(sm.tradable_symbols)
 WF, NEVER_END = "2022-04-01", "2024-09-16"          # walk-forward start; never-seen segment ends 2024-09-16
-bars, _ = be.load_bars(refresh=False, cache_name="bars_daily_long.pkl")
+bars, _ = be.load_bars(refresh=False, cache_name="bars_daily_long.pkl")   # appends a stock new in sector_mapping (or names it)
+_missing = sorted(set(U) - set(bars["Symbol"]))
+assert not _missing, f"backtest bar cache has no bars for {_missing} (new in sector_mapping.py): run be.ensure_long_cache()"
 tech = be.build_technical(bars, symbols=U)
 C, O = be.wide(bars, "Close"), be.wide(bars, "Open")
 idx = C.index

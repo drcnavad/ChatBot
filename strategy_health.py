@@ -41,7 +41,18 @@ import pandas as pd
 ROLL_WINDOW = 63          # sessions for the rolling Sharpe
 WARMUP_MIN = 10           # sessions before any score is shown
 FULL_MIN = 63             # sessions before the score is out of "provisional"
-LIVE_STRATEGY = "C6-U91-T20-MW30-E5"   # == backtest_engine.WINNER["tag"] (checked in tests/test_strategy_health.py)
+def _live_tag():
+    """The live strategy tag, computed by backtest_engine from the rules + len(sector_mapping.tradable_symbols)
+    (e.g. C6-U91-T20-MW30-E5): adding or removing a stock in sector_mapping.py changes the U-count by itself."""
+    try:
+        import backtest_engine as be
+        return be.WINNER["tag"]
+    except Exception:   # engine not importable: same label from the stock list (the rules part as in WINNER)
+        import sector_mapping as sm
+        return f"C6-U{len(sm.tradable_symbols)}-T20-MW30-E5"
+
+
+LIVE_STRATEGY = _live_tag()   # no saved backtest rows under a new tag yet -> the reference fallbacks below (rerun the backtest)
 
 # --- reference fallbacks (from backtest_summary.csv walk-forward row, 2026-10-01: C6-U91, live 99% weights) ---
 # Used only if the CSV is missing; the CSV is the authority when present.

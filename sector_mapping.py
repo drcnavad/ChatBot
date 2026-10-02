@@ -476,21 +476,16 @@ BENCHMARK_SYMBOLS = ["SPY", "QQQ"]
 # Tradable universe = stock_symbols minus ETFs (QQQ is a benchmark, not a stock)
 tradable_symbols = [s for s in dict.fromkeys(stock_symbols) if s not in BENCHMARK_SYMBOLS]
 
-# Extra fundamentals watchlist: company_report_autofetch.py fetches these + tradable_symbols
-fundamentals_watchlist = [
-    "AAPL", "ADBE", "AFRM", "AMD", "AMZN", "ANET", "APP", "AVAV", "AVGO", "AXON",
-    "BBAI", "BIIB", "BKR", "CDNS", "COIN", "CRM", "CRSP", "CRWD", "CRWV", "CVLT",
-    "DASH", "DDOG", "DUOL", "ELF", "ENPH", "FANG", "FIG", "FTNT", "GOOGL", "GTLB",
-    "HAL", "HIMS", "HOOD", "HUBS", "INTC", "INTU", "IONQ", "IREN", "ISRG", "KLAC",
-    "KVYO", "LIN", "LLY", "LMT", "LRCX", "MA", "MCK", "MDB", "MELI", "META",
-    "MNDY", "MRK", "MRVL", "MSFT", "MSTR", "MU", "NEE", "NET", "NFLX", "NOC",
-    "NOW", "NU", "NVDA", "ORCL", "PANW", "PLTR", "POOL", "RCL", "REGN", "RTX",
-    "SLB", "SNOW", "SOFI", "TEAM", "TEM", "TMO", "TOST", "TSLA", "TTD", "UBER",
-    "UI", "UNH", "UPST", "VEEV", "VRT", "WDAY", "XOM", "ZS", "ZENA", "UMAC",
-    "SHOP", "NBIS", "NEM", "NKE", "PAYX", "PCTY", "PATH", "ZBRA", "SYM", "ABNB",
-    "ARM", "ASML", "BAC", "CDW", "CELH", "CVX", "FCX", "GLW", "HD", "IT",
-    "JOBY", "NUE", "NVO",
+# Fundamentals-only watchlist (company reports, never traded): names OUTSIDE stock_symbols. company_report_autofetch.py
+# fetches fundamentals_symbols = every tradable stock above + these. Add/remove a stock in stock_symbols and it is added to /
+# dropped from the fundamentals as well (a removed stock stays only if it is listed here).
+fundamentals_extra = [
+    "ABNB", "ASML", "AXON", "BAC", "BBAI", "CDW", "CELH", "CRSP", "CRWD", "CVX", "DDOG", "DUOL",
+    "ELF", "GLW", "HD", "HUBS", "INTC", "ISRG", "IT", "KLAC", "KVYO", "LIN", "LLY", "MA",
+    "MELI", "MNDY", "NEE", "NEM", "NET", "NKE", "NU", "NUE", "NVO", "PATH", "PAYX", "PCTY",
+    "PLTR", "POOL", "RTX", "SYM", "TMO", "TOST", "TTD", "WDAY", "XOM", "ZBRA", "ZENA",
 ]
+fundamentals_symbols = sorted(set(tradable_symbols) | set(fundamentals_extra))
 
 
 def sector_etf_for(symbol):

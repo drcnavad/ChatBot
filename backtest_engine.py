@@ -289,15 +289,61 @@ def drop_partial_last_bar(bars, now=None, close_buffer_min=30):
     return bars, False
 
 
+def missing_from_cache(cache_name=LONG_CACHE):
+    """Symbols of sector_mapping (tradable + benchmarks + sector ETFs) with no bars in the backtest cache, e.g. a stock just
+    added to sector_mapping.py. [] = complete. (Removed stocks may stay in the cache: everything ranks TRADABLE only.)"""
+    path = CACHE_DIR / cache_name
+    want = TRADABLE + BENCHMARKS + SECTOR_ETFS
+    if not path.exists():
+        return sorted(want)
+    return sorted(set(want) - set(pd.read_pickle(path)["Symbol"].unique()))
+
+
+def ensure_long_cache(cache_name=LONG_CACHE, start=LONG_START, data_client=None):
+    """A stock added to sector_mapping.py gets its backtest history automatically: the bars of every missing symbol
+    (missing_from_cache) are fetched from Alpaca's free market data, `start` -> the cache's last date, and appended; the
+    other symbols are untouched. Returns the symbols added. Raises a clear error naming the missing stocks when the fetch
+    fails (no keys / network); a symbol Alpaca has no bars for is reported (warning) and skipped."""
+    path = CACHE_DIR / cache_name
+    if not path.exists():
+        return []                                   # load_bars fetches the whole cache
+    cached = pd.read_pickle(path)
+    missing = sorted(set(TRADABLE + BENCHMARKS + SECTOR_ETFS) - set(cached["Symbol"].unique()))
+    if not missing:
+        return []
+    last = cached["Date"].max()
+    try:
+        new = fetch_daily_bars(missing, start=start, end=last + pd.Timedelta(days=1), data_client=data_client)
+    except Exception as e:
+        raise RuntimeError(f"backtest bar cache {path.name} has no bars for {missing} (new in sector_mapping.py) and fetching "
+                           f"them failed: {e}. Fix: run with network + Alpaca keys: python -c \"import backtest_engine as be; "
+                           f"print(be.ensure_long_cache())\"") from e
+    new = new[new["Date"] <= last]
+    got = sorted(set(new["Symbol"]))
+    if got:
+        out = pd.concat([cached, new[cached.columns]], ignore_index=True).sort_values(["Symbol", "Date"]).reset_index(drop=True)
+        tmp = path.with_suffix(".tmp")
+        out.to_pickle(tmp)
+        tmp.replace(path)
+        log.warning("backtest bar cache: added %s (%s -> %s)", got, new["Date"].min().date(), last.date())
+    still = sorted(set(missing) - set(got))
+    if still:
+        log.warning("backtest bar cache: Alpaca has no bars for %s - check the ticker in sector_mapping.py", still)
+    return got
+
+
 def load_bars(refresh=False, cache_name=LONG_CACHE, start=LONG_START):
     """All bars needed by the backtest (tradable + benchmarks + sector ETFs), cached under Reports/cache.
-    The cache is refetched when asked, when it is missing, or when it starts later than `start`."""
+    The cache is refetched when asked, when it is missing, or when it starts later than `start`; a stock added to
+    sector_mapping.py since the last fetch is appended (ensure_long_cache)."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = CACHE_DIR / cache_name
     stale = not path.exists() or pd.read_pickle(path)["Date"].min() > pd.Timestamp(start) + pd.Timedelta(days=7)
     if refresh or stale:
         bars = fetch_daily_bars(TRADABLE + BENCHMARKS + SECTOR_ETFS, start=start)
         bars.to_pickle(path)
+    else:
+        ensure_long_cache(cache_name, start)
     bars = apply_history_start(pd.read_pickle(path))
     bars, dropped = drop_partial_last_bar(bars)
     return bars, dropped

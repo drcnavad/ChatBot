@@ -6,9 +6,9 @@ It picks the mode by itself (clock in US Central time):
          (the first session on/after Mon/Wed, e.g. Tuesday after a Monday holiday) - backtest_engine.next_decision:
            fundamentals  company_report_autofetch.py - Alpha Vantage rotation, max 12 stocks = max 24 calls (free limit 25/day)
            processing    company_report_processing.ipynb + scoring company_report_scoring.ipynb (company reports)
-           sentiment     sentiment_analysis.ipynb online - NewsAPI 97 calls (free limit 100/day -> never twice within 24 h)
-                         + Finnhub 97 calls
-           earnings      earnings_date.ipynb online - Finnhub 97 calls (throttled below 60/min) + yfinance
+           sentiment     sentiment_analysis.ipynb online - NewsAPI 1 call per stock in sector_mapping.stock_symbols (incl. QQQ;
+                         free limit 100/day -> never twice within 24 h) + Finnhub, same count
+           earnings      earnings_date.ipynb online - Finnhub 1 call per stock (throttled below 60/min) + yfinance
            main          main_signal_analysis.ipynb - fresh Alpaca daily bars (market data only), ranks, picks, mid-week check
            validate      the report files the app reads
   QUICK  any other time: main + validate only. Zero quota APIs (only Alpaca market-data bars).
@@ -89,7 +89,7 @@ STATE_FILE = os.path.join(REPORTS, "run_state.json")
 CHECKPOINT_FILE = os.path.join(REPORTS, ".pipeline_checkpoint.json")   # watchdog resume point (see pipeline_watchdog.py)
 CT, ET = ZoneInfo("America/Chicago"), ZoneInfo("America/New_York")
 FULL_AFTER = (15, 15)                  # 3:15 PM CT - the scheduled pipeline/trade time
-NEWS_MIN_GAP_H = 24                    # NewsAPI free tier: 100 requests/day, one run = 97
+NEWS_MIN_GAP_H = 24                    # NewsAPI free tier: 100 requests/day, one run = len(stock_symbols) (N_CALLS)
 BAR_FINAL_ET = (16, 30)                # the pipeline treats the daily bar as final after 4:30 PM ET (3:30 PM CT)
 NB_TIMEOUT = 3600
 KEEP_LOGS = 30
@@ -106,7 +106,14 @@ STEPS = [
     ("backtest", "notebook", "backtest.ipynb", "backtests"),
     ("validate", "check", None, "always"),
 ]
-EXPECTED_CALLS = {"fundamentals": "Alpha Vantage <= 24", "sentiment": "NewsAPI 97 + Finnhub 97", "earnings": "Finnhub 97"}
+import sector_mapping  # noqa: E402  the stock list (single source of truth) -> the per-run API call counts
+N_CALLS = len(sector_mapping.stock_symbols)   # one news / earnings call per stock + QQQ
+NEWS_DAILY_LIMIT = 100                        # NewsAPI free tier
+EXPECTED_CALLS = {"fundamentals": "Alpha Vantage <= 24", "sentiment": f"NewsAPI {N_CALLS} + Finnhub {N_CALLS}",
+                  "earnings": f"Finnhub {N_CALLS}"}
+if N_CALLS > NEWS_DAILY_LIMIT:
+    print(f"WARNING: sector_mapping.stock_symbols has {N_CALLS} symbols - one news run needs {N_CALLS} NewsAPI calls, "
+          f"over the free limit of {NEWS_DAILY_LIMIT}/day; the last ones will fail")
 
 # Steps whose failure must NOT stop the pipeline or block the evening trade. Their
 # outputs degrade gracefully: main_signal_analysis.ipynb reuses the last good
@@ -367,7 +374,7 @@ def news_allowed(now_ct, state, force_news=False):
     gap_h = (now_ct - datetime.fromisoformat(last)).total_seconds() / 3600
     if gap_h < NEWS_MIN_GAP_H:
         return False, (f"NewsAPI already ran {gap_h:.1f} h ago ({last[:16]}); the free limit is 100 calls/day and one run "
-                       f"uses 97 - skipped (use --force-news to override)")
+                       f"uses {N_CALLS} - skipped (use --force-news to override)")
     return True, "ok"
 
 

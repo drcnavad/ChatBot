@@ -51,6 +51,11 @@ sa = pd.read_csv("Reports/signal_analysis.csv", parse_dates=["Date"])
 bars = pd.read_pickle("Reports/cache/bars_daily_long.pkl")
 close = bars.pivot(index="Date", columns="Symbol", values="Close").sort_index()
 tradable = list(sm.tradable_symbols)
+_missing = sorted(set(tradable) - set(bars["Symbol"]))
+if _missing:   # stop here with a clear message (the audit below needs every stock's bars)
+    sys.exit(f"FAIL backtest bar cache has no bars for {_missing} (new in sector_mapping.py): the next pipeline run fetches "
+             f"them (be.ensure_long_cache in main_signal_analysis.ipynb), or run python -c \"import backtest_engine as be; "
+             f"print(be.ensure_long_cache())\"")
 etf_of = {s: dict((n, e) for e, n in sm.sector_etfs.items()).get(sm.symbol_sector.get(s)) for s in tradable}
 
 # raw closes agree with the pipeline's closes?

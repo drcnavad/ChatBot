@@ -49,24 +49,9 @@ YEARS_TO_KEEP = 5
 IQR_MULT = 1.5
 COOLDOWN_DAYS = None  # None = ceil(len(ALL_SYMBOLS) / MAX_STOCKS), one full pass before repeats
 
-# Fundamentals universe: extra watchlist + every stock tracked in sector_mapping
-ALL_SYMBOLS = sorted(set([
-    "AAPL", "ADBE", "AFRM", "AMD",  "AMZN", "ANET", "APP",  "AVAV",
-    "AVGO", "AXON", "BBAI", "BIIB", "BKR",  "CDNS", "COIN", "CRM",
-    "CRSP", "CRWD", "CRWV", "CVLT", "DASH", "DDOG", "DUOL", "ELF",
-    "ENPH", "FANG", "FIG",  "FTNT", "GOOGL", "GTLB", "HAL",  "HIMS",
-    "HOOD", "HUBS", "INTC", "INTU", "IONQ", "IREN", "ISRG", "KLAC",
-    "KVYO", "LIN",  "LLY",  "LMT",  "LRCX", "MA",   "MCK",  "MDB",
-    "MELI", "META", "MNDY", "MRK",  "MRVL", "MSFT", "MSTR", "MU",
-    "NEE",  "NET",  "NFLX", "NOC",  "NOW",  "NU",   "NVDA", "ORCL",
-    "PANW", "PLTR", "POOL", "RCL",  "REGN", "RTX",  "SLB",  "SNOW",
-    "SOFI", "TEAM", "TEM",  "TMO",  "TOST", "TSLA", "TTD",  "UBER",
-    "UI",   "UNH",  "UPST", "VEEV", "VRT",  "WDAY", "XOM",  "ZS",
-    "ZENA", "UMAC", "SHOP", "NBIS", "NEM",  "NKE",  "PAYX", "PCTY",
-    "PATH", "ZBRA", "SYM",  "ABNB", "ARM",  "ASML", "BAC",  "CDW",
-    "CELH", "CVX",  "FCX",  "GLW",  "HD",   "IT",   "JOBY", "NUE",
-    "NVO",
-]) | (set(sector_mapping.stock_symbols) - {"QQQ"}))
+# Fundamentals universe: from sector_mapping.py only (every tradable stock + its fundamentals_extra watchlist), so a stock
+# added to / removed from sector_mapping is fetched / dropped automatically. No list of its own here.
+ALL_SYMBOLS = list(sector_mapping.fundamentals_symbols)
 
 # --- COLUMNS -----------------------------------------------------------------
 

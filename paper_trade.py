@@ -594,7 +594,14 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
         px.update(dict(zip(targets["Symbol"], targets["Price"])))
         px.update(live_prices)
         return build_swap_orders(meta["swaps"], account_size, positions, px, fractional=fractional), meta, targets
-    prices = {**latest_prices([s for s in positions if s not in set(targets["Symbol"])], signal_csv), **live_prices}
+    others = [s for s in positions if s not in set(targets["Symbol"])]
+    prices = {**latest_prices(others, signal_csv), **live_prices}
+    unpriced = sorted(s for s in others if _safe_number(prices.get(s), default=None) is None)
+    if unpriced:
+        # e.g. a held stock removed from sector_mapping.py: it has no rows in signal_analysis.csv any more, so it is
+        # priced from Alpaca market data (read-only) and sold completely like any non-pick.
+        print(f"  held but not in the stock list / signals: {', '.join(unpriced)} - pricing from market data to sell")
+        prices.update(current_prices(unpriced))
     # 'add' and 'hold' statuses come from the latest decision in strategy_changes.csv: both are
     # brought to target (1-point no-trade band); unknown statuses are left as they are.
     statuses = latest_signal_status(as_of=meta["as_of"])

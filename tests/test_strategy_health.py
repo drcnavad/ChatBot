@@ -26,11 +26,11 @@ def _tmp(csv_text):
 
 
 # --- reference parsing ---------------------------------------------------------------
-SUMMARY = """Strategy,Period,Start,End,Total Return %,CAGR %,Sharpe,Max DD %,Trades,Win rate %,Median trade %,Median hold (sessions)
-C6-U91-T20-MW30-E5,Walk-forward,2022-04-01,2026-09-24,399.9,43.45,1.3483,-30.76,1021.0,45.45,-0.74,6.0
-C6-U91-T20-MW30-E5,Never-seen 2022-04 → 2024-09,2022-04-01,2024-09-16,33.2,12.42,0.5958,-29.33,,,,
+SUMMARY = f"""Strategy,Period,Start,End,Total Return %,CAGR %,Sharpe,Max DD %,Trades,Win rate %,Median trade %,Median hold (sessions)
+{sh.LIVE_STRATEGY},Walk-forward,2022-04-01,2026-09-24,399.9,43.45,1.3483,-30.76,1021.0,45.45,-0.74,6.0
+{sh.LIVE_STRATEGY},Never-seen 2022-04 → 2024-09,2022-04-01,2024-09-16,33.2,12.42,0.5958,-29.33,,,,
 QQQ buy & hold,Walk-forward,2022-04-01,2026-09-24,110.1,18.11,0.8458,-29.07,,,,
-"""
+"""   # the live tag comes from the stock list (U-count), never a literal
 p = _tmp(SUMMARY)
 ref = sh.load_reference(p)
 expect(abs(ref["sharpe"] - 1.3483) < 1e-9, "ref sharpe")
