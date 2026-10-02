@@ -36,6 +36,8 @@ for _s in sm.tradable_symbols:                 # from the stock list: the first 
     _FIRST_PER_SECTOR.setdefault(sm.symbol_sector.get(_s), _s)
 TICKERS = list(_FIRST_PER_SECTOR.values())[:7] + ["QQQ"]
 SIG = pd.read_csv("Reports/signal_analysis.csv", parse_dates=["Date"])
+_SH = "Reports/short_history_reference.csv"     # stocks in the list with < 200 days (reference only, never ranked)
+SHORT = pd.read_csv(_SH) if os.path.exists(_SH) else pd.DataFrame(columns=["Symbol", "As_Of"])
 DEC = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
 
 
@@ -123,7 +125,9 @@ exp_slot = {s: i + 1 for i, s in enumerate(sel.Symbol)}
 at = AppTest.from_file("app.py", default_timeout=180).run()
 page_ok(at, "initial")
 opts = [o.split("  ·  ")[0] for o in at.selectbox(key="ticker_dropdown").options]  # labels are "SYM · rank · score"; compare raw symbols
-expect(len(opts) == len(sm.tradable_symbols) + 1, f"dropdown has {len(opts)} options")
+_short_now = set(SHORT["Symbol"]) & set(sm.tradable_symbols)
+expect(len(opts) == len(sm.tradable_symbols) - len(_short_now) + 1, f"dropdown has {len(opts)} options")
+expect(not (_short_now & set(opts)), f"short-history stocks must not be in the ranked dropdown: {_short_now & set(opts)}")
 for sym in TICKERS:
     at = at.selectbox(key="ticker_dropdown").set_value(sym).run()
     page_ok(at, sym)
@@ -196,6 +200,20 @@ exp_titles = [f"Latest signals · {fmt(SIG.Date.max())} close", f"Last decision 
 labels = [e.label for e in at.expander]
 expect(labels[:1] == exp_titles[:1] and any(l.startswith(exp_titles[1]) for l in labels),
        f"Details expanders {labels[:3]} should start with {exp_titles}")
+# short history: one "Reference only" section right after Latest signals when there is such a stock, none otherwise
+_ref_labels = [l for l in labels if l.startswith("Reference only, not traded yet (short history)")]
+if len(SHORT):
+    _as_of = pd.Timestamp(pd.to_datetime(SHORT["As_Of"]).max())
+    expect(_ref_labels == [f"Reference only, not traded yet (short history) · {fmt(_as_of)} close"] and labels[1] == _ref_labels[0],
+           f"short-history section missing / misplaced / duplicated: {labels[:4]}")
+    _ref_tbl = next((d.value for d in at.dataframe if "Can join from (est.)" in d.value.columns), pd.DataFrame())
+    expect(set(_ref_tbl.get("Symbol", [])) == set(SHORT["Symbol"]), "short-history table should list exactly the reference stocks")
+    _elsewhere = [d.value for d in at.dataframe if "Symbol" in d.value.columns and "Can join from (est.)" not in d.value.columns
+                  and set(SHORT["Symbol"]) & set(d.value["Symbol"])]
+    expect(not _elsewhere, "a short-history stock shows up in another table (it must appear in one place only)")
+    print(f"   short-history section OK: {sorted(SHORT['Symbol'])}")
+else:
+    expect(not _ref_labels, "short-history section should be hidden when no stock is short on history")
 lt_all = next((d.value for d in at.dataframe if "Signal today" in d.value.columns), pd.DataFrame())
 expect(set(lt_all.get("Symbol", [])) == set(latest.index), "Latest signals should list every stock of the latest close")
 

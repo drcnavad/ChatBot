@@ -30,7 +30,7 @@ import backtest_setup as g
 # pinned for ONE stock list (C6-U91 of 2026-10-01, fingerprint below). After a stock is added to / removed from
 # sector_mapping.py the pins are skipped (loudly) - the exactness checks against the independent re-implementation and the
 # live history still run; re-baseline the numbers deliberately once they pass.
-PINNED_UNIVERSE = "82c08da0d768"   # sha1 of the sorted tradable_symbols, first 12 hex
+PINNED_UNIVERSE = "82c08da0d768"   # sha1 of the sorted SCORED universe (tradable_symbols minus short-history stocks), 12 hex
 FINGERPRINT = hashlib.sha1(",".join(sorted(g.U)).encode()).hexdigest()[:12]
 PINNED = FINGERPRINT == PINNED_UNIVERSE
 EXPECTED = {(None, False, False): (463.17, 1.4156), (30, False, False): (466.67, 1.4423), (30, True, False): (451.51, 1.3227),

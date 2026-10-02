@@ -18,7 +18,7 @@ stock_symbols = ['AAPL', 'AMZN', 'ANET', "AMD", 'APP', 'AVAV',
  'LMT', 'U', 'CRCL', 'TWLO',
 # High beta (> 2)
 'ACHR', 'ALAB', 'APLD', 'ARM', 'ASTS', 'CIFR', 'CVNA', 'IONQ', 'JOBY',
-'MARA', 'NVTS', 'RDDT', 'RKLB', 'SHOP', 'SMCI', 'SOUN', 'TEM', 'TTWO']
+'MARA', 'NVTS', 'RDDT', 'RKLB', 'SHOP', 'SMCI', 'SOUN', 'TEM', 'TTWO', 'SPCX']
 stock_symbols = list(dict.fromkeys(stock_symbols))  # de-duplicate, keep order
 # NOTE: IREN is mapped to 'Energy' below (bitcoin miner / AI data centers) - questionable, kept as-is.
 
@@ -207,6 +207,7 @@ symbol_sector = {
     'RDDT': 'Communication Services',
     'RKLB': 'Industrials',
     'SMCI': 'Technology',
+    'SPCX': 'Technology'
 }
 
 
@@ -378,7 +379,8 @@ symbol_name = {
     'RDDT': 'Reddit, Inc.',
     'RKLB': 'Rocket Lab Corporation',
     'SMCI': 'Super Micro Computer, Inc.',
-    'TTWO': 'Take-Two Interactive Software, Inc.'
+    'TTWO': 'Take-Two Interactive Software, Inc.', 
+    'SPCX': 'SpaceX, Inc.'
 }
 
 

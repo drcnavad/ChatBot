@@ -158,6 +158,7 @@ MIDWEEK_CSV = os.path.join(REPORTS, "strategy_midweek_check.csv")
 BENCH_CSV = os.path.join(REPORTS, "benchmark_prices.csv")
 PER_STOCK_CSV = os.path.join(REPORTS, "backtest_per_stock.csv")        # written by backtest.ipynb
 NEWS_CSV = os.path.join(REPORTS, "news_cleaned_df.csv")
+SHORT_HISTORY_CSV = os.path.join(REPORTS, "short_history_reference.csv")   # main_signal_analysis.ipynb: too new to trade
 COMPANY_XLSX = os.path.join(REPORTS, "complete_company_analysis.xlsx")
 CT = ZoneInfo("America/Chicago")
 MA_COLS = ['ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']
@@ -1449,6 +1450,29 @@ def render_latest_signals(p):
     open_symbol(table, event, "latest_signals")
 
 
+def load_short_history():
+    """Reports/short_history_reference.csv (stocks in the list with < 200 days of prices); None when missing or empty."""
+    d = read_report_csv(SHORT_HISTORY_CSV)
+    return None if d is None or d.empty else d
+
+
+def render_short_history(ref):
+    """Reference only: stocks in the list that are too new to be scored, ranked or bought (fewer than 200 trading days)."""
+    cols = {"Symbol": "Symbol", "Name": "Name", "Sector": "Sector", "First_Trade": "First traded",
+            "History": "Days of history", "Est_Eligible_Date": "Can join from (est.)", "Last_Close": "Last close",
+            "Return_Since_First_Close_%": "Since first close %", "Return_21d_%": "21-day %", "Return_63d_%": "63-day %",
+            "RSI_14": "RSI 14", "MA_10": "MA 10", "MA_30": "MA 30", "MA_50": "MA 50", "Close_vs_MA_50_%": "vs MA 50 %",
+            "Off_High_%": "Below high %"}
+    t = ref.assign(History=[f"{int(a)} of {int(b)}" for a, b in zip(ref["Days_Of_History"], ref["Days_Needed"])])
+    t = t[[c for c in cols if c in t.columns]].rename(columns=cols)
+    for c in ("First traded", "Can join from (est.)"):
+        t[c] = pd.to_datetime(t[c]).dt.strftime("%a %b %-d, %Y")
+    st.caption("In your stock list, but with fewer than 200 trading days of prices, so the strategy does not score, rank or "
+               "buy them yet - shown for reference only. Each joins the ranking by itself on its 200th trading day (estimated "
+               "date, assuming it trades every market day). Moving averages and returns use only the days it has traded.")
+    st.dataframe(t, hide_index=True, width="stretch")
+
+
 def render_all_signals(p):
     """Every stock with its signal (the decisions in force) in one table; click a row to open the stock."""
     today = p.df["Date"].max()
@@ -1666,6 +1690,11 @@ def render_data_and_settings(p):
 def render_details(p, ticker):
     with st.expander(latest_signals_title(p), expanded=True):
         render_latest_signals(p)
+    short = load_short_history()
+    if short is not None:   # hidden when every stock in the list has enough history
+        as_of = pd.to_datetime(short["As_Of"]).max()
+        with st.expander(f"Reference only, not traded yet (short history) · {as_of:%a %b %-d} close", expanded=True):
+            render_short_history(short)
     with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=False):
         render_all_signals(p)
     with st.expander("Rank history · last 20 decision days", expanded=False):

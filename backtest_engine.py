@@ -783,6 +783,78 @@ def build_technical(bars, symbols=None):
     return df.sort_values(["Symbol", "Date"]).reset_index(drop=True)
 
 
+# ----------------------------------------------------------------------------- short history (too new to trade)
+SHORT_HISTORY_CSV = REPORTS_DIR / "short_history_reference.csv"
+SHORT_HISTORY_NOTE = "Reference only - not traded yet (short history)"
+SHORT_HISTORY_COLUMNS = ["As_Of", "Symbol", "Name", "Sector", "Status", "First_Trade", "Days_Of_History", "Days_Needed",
+                         "Days_To_Go", "Est_Eligible_Date", "Last_Date", "Last_Close", "Return_Since_First_Close_%",
+                         "Return_21d_%", "Return_63d_%", "RSI_14", "MA_10", "MA_30", "MA_50", "Close_vs_MA_50_%",
+                         "High_Since_First", "Off_High_%"]
+
+
+def short_history_symbols(bars, symbols=None, min_bars=MIN_BARS):
+    """Stocks of the list (default TRADABLE) with some, but fewer than `min_bars`, daily bars in `bars`: too new for a full
+    ma_200. They are NOT scored, ranked, picked or traded, and they stay out of the relative-strength cross-section (which
+    would otherwise shift every other stock's percentile score). Derived from the data, never a list: a stock joins by
+    itself once it has `min_bars` bars. A symbol with no bars at all is not listed here (the pipeline reports it as missing)."""
+    symbols = list(symbols if symbols is not None else TRADABLE)
+    n = bars.loc[bars["Symbol"].isin(symbols), "Symbol"].value_counts()
+    return [s for s in symbols if 0 < n.get(s, 0) < min_bars]
+
+
+def scored_symbols(bars, symbols=None, min_bars=MIN_BARS):
+    """`symbols` (default TRADABLE) minus short_history_symbols: the stocks that are scored and ranked."""
+    symbols = list(symbols if symbols is not None else TRADABLE)
+    short = set(short_history_symbols(bars, symbols, min_bars))
+    return [s for s in symbols if s not in short]
+
+
+def short_history_reference(bars, symbols=None, min_bars=MIN_BARS):
+    """Reference table (display only, never traded) for every short-history stock: first trade, days of history vs the
+    `min_bars` needed, the estimated date it becomes eligible (its `min_bars`-th NYSE session, assuming it trades every
+    session), the last close and the indicators its history allows (returns, RSI 14, short moving averages)."""
+    rows = []
+    as_of = bars["Date"].max() if len(bars) else pd.NaT
+    for sym in short_history_symbols(bars, symbols, min_bars):
+        b = bars[bars["Symbol"] == sym].sort_values("Date").reset_index(drop=True)
+        c, n, last = b["Close"].astype(float), len(b), b["Date"].iloc[-1]
+
+        def ret(k):
+            return round((c.iloc[-1] / c.iloc[-1 - k] - 1) * 100, 2) if n > k else np.nan
+
+        def ma(k):
+            return round(float(c.tail(k).mean()), 2) if n >= k else np.nan
+
+        rsi = wilder_rsi(c, 14).iloc[-1] if n > 14 else np.nan
+        hi = float(b["High"].max())
+        rows.append({"As_Of": as_of.date(), "Symbol": sym, "Name": sector_mapping.symbol_name.get(sym, ""),
+                     "Sector": sector_mapping.symbol_sector.get(sym, ""), "Status": SHORT_HISTORY_NOTE,
+                     "First_Trade": b["Date"].iloc[0].date(), "Days_Of_History": n, "Days_Needed": min_bars,
+                     "Days_To_Go": min_bars - n, "Est_Eligible_Date": (last + (min_bars - n) * NYSE_SESSION).date(),
+                     "Last_Date": last.date(), "Last_Close": round(float(c.iloc[-1]), 2),
+                     "Return_Since_First_Close_%": round((c.iloc[-1] / c.iloc[0] - 1) * 100, 2),
+                     "Return_21d_%": ret(21), "Return_63d_%": ret(63),
+                     "RSI_14": round(float(rsi), 1) if pd.notna(rsi) else np.nan,
+                     "MA_10": ma(10), "MA_30": ma(30), "MA_50": ma(50),
+                     "Close_vs_MA_50_%": round((c.iloc[-1] / ma(50) - 1) * 100, 2) if n >= 50 else np.nan,
+                     "High_Since_First": round(hi, 2), "Off_High_%": round((c.iloc[-1] / hi - 1) * 100, 2)})
+    return pd.DataFrame(rows, columns=SHORT_HISTORY_COLUMNS)
+
+
+def save_short_history_reference(ref, path=SHORT_HISTORY_CSV):
+    """Write the reference table (header only when no stock is short on history -> the app hides its section)."""
+    ref.reindex(columns=SHORT_HISTORY_COLUMNS).to_csv(path, index=False)
+
+
+def short_history_message(ref):
+    """One plain line for the logs, e.g. 'Skipped for short history (not tradable yet): X (77 of 200 days, first traded ...)'."""
+    if ref is None or not len(ref):
+        return "Short history: none (every stock in the list has the 200 days needed)"
+    return "Skipped for short history (not tradable yet): " + "; ".join(
+        f"{r.Symbol} ({r.Days_Of_History} of {r.Days_Needed} days, first traded {r.First_Trade}, est. eligible {r.Est_Eligible_Date})"
+        for r in ref.itertuples())
+
+
 def wide(df, col, index="Date", columns="Symbol"):
     """Long table -> wide Date x Symbol matrix of one column (last value per cell)."""
     return df.pivot_table(index=index, columns=columns, values=col, aggfunc="last").sort_index()
@@ -1660,13 +1732,13 @@ def backtest_inputs(refresh=False):
     Reports/cache/bars_daily_long.pkl (refresh=True downloads the bars again: Alpaca market data, no quota; the pinned test
     numbers in tests/ assume the cached bars). Same set-up as tests/backtest_setup.py."""
     bars, _ = load_bars(refresh=refresh, cache_name=LONG_CACHE, start=LONG_START)
-    U = TRADABLE
+    U = scored_symbols(bars)          # short-history stocks (< MIN_BARS bars at the end of the data) are not scored
     tech = build_technical(bars, symbols=U)
     close, opn = wide(bars, "Close"), wide(bars, "Open")
     idx = close.index
     tech_score = wide(tech, "Technical_Score").reindex(index=idx, columns=U)
     rs, _ = relative_strength(close, U)
-    return {"close": close, "open": opn, "score": 0.5 * tech_score + 0.5 * rs, "tiebreak": rs,
+    return {"close": close, "open": opn, "score": 0.5 * tech_score + 0.5 * rs, "tiebreak": rs, "universe": U,
             "eligible": bool_wide(tech, "eligible", idx, U),
             "vol": volatility(close[U]),
             "regime": regime_series(close, "QQQ"), "weekly": weekly_rebalance_days(idx, live=True)}
@@ -1743,7 +1815,7 @@ def per_stock_table(run, inp, start=WALK_FORWARD_START):
     tr, dates = run["res"]["trades"], inp["close"].index
     held = run["targets"].loc[start:] > 0
     rows = []
-    for sym in TRADABLE:
+    for sym in inp.get("universe", TRADABLE):
         t = tr[tr["Symbol"] == sym]
         first = inp["open"][sym].loc[start:].first_valid_index()
         last_close = inp["close"][sym].dropna()

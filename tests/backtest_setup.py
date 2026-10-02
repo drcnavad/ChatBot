@@ -13,10 +13,12 @@ import sector_mapping as sm
 
 warnings.filterwarnings("ignore")
 
-U = list(sm.tradable_symbols)
 WF, NEVER_END = "2022-04-01", "2024-09-16"          # walk-forward start; never-seen segment ends 2024-09-16
 bars, _ = be.load_bars(refresh=False, cache_name="bars_daily_long.pkl")   # appends a stock new in sector_mapping (or names it)
-_missing = sorted(set(U) - set(bars["Symbol"]))
+_missing = sorted(set(sm.tradable_symbols) - set(bars["Symbol"]))
+# the scored universe, as in backtest_engine.backtest_inputs: stocks with < 200 bars at the end of the data are not scored
+U = be.scored_symbols(bars, list(sm.tradable_symbols))
+SHORT = be.short_history_symbols(bars, list(sm.tradable_symbols))
 assert not _missing, f"backtest bar cache has no bars for {_missing} (new in sector_mapping.py): run be.ensure_long_cache()"
 tech = be.build_technical(bars, symbols=U)
 C, O = be.wide(bars, "Close"), be.wide(bars, "Open")
