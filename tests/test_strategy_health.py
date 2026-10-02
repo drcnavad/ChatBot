@@ -42,7 +42,7 @@ expect(abs(ref["qqq_sharpe"] - 0.8458) < 1e-9, "ref qqq sharpe")
 os.remove(p)
 
 ref_missing = sh.load_reference("/nonexistent/file.csv")
-expect(abs(ref_missing["sharpe"] - 1.4178) < 1e-9, "fallback ref used when CSV missing")
+expect(abs(ref_missing["sharpe"] - 1.4155) < 1e-9, "fallback ref used when CSV missing")
 import backtest_engine as be  # noqa: E402  (settings only)
 expect(sh.LIVE_STRATEGY == be.WINNER["tag"], f"strategy_health.LIVE_STRATEGY {sh.LIVE_STRATEGY} != live tag {be.WINNER['tag']}")
 _real = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Reports", "backtest_summary.csv")

@@ -902,6 +902,8 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
     at a weekly rebalance (``rebalance`` True on the decision day) every held pick is brought back to its target unless it
     is within band x equity of it; on other decision days only adds and exits are traded. ``block`` (days until earnings, earnings_days_ahead; NaN = none): a held
     pick with earnings in the window is never bought up. band=None keeps the rule described below (adds and exits only).
+    Trim fix (with a band): when new buys would not fit (end above max(sum of targets, LIVE_INVESTED) or above the cash),
+    band-held picks above target are trimmed toward their target first - the same rule as paper_trade._trim_band_holds.
 
     target: weights decided at the close of each date (row d executes at the open of d+1).
     Trading follows the LIVE rule: only adds and exits are ever traded, holds are never resized.
@@ -981,6 +983,21 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
             if BLK is not None:                          # earnings soon: a held pick is not bought up
                 move &= ~((tgt > shares) & ~np.isnan(BLK[t - 1]))
             desired[move] = tgt[move]
+            # Trim fix (live from 2026-10-02, paper_trade._trim_band_holds): when the buys would end the book above the cap
+            # (max(sum of targets, LIVE_INVESTED), <= 100%) or not fit the cash, band-held picks above target are trimmed
+            # toward (never below) their target, pro rata to their excess, so each new pick gets its full weight.
+            pxo = np.nan_to_num(px_open)
+            buy_val = float(np.sum(np.clip(desired - shares, 0, None) * pxo))
+            over = held & ~move & (shares > tgt)
+            if buy_val > 0 and over.any():
+                sell_val = float(np.sum(np.clip(shares - desired, 0, None) * pxo))
+                cap = min(1.0, max(float(np.sum(w)), LIVE_INVESTED))
+                need = max(float(np.sum(desired * pxo)) - cap * V,
+                           (buy_val * (1 + cost) - cash - sell_val * (1 - cost)) / (1 - cost))
+                excess = (shares - tgt) * pxo
+                if need > 0:
+                    f = min(1.0, need / float(np.sum(excess[over])))
+                    desired[over] = shares[over] - (shares[over] - tgt[over]) * f
         delta = desired - shares
         delta[np.abs(delta * np.nan_to_num(px_open)) < 1e-10] = 0.0
         traded_notional = delist_notional  # delisting sales already counted above

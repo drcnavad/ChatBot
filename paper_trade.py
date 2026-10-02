@@ -70,6 +70,7 @@ ORDER_COLUMNS = ["Symbol", "Side", "Shares", "Price", "Est_Value", "Current_Shar
                  "Target_Weight_%", "Target_Value"]
 NO_TRADE_BAND = 0.01   # Friday rebalance: a target holding within 1 percentage point of its weight is not traded
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
+INVESTED_CAP = 0.99   # trim fix: a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED, tests check)
 CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills a bit above the estimate still fit.
                        # A cap, not a second scale-down: weights already sum to <= 99% (backtest_engine.LIVE_INVESTED),
                        # and 99% of equity always fits under it, so the account ends ~99% invested, not ~98%.
@@ -369,7 +370,11 @@ def build_orders(targets, account_size, positions=None, prices=None, min_value=1
     (1 percentage point by default) is left alone.
     `blocked` {SYMBOL: note}: picks with earnings soon (earnings_blocked): not newly bought (SKIP row)
     and, if owned, not topped up (HOLD instead of BUY); a trim SELL still goes through.
-    Positions not in the targets (sell signals) are sold completely (no band).
+    Positions not in the targets (sell signals, or a stock removed from sector_mapping) are sold completely (no band).
+    Trim fix (2026-10-01): when there are new buys and the plan would end above INVESTED_CAP (99%) of `account_size`, or
+    the buys would not fit the cash (account_size - held value + planned sells, less the 1% CASH_CUSHION), band-held
+    picks ABOVE their target are trimmed (SELL rows) toward - never below - their target, pro rata to their excess, so
+    each new pick gets (close to) its full target weight. Otherwise the 1-point band is unchanged.
     Trades worth less than `min_value` are skipped. `statuses` maps SYMBOL -> status string from
     strategy_changes.csv; a missing/unknown status is treated as HOLD (fail closed), never traded.
     """
@@ -444,7 +449,7 @@ def build_orders(targets, account_size, positions=None, prices=None, min_value=1
             # No-trade band: close enough to target (within 1 percentage point) - not traded.
             rows.append({"Symbol": sym, "Side": "HOLD", "Shares": 0, "Price": float(price), "Est_Value": 0.0,
                          "Current_Shares": cur, "Target_Shares": cur, "Target_Weight_%": round(weight * 100, 2),
-                         "Target_Value": round(target_value, 2)})
+                         "Target_Value": round(target_value, 2), "_band": True})
             continue
         if fractional:
             # 2-decimal shares, rounded DOWN (buys and trims); a full exit (target 0)
@@ -463,9 +468,55 @@ def build_orders(targets, account_size, positions=None, prices=None, min_value=1
         rows.append({"Symbol": sym, "Side": side, "Shares": abs(delta) if side != "HOLD" else 0, "Price": float(price),
                      "Est_Value": round(abs(delta) * price, 2) if side != "HOLD" else 0.0, "Current_Shares": cur,
                      "Target_Shares": tgt, "Target_Weight_%": round(weight * 100, 2), "Target_Value": round(target_value, 2)})
+    _trim_band_holds(rows, account_size, positions, px, fractional, min_value, total_weight)
     orders = pd.DataFrame(rows, columns=ORDER_COLUMNS)
     order = {"SELL": 0, "BUY": 1, "HOLD": 2}
     return orders.sort_values(["Side", "Symbol"], key=lambda s: s.map(order).fillna(3) if s.name == "Side" else s).reset_index(drop=True)
+
+
+def _ceil2(x):
+    """Round UP to 2 decimals (a trim sells at least the dollars it needs)."""
+    return math.ceil(round(x * 100, 6)) / 100
+
+
+def _trim_band_holds(rows, account_size, positions, px, fractional, min_value, total_weight, cushion=CASH_CUSHION):
+    """Trim fix, in place on build_orders' rows: when new BUYs exist and the plan would end above the cap
+    (max(total target weight, INVESTED_CAP), at most 100%) or the buys would not fit the cash, the band-held picks
+    above their target (HOLD rows marked _band) are turned into SELL rows that trim them toward their target, pro rata to
+    their excess, never below it. Mirrors backtest_engine.simulate(band=...)."""
+    buys = sum(r["Est_Value"] for r in rows if r["Side"] == "BUY")
+    if buys <= 0:
+        return
+    over = []
+    for r in rows:
+        p = _safe_number(r["Price"], default=None)
+        if r.get("_band") and p and p > 0 and r["Current_Shares"] * p > r["Target_Value"] + 0.005:
+            over.append((r, p, r["Current_Shares"] * p - r["Target_Value"]))
+    if not over:
+        return
+    sells = sum(r["Est_Value"] for r in rows if r["Side"] == "SELL")
+    held = 0.0
+    for s, q in positions.items():
+        p = _safe_number(px.get(s), default=None)
+        if p and p > 0:
+            held += q * p
+    end_value = held - sells + buys
+    cap = min(1.0, max(total_weight, INVESTED_CAP))
+    need = max(end_value - cap * account_size,                              # end state above 99%
+               buys * (1 + cushion) - (account_size - held + sells))       # buys do not fit cash + sells (1% cushion)
+    if need <= 0.005:
+        return
+    excess = sum(e for _, _, e in over)
+    f = min(1.0, need / excess)
+    for r, p, e in over:
+        cur = r["Current_Shares"]
+        if fractional:
+            q = min(_ceil2(e * f / p), _floor2(cur - r["Target_Value"] / p))
+        else:
+            q = min(math.ceil(e * f / p - 1e-9), int(math.floor(cur - r["Target_Value"] / p)))
+        if q <= 0 or q * p < min_value:
+            continue
+        r.update(Side="SELL", Shares=q, Est_Value=round(q * p, 2), Target_Shares=round(cur - q, 4))
 
 
 def invested_after(orders):

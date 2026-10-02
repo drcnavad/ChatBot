@@ -38,7 +38,11 @@
   test_live_weights.py   live weights: 99% target, each rounded down to a 2-decimal percent (never over 100%),
                          halving on top, build_orders still rejects >100%, the 1% cushion does not trim a 99% plan
   test_band_hold.py      band-hold rebalance math (above / below / mixed band holds, worst case, regime off, E5 skip,
-                         sector cap, rounding, 99% once, sells fund buys) + fake-broker runs of Fri 10/2 and Mon 10/5
+                         sector cap, rounding, 99% once, sells fund buys), the trim fix (live + simulate) + fake-broker
+                         runs of Fri 10/2 (incl. a held stock removed from the list) and Mon 10/5
+  test_single_universe.py  sector_mapping.py is the only stock list: no hardcoded ticker list / symbol map / C6-U<n>
+                         tag / "NN stocks" count in any other .py or notebook; derived lists (engine, autofetch, call
+                         counts, bar cache) equal sector_mapping's
   test_strategy_health.py  strategy_health.py: reference parsing, equity stats, trend/drawdown/Sharpe
                          bands, composite score levels, regime detection, fail-soft on missing files
                          (synthetic data, no network, no streamlit)

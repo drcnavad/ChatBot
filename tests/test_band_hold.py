@@ -1,10 +1,12 @@
 """Band-hold audit of the live rebalance math (paper_trade.build_orders + apply_buying_power_guard, the exact path of
 auto_trade) and fake-broker runs of Fri 2026-10-02 (full rebalance) and Mon 2026-10-05 (mid-week check). Zero broker calls.
 
-A held pick within the 1-point no-trade band keeps its old weight (e.g. TWLO 9.14% vs a new 8.56% target), new buys are sized
-at their own targets, and the buying-power guard (free cash + planned sells, / 1.01) scales the buys down when band-held
-names above target leave too little cash. So the total never exceeds 100% (no margin), each band-held name is <= 1 point off,
-and a below-target band hold leaves that shortfall in cash. Same as the backtest (simulate: sells first, buys scaled to cash).
+A held pick within the 1-point no-trade band keeps its old weight (e.g. TWLO 9.14% vs a new 8.56% target) and new buys are
+sized at their own targets. Trim fix (2026-10-01): when new buys do not fit (the plan would end above 99%, or above the cash +
+planned sells less the 1% cushion), band-held names ABOVE target are trimmed toward (never below) their target, pro rata to
+their excess, so each new pick gets close to its full weight; the buying-power guard then only absorbs a small residual. So the
+total stays <= 99% with new buys, each band-held name is <= 1 point off, and a below-target band hold leaves that shortfall in
+cash. Same rule in the backtest (simulate(band=...): sells first, the same trim, buys scaled to cash).
 Run: PYTHONPATH=. python tests/test_band_hold.py"""
 import json
 import os
@@ -108,15 +110,16 @@ def shares_for(pcts):
     return {s: round(p * 1000 / 100, 4) for s, p in pcts.items()}  # equity ~ $100,000, price $100
 
 
-# A1. several band-held names ABOVE target (+0.9 point each) and 5 new buys
+# A1. several band-held names ABOVE target (+0.9 point each) and 5 new buys -> trim fix: the 5 are trimmed to target
 held = shares_for({f"S{i}": 10.8 for i in range(5)})
 o, w, c, eq = friday(T10, held, P, cash=100000 - 54000)
-check("above: the 5 band-held names are not traded (HOLD, left at 10.8%)",
-      all(side(o, f"S{i}") == "HOLD" and abs(w[f"S{i}"] - 10.8) < 0.01 for i in range(5)), w)
-check("above: the new buys are scaled down to fit the cash (each below its 9.9%)", all(w[f"S{i}"] < 9.9 for i in range(5, 10)), w)
-check("above: total invested <= 100% and cash never negative", sum(w.values()) <= 100 + 1e-9 and c >= 0, (sum(w.values()), c))
-check("above: the 1% cushion is kept (cash >= ~0.45% of equity)", c >= 0.44, c)
+check("above (trim fix): the 5 band-held names are trimmed (SELL) to ~9.9%, never below",
+      all(side(o, f"S{i}") == "SELL" and 9.9 - 1e-6 <= w[f"S{i}"] < 9.92 for i in range(5)), w)
+check("above (trim fix): the new buys get their full 9.9% (not scaled)", all(abs(w[f"S{i}"] - 9.9) < 0.02 for i in range(5, 10)), w)
+check("above: total invested <= 99% and cash never negative", sum(w.values()) <= 99 + 1e-6 and c >= 0, (sum(w.values()), c))
+check("above: the 1% cash is kept (cash >= ~1% of equity)", c >= 0.99, c)
 check("above: every stock within 1 point of its target", all(abs(w[s] - 9.9) <= 1.0 for s in T10), w)
+check("above: SELLs before BUYs", list(o.Side[o.Side.isin(["SELL", "BUY"])]) == ["SELL"] * 5 + ["BUY"] * 5)
 print(f"   above: total {sum(w.values()):.2f}%  cash {c:.2f}%  new buys {[round(w[f'S{i}'], 2) for i in range(5, 10)]}")
 
 # A2. several band-held names BELOW target (-0.9 point each)
@@ -129,25 +132,74 @@ check("below: the shortfall (5 x 0.9 points) stays in cash: total 94.5%", abs(su
 # A3. mixed: 3 above, 2 below
 held = shares_for({"S0": 10.8, "S1": 10.8, "S2": 10.8, "S3": 9.0, "S4": 9.0})
 o, w, c, eq = friday(T10, held, P, cash=100000 - 50400)
-check("mixed: all 5 band-held names HOLD", all(side(o, f"S{i}") == "HOLD" for i in range(5)))
-check("mixed: total <= 100%, cash >= 0, every stock within 1 point", sum(w.values()) <= 100 and c >= 0
+check("mixed (trim fix): the 2 below-target names HOLD (not topped up)", all(side(o, f"S{i}") == "HOLD" for i in (3, 4)))
+check("mixed (trim fix): the 3 above-target names trimmed only part way (to ~10.5%: just enough to end at 99%)",
+      all(side(o, f"S{i}") == "SELL" and 10.45 < w[f"S{i}"] < 10.55 for i in range(3)), w)
+check("mixed (trim fix): new buys at their full 9.9%", all(abs(w[f"S{i}"] - 9.9) < 0.02 for i in range(5, 10)), w)
+check("mixed: total <= 99%, cash >= 0, every stock within 1 point", sum(w.values()) <= 99 + 1e-6 and c >= 0
       and all(abs(w[s] - 9.9) <= 1.0 for s in T10), (sum(w.values()), c))
 
-# A4. the TWLO example: 9.14% held vs a new 8.56% target -> kept at 9.14% (0.58 point, inside the band)
-tg = {"TWLO": 0.0856, **{f"S{i}": 0.0905 for i in range(1, 11)}}
+# A4. the TWLO example: 9.14% held vs a new 8.56% target (0.58 point, inside the band)
 px = {**P, "TWLO": 301.27, "S10": 100.0, "S11": 100.0}
 held = {"TWLO": round(9140 / 301.27, 2)}
+tg = {"TWLO": 0.0856, **{f"S{i}": 0.0905 for i in range(1, 10)}}          # the new buys fit -> TWLO left alone
 o, w, c, eq = friday(tg, held, px, cash=100000 - held["TWLO"] * 301.27)
-check("TWLO 9.14% vs 8.56%: HOLD, not trimmed", side(o, "TWLO") == "HOLD" and abs(w["TWLO"] - 9.14) < 0.01, w.get("TWLO"))
-check("TWLO case: total <= 100%, cash >= 0", sum(w.values()) <= 100 and c >= 0, (sum(w.values()), c))
+check("TWLO 9.14% vs 8.56%, buys fit: HOLD, not trimmed (band kept)", side(o, "TWLO") == "HOLD" and abs(w["TWLO"] - 9.14) < 0.01,
+      w.get("TWLO"))
+tg = {"TWLO": 0.0856, **{f"S{i}": 0.0905 for i in range(1, 11)}}          # 10 new buys at 9.05% do not fit next to 9.14%
+o, w, c, eq = friday(tg, held, px, cash=100000 - held["TWLO"] * 301.27)
+check("TWLO case, buys do not fit (trim fix): TWLO trimmed toward 8.56%, every new buy at its full 9.05%",
+      side(o, "TWLO") == "SELL" and 8.56 - 1e-6 <= w["TWLO"] < 9.14 and all(abs(w[f"S{i}"] - 9.05) < 0.02 for i in range(1, 11)), w)
+check("TWLO case: total <= the targets' sum (99.06%) + 0.01 point of share rounding, cash >= 0",
+      sum(w.values()) <= 99.06 + 0.01 and c >= 0, (sum(w.values()), c))
 
-# A5. worst case: 9 band-held names at +0.99 point and one new buy -> the buy only gets the cash that is left
+# A5. worst case: 9 band-held names at +0.99 point and one new buy (before the trim fix the buy got only 1.97%)
 held = shares_for({f"S{i}": 10.89 for i in range(9)})
 o, w, c, eq = friday(T10, held, P, cash=100000 - 98010)
-check("worst case: never over 100%, cash >= 0 (no margin, no insufficient-buying-power reject)",
-      sum(w.values()) <= 100 and c >= 0, (sum(w.values()), c))
-check("worst case: the new buy is starved (gets < 2% instead of 9.9%) - same as the backtest", w.get("S9", 0) < 2.0, w.get("S9"))
-print(f"   worst case: total {sum(w.values()):.2f}%  new buy S9 {w.get('S9', 0):.2f}% (target 9.9%)")
+check("worst case: never over 99%, cash >= 0 (no margin, no insufficient-buying-power reject)",
+      sum(w.values()) <= 99 + 1e-6 and c >= 0, (sum(w.values()), c))
+check("worst case (trim fix): the new buy gets its full 9.9% (was 1.97%)", abs(w.get("S9", 0) - 9.9) < 0.02, w.get("S9"))
+check("worst case (trim fix): the 9 band-held names are trimmed to ~9.9%, never below",
+      all(side(o, f"S{i}") == "SELL" and 9.9 - 1e-6 <= w[f"S{i}"] < 9.92 for i in range(9)), w)
+check("worst case: SELLs are planned before the BUY", list(o.Side[o.Side.isin(["SELL", "BUY"])]) == ["SELL"] * 9 + ["BUY"])
+print(f"   worst case: total {sum(w.values()):.2f}%  new buy S9 {w.get('S9', 0):.2f}% (target 9.9%)  cash {c:.2f}%")
+
+# A5b. no new buy -> nothing is trimmed: band-held names above target stay as they are (the band is unchanged)
+held = shares_for({f"S{i}": 10.89 for i in range(9)})
+o, w, c, eq = friday({f"S{i}": 0.099 for i in range(9)}, held, P, cash=100000 - 98010)
+check("no new buy: the band holds are not trimmed (all HOLD)", all(side(o, f"S{i}") == "HOLD" for i in range(9)), list(o.Side))
+# A5c. a new buy that fits next to an above-target band hold -> no trim
+held = shares_for({"S0": 10.5})
+o, w, c, eq = friday({"S0": 0.099, "S1": 0.099}, held, P, cash=100000 - 10500)
+check("buy fits: the above-target band hold is not trimmed", side(o, "S0") == "HOLD" and abs(w["S1"] - 9.9) < 0.02, (side(o, "S0"), w))
+# A5d. whole-share mode: the trim is whole shares and still never below target
+t = pd.DataFrame([(s, 0.099, 100.0) for s in T10], columns=["Symbol", "Weight", "Price"])
+o = pt.build_orders(t, 100000, {f"S{i}": 108.9 for i in range(9)}, P, statuses={s: ("hold" if s != "S9" else "add") for s in T10})
+tr = o[o.Side == "SELL"]
+check("whole shares: trims are whole shares and leave >= target", len(tr) == 9 and all(float(q).is_integer() for q in tr.Shares)
+      and all(ts * 100 >= 9900 - 1e-6 for ts in tr.Target_Shares), tr[["Symbol", "Shares", "Target_Shares"]].to_dict("records"))
+check("trim cap == backtest_engine.LIVE_INVESTED (99%)", pt.INVESTED_CAP == __import__("backtest_engine").LIVE_INVESTED)
+
+# A5e. the backtest mirrors it: simulate(band=0.01) with 9 band-held names at ~+0.95 point and one new add
+import backtest_engine as be  # noqa: E402
+dts = pd.bdate_range("2026-01-05", periods=8)
+cols = [f"S{i}" for i in range(10)]
+op = pd.DataFrame(100.0, index=dts, columns=cols)
+op.loc[dts[3]:, cols[:9]] = 100.0 * 5.085                       # the 9 holdings rise -> each ~10.85% of the book
+tw = pd.DataFrame(0.0, index=dts, columns=cols)
+tw.loc[:, cols[:9]] = 0.099
+tw.loc[dts[4]:, "S9"] = 0.099                                    # decided at the 5th close (a weekly rebalance), filled next open
+reb = pd.Series(False, index=dts)
+reb[dts[4]] = True
+res = be.simulate(op, op, tw, dts[1], rebalance=reb, cost=be.COST, band=0.01)
+trims = res["trades"][res["trades"].Kind == "trim"]
+r5 = be.simulate(op, op, tw, dts[1], end=dts[5], rebalance=reb, cost=be.COST, band=0.01)
+print(f"   simulate trim fix: exposure after the rebalance {r5['exposure'].iloc[-1] * 100:.2f}%, trims {len(trims)}")
+check("simulate (trim fix): the 9 band-held names are trimmed on the rebalance day", len(trims) == 9, len(trims))
+check("simulate (trim fix): exposure ends at ~99% (the new add got its full weight, not the ~2% cash left)",
+      0.985 <= r5["exposure"].iloc[-1] <= 0.991, r5["exposure"].iloc[-1])           # 99% at the open, measured at the close
+r_old = be.simulate(op, op, tw.drop(columns="S9").assign(S9=0.0), dts[1], end=dts[5], rebalance=reb, cost=be.COST, band=0.01)
+check("simulate: with no new add nothing is trimmed (band unchanged)", (r_old["trades"].Kind != "trim").all())
 
 # A6. regime-off week: weights halved (10 x 4.95%), names held at ~9.9% are trimmed back
 held = shares_for({f"S{i}": 9.9 for i in range(10)})
@@ -307,9 +359,28 @@ check("Fri 10/2: holds exactly the 10 target names after the evening", len(names
       names)
 check("Fri 10/2: every name within 1 point (+ the fractional rest) of its target", all(abs(g) <= 1.0 + PX[s] / eq * 100 for s, g in gap.items()), gap)
 check("Fri 10/2: total invested <= 99% + band excess, never > 100%", inv <= 100.0, inv)
+check("Fri 10/2 (trim fix): total invested <= 99%", inv <= 99.0 + 1e-6, inv)
+under = {s: round(tgt_pct[s] - end_pct[s], 2) for s in want_in}
+check("Fri 10/2 (trim fix): each new buy within one share of its full target after the evening",
+      all(g <= PX[s] / eq * 100 + 0.02 for s, g in under.items()), under)
 pend = json.load(open(os.path.join(tmp, "pending_2026-10-02.json")))
 print(f"   Fri 10/2: {len(sold)} sells, {len(bought)} buys, invested {inv:.2f}% after the evening, cash {broker.cash / eq * 100:.2f}%; "
       f"{len(pend.get('orders', []))} rows recorded for the 9 AM fractional completion; per-name gap vs target {gap}")
+
+# Fri 10/2 with a held stock that was REMOVED from sector_mapping.py (here MSTR): it has no rows in signal_analysis.csv, is
+# priced from market data (current_prices, patched here - no network) and sold completely like any non-pick
+PX["MSTR"] = 150.0
+cp0 = pt.current_prices
+pt.current_prices = lambda syms: {s: PX[s] for s in syms if s in PX}
+try:
+    import sector_mapping as _sm
+    assert "MSTR" not in _sm.tradable_symbols
+    _, _, _, broker_rm, _ = run_day("2026-10-02", "2026-10-02", {**pos, "MSTR": 7.0}, cash0 - 7 * 150.0, rows)
+finally:
+    pt.current_prices = cp0
+check("Fri 10/2: a held stock removed from the list (MSTR) is sold completely at the rebalance",
+      broker_rm.pos.get("MSTR", 0) == 0 and any(r.symbol == "MSTR" and r.side == OrderSide.SELL for r in broker_rm.submitted),
+      broker_rm.pos.get("MSTR"))
 
 # Mon 10/5: a quiet mid-week check -> nothing is traded
 pos_mon = dict(broker.pos)
