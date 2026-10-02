@@ -399,14 +399,6 @@ def last_next_earnings(symbols):
     return pd.DataFrame(rows, columns=['Symbol', 'Last ED', 'Next ED'])
 
 
-def upcoming_earnings(symbols, days=7):
-    """Earnings within the next `days` days, soonest first (one row per symbol)."""
-    ed = load_earnings()
-    today = pd.Timestamp.now().normalize()
-    soon = ed[ed['Symbol'].isin(symbols) & ed['Earnings Date'].between(today, today + pd.Timedelta(days=days))]
-    return soon.sort_values(['Earnings Date', 'Symbol']).drop_duplicates('Symbol').fillna({'Time': '—'})
-
-
 @st.cache_data(ttl=3600)
 def _load_company(mtime: float):
     return pd.read_excel(COMPANY_XLSX, sheet_name="2_Latest_Quarter_Complete", engine="openpyxl")
@@ -958,64 +950,32 @@ def render_top_bar(p):
 # =====================================================================================================================
 # 10. Dashboard tab: summary
 # =====================================================================================================================
-def render_key_metrics(p):
-    """Three headline numbers: stocks held, last and next decision."""
+def render_summary(p):
+    """Short summary only: holdings now, the latest data date, the next rebalance, and where the details are.
+    (The decision details - signals, reasons, every stock - live in the Details tab.)"""
+    section("Summary")
     la = p.by_symbol
+    held = la[la["Strategy_Weight"].fillna(0) > 0]
+    latest = p.df["Date"].max()
     c = st.columns(3)
-    c[0].metric("Stocks held", int((la["Strategy_Weight"] > 0).sum()))
-    c[1].metric("Last decision", f"{p.off_date:%a %b %-d}")
-    c[2].metric("Next decision", f"{p.next_dec:%a %b %-d}" if p.next_dec is not None else "—", help=p.next_kind or None)
-
-
-def render_picks_table(p):
-    """Current portfolio (the decisions in force). Click a row to open it."""
-    la = p.by_symbol
-    held = la[la["Strategy_Weight"] > 0]
-    w = held["Strategy_Weight"].fillna(0)
+    c[0].metric("Stocks held", len(held))
+    c[1].metric("Latest data", f"{latest:%a %b %-d} close")
+    c[2].metric("Next rebalance", f"{p.plan_day:%a %b %-d}" if p.plan_day is not None else "—",
+                help="Full weekly rebalance (Mon/Wed closes are mid-week checks)." if MIDWEEK else None)
     table = pd.DataFrame({
         "Symbol": held.index,
-        "Signal": [p.sig_off.get(s, "—") for s in held.index],
-        "Rank today": held["Strategy_Rank"].round(0).to_numpy(),
-        "Portfolio weight %": (w * 100).round(2).to_numpy(),
+        "Weight %": (held["Strategy_Weight"] * 100).round(2).to_numpy(),
+        "Rank today": held["Strategy_Rank"].round(0).astype("Int64").to_numpy(),
         "Sector": [symbol_sector.get(s, "—") for s in held.index],
         "Next earnings": last_next_earnings(list(held.index))["Next ED"].to_numpy(),
-        "Why": [p.why_off.get(s, "") for s in held.index],
-    }).sort_values(["Portfolio weight %", "Rank today"], ascending=[False, True]).reset_index(drop=True)
+    }).sort_values(["Weight %", "Rank today"], ascending=[False, True]).reset_index(drop=True)
     event = st.dataframe(table, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
-                         key="summary_tbl", column_config={"Why": st.column_config.TextColumn("Why", width="large")})
+                         key="summary_tbl")
     open_symbol(table, event, "summary")
-
-
-def render_earnings_line(p):
-    """Earnings in the next 7 days: one card per stock, laid out horizontally (whole card clickable)."""
-    up = upcoming_earnings(sorted(p.by_symbol.index))
-    if up.empty:
-        st.caption("Earnings \u00b7 next 7 days: none.")
-        return
-    cards = []
-    for s, d, t in zip(up["Symbol"], up["Earnings Date"], up["Time"]):
-        t = str(t)
-        sub = {"AM": "before the open", "PM": "after the close"}.get(t, "time estimated")
-        cards.append(
-            f'<a href="?symbol={quote(s)}" target="_self" style="text-decoration:none;">'
-            '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;'
-            'padding:10px 16px;min-width:118px;text-align:center;'
-            'box-shadow:0 1px 3px rgba(15,23,42,.07);">'
-            '<div style="font-family:\'JetBrains Mono\',monospace;font-weight:700;'
-            f'font-size:1.05rem;color:#0f766e;">{esc(s)}</div>'
-            f'<div style="font-size:0.82rem;font-weight:600;color:#0f172a;margin-top:3px;">{d:%a %b %-d}</div>'
-            f'<div style="font-size:0.72rem;color:#64748b;margin-top:2px;">{esc(t)} \u00b7 {sub}</div>'
-            "</div></a>")
-    show_html('<div style="font-size:0.95rem;font-weight:700;margin:8px 0 6px 0;">Earnings \u00b7 next 7 days</div>'
-              '<div style="display:flex;flex-wrap:wrap;gap:10px;">' + "".join(cards) + "</div>")
-
-
-def render_summary(p):
-    section("Summary")
-    render_key_metrics(p)
-    render_picks_table(p)
-    render_earnings_line(p)
-    st.caption(f"Every stock's rank, score and plan at the latest close: 🔎 Details tab → **{latest_signals_title(p)}**.")
+    plan = f", the {p.plan_day:%a %b %-d} plan" if p.plan_day is not None else ""
+    st.caption(f"Holdings at the {latest:%a %b %-d} close. Every stock's signal, rank and score today{plan}: "
+               f"🔎 Details tab → **{latest_signals_title(p)}** · the last decision and its reasons: "
+               f"🔎 Details tab → **Last decision · {p.off_date:%a %b %-d}**.")
 
 
 # =====================================================================================================================
