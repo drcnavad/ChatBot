@@ -1,12 +1,16 @@
-"""Regression: the LIVE engine (backtest_engine.winner_targets) reproduces the tested backtests exactly.
-  1. plain C6-U96-MW (Mon/Wed top 3 in / below 15 out):  +470.31%, Sharpe 1.4393
-  2. C6-U96-MW30 (+ sell anything worse than rank 30 at the Mon/Wed checks): +457.14%, Sharpe 1.4451 (sell-rule test S3)
-  3. C6-U96-T20-MW30 (picks only from ranks 1-20, sector cap relaxed to fill 10 slots, top-3 swaps ignore the cap):
-     +452.96%, Sharpe 1.3172, never-seen 0.5942
-  4. C6-U96-T20-MW30-E5 (the live rules from 2026-09-25: + no new buys with earnings within 5 days; PARTIAL - the earnings
-     dates on disk start in late 2024): engine == the independent re-implementation, numbers pinned as a regression
-     (pinned values re-baselined 2026-09-25 after simulate() was fixed to trade only on target changes)
-  (3 and 4 were user decisions, not pre-registered tests.)
+"""Regression: the LIVE engine (backtest_engine.winner_targets) reproduces the tested backtests exactly, on the live universe
+(sector_mapping.tradable_symbols; 91 stocks since 2026-10-01 = tag C6-U91):
+  1. plain C6-U91-MW (Mon/Wed top 3 in / below 15 out):  +463.17%, Sharpe 1.4156, never-seen 0.7617
+  2. C6-U91-MW30 (+ sell anything worse than rank 30 at the Mon/Wed checks): +466.67%, Sharpe 1.4423, never-seen 0.7584
+  3. C6-U91-T20-MW30 (picks only from ranks 1-20, sector cap relaxed to fill 10 slots, top-3 swaps ignore the cap):
+     +451.51%, Sharpe 1.3227, never-seen 0.5887
+  4. C6-U91-T20-MW30-E5 (the live rules from 2026-09-25: + no new buys with earnings within 5 days; PARTIAL - the earnings
+     dates on disk start in late 2024): +414.17%, Sharpe 1.2700
+  (3 and 4 were user decisions, not pre-registered tests.) Pins re-baselined 2026-10-01 for the universe change (user decision:
+  drop ADBE AFRM MU SOFI MDB MSTR, add TTWO; TTWO bars added to Reports/cache/bars_daily_long.pkl), after the engine still
+  matched the independent re-implementation exactly and the live decision history over the overlap. Previous pins (U96, 96
+  stocks): 1. +470.31% / 1.4393 / 0.8511, 2. +457.14% / 1.4451 / 0.8211, 3. +452.96% / 1.3172 / 0.5942, 4. +387.57% / 1.2249 / 0.5942
+  (4 re-baselined 2026-09-25 after simulate() was fixed to trade only on target changes).
 Compares targets, swap and sell logs with the independent re-implementation in tests/backtest_setup.py, and the live
 pipeline's decision history (Reports/strategy_decisions.csv) with the test over the overlapping window.
 Run: python tests/run_tests.py  (or PYTHONPATH=. python tests/test_midweek_repro.py)"""
@@ -22,10 +26,13 @@ import backtest_engine as be
 import backtest_setup as g
 
 # (exit_below, t20, earnings rule) -> (total return %, Sharpe) at 0.1%/side, and the never-seen 2022-04 -> 2024-09 Sharpe
-EXPECTED = {(None, False, False): (470.31, 1.4393), (30, False, False): (457.14, 1.4451), (30, True, False): (452.96, 1.3172),
-            (30, True, True): (387.57, 1.2249)}
-EXPECTED_NEVER_SEEN = {(None, False, False): 0.8511, (30, False, False): 0.8211, (30, True, False): 0.5942,
-                       (30, True, True): 0.5942}
+# pinned for the 91-stock universe (C6-U91); a different universe changes them - re-baseline only after the exactness checks pass
+UNIVERSE = 91
+EXPECTED = {(None, False, False): (463.17, 1.4156), (30, False, False): (466.67, 1.4423), (30, True, False): (451.51, 1.3227),
+            (30, True, True): (414.17, 1.2700)}
+EXPECTED_NEVER_SEEN = {(None, False, False): 0.7617, (30, False, False): 0.7584, (30, True, False): 0.5887,
+                       (30, True, True): 0.5887}
+assert len(g.U) == UNIVERSE, f"live universe has {len(g.U)} stocks, the pins are for {UNIVERSE}: re-baseline deliberately"
 MW = {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]}
 
 
@@ -48,7 +55,7 @@ def check(exit_all, t20=False, e5=False):
         for a, (_, b) in zip(sells_test.itertuples(), se.iterrows()))
     res = be.simulate(g.O, g.C, g.full(t_live), g.WF, rebalance=g.weekly, cost=be.COST)
     m, ns = be.metrics(res), g.em(res["equity"].loc[:g.NEVER_END])
-    label = ("C6-U96-T20-MW" if t20 else "C6-U96-MW") + ("" if exit_all is None else str(exit_all)) + ("-E5" if e5 else "")
+    label = (f"C6-U{len(g.U)}-T20-MW" if t20 else f"C6-U{len(g.U)}-MW") + ("" if exit_all is None else str(exit_all)) + ("-E5" if e5 else "")
     print(f"[{label}] check days {int(checks.sum())} | swaps {len(sw)} (same as test: {same_swaps}) | rank-{exit_all} sells "
           f"{len(se)} (same as test: {same_sells}) | max |target diff| {diff:.3g}")
     print(f"[{label}] total {m['Total Return %']:.2f}%  Sharpe {m['Sharpe']:.4f}  max DD {m['Max DD %']:.2f}%  "
