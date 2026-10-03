@@ -54,7 +54,8 @@
   test_forward_test.py   forward testing from FORWARD_START (2026-10-02): per-stock panel cutoff / empty state;
                          forward_test.py picks, trade cost, leaderboard + ranking rule, daily record (fake account, no
                          requests); the paper strategies: registry runs, idempotent, missed days caught up, accounting,
-                         dip / earnings drift / risk parity / VWAP by hand, fake bars (no download), live rules =
+                         dip / earnings drift / risk parity / VWAP / ATR stops (replay = live, stop + refill, open
+                         sales) by hand, fake bars (no download), live rules =
                          live Strategy_Weight, no live file / WINNER change
   test_safety_guards.py  20% max weight per stock (extra stays cash); mocked: BUYs over 20% of equity refused (backstop);
                          a missed scheduled decision gets one run-log warning while it waits

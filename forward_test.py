@@ -1,7 +1,7 @@
 """Forward test from backtest_engine.FORWARD_START (Fri Oct 2, 2026), counted only from that close on, never backtested:
 
   1. the real Alpaca account (read-only GET requests through alpaca_paper; no orders, ever), and
-  2. STRATEGIES: 30 paper-only strategies next to it (the live rules recomputed the same way + 29 others). They are
+  2. STRATEGIES: 32 paper-only strategies next to it (the live rules recomputed the same way + 31 others). They are
      never traded; each one is a list of target weights built from data the pipeline already saves every day
      (Reports/signal_analysis.csv, factor_history.csv, earnings_date.csv, benchmark_prices.csv) + daily volume from
      Alpaca's free market data (forward_bars(): one bar download per run, the same request the pipeline makes).
@@ -67,7 +67,7 @@ RANK_RULE = ("Ranked by median weekly return (Friday to Friday); a tie goes to t
 # weights, half size when QQQ is below its 200-day average, no buys 5 days before earnings. "select" changes rank_targets
 # keys (n, sector_cap, vol_sizing, regime, ...), "earnings" None drops the earnings skip, "calendar" is "mwf" / "weekly"
 # (Friday only) / "monthly" (last session of the month). "weights" = a rule that is not a ranking (its own weights below);
-# "reweight" = the same picks with other weights.
+# "reweight" = the same picks with other weights; "stop" = the live rules + an ATR stop around earnings (STOPS).
 PLAIN = {"max_pick_rank": None, "cap_soft": False}       # walk every rank, strict max 4 per sector
 EQ = {**PLAIN, "vol_sizing": False}                      # ... and an equal weight per stock
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
@@ -128,9 +128,19 @@ STRATEGIES = [
     dict(name="Breakout with volume", score="breakout", calendar="weekly", select=EQ, earnings=None,
          rule="Stocks that closed within 2% of their 55-day high on 1.3x+ normal volume (5-day vs 50-day average) in the "
               "last 20 trading days and are still above their 50-day average; top 10 by that volume jump, equal weight, Fridays."),
+    dict(name="Live + pre-earnings 3.5x ATR stop", stop="pre",
+         rule="The live rules + a stop for a stock kept at the Friday rebalance with earnings in the next 7 days, from that "
+              "Friday through its first trading day after the report: sold in full at the close at or below its highest "
+              "close since bought minus 3.5x ATR(14), or at the open if that day opens below it; the best stock the live "
+              "rules would buy takes the slot."),
+    dict(name="Live + post-earnings ATR stop", stop="post",
+         rule="The live rules + the same stop from a holding's first trading day after earnings through 10 trading days "
+              "later: sold at the close at or below its highest close since bought minus 3x ATR(14); the best stock the "
+              "live rules would buy takes the slot."),
     dict(name="Risk parity", reweight="risk_parity",
          rule="The live picks, weighted so each stock adds the same risk (63-day volatility and correlation)."),
 ]
+STOPS = {"pre": dict(k=3.5, arm_days=7, gap_open=True), "post": dict(k=3.0, after=10)}   # atr_stop_targets settings
 FWD_BARS = os.path.join(REPORTS, "cache", "forward_bars.pkl")
 FWD_BARS_START = "2026-05-01"      # ~100 sessions before the start: the 50-day volume average is full by Oct 2
 _NO_SAVE = datetime(2000, 1, 1, tzinfo=be.EASTERN)   # be.keep_decision_bars(now=this) only reads Reports/decision_bars.csv
@@ -164,16 +174,20 @@ def forward_bars(fetch=True):
 
 
 def bar_features(sources, dates, cols):
-    """Close / 20-day VWAP (the copy's daily-bar VWAP: typical price x volume) and the volume jump (5-day / 50-day average
-    volume), computed inside each download so splits and dividends stay consistent; the newest download wins where its
+    """Close / 20-day VWAP (the copy's daily-bar VWAP: typical price x volume), the volume jump (5-day / 50-day average
+    volume), ATR(14) / close and open / close, computed inside each download so splits and dividends stay consistent; the newest download wins where its
     window is full. Decision days use their 2:30 PM bar, like signal_analysis.csv."""
-    out = {k: pd.DataFrame(index=dates, columns=cols, dtype=float) for k in ("vwap_ratio", "vol_jump")}
+    out = {k: pd.DataFrame(index=dates, columns=cols, dtype=float) for k in ("vwap_ratio", "vol_jump", "atr_ratio", "open_ratio")}
     for b in sources:
         b = be.keep_decision_bars(b.sort_values(["Symbol", "Date"]).reset_index(drop=True), now=_NO_SAVE)
-        w = {c: b.pivot_table(index="Date", columns="Symbol", values=c) for c in ("High", "Low", "Close", "Volume")}
+        w = {c: b.pivot_table(index="Date", columns="Symbol", values=c) for c in be.BAR_COLS}
         v = w["Volume"].replace(0, np.nan)
         vwap = ((w["High"] + w["Low"] + w["Close"]) / 3 * v).rolling(20).sum() / v.rolling(20).sum()
-        new = {"vwap_ratio": w["Close"] / vwap, "vol_jump": v.rolling(5).mean() / v.rolling(50).mean()}
+        pc = w["Close"].shift(1)                         # ATR: Wilder 14, as in be.calculate_technical_indicators
+        tr = np.fmax(w["High"] - w["Low"], np.fmax((w["High"] - pc).abs(), (w["Low"] - pc).abs()))
+        atr = tr.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+        new = {"vwap_ratio": w["Close"] / vwap, "vol_jump": v.rolling(5).mean() / v.rolling(50).mean(),
+               "atr_ratio": atr / w["Close"], "open_ratio": w["Open"] / w["Close"]}
         for k in out:
             out[k] = out[k].combine_first(new[k].reindex(index=dates, columns=cols))
     return out
@@ -252,6 +266,97 @@ def risk_parity(tgt, close, days, window=63):
     return pd.DataFrame(out, index=tgt.index, columns=tgt.columns)
 
 
+def earnings_events(dates, cols, earnings):
+    """[(column, report day, reaction-day row)] per report in `dates`: the reaction day is the report day for AM reports,
+    else the next session (after-close reports)."""
+    pos, ev = {s: j for j, s in enumerate(cols)}, []
+    e = earnings[earnings["Symbol"].isin(pos)]
+    for sym, day, when in zip(e["Symbol"], e["Earnings Date"], e.get("Time", pd.Series("", index=e.index)).astype(str)):
+        r = dates.searchsorted(day, side="left" if when.strip().upper() == "AM" else "right")
+        if r < len(dates):
+            ev.append((pos[sym], day, r))
+    return ev
+
+
+def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False):
+    """The live rules + an ATR trailing stop around earnings. The live rules are replayed day by day with the engine's own
+    pieces, exactly as be.winner_targets does (Friday selection with the real holdings, Mon/Wed swaps and exits). Stop
+    window: after = from the reaction day through `after` sessions later; arm_days = a stock kept (HOLD) at a Friday
+    rebalance with earnings within the next arm_days calendar days, from that Friday through its reaction day. Inside it
+    a holding whose close is at or below its highest close since it was bought - k x ATR(14) is sold in full at that close
+    (gap_open: on the reaction day an open already below the stop sells at the open); its weight goes to the best stock
+    the live rules would buy: ranks 1-20, max 4 per sector unless none fits, no buy within 5 days of earnings, and not a
+    stock stopped out in its window. Returns (raw weights, open-sale prices)."""
+    W, args = be.WINNER, be.winner_rank_args(inp["regime"])
+    score, elig, vol, tb = inp["scores"]["live"], inp["eligible"], inp["vol"], inp["scores"]["rs"]
+    dates, cols = score.index, list(score.columns)
+    arr = lambda x: x.reindex(index=dates, columns=cols).to_numpy(float)
+    S, V, TB, C, A, O = arr(score), arr(vol), arr(tb), arr(inp["close"]), arr(inp["atr"]), arr(inp["open"])
+    E = elig.reindex(index=dates, columns=cols).astype("boolean").fillna(False).to_numpy(bool)
+    BB = arr(be.earnings_days_ahead(dates, cols, inp["earnings"], W["earnings_block_days"]))   # not NaN = not bought
+    mw, n, min_score = W["midweek_swap"], W["n"], W["min_score"]
+    reb = inp["weekly"].reindex(dates).fillna(False).to_numpy(bool)
+    chk = be.midweek_check_days(dates, mw.get("days", ("Mon", "Wed")), inp["weekly"]).to_numpy(bool)
+    name_pos, sectors = be._name_positions(cols), np.array([be.sector_mapping.symbol_sector.get(c, "Other") for c in cols])
+    per_sector = max(1, int(np.floor(W["sector_cap"] * n)))
+    win, react, reports = np.zeros((len(dates), len(cols)), bool), np.zeros((len(dates), len(cols)), bool), {}
+    for j, day, r in earnings_events(dates, cols, inp["earnings"]):
+        react[r, j] = True
+        reports.setdefault(j, []).append((day, r))
+        if after is not None:
+            win[r:r + after + 1, j] = True
+    out, opens = np.zeros((len(dates), len(cols))), np.full((len(dates), len(cols)), np.nan)
+    cur, peak, armed = np.zeros(len(cols)), np.full(len(cols), np.nan), np.full(len(cols), -1)
+
+    def ranked(t):
+        ok = E[t] & ~np.isnan(S[t]) & ~np.isnan(V[t]) & (V[t] > 0) & (S[t] > min_score)
+        return be.ranking_order(np.where(ok)[0], S[t], TB[t], name_pos)
+
+    def stop_out(t, j):                                   # sold in full; not bought back until its window ends
+        end = armed[j] + 1 if armed[j] >= t else (t + np.argmin(win[t:, j]) if not win[t:, j].all() else len(dates))
+        BB[t:end, j], peak[j], armed[j], w = 0.0, np.nan, -1, cur[j]
+        cur[j] = 0.0
+        return w
+
+    for t in range(len(dates)):
+        freed = []
+        if gap_open and t:                                # the reaction day opens below yesterday's stop: sold at the open
+            inside = win[t] | (armed >= t)
+            for j in np.where(react[t] & inside & (cur > 0) & (O[t] <= peak - k * A[t - 1]))[0]:
+                opens[t, j] = O[t, j]
+                freed.append(stop_out(t, j))
+        if reb[t]:
+            day, before = dates[[t]], cur.copy()
+            cur = be.rank_targets(score.iloc[[t]], elig, vol, rebalance_days=pd.Series(True, index=day), tiebreak_w=tb,
+                                  buy_block=pd.DataFrame(BB[[t]], index=day, columns=cols), start_holdings=cur.copy(),
+                                  **args).iloc[0].to_numpy(float)
+            freed = []                                    # the Friday selection already refilled
+            if arm_days:                                  # kept at this rebalance, earnings within arm_days: armed
+                for j in np.where((before > 0) & (cur > 0))[0]:
+                    for day_, r in reports.get(j, []):
+                        if dates[t] < day_ <= dates[t] + pd.Timedelta(days=arm_days):
+                            armed[j] = max(armed[j], r)
+        elif chk[t] and cur.sum() > 0:
+            order = ranked(t)
+            rank = {j: r + 1 for r, j in enumerate(order)}
+            skip = {j for j in order[:mw["enter_top"]] if cur[j] == 0 and not np.isnan(BB[t, j])}
+            be.midweek_swap_pairs(cur, order, rank, sectors, mw["enter_top"], mw["exit_below"],
+                                  10 ** 6 if args["cap_soft"] else per_sector, skip=skip)
+            be.midweek_exit_sells(cur, rank, W.get("midweek_exit_below"))
+        peak, armed = np.where(cur > 0, peak, np.nan), np.where(cur > 0, armed, -1)   # sold by the live rules: reset
+        inside = ~np.isnan(peak) & (cur > 0) & (win[t] | (armed >= t))       # held before today, inside its window
+        for j in np.where(inside & (C[t] <= np.fmax(peak, C[t]) - k * A[t]))[0]:
+            freed.append(stop_out(t, j))
+        for w in freed:                                   # refill each freed slot (its weight) like a live buy
+            cands = [j for j in ranked(t)[:args["max_pick_rank"]] if cur[j] == 0 and np.isnan(BB[t, j])]
+            fits = [j for j in cands if sum(sectors[cur > 0] == sectors[j]) < per_sector] or (cands if args["cap_soft"] else [])
+            if fits:
+                cur[fits[0]] = w
+        peak = np.where(cur > 0, np.fmax(peak, C[t]), np.nan)
+        out[t] = cur
+    return pd.DataFrame(out, index=dates, columns=cols), pd.DataFrame(opens, index=dates, columns=cols)
+
+
 def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     """Everything the strategies rank on, as Date x Symbol frames, from saved data only: `sig` = signal_analysis.csv rows
     (SIG_COLS), `facts` = factor_history.csv (the daily snapshot of news sentiment and the company-report score; each day
@@ -310,16 +415,19 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
                "trend": _carry(((f["ma_50"] > f["ma_200"]) & eligible).astype(float).div(n, axis=0), weekly)}
     have = bx["vwap_ratio"].notna().any(axis=1)
     return {"close": c.ffill(), "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
-            "weekly": weekly, "earnings": earnings,
+            "weekly": weekly, "earnings": earnings, "atr": bx["atr_ratio"] * c, "open": bx["open_ratio"] * c,
             "monthly": pd.Series([be.next_sessions(d, 1)[0].month != d.month for d in dates], index=dates),
             "through": have[have].index.max() if have.any() else pd.Timestamp(0)}
 
 
 def strategy_targets(cfg, inp):
     """Daily live target weights of one STRATEGIES entry (Date x Symbol). Ranked ones go through the engine's own selection
-    code (be.winner_targets): only overrides are passed, WINNER itself is never changed."""
+    code (be.winner_targets): only overrides are passed, WINNER itself is never changed. A "stop" strategy also leaves its
+    open-sale prices in inp["open_sells"][name]."""
     if cfg.get("weights"):
         tgt = inp["weights"][cfg["weights"]]
+    elif cfg.get("stop"):
+        tgt, inp.setdefault("open_sells", {})[cfg["name"]] = atr_stop_targets(inp, **STOPS[cfg["stop"]])
     else:
         cal, tb = cfg.get("calendar", "mwf"), cfg.get("tiebreak", "rs")
         tgt, _ = be.winner_targets(inp["scores"][cfg.get("score", "live")], inp["eligible"], inp["vol"], inp["regime"],
@@ -365,8 +473,12 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
             cash = float(mine.loc[mine["Date"] == last, "Cash"].iloc[0])
             shares, prev = zero.add(h["Shares"], fill_value=0.0), zero.add(h["Weight"], fill_value=0.0)
         w = strategy_targets(cfg, inp).reindex(columns=cols).fillna(0.0)
+        opens = inp.get("open_sells", {}).get(name, pd.DataFrame()).reindex(index=todo, columns=cols)
         for d in todo:
             px = close.loc[d].reindex(cols).fillna(last_px)  # a stock gone from the list keeps its last saved price
+            at_open = opens.loc[d][(shares > 0) & opens.loc[d].notna()]
+            cash += (shares[at_open.index] * at_open * (1 - be.COST)).sum()   # stop sales at the open (0.1% cost)
+            shares = shares.where(~shares.index.isin(at_open.index), 0.0)
             value = cash + (shares * px).sum()
             wd = w.loc[d]
             if prev is None or not np.allclose(wd, prev):

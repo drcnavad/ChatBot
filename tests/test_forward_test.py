@@ -181,8 +181,8 @@ SIG = fake_sig(sdays)
 FACTS = pd.DataFrame({"as_of": "2026-09-01 15:31", "bar_date": "2026-09-01", "Symbol": SYMS,
                       "SentimentScore": rng.normal(1, 3, len(SYMS)), "Fundamental_Weight": rng.uniform(-3, 8, len(SYMS))})
 NO_EARN = pd.DataFrame(columns=["Symbol", "Earnings Date"])
-EARN = pd.DataFrame({"Symbol": SYMS * 2, "Earnings Date": pd.to_datetime(["2026-08-04"] * 30 + ["2026-09-15"] * 30),
-                     "Time": ["AM", "PM"] * 30})
+EARN = pd.DataFrame({"Symbol": SYMS * 2, "Time": ["AM", "PM"] * 30,     # reports spread over a month, twice
+                     "Earnings Date": [pd.Timestamp(m) + pd.Timedelta(days=k) for m in ("2026-07-20", "2026-09-01") for k in range(30)]})
 BENCH = pd.DataFrame({"Date": sdays, **{s: 100 * np.exp(np.cumsum(rng.normal(0.0003, 0.012, len(sdays))))
                                        for s in ["SPY", "QQQ", *be.SECTOR_ETFS]}})
 _c = SIG.pivot(index="Date", columns="Symbol", values="Close").stack().rename("Close").reset_index()
@@ -200,6 +200,54 @@ check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%
 check("registry: the strategies are not copies of each other (distinct weights over the test)",
       len({t.round(4).to_numpy().tobytes() for t in tg.values()}) >= len(ft.STRATEGIES) - 3)
 check("registry: WINNER untouched", be.WINNER == w0)
+live_raw, _ = be.winner_targets(inp["scores"]["live"], inp["eligible"], inp["vol"], inp["regime"], inp["weekly"],
+                                tiebreak_w=inp["scores"]["rs"], earnings=EARN)
+check("ATR stops: with no stop the day-by-day replay = be.winner_targets exactly (every day, both windows)",
+      all(ft.atr_stop_targets(inp, **{**ft.STOPS[m], "k": np.inf})[0].equals(live_raw) for m in ft.STOPS))
+# stop scenarios: each stock held over a Friday reports (after the close) 2 sessions after that Friday
+L, fridays = live_raw.to_numpy(), np.where(inp["weekly"].to_numpy(bool))[0]
+EARN2 = pd.DataFrame([{"Symbol": s_, "Earnings Date": live_raw.index[f + 2], "Time": "PM"} for j_, s_ in enumerate(live_raw.columns)
+                      for f in fridays[(fridays > 0) & (fridays < len(L) - 6)] if L[f - 1, j_] > 0 and (L[f:f + 6, j_] > 0).all()])
+inp2 = dict(inp, earnings=EARN2)
+live_raw, _ = be.winner_targets(inp2["scores"]["live"], inp2["eligible"], inp2["vol"], inp2["regime"], inp2["weekly"],
+                                tiebreak_w=inp2["scores"]["rs"], earnings=EARN2)
+cols_ = list(live_raw.columns)
+ev = ft.earnings_events(live_raw.index, cols_, EARN2)
+react = np.zeros(live_raw.shape, bool)
+for j, _, r in ev:
+    react[r, j] = True
+
+
+def in_window(m, t, j):
+    """Stop window of column j on row t: post = reaction day .. +10 sessions; pre = earnings within 7 days of the last
+    Friday rebalance, through its reaction day (and the stock was held before that Friday)."""
+    if m == "post":
+        return any(r <= t <= r + 10 for jj, _, r in ev if jj == j)
+    f = fridays[fridays <= t].max()
+    return any(jj == j and live_raw.index[f] < day <= live_raw.index[f] + pd.Timedelta(days=7) and r >= t
+               for jj, day, r in ev)
+
+
+stops = {}
+for m, kk in (("pre", 0.5), ("post", 1.0)):           # small k: the fake random walks rarely fall 3.5 ATR in a few days
+    st_w, st_open = stops[m] = ft.atr_stop_targets(inp2, **{**ft.STOPS[m], "k": kk})
+    diff = ~np.isclose(st_w, live_raw).all(axis=1)
+    t = int(np.argmax(diff)) if diff.any() else None
+    ok = t is not None
+    if ok:                                            # the first day it differs from live: a stop inside the window
+        now, live_now = st_w.iloc[t].to_numpy(), live_raw.iloc[t].to_numpy()     # same holdings as live until yesterday
+        sold, bought = np.where((live_now > 0) & (now == 0))[0], np.where((live_now == 0) & (now > 0))[0]
+        c_, a_ = inp2["close"].to_numpy(), inp2["atr"].reindex(columns=cols_).to_numpy()
+        held_from = [t - np.argmax(st_w.iloc[:t, j].to_numpy()[::-1] == 0) for j in sold]   # the day it was bought
+        hit = [c_[t, j] <= c_[h:t + 1, j].max() - kk * a_[t, j] or st_open.iat[t, j] == st_open.iat[t, j]
+               for j, h in zip(sold, held_from)]
+        ok = len(sold) >= 1 and all(in_window(m, t, j) for j in sold) and all(hit) and np.isclose(now.sum(), live_now.sum()) \
+            and set(bought).isdisjoint(sold) and len(bought) == len(sold)
+    check(f"ATR stop ({m}-earnings, {kk}x): the first change vs live is a holding in its window at/below its "
+          "peak - k ATR, sold in full and replaced at the same weight", ok, t)
+o = stops["pre"][1].notna().to_numpy()
+check(f"ATR stop (pre-earnings): open sales only on reaction days, at the open price ({len(EARN2)} reports)",
+      len(EARN2) >= 4 and react[o].all() and np.allclose(stops["pre"][1].to_numpy()[o], inp2["open"].reindex(columns=cols_).to_numpy()[o]), int(o.sum()))
 
 import filecmp  # noqa: E402
 with tempfile.TemporaryDirectory() as tmp:
@@ -236,20 +284,27 @@ with tempfile.TemporaryDirectory() as tmp:
     def fake_targets(cfg, inp_):
         t = pd.DataFrame(0.0, index=inp_["close"].index, columns=inp_["close"].columns)
         t.loc[:"2026-10-05", "AAA"], t.loc["2026-10-06":, "BBB"] = 0.99, 0.99
+        if cfg["name"] == "Y":                        # the same switch, but AAA sold at a 95 open on Oct 6 (a stop)
+            inp_.setdefault("open_sells", {})["Y"] = t * np.nan
+            inp_["open_sells"]["Y"].loc["2026-10-06", "AAA"] = 95.0
         return t
     try:
         ft.strategy_inputs = lambda sig, *a, **k: {"close": sig.pivot(index="Date", columns="Symbol", values="Close")}
-        ft.strategy_targets, ft.STRATEGIES = fake_targets, [{"name": "X", "rule": "x"}]
+        ft.strategy_targets, ft.STRATEGIES = fake_targets, [{"name": "X", "rule": "x"}, {"name": "Y", "rule": "y"}]
         ft.update_strategies(hs[hs["Date"] <= "2026-10-05"], None, NO_EARN, **P("h"))   # resume across the switch
         ft.update_strategies(hs, None, NO_EARN, **P("h"))
     finally:
         ft.strategy_inputs, ft.strategy_targets, ft.STRATEGIES = real_inputs, real_targets, real_list
-    hv = pd.read_csv(P("h")["path"], parse_dates=["Date"]).set_index("Date")["Value"]
+    hy = pd.read_csv(P("h")["path"], parse_dates=["Date"])
+    hv, hy = (hy[hy["Strategy"] == x].set_index("Date")["Value"] for x in ("X", "Y"))
     a5 = 0.01 + 0.99 * 1.1
     after = a5 - be.COST * (0.99 * 1.1 + 0.99 * a5)      # sell all AAA + buy 99% BBB
     check("accounting: 1.0 at the start close, follows the closes, pays 0.1% per side on a change, cash earns 0",
           hv.index[0] == pd.Timestamp("2026-10-02") and hv.iloc[0] == 1.0 and abs(hv["2026-10-05"] - a5) < 1e-12
           and abs(hv["2026-10-06"] - after) < 1e-12 and abs(hv.iloc[-1] - after) < 1e-12, hv.round(6).to_dict())
+    at_open = (0.01 + 0.0099 * 95 * (1 - be.COST)) * (1 - 0.99 * be.COST)   # AAA sold at the open, then 99% BBB at the close
+    check("accounting: a stop sale at the open gets the open price (0.1% cost), the refill buys at the close",
+          abs(hy["2026-10-05"] - a5) < 1e-12 and abs(hy["2026-10-06"] - at_open) < 1e-12, hy.round(6).to_dict())
 
 # the rules that are not rankings, on tiny hand-made data
 ud = pd.bdate_range("2026-01-05", periods=8)
@@ -299,6 +354,10 @@ if os.path.exists(ft.SIGNAL_CSV):
     real = pd.read_csv(ft.SIGNAL_CSV, usecols=["Date", "Symbol", "Strategy_Weight"], parse_dates=["Date"])
     d0 = pd.Timestamp(be.FORWARD_START)
     live = real[(real["Date"] == d0) & (real["Strategy_Weight"] > 0)].set_index("Symbol")["Strategy_Weight"].sort_index()
+    real_live, _ = be.winner_targets(real_inp["scores"]["live"], real_inp["eligible"], real_inp["vol"], real_inp["regime"],
+                                     real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"])
+    check("ATR stops on the real data: with no stop the replay = the live targets on every saved day",
+          all(ft.atr_stop_targets(real_inp, **{**ft.STOPS[m], "k": np.inf})[0].equals(real_live) for m in ft.STOPS))
     mine = ft.strategy_targets(ft.STRATEGIES[0], real_inp).loc[d0]
     mine = mine[mine > 0].sort_index()
     check("live rules recomputed from the saved files = the live Strategy_Weight of Oct 2 (apples to apples)",
