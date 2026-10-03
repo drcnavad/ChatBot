@@ -46,7 +46,6 @@ STALE_DAYS = 90      # re-fetch when the last successful fetch is older than thi
 MAX_STOCKS = 12      # 25 API calls/day / 2 calls per stock
 CALL_DELAY_SEC = 13  # free tier = 5 calls/min
 YEARS_TO_KEEP = 5
-IQR_MULT = 1.5
 COOLDOWN_DAYS = None  # None = ceil(len(ALL_SYMBOLS) / MAX_STOCKS), one full pass before repeats
 
 # Fundamentals universe: from sector_mapping.py only (every tradable stock + its fundamentals_extra watchlist), so a stock
@@ -70,7 +69,6 @@ BALANCE_FIELDS = {
     "CashAndEquivalents": "cashAndCashEquivalentsAtCarryingValue",
 }
 MILLIONS_COLS = [*INCOME_FIELDS, *BALANCE_FIELDS]
-NUMERIC_COLS = MILLIONS_COLS + ["OperatingMargin", "BVPS", "Debt_to_Equity"]
 OUTPUT_COLUMNS = [
     "Symbol", "FiscalDateEnding", *INCOME_FIELDS, "OperatingMargin",
     *BALANCE_FIELDS, "BVPS", "Debt_to_Equity", "Date", "DateAdded",
@@ -102,17 +100,6 @@ def fetch_statement(function, symbol, fields):
 # --- TRANSFORM + SAVE --------------------------------------------------------
 
 
-def clip_outliers(df):
-    """Clamp each numeric column to [Q1 - k*IQR, Q3 + k*IQR] when it has > 3 values."""
-    for col in NUMERIC_COLS:
-        s = df[col]
-        if s.count() > 3:
-            q1, q3 = s.quantile([0.25, 0.75])
-            iqr = max(q3 - q1, 1e-10)
-            df[col] = s.clip(q1 - IQR_MULT * iqr, q3 + IQR_MULT * iqr)
-    return df
-
-
 def build_fundamentals(income, balance):
     """Merge raw income + balance rows into the balance_sheet.csv format."""
     income, balance = (
@@ -128,7 +115,9 @@ def build_fundamentals(income, balance):
     df[MILLIONS_COLS] = df[MILLIONS_COLS] / 1_000_000
     df = df.replace([np.inf, -np.inf], np.nan)
     df["Date"] = df["DateAdded"] = pd.Timestamp.today().normalize()
-    return pd.concat(clip_outliers(g) for _, g in df.groupby("Symbol"))[OUTPUT_COLUMNS]
+    # No per-company outlier clipping: clamping a company's own quarters to Q1/Q3 +- 1.5 IQR flattened the newest
+    # quarters of every fast grower (e.g. NVDA's last two quarters showed the same capped net income and assets).
+    return df.sort_values(["Symbol", "FiscalDateEnding"])[OUTPUT_COLUMNS]
 
 
 def save_fundamentals(new_df):
