@@ -5,10 +5,11 @@ Page layout, top to bottom:
   1. Title bar.
   2. "Dashboard" tab: the single-stock view (clickable rank tiers, stock picker, chart). Open any stock directly with
      http://localhost:8502/?symbol=NVDA
-  3. "Details" tab: everything else (latest signals, the last decision, the strategy rules and decisions, data freshness),
-     each in its own expander.
+  3. "Details" tab: everything else (live Alpaca holdings, latest signals, the last decision, the strategy rules and
+     decisions, data freshness), each in its own expander.
 
-The app only READS the Reports/*.csv files written by `python run_all.py` for strategy data. It never places orders and never calls
+The app only READS the Reports/*.csv files written by `python run_all.py` for strategy data, plus the live holdings from the
+Alpaca account (read-only GETs via alpaca_paper.py, at most once a minute). It never places orders and never calls
 a paid data API (the optional "AI analysis" button uses the Hugging Face token from .env). The stock header additionally
 shows a display-only live quote from yfinance (free), and yfinance also draws the price chart of stocks too new to trade
 (short history); neither ever feeds back into signals, picks, backtests, or orders.
@@ -1538,7 +1539,62 @@ def render_data_and_settings(p):
         st.success("All report files are within their expected refresh window.")
 
 
+@st.cache_data(ttl=3600, max_entries=4, show_spinner=False)
+def _read_holdings(refresh_key):
+    """One read of the Alpaca LIVE account (GET only: positions, account, fills) and the QQQ quote per refresh_key
+    (alpaca_paper.holdings_refresh_key: a new key each minute in market hours, each hour otherwise). A failure raises,
+    and Streamlit never caches a raise, so the next minute tries again."""
+    import alpaca_paper as ap
+    acct = ap.PaperAccount()
+    q = live_quote("QQQ")
+    return {"positions": acct.position_dicts(), "fills": acct.fills(), "equity": acct.account_summary()["Equity"],
+            "qqq_now": q[0] if q else None, "as_of": datetime.now(CT)}
+
+
+def live_holdings():
+    """(data, None) or (None, plain message). Keys come from .env via alpaca_paper; error messages never hold them."""
+    if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off":                # tests: never call Alpaca
+        return None, "Live holdings are turned off here (STOCK_ANALYSIS_LIVE_HOLDINGS=off)."
+    try:
+        import alpaca_paper as ap
+        return _read_holdings(ap.holdings_refresh_key()), None
+    except Exception as e:
+        return None, f"Live holdings unavailable right now ({type(e).__name__}: {str(e)[:200]}). It tries again in a minute."
+
+
+@st.fragment(run_every=60)        # reruns only this table each minute; it reads Alpaca only when the refresh key changes
+def render_live_holdings():
+    """Details tab: the real Alpaca positions with cost, value, P/L and the first purchase date, plus QQQ for comparison."""
+    data, err = live_holdings()
+    if err:
+        st.info(err)
+        return
+    import alpaca_paper as ap
+    last = load_benchmarks()                                     # no live QQQ quote: the last daily close
+    last = last["QQQ"].dropna() if last is not None and "QQQ" in last else ()
+    table = ap.holdings_table(data["positions"], data["fills"], data["equity"],
+                              data["qqq_now"] or (float(last.iloc[-1]) if len(last) else None))
+    if table.empty:
+        st.info(f"No open positions in the Alpaca account (as of {data['as_of']:%a %b %-d %I:%M %p} CT).")
+        return
+    table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
+    money, pct = st.column_config.NumberColumn(format="dollar"), st.column_config.NumberColumn(format="%+.2f%%")
+    st.dataframe(table, hide_index=True, width="stretch",
+                 column_config={"Shares": st.column_config.NumberColumn(format="%.2f"), "Avg price": money,
+                                "Cost basis": money, "Market value": money, "P/L $": money, "Price": money,
+                                "P/L %": pct, "Today %": pct, "Weight %": st.column_config.NumberColumn(format="%.2f%%")})
+    st.caption(f"As of {data['as_of']:%a %b %-d %I:%M:%S %p} CT, read from Alpaca (read-only). Updates by itself: every "
+               "minute in market hours (8:30 AM-3:00 PM CT on trading days), every hour otherwise. "
+               "Cost basis = what you paid; Market value = shares x the latest price; P/L $ and P/L % = market value vs "
+               "cost basis; Today % = price change since the last close; Weight % = share of the account's equity (the rest "
+               "is cash). First bought = the earliest buy still in the position (sells use up the oldest shares first). "
+               f"QQQ is not held: its row invests the same total cost basis in QQQ at its Fri Oct 2, 2026 close "
+               f"(${ap.QQQ_BASE_CLOSE:,.2f}, fixed) and values it at QQQ's latest price, to compare with the Total row.")
+
+
 def render_details(p):
+    with st.expander("Live holdings (Alpaca account)", expanded=True):
+        render_live_holdings()
     with st.expander(latest_signals_title(p), expanded=True):
         render_latest_signals(p)
     with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=False):

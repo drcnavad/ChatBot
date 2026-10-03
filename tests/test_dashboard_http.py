@@ -29,6 +29,7 @@ def status(url):
         return getattr(e, "code", None) or str(e), ""
 
 
+os.environ["STOCK_ANALYSIS_LIVE_HOLDINGS"] = "off"   # the test server never calls Alpaca
 if port_busy(PORT):
     print(f"port {PORT} is already in use - not starting a second server (nothing was stopped)")
     sys.exit(1)

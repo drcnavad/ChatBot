@@ -9,7 +9,8 @@ Safety rules built into this module:
   * Only the live endpoint https://api.alpaca.markets/v2 is accepted; any other URL (the paper
     paper-api.alpaca.markets host, plain http, another version or host) raises PaperAccountError
     before a request is made.
-  * Only HTTP GET requests to /account, /positions, /orders, /clock and /account/activities (deposits/withdrawals) are possible.
+  * Only HTTP GET requests to /account, /positions, /orders, /clock and /account/activities (deposits/withdrawals, fills)
+    are possible.
     There is no code here that places, changes or cancels orders.
   * The keys come from .env (ALPACA_LIVE_KEY_ID, ALPACA_LIVE_SECRET_KEY). They are sent only in the request headers
     and are never printed, logged or written to a file.
@@ -171,6 +172,86 @@ class PaperAccount:
             if len(page) < 100:
                 return total
             params = {**params, "page_token": page[-1]["id"]}
+
+    def position_dicts(self):
+        """Open positions as Alpaca returns them (GET /positions), for the dashboard's holdings table."""
+        return self._get("/positions")
+
+    def fills(self, max_pages=50):
+        """Every order fill on the account (GET /account/activities, type FILL), oldest first."""
+        out, params = [], {"activity_types": "FILL", "page_size": 100, "direction": "desc"}
+        for _ in range(max_pages):
+            page = self._get("/account/activities", params)
+            out += page
+            if len(page) < 100:
+                break
+            params = {**params, "page_token": page[-1]["id"]}
+        return out[::-1]
+
+
+# --- the dashboard's live holdings table (pure: no requests here) -------------------------------------------------------
+QQQ_BASE_DATE, QQQ_BASE_CLOSE = "2026-10-02", 749.58   # the QQQ comparison row starts at QQQ's close on Fri Oct 2, 2026
+QQQ_LABEL = "QQQ since Oct 2, 2026 — not held, comparison only"
+HOLDING_COLS = ["Stock", "Shares", "Avg price", "First bought", "Cost basis", "Market value", "P/L $", "P/L %",
+                "Price", "Today %", "Weight %"]
+
+
+def holdings_refresh_key(now=None):
+    """Cache key for the dashboard's live holdings: a new key every minute in regular market hours (8:30 AM-3:00 PM CT,
+    12:00 PM on early-close days, NYSE sessions only), else every hour (after hours, nights, weekends, holidays)."""
+    import backtest_engine as be
+    now = (now or datetime.now(CT)).astimezone(CT)
+    close = (12, 0) if be.is_early_close(now.date()) else (15, 0)
+    if be.is_session(now.date()) and (8, 30) <= (now.hour, now.minute) < close:
+        return f"{now:%Y-%m-%d %H:%M}"
+    return f"{now:%Y-%m-%d %H}h"
+
+
+def first_buy_dates(fills):
+    """Symbol -> date (CT) of the earliest buy fill still part of the current position. Sells use up the oldest shares
+    first (FIFO), so after a partial sell the date moves to the oldest shares still held; after a full exit it restarts."""
+    lots = {}
+    for f in sorted(fills, key=lambda f: str(f.get("transaction_time"))):
+        q, qty = lots.setdefault(f["symbol"], []), float(f.get("qty") or 0)
+        if f.get("side") == "buy":
+            q.append([pd.to_datetime(f["transaction_time"], utc=True).tz_convert(CT).date(), qty])
+            continue
+        while qty > 1e-9 and q:
+            used = min(qty, q[0][1])
+            q[0][1] -= used
+            qty -= used
+            if q[0][1] <= 1e-9:
+                q.pop(0)
+    return {s: q[0][0] for s, q in lots.items() if q}
+
+
+def holdings_table(positions, fills, equity, qqq_now=None):
+    """One row per held stock, a Total row and a QQQ comparison row (not held). positions: GET /positions dicts;
+    fills: GET /account/activities FILL dicts; equity: account equity (Weight % = market value / equity);
+    qqq_now: latest QQQ price. The QQQ row (only with qqq_now) invests the same total cost basis in QQQ at its fixed
+    Oct 2, 2026 close (QQQ_BASE_CLOSE) and values it at qqq_now: a hypothetical P/L, not a holding."""
+    num = lambda d, k: float(d.get(k)) if d.get(k) not in (None, "") else float("nan")
+    first = first_buy_dates(fills)
+    rows = [{"Stock": p["symbol"], "Shares": num(p, "qty"), "Avg price": num(p, "avg_entry_price"),
+             "First bought": first.get(p["symbol"]), "Cost basis": num(p, "cost_basis"),
+             "Market value": num(p, "market_value"), "P/L $": num(p, "unrealized_pl"),
+             "P/L %": num(p, "unrealized_plpc") * 100, "Price": num(p, "current_price"),
+             "Today %": num(p, "change_today") * 100, "Weight %": num(p, "market_value") / equity * 100 if equity else float("nan"),
+             "_prev": num(p, "qty") * num(p, "lastday_price")} for p in positions]
+    if not rows:
+        return pd.DataFrame(columns=HOLDING_COLS)
+    t = pd.DataFrame(rows).sort_values("Market value", ascending=False)
+    cost, pl, prev = t["Cost basis"].sum(), t["P/L $"].sum(), t["_prev"].sum()
+    total = {"Stock": f"Total ({len(t)} stocks)", "Cost basis": cost, "Market value": t["Market value"].sum(), "P/L $": pl,
+             "P/L %": pl / cost * 100 if cost else float("nan"), "Weight %": t["Weight %"].sum(),
+             "Today %": (t["Market value"].sum() - prev) / prev * 100 if prev else float("nan")}
+    out = [t.drop(columns="_prev"), pd.DataFrame([total])]
+    if qqq_now:
+        worth = cost * qqq_now / QQQ_BASE_CLOSE
+        out.append(pd.DataFrame([{"Stock": QQQ_LABEL, "Avg price": QQQ_BASE_CLOSE, "First bought": pd.Timestamp(QQQ_BASE_DATE).date(),
+                                  "Cost basis": cost, "Market value": worth, "P/L $": worth - cost,
+                                  "P/L %": (qqq_now / QQQ_BASE_CLOSE - 1) * 100, "Price": qqq_now}]))
+    return pd.concat(out, ignore_index=True)[HOLDING_COLS]
 
 
 # --- files for the rest of the pipeline --------------------------------------------------------------------------------

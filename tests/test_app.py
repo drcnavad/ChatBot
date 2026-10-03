@@ -15,6 +15,7 @@ from html.parser import HTMLParser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
+os.environ["STOCK_ANALYSIS_LIVE_HOLDINGS"] = "off"   # never call Alpaca here (tests/test_live_holdings.py fakes it)
 sys.path.insert(0, ROOT)
 import numpy as np
 import pandas as pd
@@ -194,9 +195,9 @@ for sym in dict.fromkeys(cases):
                and int(b[rank_then]) == int(CH.set_index("Symbol").Rank[sym]),
                f"{sym}: Last decision row {b.to_dict()} disagrees")
     print(f"   {sym}: {badges} · rank {rk and rk.groups()} OK")
-exp_titles = [f"Latest signals · {fmt(SIG.Date.max())} close", f"Last decision · {fmt(dec_day)}"]
+exp_titles = ["Live holdings (Alpaca account)", f"Latest signals · {fmt(SIG.Date.max())} close", f"Last decision · {fmt(dec_day)}"]
 labels = [e.label for e in at.expander]
-expect(labels[:1] == exp_titles[:1] and any(l.startswith(exp_titles[1]) for l in labels),
+expect(labels[:2] == exp_titles[:2] and any(l.startswith(exp_titles[2]) for l in labels),
        f"Details expanders {labels[:3]} should start with {exp_titles}")
 # short history: no Details section any more; the stocks sit in the clickable stock list (see the rank tiers test)
 expect(not any(l.startswith("Reference only") for l in labels), f"stale short-history Details section: {labels}")
@@ -241,6 +242,7 @@ box = [m.value for m in at.markdown if "sa-alert " in m.value]
 expect(len(box) == 0, f"the alert banner was removed from the dashboard, found {len(box)}")
 expect([t.label for t in at.tabs] == ["📈 Dashboard", "🔎 Details"], f"tabs: {[t.label for t in at.tabs]} (Strategy Health removed)")
 expect(not [m for m in at.markdown if '<div class="sa-section">Summary</div>' in m.value], "the Summary section was removed")
+expect(any("Live holdings are turned off here" in i.value for i in at.info), "holdings expander: off message in tests")
 
 # ---------------------------------------------------------------- rank tiers: horizontal clickable lists by rank
 tier_md = [m.value for m in at.markdown if "Rank 1 to 20" in m.value and "?symbol=" in m.value]

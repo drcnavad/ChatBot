@@ -12,6 +12,8 @@
                          block trading; only main/validate failures are critical
   test_app.py            Streamlit AppTest: page, charts, displayed ranks, Details widgets, captions, removed sections
   test_paper_account.py  alpaca_paper.py + run_all --sync-live against a local MOCK server
+  test_live_holdings.py  Details tab live holdings: fake Alpaca client, FIFO first-buy dates, totals, QQQ row,
+                         60 s cache, failure message (no network to Alpaca)
   test_dashboard_http.py the app on test port 8599 answers 200 for / and /?symbol=NVDA (never touches 8502, the running app)
   test_paper_trade_live_safety.py  mocked (zero broker calls) regression tests for the LIVE paper_trade.py:
                          live- / live-fill- order id namespace, paper=False LIVE client from LIVE keys,
@@ -63,12 +65,12 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
          "test_paper_trade_math_audit.py", "test_run_log.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
          "test_live_rules_audit.py", "test_catch_up.py",
          "test_alpaca_api_names.py", "test_smart_orders.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py",
-         "test_decision_bars.py", "test_refresh_job.py"]
+         "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py"]
 
 
 def main():
     fast = "--fast" in sys.argv
-    env = dict(os.environ, PYTHONPATH=ROOT + os.pathsep + os.environ.get("PYTHONPATH", ""), PYTHONDONTWRITEBYTECODE="1",
+    env = dict(os.environ, PYTHONPATH=ROOT + os.pathsep + os.environ.get("PYTHONPATH", ""), PYTHONDONTWRITEBYTECODE="1", STOCK_ANALYSIS_LIVE_HOLDINGS="off",
                PYTHONWARNINGS="ignore",   # tests never write the real Reports/run_log.csv
                STOCK_ANALYSIS_RUN_LOG=os.path.join(tempfile.mkdtemp(), "run_log.csv"))
     results = []
