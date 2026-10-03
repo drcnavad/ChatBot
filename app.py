@@ -15,6 +15,7 @@ shows a display-only live quote from yfinance (free), and yfinance also draws th
 (short history); neither ever feeds back into signals, picks, backtests, or orders.
 """
 import html
+import json
 import os
 import re
 import sys
@@ -103,7 +104,11 @@ def rules_text():
                "sold; the cash waits for the Friday rebalance.\n" if EXIT_BELOW else "")
             + (f"- **Earnings:** a stock that is not held is not bought when its next earnings date is within {EARNINGS} "
                "calendar days; on Friday its slot goes to the next eligible stock (else cash), mid-week it is just not bought. "
-               "A held stock is never sold because of earnings, and it is not topped up before them.\n" if EARNINGS else "")
+               "A held stock is not topped up before them.\n" if EARNINGS else "")
+            + "- **Pre-earnings stop:** a held stock with earnings within 7 calendar days is sold if its price falls to its "
+            "highest close since bought - 3.5 × ATR(14), from 7 days before the report through the reaction day (checked "
+            "every 10 minutes in the pre-market, regular and after-hours sessions; whole shares at once, the fraction at "
+            "the 9 AM CT check). One sale per report; the cash waits for the next scheduled run.\n"
             + "- **Orders:** sells go first. Every order is a limit at the live quote: buy at the ask + 0.05%, sell at the "
             "bid - 0.05% (no market orders). An order whose quote is stale or wider than 0.5% waits for the next 9 AM CT "
             "check. The 2:30 PM CT run trades in market hours (2-decimal shares); from 5 minutes before the close, "
@@ -1694,6 +1699,32 @@ def render_forward_rules():
                    "has every day). Paper only: none of these is traded.")
 
 
+def render_earnings_stops():
+    """The live pre-earnings stop (earnings_stop.py, launchd every 10 min): its latest check and the stop sales."""
+    path = os.path.join(REPORTS, "earnings_stops.csv")
+    try:
+        t = pd.read_csv(path)
+    except (OSError, ValueError):
+        t = None
+    if t is None:
+        st.info("No check yet: the stop job checks every 10 minutes on trading days, 3:00 AM to 7:00 PM CT.")
+    elif t.empty:
+        st.caption(f"No held stock has earnings within 7 days (last check "
+                   f"{datetime.fromtimestamp(os.path.getmtime(path)):%a %b %-d %-I:%M %p} CT).")
+    else:
+        st.dataframe(t.drop(columns="Checked_At_CT"), hide_index=True, width="stretch")
+        st.caption(f"Last check {t['Checked_At_CT'].iloc[0]} CT. Stop = highest close since entry - 3.5 × ATR(14); "
+                   "Price = the latest quote's mid price.")
+    try:
+        with open(os.path.join(REPORTS, "earnings_stop_state.json")) as f:
+            sold = json.load(f).get("sold", {})
+    except (OSError, ValueError):
+        sold = {}
+    if sold:
+        st.caption("Stop sales: " + "; ".join(f"{k.split('|')[0]} before its {k.split('|')[1]} report, "
+                                               f"{str(v.get('at'))[:16].replace('T', ' ')} CT" for k, v in sorted(sold.items())))
+
+
 def render_details(p):
     with st.expander("Live holdings (Alpaca account)", expanded=True):
         render_live_holdings()
@@ -1707,6 +1738,8 @@ def render_details(p):
         render_latest_signals(p)
     with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=False):
         render_last_decision(p)
+    with st.expander("Pre-earnings stops (3.5× ATR, live account)", expanded=False):
+        render_earnings_stops()
     with st.expander("Data freshness and settings", expanded=False):
         render_data_and_settings(p)
     with st.expander("Strategy rules", expanded=False):

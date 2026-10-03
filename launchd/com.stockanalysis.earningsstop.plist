@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Pre-earnings 3.5x ATR stop (LIVE): every 10 min (StartInterval), at login/boot (RunAtLoad) and once on wake.
+     earnings_stop.py --scheduled acts only on NYSE trading days in the pre-market (3:00-8:30 AM CT), regular hours and
+     after hours (until 7:00 PM CT, 4:00 PM CT on early-close days); otherwise it prints one "idle" line. It sells a held
+     stock with earnings within 7 days at or below its stop (whole shares, limit at the bid; the fraction at 9 AM CT),
+     once per report. Installed by launchd/install_schedule.sh. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.stockanalysis.earningsstop</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/anaconda3/bin/python</string>
+        <string>/Users/drcnavad/Desktop/Stock Analysis/earnings_stop.py</string>
+        <string>--scheduled</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/anaconda3/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StartInterval</key>
+    <integer>600</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_earningsstop.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_earningsstop.err</string>
+</dict>
+</plist>

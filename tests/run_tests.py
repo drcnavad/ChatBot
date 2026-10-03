@@ -57,6 +57,9 @@
                          dip / ATR dip buys / earnings drift / risk parity / VWAP / ATR stops (replay = live, stop + refill, open
                          sales) by hand, fake bars (no download), live rules =
                          live Strategy_Weight, no live file / WINNER change
+  test_earnings_stop.py  live pre-earnings 3.5x ATR stop (mocked broker, quotes and bars): window through the reaction
+                         day, sessions, stop = engine ATR, one whole-share limit SELL (extended_hours outside regular
+                         hours), fraction to 9 AM, never twice, fails closed; dry run sends and writes nothing
   test_safety_guards.py  20% max weight per stock (extra stays cash); mocked: BUYs over 20% of equity refused (backstop);
                          a missed scheduled decision gets one run-log warning while it waits
 Only the files in TESTS run (never Archive/). Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
@@ -73,7 +76,8 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
          "test_paper_trade_math_audit.py", "test_run_log.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
          "test_live_rules_audit.py", "test_catch_up.py",
          "test_alpaca_api_names.py", "test_smart_orders.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py",
-         "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py", "test_forward_test.py", "test_safety_guards.py"]
+         "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py", "test_forward_test.py", "test_earnings_stop.py",
+         "test_safety_guards.py"]
 
 
 def main():

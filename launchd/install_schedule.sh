@@ -7,6 +7,8 @@
 #   com.stockanalysis.forwardtest     Mon-Fri 4:15 PM CT, on wake: forward_test.py --record (one row per trading day in
 #                                     Reports/forward_test_daily.csv; read-only GETs, never orders; + the paper
 #                                     strategies' days in Reports/forward_strategies*.csv from saved data + free daily bars)
+#   com.stockanalysis.earningsstop    every 10 min, at login, on wake: earnings_stop.py --scheduled (LIVE pre-earnings
+#                                     3.5x ATR stop; acts only 3:00 AM-7:00 PM CT on trading days, else one idle line)
 #   com.stockanalysis.dashboard-8502  always on (restarted if it stops): the app on http://localhost:8502
 # run_all.py decides whether anything is due (a decision after its 2:30 PM slot, or a missed one caught up at the next
 # regular session until the next slot); idle starts print one "idle:" line. run_state last_decision and lock files
