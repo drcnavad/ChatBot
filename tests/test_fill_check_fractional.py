@@ -394,6 +394,43 @@ b = Broker(orders=[o]); p = write_pending([r]); res = run(b, p)
 check("rest under $1: not ordered, not retried", not b.submitted and not os.path.exists(p)
       and "under $1" in status_of(res, "ANET"), status_of(res, "ANET"))
 
+# ------------------------------------------------------------------ pre-earnings stop: no buy back until after the reaction day
+stop_state = os.path.join(tempfile.mkdtemp(), "earnings_stop_state.json")
+json.dump({"sold": {"S1|2026-10-01": {"at": "2026-09-30T10:00:00-05:00", "react": "2026-10-02"},
+                    "S3|2026-10-01": {"at": "2026-09-29T10:00:00-05:00", "react": "2026-10-02"},
+                    "ANET|2099-01-01": {"at": "2026-09-29T10:00:00-05:00", "react": "2099-01-02"}}}, open(stop_state, "w"))
+saved_state, pt.EARNINGS_STOP_STATE = pt.EARNINGS_STOP_STATE, stop_state
+check("stop block: through the reaction day only", set(pt.earnings_stop_blocked("2026-10-02")) == {"S1", "S3", "ANET"}
+      and set(pt.earnings_stop_blocked("2026-10-03")) == {"ANET"} and pt.earnings_stop_blocked("2026-10-02", "/nonexistent") == {})
+d = picks_csv("2026-10-02", "2026-10-02")
+o = pt.plan_orders("auto", 10000, {}, midweek_csv=midweek_csv(d, "2026-10-02", []),
+                   picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
+check("Friday rebalance: the stopped S1 and S3 are not bought back (SKIP), the other 8 picks are",
+      all(o.set_index("Symbol").Side[x].startswith("SKIP (sold by the pre-earnings stop") for x in ("S1", "S3"))
+      and (o["Side"] == "BUY").sum() == 8, list(o["Side"]))
+o = pt.plan_orders("auto", 10000, {"S1": 0.4}, midweek_csv=midweek_csv(d, "2026-10-02", []),
+                   picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
+check("Friday rebalance: a leftover S1 fraction is not topped up", o.set_index("Symbol").Side["S1"] == "HOLD")
+d = picks_csv("2026-09-30", "2026-09-25")
+o = pt.plan_orders("auto", 10000, {"OWN": 5}, midweek_csv=midweek_csv(d, "2026-09-30", [("SWAP", "OWN", "S3")]),
+                   picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
+check("Wednesday swap into a stopped stock: no BUY (SKIP), the swap's sell still goes",
+      not (o["Side"] == "BUY").any() and o.set_index("Symbol").Side["S3"].startswith("SKIP") and list(o.loc[o.Side == "SELL", "Symbol"]) == ["OWN"],
+      list(zip(o.Symbol, o.Side)))
+o, r = eve("ANET", "BUY", 3.58, 3, "expired", 0)
+b = Broker(orders=[o]); p = write_pending([r]); res = run(b, p)
+check("9 AM fill check: a BUY rest of a stopped stock is dropped, nothing sent", not b.submitted and "pre-earnings stop" in status_of(res, "ANET"),
+      status_of(res, "ANET"))
+saved_rec = (pt.load_targets, pt.get_live_positions_and_equity, pt.latest_prices)
+pt.load_targets = lambda *a, **k: (pd.DataFrame({"Symbol": ["ANET", "MRK"], "Weight": [0.1, 0.1], "Price": [100.0, 100.0]}), {"source": "current"})
+pt.get_live_positions_and_equity = lambda: ({"MRK": 100}, 100000.0, None, None)
+pt.latest_prices = lambda syms, *a, **k: {}
+rep, ok = pt.reconcile_positions(symbols={"ANET", "MRK"})
+check("reconciliation: a stock sold by the stop is expected at 0% (no false 'below planned weight' warning)",
+      ok is True and rep.set_index("Symbol").Status["ANET"] == "OK", rep.to_dict("records"))
+pt.load_targets, pt.get_live_positions_and_equity, pt.latest_prices = saved_rec
+pt.EARNINGS_STOP_STATE = saved_state
+
 bad = [n for n in NOTES if n[0] not in ("ok", "warning", "failed") or " pp" in n[1] or "DRIFT" in n[1]]
 check(f"all {len(NOTES)} run-log rows written here have a valid status and plain words", NOTES and not bad, bad)
 

@@ -46,7 +46,7 @@ Targets come from Reports/strategy_picks.csv (written by main_signal_analysis.ip
                     rebalance, and cash from a mid-week exit stays idle until Friday).
 Earnings rule (backtest_engine.WINNER["earnings_block_days"] = 5): the targets leave out stocks not held with earnings
 within 5 calendar days. The live planner adds its own check for the LIVE account: a pick with earnings within 5 days is
-not newly bought or topped up (a held stock is never sold because of earnings).
+not newly bought or topped up (this rule never sells; the pre-earnings stop, earnings_stop.py, may).
 """
 import argparse
 import json
@@ -64,6 +64,8 @@ SIGNAL_CSV = os.path.join(PROJECT_ROOT, "Reports", "signal_analysis.csv")
 CHANGES_CSV = os.path.join(PROJECT_ROOT, "Reports", "strategy_changes.csv")
 ORDER_LOG_CSV = os.path.join(PROJECT_ROOT, "Reports", "live_orders_log.csv")
 PENDING_ORDERS_JSON = os.path.join(PROJECT_ROOT, "Reports", "live_pending_orders.json")
+EARNINGS_STOP_STATE = (os.environ.get("STOCK_ANALYSIS_EARNINGS_STOP_STATE")      # the pre-earnings stop's sales (earnings_stop.py);
+                       or os.path.join(PROJECT_ROOT, "Reports", "earnings_stop_state.json"))   # the tests point it elsewhere
 # NOTE (2026-09-28): LIVE account (real money). paper_* names are historical, kept so the
 # pipeline keeps working unchanged. paper=False, ALPACA_LIVE_* keys, live- order ids,
 # live_* ledgers. The paper version was retired; no paper rollback is kept.
@@ -371,6 +373,33 @@ def earnings_blocked(symbols, as_of, earnings_csv=None):
             for s, v in days.items() if pd.notna(v)}
 
 
+def earnings_stop_blocked(as_of, state_json=None):
+    """{SYMBOL: note} for stocks the live pre-earnings stop sold (earnings_stop.py, Reports/earnings_stop_state.json) whose
+    earnings reaction day is on or after `as_of`: not bought back by any live run until after that day (the forward
+    test's no-buy-back rule). {} when no stop has fired; an unreadable file prints a warning and blocks nothing."""
+    try:
+        with open(state_json or EARNINGS_STOP_STATE) as f:
+            sold = json.load(f).get("sold", {})
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError, AttributeError) as e:
+        print(f"WARNING: pre-earnings stop sales not read ({e}) - no buy-back was blocked")
+        return {}
+    d = str(pd.Timestamp(str(as_of)).date())
+    return {str(k).split("|")[0].upper(): f"sold by the pre-earnings stop, no buy back until after {pd.Timestamp(v['react']):%a %b %d}"
+            for k, v in sold.items() if isinstance(v, dict) and v.get("react") and d <= str(v["react"])}
+
+
+def skip_stop_buys(orders, stop):
+    """Mid-week orders: a BUY of a stock in `stop` (earnings_stop_blocked) becomes a SKIP row (nothing bought)."""
+    hit = (orders["Side"] == "BUY") & orders["Symbol"].astype(str).isin(list(stop))
+    if hit.any():
+        orders = orders.copy()
+        orders.loc[hit, "Side"] = [f"SKIP ({stop[s]})" for s in orders.loc[hit, "Symbol"].astype(str)]
+        orders.loc[hit, ["Shares", "Est_Value"]] = 0
+    return orders
+
+
 # ----------------------------------------------------------------------------- order sizing (whole shares by default)
 def build_orders(targets, account_size, positions=None, prices=None, min_value=1.0, fractional=False,
                statuses=None, band=NO_TRADE_BAND, blocked=None):
@@ -657,7 +686,8 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
         px = latest_prices(syms, signal_csv)
         px.update(dict(zip(targets["Symbol"], targets["Price"])))
         px.update(live_prices)
-        return build_swap_orders(meta["swaps"], account_size, positions, px, fractional=fractional), meta, targets
+        orders = build_swap_orders(meta["swaps"], account_size, positions, px, fractional=fractional)
+        return skip_stop_buys(orders, earnings_stop_blocked(meta["as_of"])), meta, targets
     others = [s for s in positions if s not in set(targets["Symbol"])]
     prices = {**latest_prices(others, signal_csv), **live_prices}
     unpriced = sorted(s for s in others if _safe_number(prices.get(s), default=None) is None)
@@ -669,7 +699,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     # 'add' and 'hold' statuses come from the latest decision in strategy_changes.csv: both are
     # brought to target (1-point no-trade band); unknown statuses are left as they are.
     statuses = latest_signal_status(as_of=meta["as_of"])
-    blocked = earnings_blocked(list(targets["Symbol"].astype(str)), meta["as_of"])
+    blocked = {**earnings_blocked(list(targets["Symbol"].astype(str)), meta["as_of"]), **earnings_stop_blocked(meta["as_of"])}
     return build_orders(targets, account_size, positions, prices, min_value=min_value, fractional=fractional,
                         statuses=statuses, blocked=blocked), meta, targets
 
@@ -1695,6 +1725,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     # Completion ids use the row's EVENING date, so a retry on any later day still finds them.
     fill_date = str(pend.get("evening_date") or _today_ct().date().isoformat()).replace("-", "")
     today = _today_ct().date().isoformat()
+    stop_sold = earnings_stop_blocked(today)   # sold by the pre-earnings stop: no buy back until after the reaction day
     results = []
     px = {}        # results row number -> price columns for the order log (quote, limit, fill, slippage)
     to_retry = []  # rows kept for the next fill check: FAILED completions, cash waits, BUY rests, bad quotes
@@ -1729,6 +1760,9 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             # A previous check already completed this row - never order it twice.
             results.append((sym, side, qty, o["completed_order_id"],
                             f"ALREADY COMPLETED (morning order {o['completed_order_id']})"))
+            continue
+        if side == "BUY" and sym in stop_sold:
+            results.append((sym, side, qty, oid, f"SKIPPED: {stop_sold[sym]} (dropped)"))
             continue
         if str(o.get("retry_on") or "") > today:
             # Carried to a later 9 AM CT check (a bad quote, or a limit left working): nothing now.
@@ -2104,6 +2138,8 @@ def reconcile_positions(target_source="auto", tolerance_pct=1.0, symbols=None):
     except Exception:
         pass
     target_w = {str(s): float(w) for s, w in zip(targets["Symbol"].astype(str), targets["Weight"])}
+    for s in earnings_stop_blocked(_today_ct().date()):   # sold by the pre-earnings stop: 0% is expected, not drift
+        target_w.pop(s, None)
     rows = []
     for sym in syms:
         tw = target_w.get(sym, 0.0) * 100

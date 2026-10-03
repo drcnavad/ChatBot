@@ -10,8 +10,10 @@ Alpaca trailing stops do not work outside regular hours, so this job checks pric
 8 PM ET, 5 PM ET on early-close days). Not overnight: the SIP/IEX quotes stop updating at 8 PM ET.
 Quotes: the same SIP -> IEX fallback as the smart limit prices (paper_trade._latest_quote). The stop fires when the
 quote's mid price is at or below the stop (a stale, one-sided or too-wide quote waits for the next check).
-At the stop: SELL the whole shares held with a limit at the bid - 0.05% (time in force DAY; extended_hours when outside
-regular hours). The fractional rest, and any unfilled part, is a pending row for the 9 AM CT fill check.
+At the stop: SELL with a limit at the bid - 0.05% (time in force DAY): in regular hours every share held, fraction
+included (nothing is left for later); outside regular hours the whole shares (extended_hours) and the fractional rest
+goes to the 9 AM CT fill check. Any unfilled part is a pending row for that check too. A stock sold by the stop is not
+bought back by any live run until after its reaction day (paper_trade.earnings_stop_blocked reads the state file).
 Never twice: one sale per (stock, earnings date), kept in Reports/earnings_stop_state.json, and a fixed client order id
 (live-stop-YYYYMMDD-SYMBOL) that is looked up on the broker before sending. Any read failure skips the sale (fails closed).
 The cash stays in cash until the next scheduled run, which rebalances normally (its no-buy-before-earnings rule still
@@ -36,7 +38,8 @@ import backtest_engine as be
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
 EARNINGS_CSV = os.path.join(REPORTS, "earnings_date.csv")
-STATE_JSON = os.path.join(REPORTS, "earnings_stop_state.json")     # sales done + once-a-day log notes
+STATE_JSON = (os.environ.get("STOCK_ANALYSIS_EARNINGS_STOP_STATE")    # sales done (+ reaction day: the buy-back block
+              or os.path.join(REPORTS, "earnings_stop_state.json"))     # in paper_trade) + once-a-day log notes
 STATUS_CSV = os.path.join(REPORTS, "earnings_stops.csv")           # the latest check, for the dashboard
 K_ATR, ATR_LEN, ARM_DAYS = 3.5, 14, 7
 REGULAR_MAX_AGE, EXTENDED_MAX_AGE = 60, 900                         # quote age limits (seconds)
@@ -277,7 +280,7 @@ def _sell(c, q, session, now, state, pending_path):
             st = getattr(o.status, "value", str(o.status)).lower()
             if st != "rejected" or pt._safe_number(getattr(o, "filled_qty", 0)) > 0:
                 state["sold"][key] = {"at": now.astimezone(be.CENTRAL).isoformat(timespec="seconds"), "order_id": str(o.id),
-                                      "note": f"found on the broker ({st})"}
+                                      "react": f"{c['react']:%Y-%m-%d}", "note": f"found on the broker ({st})"}
                 return f"sold earlier ({st})"
             attempt += 1
         if attempt > 3:
@@ -295,11 +298,11 @@ def _sell(c, q, session, now, state, pending_path):
             return "at stop - open order already working"
         if held_now <= 0:
             return "no longer held"
-        whole = math.floor(held_now + 1e-9)
-        limit = pt._tick(q[0] * (1 - pt.LIMIT_OFFSET), False)
         ext = session != "regular"
+        whole = math.floor(held_now + 1e-9) if ext else held_now   # regular hours: the exact holding, fraction included
+        limit = pt._tick(q[0] * (1 - pt.LIMIT_OFFSET), False)
         oid, filled = None, 0.0
-        if whole >= 1:
+        if whole >= 1 or (not ext and whole > 0):
             req = LimitOrderRequest(symbol=s, qty=whole, side=OrderSide.SELL, time_in_force=TimeInForce.DAY,
                                     limit_price=limit, extended_hours=ext, client_order_id=stop_cid(s, e, attempt))
             try:
@@ -310,24 +313,41 @@ def _sell(c, q, session, now, state, pending_path):
                 return "at stop - send failed, retrying"
             oid, filled = str(order.id), pt._safe_number(getattr(order, "filled_qty", 0))
         stamp = now.astimezone(be.CENTRAL).isoformat(timespec="seconds")
-        state["sold"][key] = {"at": stamp, "order_id": oid, "qty": whole, "limit": limit, "held": held_now}
+        state["sold"][key] = {"at": stamp, "order_id": oid, "qty": whole, "limit": limit, "held": held_now,
+                              "react": f"{c['react']:%Y-%m-%d}"}
         _save_state(state)
         frac = round(held_now - whole, 6)
-        _append_pending({"symbol": s, "side": "SELL", "qty": held_now, "limit_price": limit, "order_id": oid,
-                         "order_qty": whole, "exit": True, "recorded_at": stamp, "decision": None,
-                         "evening_date": str(today), "source": "earnings-stop"}, pending_path)
-        sent = (f"Sent a sell order for {whole:g} whole shares with {'a pre-market' if session == 'pre' else 'an after-hours' if ext else 'a regular-hours'} "
+        try:
+            _append_pending({"symbol": s, "side": "SELL", "qty": held_now, "limit_price": limit, "order_id": oid,
+                             "order_qty": whole, "exit": True, "recorded_at": stamp, "decision": None,
+                             "evening_date": str(today), "source": "earnings-stop"}, pending_path)
+        except (OSError, ValueError) as err:
+            log_event("failed", "unknown", f"The {s} pre-earnings stop sale was sent, but its row for the 9 AM CT check "
+                      f"could not be written ({str(err)[:100]}). Check Alpaca: any unfilled rest or fraction must be sold by hand.")
+        sent = (f"Sent a sell order for {whole:g} {'whole ' if ext else ''}shares with {'a pre-market' if session == 'pre' else 'an after-hours' if ext else 'a regular-hours'} "
                 f"limit at ${limit:,.2f} (bid ${q[0]:,.2f})" if whole else "No whole share to sell")
         log_event("ok", "yes" if filled > 0 else "unknown",
                   f"Pre-earnings stop: {s} fell to ${(q[0] + q[1]) / 2:,.2f}, at or below its stop ${c['stop']:,.2f} "
                   f"(highest close since entry ${c['peak']:,.2f} - 3.5 x ATR ${c['atr']:,.2f}). {sent}."
                   + (f" The {frac:g} fractional share goes to the 9 AM CT fill check." if frac > 0 else "")
-                  + f" Earnings {e:%a %b %-d} ({c['e_time']}). The cash waits for the next scheduled run.",
+                  + f" Earnings {e:%a %b %-d} ({c['e_time']}). The cash waits for the next scheduled run; {s} is not bought back "
+                  f"until after {c['react']:%a %b %-d}.",
                   f"order {oid or 'none'}; client id {stop_cid(s, e, attempt)}; held {held_now:g}")
         return ((f"SELL sent: {whole:g} shares at limit ${limit:,.2f}" if whole else "at stop - no whole share")
                 + (f" (+{frac:g} at 9 AM CT)" if frac > 0 else ""))
     finally:
         run_all.release_trade_lock(run_all.FILL_LOCK)
+
+
+def _sell_safe(c, q, session, now, state, pending_path):
+    """_sell; an unexpected error (e.g. no trading client) is logged once a day and retried at the next check."""
+    import paper_trade as pt
+    try:
+        return _sell(c, q, session, now, state, pending_path or pt.PENDING_ORDERS_JSON)
+    except (Exception, SystemExit) as err:     # paper_trading_client raises SystemExit when the keys are missing
+        _once(state, f"error|{c['symbol']}", now.astimezone(be.CENTRAL).date(), "failed", "unknown",
+              f"The {c['symbol']} pre-earnings stop check failed ({str(err)[:150]}). Check Alpaca; next check in 10 minutes.")
+        return "at stop - error, retrying"
 
 
 def run_check(now=None, dry_run=False, pending_path=None):
@@ -368,9 +388,9 @@ def run_check(now=None, dry_run=False, pending_path=None):
         elif skip and not dry_run:
             status = f"watching (quote skipped: {skip})"
         elif q is not None and mid <= c["stop"]:
-            whole = math.floor(c["shares"] + 1e-9)
-            status = (f"AT STOP - would sell {whole} whole shares at ${pt._tick(q[0] * (1 - pt.LIMIT_OFFSET), False):,.2f}"
-                      + (f" (quote note: {skip})" if skip else "")) if dry_run else _sell(c, q, session, now, state, pending_path or pt.PENDING_ORDERS_JSON)
+            whole = c["shares"] if (session or "regular") == "regular" else math.floor(c["shares"] + 1e-9)
+            status = (f"AT STOP - would sell {whole:g} shares at ${pt._tick(q[0] * (1 - pt.LIMIT_OFFSET), False):,.2f}"
+                      + (f" (quote note: {skip})" if skip else "")) if dry_run else _sell_safe(c, q, session, now, state, pending_path)
         elif dry_run and skip:
             status = f"watching (quote note: {skip})"
         if not dry_run and key not in state["armed"] and key not in state["sold"]:

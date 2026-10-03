@@ -167,18 +167,20 @@ d, acct, made = setup(client=c, quote=(bid, bid + 0.04))
 n0 = len(runlog())
 es_run(REG)
 r = c.sent[0] if c.sent else None
-check("at the stop: one SELL of the 10 whole shares", len(c.sent) == 1 and r.qty == 10 and r.side.value == "sell", c.sent)
+check("at the stop in regular hours: one SELL of every share held (10.4, fraction included)", len(c.sent) == 1 and r.qty == 10.4 and r.side.value == "sell", c.sent)
 check("limit = bid - 0.05% on the tick, DAY, regular hours (no extended_hours)",
       r and r.limit_price == pt._tick(bid * (1 - pt.LIMIT_OFFSET), False) and r.time_in_force.value == "day" and not r.extended_hours)
 check("fixed client order id live-stop-20261029-XYZ", r and r.client_order_id == "live-stop-20261029-XYZ")
 pend = json.load(open(pt.PENDING_ORDERS_JSON))
 row = pend["orders"][0]
-check("pending row for the 9 AM check: exact qty 10.4, order_qty 10, exit, order id",
-      len(pend["orders"]) == 1 and row["qty"] == 10.4 and row["order_qty"] == 10 and row["exit"] is True and row["order_id"] == "oid-0"
+check("pending row (only for an unfilled part): exact qty 10.4, order_qty 10.4, exit, order id",
+      len(pend["orders"]) == 1 and row["qty"] == 10.4 and row["order_qty"] == 10.4 and row["exit"] is True and row["order_id"] == "oid-0"
       and row["side"] == "SELL" and pend["evening_date"] == "2026-10-22", pend)
 log = [x for x in runlog()[n0:] if "Pre-earnings stop: XYZ" in x["message"]]
 check("one run-log row for the sale (money moved unknown until filled)", len(log) == 1 and log[0]["run"] == "Earnings stop" and log[0]["money_moved"] == "unknown", log)
 check("the fill-check lock is released", not os.path.exists(run_all.FILL_LOCK))
+check("the sale blocks live buy-backs through the reaction day (paper_trade reads the state file)",
+      set(pt.earnings_stop_blocked("2026-10-30", es.STATE_JSON)) == {"XYZ"} and pt.earnings_stop_blocked("2026-10-31", es.STATE_JSON) == {})
 es_run(REG + timedelta(minutes=10))
 check("never twice: the next check sends nothing", len(c.sent) == 1)
 os.remove(es.STATE_JSON)
@@ -190,7 +192,8 @@ for t, name in (("2026-10-23 07:00", "pre-market"), ("2026-10-23 17:30", "after 
     c = Client({"XYZ": 10.4})
     setup(client=c, quote=(bid, bid + 0.04), age=300)
     es_run(at(t))
-    check(f"{name}: extended_hours limit DAY order (a 5-minute-old quote is fine)", len(c.sent) == 1 and c.sent[0].extended_hours is True
+    check(f"{name}: extended_hours limit DAY order for the 10 whole shares (a 5-minute-old quote is fine)", len(c.sent) == 1
+          and c.sent[0].extended_hours is True and c.sent[0].qty == 10
           and c.sent[0].time_in_force.value == "day")
     ev_day = json.load(open(pt.PENDING_ORDERS_JSON))["evening_date"]
     check(f"{name}: the fraction goes to the next 9 AM CT check", ev_day == ("2026-10-22" if name == "pre-market" else "2026-10-23"), ev_day)
@@ -220,8 +223,12 @@ check("the 2:30 PM trade job is running: the stop waits (no order)", c.sent == [
 c = Client({"XYZ": 0.4})
 setup(held={"XYZ": 0.4}, client=c, quote=(bid, bid + 0.04))
 es_run(REG)
+check("only a fraction held, regular hours: the 0.4 is sold now", [x.qty for x in c.sent] == [0.4], c.sent)
+c = Client({"XYZ": 0.4})
+setup(held={"XYZ": 0.4}, client=c, quote=(bid, bid + 0.04))
+es_run(at("2026-10-23 17:30"))
 p = json.load(open(pt.PENDING_ORDERS_JSON))["orders"][0]
-check("only a fraction held: no order now, the 9 AM fill check sells it", c.sent == [] and p["order_qty"] == 0 and p["order_id"] is None and p["qty"] == 0.4)
+check("only a fraction held, after hours: no order now, the 9 AM fill check sells it", c.sent == [] and p["order_qty"] == 0 and p["order_id"] is None and p["qty"] == 0.4)
 c = Client({"XYZ": 10.4}, prior=[NS(id="x", client_order_id="live-stop-20261029-XYZ", status=NS(value="rejected"), filled_qty="0", symbol="XYZ")])
 setup(client=c, quote=(bid, bid + 0.04))
 es_run(REG)
@@ -234,6 +241,15 @@ es_run(REG)
 p = json.load(open(pt.PENDING_ORDERS_JSON))
 check("an existing pending file keeps its dates and rows (the stop row is added)",
       p["evening_date"] == "2026-10-21" and [o["symbol"] for o in p["orders"]] == ["AAA", "XYZ"], p)
+
+c = Client({"XYZ": 10.4})
+setup(client=c, quote=(bid, bid + 0.04))
+es.trading_client = lambda: (_ for _ in ()).throw(SystemExit("No Alpaca LIVE keys"))
+n0 = len(runlog())
+es_run(REG)
+es_run(REG + timedelta(minutes=10))
+check("no trading client (e.g. keys missing): no crash, one failed row a day, retried later",
+      c.sent == [] and sum("stop check failed" in x["message"] for x in runlog()[n0:]) == 1 and "error" in pd.read_csv(es.STATUS_CSV).Status[0])
 
 # idle / dry run
 c = Client({"XYZ": 10.4})
@@ -253,7 +269,7 @@ with redirect_stdout(buf):
     es_run(at("2026-10-24 11:00"), dry_run=True)
 out = buf.getvalue()
 check("dry run: shows the stock at its stop, no trading client, no order, no files, no run-log row",
-      "AT STOP - would sell 10 whole shares" in out and "XYZ" in out and made == [] and c.sent == [] and len(runlog()) == n0
+      "AT STOP - would sell 10.4 shares" in out and "XYZ" in out and made == [] and c.sent == [] and len(runlog()) == n0
       and not any(os.path.exists(x) for x in (es.STATE_JSON, es.STATUS_CSV, pt.PENDING_ORDERS_JSON)), out)
 
 src = open(os.path.join(ROOT, "earnings_stop.py")).read()

@@ -84,7 +84,8 @@ def main():
     fast = "--fast" in sys.argv
     env = dict(os.environ, PYTHONPATH=ROOT + os.pathsep + os.environ.get("PYTHONPATH", ""), PYTHONDONTWRITEBYTECODE="1", STOCK_ANALYSIS_LIVE_HOLDINGS="off",
                PYTHONWARNINGS="ignore",   # tests never write the real Reports/run_log.csv
-               STOCK_ANALYSIS_RUN_LOG=os.path.join(tempfile.mkdtemp(), "run_log.csv"))
+               STOCK_ANALYSIS_RUN_LOG=os.path.join(tempfile.mkdtemp(), "run_log.csv"),
+               STOCK_ANALYSIS_EARNINGS_STOP_STATE=os.path.join(tempfile.mkdtemp(), "earnings_stop_state.json"))   # never the real stop sales
     results = []
     for t in TESTS:
         if fast and t in ("test_app.py", "test_dashboard_http.py"):

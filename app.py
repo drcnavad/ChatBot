@@ -107,8 +107,9 @@ def rules_text():
                "A held stock is not topped up before them.\n" if EARNINGS else "")
             + "- **Pre-earnings stop:** a held stock with earnings within 7 calendar days is sold if its price falls to its "
             "highest close since bought - 3.5 × ATR(14), from 7 days before the report through the reaction day (checked "
-            "every 10 minutes in the pre-market, regular and after-hours sessions; whole shares at once, the fraction at "
-            "the 9 AM CT check). One sale per report; the cash waits for the next scheduled run.\n"
+            "every 10 minutes in the pre-market, regular and after-hours sessions; in regular hours every share at once, "
+            "outside them the whole shares and the fraction at the 9 AM CT check). One sale per report; the cash waits for "
+            "the next scheduled run, and the stock is not bought back until after its reaction day.\n"
             + "- **Orders:** sells go first. Every order is a limit at the live quote: buy at the ask + 0.05%, sell at the "
             "bid - 0.05% (no market orders). An order whose quote is stale or wider than 0.5% waits for the next 9 AM CT "
             "check. The 2:30 PM CT run trades in market hours (2-decimal shares); from 5 minutes before the close, "

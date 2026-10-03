@@ -3,8 +3,8 @@
 <!-- Pre-earnings 3.5x ATR stop (LIVE): every 10 min (StartInterval), at login/boot (RunAtLoad) and once on wake.
      earnings_stop.py --scheduled acts only on NYSE trading days in the pre-market (3:00-8:30 AM CT), regular hours and
      after hours (until 7:00 PM CT, 4:00 PM CT on early-close days); otherwise it prints one "idle" line. It sells a held
-     stock with earnings within 7 days at or below its stop (whole shares, limit at the bid; the fraction at 9 AM CT),
-     once per report. Installed by launchd/install_schedule.sh. -->
+     stock with earnings within 7 days at or below its stop (limit at the bid: every share in regular hours; outside them
+     the whole shares, the fraction at 9 AM CT), once per report. Installed by launchd/install_schedule.sh. -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
