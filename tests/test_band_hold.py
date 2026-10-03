@@ -311,7 +311,7 @@ pd.DataFrame({"Symbol": picks.Symbol, "Earnings Date": "2026-11-20", "Time": "PM
 
 
 def run_day(day, last_reb, positions, cash, changes_rows=None, midweek_rows=None):
-    """auto_trade() on a fake broker with the pipeline files as they would be after `day`'s 3:15 PM run."""
+    """auto_trade() on a fake broker with the pipeline files as they would be after `day`'s 2:30 PM run."""
     pk = picks.copy()
     pk["As_Of"], pk["Last_Rebalance"], pk["Last_Decision"] = day, last_reb, day
     paths = {k: os.path.join(tmp, f"{k}_{day}.csv") for k in ("picks", "changes", "midweek")}

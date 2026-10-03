@@ -15,7 +15,7 @@ It picks the mode by itself (clock in US Central time):
 Both end with a short summary: what ran, API calls used, data date, and the next check / rebalance.
 The upstream online steps (fundamentals, processing, scoring, sentiment, earnings) are optional: if one
 fails, the pipeline warns and continues - main_signal_analysis.ipynb reuses the last good upstream tables,
-so the evening trade still runs on fresh signals. Only a main or validate failure stops the pipeline.
+so the 2:30 PM trade still runs on fresh signals. Only a main or validate failure stops the pipeline.
 
     python run_all.py --full          # force the online update now (NewsAPI still refused if it ran within 24 h)
     python run_all.py --full --force-news     # ... and allow a second NewsAPI run (may exceed the free 100/day)
@@ -118,7 +118,7 @@ if N_CALLS > NEWS_DAILY_LIMIT:
     print(f"WARNING: sector_mapping.stock_symbols has {N_CALLS} symbols - one news run needs {N_CALLS} NewsAPI calls, "
           f"over the free limit of {NEWS_DAILY_LIMIT}/day; the last ones will fail")
 
-# Steps whose failure must NOT stop the pipeline or block the evening trade. Their
+# Steps whose failure must NOT stop the pipeline or block the 2:30 PM trade. Their
 # outputs degrade gracefully: main_signal_analysis.ipynb reuses the last good
 # upstream tables (weighted_sentiment.csv, balance_sheet_weights.csv,
 # earnings_date.csv), which are informational inputs to scoring, not load-bearing.
@@ -135,7 +135,7 @@ def _stop_on_failure(name, keep_going):
 
 
 def _critical_failures(failures):
-    """Failures that block the evening trade and set a nonzero exit code.
+    """Failures that block the trade and set a nonzero exit code.
 
     Optional-step failures degrade gracefully (the main signal notebook reuses
     the last good tables); 'sync_live' is a read-only refresh, so neither
@@ -145,7 +145,7 @@ def _critical_failures(failures):
 
 
 def _trade_decision(failures):
-    """Evening-trade guard: (proceed, reason).
+    """Trade guard: (proceed, reason).
 
     Only critical failures block trading. Optional-step failures (and the
     read-only sync_live) degrade gracefully - the main signals are fresh,

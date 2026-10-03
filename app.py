@@ -1515,7 +1515,7 @@ def render_data_and_settings(p):
     st.dataframe(p.freshness, width="stretch", hide_index=True)
     stale = p.freshness[p.freshness["Status"].str.startswith("⚠️")]
     if not stale.empty:
-        st.warning("Stale or missing: " + ", ".join(stale["File"]) + " — run `python run_all.py` (see docs/README.md).")
+        st.warning("Stale or missing: " + ", ".join(stale["File"]) + " — run `python run_all.py`.")
     else:
         st.success("All report files are within their expected refresh window.")
 
