@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Forward test: Mon-Fri 4:15 PM CT (after the close), and once on wake for a slot missed in sleep. Saves one row per
+     trading day to Reports/forward_test_daily.csv (the live account's equity, picks and trading cost, read-only GET
+     requests; no orders, no pipeline step, no paid API). Idle on weekends / holidays. Installed by launchd/install_schedule.sh. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.stockanalysis.forwardtest</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/anaconda3/bin/python</string>
+        <string>/Users/drcnavad/Desktop/Stock Analysis/forward_test.py</string>
+        <string>--record</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/anaconda3/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>15</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>15</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>15</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>15</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>15</integer></dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_forwardtest.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_forwardtest.err</string>
+</dict>
+</plist>

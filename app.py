@@ -200,6 +200,7 @@ FRESHNESS = {
     "complete_company_analysis.xlsx": ("fundamentals / fair value", 30),
     "balance_sheet_weights.csv": ("balance-sheet scores", 30),
     "balance_sheet.csv": ("raw quarterly fundamentals", 100),
+    "forward_test_daily.csv": ("forward test, one row per trading day (forward_test.py)", 4),
 }
 APP_FILES = {"signal_analysis.csv", "strategy_picks.csv", "strategy_tracking.csv", "news_cleaned_df.csv", "earnings_date.csv",
              "complete_company_analysis.xlsx", "strategy_decisions.csv", "benchmark_prices.csv"}
@@ -1572,9 +1573,35 @@ def render_live_holdings():
                f"(\\${ap.QQQ_BASE_CLOSE:,.2f}, fixed) and values it at QQQ's latest price, to compare with the Total row.")
 
 
+def render_forward_test():
+    """Details tab: the live account vs QQQ and SPY from FORWARD_START (Reports/forward_test_daily.csv, forward_test.py)."""
+    import forward_test as ft
+    from backtest_engine import FORWARD_START
+    start = f"{pd.Timestamp(FORWARD_START):%b %-d, %Y}"
+    daily = read_report_csv(ft.DAILY_CSV)
+    if daily is None or daily.empty:
+        st.info(f"Forward test started {start}; the first daily row is saved after the close (4:15 PM CT on trading days).")
+        return
+    bench = load_benchmarks()
+    table = ft.summary(daily, bench.reset_index() if bench is not None else None)
+    table["From"] = [f"{d:%a %b %-d}" for d in table["From"]]
+    st.dataframe(table, hide_index=True, width="stretch",
+                 column_config={c: PCT_COL for c in ("Total return %", "Median weekly return %", "Max drawdown %")})
+    last = daily.iloc[-1]
+    n, w, traded, cost = int(last["Closed_Picks"]), int(last["Winning_Picks"]), float(last["Traded_USD"]), float(last["Cost_USD"])
+    st.caption(f"As of {last['Date']} {last['Time_CT']} CT ({len(daily)} trading day(s) saved). "
+               + (f"Closed picks {n}, win rate {w / n:.0%}" if n else f"Forward test started {start}; no closed picks yet")
+               + f" · traded \\${traded:,.0f}, cost vs the decision price {'-' if cost < 0 else ''}\\${abs(cost):,.2f}"
+               + (f" ({cost / traded * 1e4:+.1f} bps; + = it cost money)" if traded else "")
+               + ". Strategy = account equity net of new deposits; QQQ / SPY = daily closes, comparison only. Median weekly "
+               "= Friday to Friday. Saved by the 4:15 PM CT job (read-only, no orders); details in forward_test.ipynb.")
+
+
 def render_details(p):
     with st.expander("Live holdings (Alpaca account)", expanded=True):
         render_live_holdings()
+    with st.expander("Forward test · live account vs QQQ and SPY since Oct 2, 2026", expanded=True):
+        render_forward_test()
     with st.expander(latest_signals_title(p), expanded=True):
         render_latest_signals(p)
     with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=False):

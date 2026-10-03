@@ -201,10 +201,15 @@ for sym in dict.fromkeys(cases):
                and int(b[rank_then]) == int(CH.set_index("Symbol").Rank[sym]),
                f"{sym}: Last decision row {b.to_dict()} disagrees")
     print(f"   {sym}: {badges} · rank {rk and rk.groups()} OK")
-exp_titles = ["Live holdings (Alpaca account)", f"Latest signals · {fmt(SIG.Date.max())} close", f"Last decision · {fmt(dec_day)}"]
+exp_titles = ["Live holdings (Alpaca account)", "Forward test · live account vs QQQ and SPY since Oct 2, 2026",
+              f"Latest signals · {fmt(SIG.Date.max())} close", f"Last decision · {fmt(dec_day)}"]
 labels = [e.label for e in at.expander]
-expect(labels[:2] == exp_titles[:2] and any(l.startswith(exp_titles[2]) for l in labels),
-       f"Details expanders {labels[:3]} should start with {exp_titles}")
+expect(labels[:3] == exp_titles[:3] and any(l.startswith(exp_titles[3]) for l in labels),
+       f"Details expanders {labels[:4]} should start with {exp_titles}")
+expect(sum("forward test" in l.lower() for l in labels) == 1, f"the account forward test is in one place only: {labels}")
+_ft = [d.value for d in at.dataframe if "Median weekly return %" in d.value.columns]
+expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Series"]} if _ft else
+       any("Forward test started Oct 2, 2026" in i.value for i in at.info), "forward test table (QQQ + SPY rows) or empty state")
 # short history: no Details section any more; the stocks sit in the clickable stock list (see the rank tiers test)
 expect(not any(l.startswith("Reference only") for l in labels), f"stale short-history Details section: {labels}")
 lt_all = next((d.value for d in at.dataframe if "Signal today" in d.value.columns), pd.DataFrame())

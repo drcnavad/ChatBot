@@ -51,7 +51,8 @@
                          counts, bar cache) equal sector_mapping's
   test_decision_bars.py  decision days keep their 2:30 PM bar (saved as ratios, split-safe; never overwritten after the
                          trade; unchanged bars when nothing is saved or the file is bad)
-  test_forward_test.py   dashboard per-stock forward test: counts only from FORWARD_START (2026-10-02), empty state
+  test_forward_test.py   forward testing from FORWARD_START (2026-10-02): per-stock panel cutoff / empty state;
+                         forward_test.py picks, trade cost, summary, daily record (fake account, no requests)
 Only the files in TESTS run (never Archive/). Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
 import os
 import subprocess
