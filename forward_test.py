@@ -535,23 +535,44 @@ def holdings(path=HOLDINGS_CSV):
     return {s: ", ".join(f"{r.Symbol} {r.Weight:.1%}" for r in g.itertuples()) for s, g in h.groupby("Strategy")}
 
 
+def _log_problem(message, error):
+    """A failed forward-test update -> one Reports/run_log.csv row (the dashboard's run log), so it is not only in the
+    launchd log. Never raises."""
+    print(f"{message} ({type(error).__name__}: {error})")
+    try:
+        import run_all
+        run_all.log_event("Forward test", "failed", "no", message, f"{type(error).__name__}: {error}")
+    except Exception as e:
+        print(f"run log not written ({e})")
+
+
 def main(argv=None):
+    """Update the paper strategies (and with --record save today's account row), then print the leaderboard. Returns the
+    exit code: 1 when a part failed (each failure is one run-log row; a saved day is never redone or lost)."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--record", action="store_true", help="also save today's account row (reads the live account, GET only)")
     a = p.parse_args(argv)
+    rc = 0
     try:
         print(f"strategies: {update_strategies()} new row(s) -> {os.path.relpath(STRATEGIES_CSV, ROOT)}")
     except Exception as e:  # never stops the account row
-        print(f"strategies not updated: {type(e).__name__}: {e}")
+        _log_problem("The paper strategies were not updated today; the next run adds the missing days.", e)
+        rc = 1
     if a.record:
-        row = record()
+        try:
+            row = record()
+        except Exception as e:  # Alpaca down / keys missing: the next trading day's run still adds its own row
+            _log_problem("Today's account row for the forward test was not saved (the Alpaca account read failed). "
+                         "No money moved.", e)
+            row, rc = None, 1
         if row:
             print("saved", {k: row[k] for k in ("Date", "Time_CT", "Positions", "Closed_Picks")}, "->",
                   os.path.relpath(DAILY_CSV, ROOT))
     board = leaderboard()
     print(board.round(2).to_string(index=False))
     print(verdict(board))
+    return rc
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
