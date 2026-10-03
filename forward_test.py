@@ -1,9 +1,10 @@
 """Forward test from backtest_engine.FORWARD_START (Fri Oct 2, 2026), counted only from that close on, never backtested:
 
   1. the real Alpaca account (read-only GET requests through alpaca_paper; no orders, ever), and
-  2. STRATEGIES: about 20 paper-only strategies next to it (the live rules recomputed the same way + 19 others). They are
+  2. STRATEGIES: 30 paper-only strategies next to it (the live rules recomputed the same way + 29 others). They are
      never traded; each one is a list of target weights built from data the pipeline already saves every day
-     (Reports/signal_analysis.csv, Reports/factor_history.csv, Reports/earnings_date.csv), so no API quota is used.
+     (Reports/signal_analysis.csv, factor_history.csv, earnings_date.csv, benchmark_prices.csv) + daily volume from
+     Alpaca's free market data (forward_bars(): one bar download per run, the same request the pipeline makes).
 
   Reports/forward_test_daily.csv           one row per trading day (re-recording a day replaces it): account equity, cash,
                                            lifetime net deposits, positions, closed picks / winners, $ traded and its cost
@@ -20,7 +21,7 @@ that price whenever its target changes, be.COST (0.1%) per side, no stock above 
 running twice never double-counts) and a missed day is caught up from the saved bars.
 
     python forward_test.py --record   # strategies + today's account row (launchd com.stockanalysis.forwardtest, 4:15 PM CT)
-    python forward_test.py            # update the strategies (no requests) and print the leaderboard
+    python forward_test.py            # update the strategies (bars only, no account request) and print the leaderboard
 """
 import argparse
 import os
@@ -59,50 +60,79 @@ RANK_RULE = ("Ranked by median weekly return (Friday to Friday); a tie goes to t
 
 
 # ---------------------------------------------------------------------------------------------------- the strategies
-# One dict per strategy. Defaults = the live rules: score "live" (0.5 x technical + 0.5 x relative strength), relative
-# strength tiebreak, Friday rebalance + Mon/Wed swaps and exits ("mwf"), top 10 from ranks 1-20, max 4 per sector (relaxed
-# to fill the slots), 1/volatility weights, half size when QQQ is below its 200-day average, no buys 5 days before
-# earnings. "select" changes rank_targets keys (n, sector_cap, vol_sizing, regime, ...), "earnings" None drops the
-# earnings skip, "calendar" is "mwf" / "weekly" (Friday only) / "monthly" (last session of the month) / "daily".
+# One dict per strategy. Ranked strategies go through the engine's own selection (be.winner_targets); their defaults = the
+# live rules: score "live" (0.5 x technical + 0.5 x relative strength), relative strength tiebreak, Friday rebalance +
+# Mon/Wed swaps and exits ("mwf"), top 10 from ranks 1-20, max 4 per sector (relaxed to fill the slots), 1/volatility
+# weights, half size when QQQ is below its 200-day average, no buys 5 days before earnings. "select" changes rank_targets
+# keys (n, sector_cap, vol_sizing, regime, ...), "earnings" None drops the earnings skip, "calendar" is "mwf" / "weekly"
+# (Friday only) / "monthly" (last session of the month). "weights" = a rule that is not a ranking (its own weights below);
+# "reweight" = the same picks with other weights.
 PLAIN = {"max_pick_rank": None, "cap_soft": False}       # walk every rank, strict max 4 per sector
+EQ = {**PLAIN, "vol_sizing": False}                      # ... and an equal weight per stock
+SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
 STRATEGIES = [
     dict(name=LIVE, rule="What the bot trades: 50% technical + 50% relative strength, top 10, Fri rebalance + Mon/Wed swaps."),
     dict(name="Live without rank-20 limit / earnings skip", select=PLAIN, earnings=None,
          rule="The live rules, but picks may come from any rank and earnings never block a buy."),
     dict(name="Technical score only", score="tech", rule="Live rules ranking on the technical score alone."),
-    dict(name="Relative strength only", score="rs", tiebreak="tech",
+    dict(name="Relative strength only", score="rs",
          rule="Live rules ranking on relative strength (vs sector ETF and SPY) alone."),
     dict(name="Quant Score", score="quant", tiebreak=None,
-         rule="Live rules ranking on the copy folder's Quant Score (trend, MAs, RSI, MACD, Bollinger); needs a score above 50."),
+         rule="Live rules ranking on the copy folder's Quant Score (trend, MAs, VWAP, RSI, MACD, Bollinger); needs a score above 50."),
+    dict(name="Quant Score top 5", score="quant", tiebreak=None, select={"n": 5},
+         rule="The copy folder's main Quant leg: the Quant Score rules with 5 stocks."),
     dict(name="Quant + relative strength", score="quant_rs",
          rule="Live rules ranking on a 50/50 blend of Quant Score rank and relative strength rank."),
     dict(name="Live + news sentiment", score="sentiment",
          rule="Live rules, ranking 80% on the live score and 20% on the latest news sentiment."),
-    dict(name="Company fundamentals", score="fundamental", calendar="monthly", select={**PLAIN, "vol_sizing": False},
-         earnings=None, rule="Top 10 by the company-report score (Fundamental_Weight), equal weight, monthly."),
-    dict(name="12-1 month momentum", score="mom_12_1", calendar="monthly", select=PLAIN, earnings=None,
+    dict(name="Company fundamentals", score="fundamental", calendar="monthly", select=EQ, earnings=None,
+         rule="Top 10 by the company-report score (Fundamental_Weight), equal weight, monthly."),
+    dict(name="12-1 month momentum", score="mom_12_1", calendar="monthly", **SIMPLE,
          rule="Top 10 by the 12-month return skipping the last month, monthly, 1/volatility weights."),
-    dict(name="6-month momentum", score="mom_6", calendar="weekly", select=PLAIN, earnings=None,
+    dict(name="6-month momentum", score="mom_6", calendar="weekly", **SIMPLE,
          rule="Top 10 by the 6-month return, every Friday, 1/volatility weights."),
-    dict(name="Low volatility in uptrend", score="low_vol", calendar="monthly", select={**PLAIN, "vol_sizing": False},
-         earnings=None, rule="The 10 calmest stocks (63-day volatility) above their 200-day average, equal weight, monthly."),
-    dict(name="Buy the dip", score="dip", calendar="weekly", select={**PLAIN, "vol_sizing": False}, earnings=None,
-         rule="Stocks above their 200-day average that fell furthest below their 50-day average; top 10, equal weight, "
-              "every Friday (sold once back above the 50-day)."),
-    dict(name="Legacy BUY/SELL signals", score="legacy", calendar="daily",
-         rule="The Legacy folder's rule: hold a stock from its BUY signal to its SELL signal, an equal slice per stock."),
-    dict(name="Top 5", calendar="weekly", select={"n": 5, "max_pick_rank": 10},
-         rule="Live score, 5 stocks from ranks 1-10 (max 2 per sector), Friday only."),
-    dict(name="Top 20", calendar="weekly", select={"n": 20, "max_pick_rank": 40},
-         rule="Live score, 20 stocks from ranks 1-40 (max 8 per sector), Friday only."),
+    dict(name="Low volatility in uptrend", score="low_vol", calendar="monthly", select=EQ, earnings=None,
+         rule="The 10 calmest stocks (63-day volatility) above their 200-day average, equal weight, monthly."),
+    dict(name="Buy the dip", weights="dip",
+         rule="The copy folder's dip test: buy a stock 8% below its 50-day average, sell when it is back at the average or "
+              "after 30 days; 10% each, at most 10, deepest first, checked daily."),
+    dict(name="Legacy BUY/SELL signals", weights="legacy",
+         rule="The Legacy folder's rule: 60% technical + 25% fundamentals + 10% sector week + 5% news; hold from BUY (above "
+              "20) to SELL (below -25), an equal slice of the money per stock, checked daily."),
+    dict(name="Top 5", select={"n": 5}, rule="The live rules with 5 stocks (max 2 per sector)."),
+    dict(name="Top 20", select={"n": 20}, rule="The live rules with 20 stocks (= ranks 1-20, max 8 per sector)."),
     dict(name="Equal weight", select={"vol_sizing": False}, rule="The live rules with an equal weight per stock."),
     dict(name="Friday only", calendar="weekly", rule="The live rules without the Mon/Wed swaps and exits."),
     dict(name="Monthly", calendar="monthly", rule="The live rules, rebalanced on the last trading day of each month only."),
-    dict(name="No QQQ filter", select={"regime": None, "regime_scale": None},
-         rule="The live rules, always fully invested (no halving when QQQ is below its 200-day average)."),
     dict(name="No sector limit", select={"sector_cap": 1.0, "cap_soft": True},
          rule="The live rules without the max-4-per-sector rule (pure top 10)."),
+    dict(name="Dual momentum", score="dual", calendar="monthly", select={**EQ, "regime": None, "regime_scale": None},
+         earnings=None, rule="Top 10 by 12-month return, only stocks that are up over the year; all cash while QQQ is "
+                             "below its 200-day average; equal weight, monthly."),
+    dict(name="Trend following 50/200", weights="trend",
+         rule="An equal slice of the money for every stock whose 50-day average is above its 200-day average; checked Fridays."),
+    dict(name="Volatility-adjusted momentum", score="mom_risk", calendar="weekly", select=EQ, earnings=None,
+         rule="Top 10 by 6-month return divided by 6-month volatility, equal weight, every Friday."),
+    dict(name="52-week high", score="high_52", calendar="monthly", select=EQ, earnings=None,
+         rule="The 10 stocks closest to their 52-week high (George & Hwang), equal weight, monthly."),
+    dict(name="Short-term reversal", score="reversal", calendar="weekly", select=EQ, earnings=None,
+         rule="The 10 biggest 1-week losers among stocks above their 200-day average, equal weight, every Friday."),
+    dict(name="Quality + momentum", score="quality_mom", calendar="monthly", **SIMPLE,
+         rule="Top 10 by 50% fundamentals rank + 50% 12-1 month momentum rank, monthly, 1/volatility weights."),
+    dict(name="Earnings drift", score="drift", calendar="weekly", **SIMPLE,
+         rule="Stocks that beat the market on their last earnings day (within 60 trading days), biggest jump first; top 10, "
+              "every Friday. (No free EPS-surprise data, so the price jump stands in for the beat.)"),
+    dict(name="Sector rotation", score="sector_rot", calendar="weekly", **SIMPLE,
+         rule="The 3 sector ETFs with the best 3-month return, then the best live-score stocks in those sectors; top 10, Fridays."),
+    dict(name="Breakout with volume", score="breakout", calendar="weekly", select=EQ, earnings=None,
+         rule="Stocks that closed within 2% of their 55-day high on 1.3x+ normal volume (5-day vs 50-day average) in the "
+              "last 20 trading days and are still above their 50-day average; top 10 by that volume jump, equal weight, Fridays."),
+    dict(name="Risk parity", reweight="risk_parity",
+         rule="The live picks, weighted so each stock adds the same risk (63-day volatility and correlation)."),
 ]
+FWD_BARS = os.path.join(REPORTS, "cache", "forward_bars.pkl")
+FWD_BARS_START = "2026-05-01"      # ~100 sessions before the start: the 50-day volume average is full by Oct 2
+_NO_SAVE = datetime(2000, 1, 1, tzinfo=be.EASTERN)   # be.keep_decision_bars(now=this) only reads Reports/decision_bars.csv
 
 
 def _wide(df, col, index="Date"):
@@ -113,15 +143,51 @@ def _pct(w):
     return w.rank(axis=1, pct=True)
 
 
-def quant_score(f):
+def _carry(w, days):
+    """Weights that only change on `days` (carried in between)."""
+    return w[days.to_numpy(bool)].reindex(w.index).ffill().fillna(0.0)
+
+
+def forward_bars(fetch=True):
+    """Daily bars with volume for the VWAP / volume rules: a fresh download from FWD_BARS_START (Alpaca free market data
+    through be.fetch_daily_bars, the pipeline's own client; saved to Reports/cache/forward_bars.pkl and reused when a
+    download fails) + the backtest bar cache (Reports/cache/bars_daily_long.pkl, read only) for the older days."""
+    if fetch:
+        try:
+            new, _ = be.drop_partial_last_bar(be.fetch_daily_bars(be.TRADABLE, start=FWD_BARS_START))
+            new.to_pickle(FWD_BARS + ".tmp")
+            os.replace(FWD_BARS + ".tmp", FWD_BARS)
+        except Exception as e:
+            print(f"bars not refreshed ({type(e).__name__}: {e}); using the saved copy")
+    return [be.apply_history_start(pd.read_pickle(p)) for p in (FWD_BARS, be.CACHE_DIR / be.LONG_CACHE) if os.path.exists(p)]
+
+
+def bar_features(sources, dates, cols):
+    """Close / 20-day VWAP (the copy's daily-bar VWAP: typical price x volume) and the volume jump (5-day / 50-day average
+    volume), computed inside each download so splits and dividends stay consistent; the newest download wins where its
+    window is full. Decision days use their 2:30 PM bar, like signal_analysis.csv."""
+    out = {k: pd.DataFrame(index=dates, columns=cols, dtype=float) for k in ("vwap_ratio", "vol_jump")}
+    for b in sources:
+        b = be.keep_decision_bars(b.sort_values(["Symbol", "Date"]).reset_index(drop=True), now=_NO_SAVE)
+        w = {c: b.pivot_table(index="Date", columns="Symbol", values=c) for c in ("High", "Low", "Close", "Volume")}
+        v = w["Volume"].replace(0, np.nan)
+        vwap = ((w["High"] + w["Low"] + w["Close"]) / 3 * v).rolling(20).sum() / v.rolling(20).sum()
+        new = {"vwap_ratio": w["Close"] / vwap, "vol_jump": v.rolling(5).mean() / v.rolling(50).mean()}
+        for k in out:
+            out[k] = out[k].combine_first(new[k].reindex(index=dates, columns=cols))
+    return out
+
+
+def quant_score(f, vwap_ratio):
     """The copy folder's Quant_Score (Stock Analysis Test Strategy/backtest_engine.quant_score), 0-100, from the saved
-    signal_analysis.csv columns: the average of price above its 5 moving averages, the moving-average stack, RSI(14), the
-    MACD histogram (point-in-time scaled), Bollinger %B (20 days) and the 20-day slope of the 200-day average (a missing
-    part counts as 50). Its VWAP part is left out because daily volume is not saved."""
+    signal_analysis.csv columns + the bars' VWAP: the average of price above its 5 moving averages, the moving-average
+    stack, price vs the 20-day VWAP, RSI(14), the MACD histogram (point-in-time scaled), Bollinger %B (20 days) and the
+    20-day slope of the 200-day average (a missing part counts as 50)."""
     c, ma = f["Close"], {n: f[f"ma_{n}"] for n in (10, 30, 50, 100, 200)}
     mid, sd = c.rolling(be.BB_WINDOW).mean(), c.rolling(be.BB_WINDOW).std()
     parts = [sum((c > m).astype(float) for m in ma.values()) / 5 * 100,
              sum((ma[a] > ma[b]).astype(float) for a, b in ((10, 30), (30, 50), (50, 100), (100, 200))) / 4 * 100,
+             (50 + 2500 * (vwap_ratio - 1)).clip(0, 100),
              f["RSI"].clip(0, 100),
              (50 + (f["macd"] - f["MACD Signal"]).apply(be.pit_scale) / 2).clip(0, 100),
              ((c - (mid - 2 * sd)) / (4 * sd).replace(0, np.nan)).clip(0, 1) * 100,
@@ -129,68 +195,154 @@ def quant_score(f):
     return sum(p.fillna(50.0) for p in parts) / len(parts)
 
 
-def strategy_inputs(sig, facts=None, earnings=None):
-    """Everything the strategies rank on, as Date x Symbol frames, from the saved files only. `sig` = signal_analysis.csv
-    rows (SIG_COLS), `facts` = factor_history.csv (the daily snapshot of news sentiment and the company-report score; each
-    day uses the latest snapshot on or before it)."""
+def dip_weights(c, ma50, eligible, depth=0.08, max_hold=30, n=10):
+    """test_buy_high_sell_low.ipynb as a portfolio: buy at the close 8% or more below the 50-day average, sell at the close
+    back at/above it or after max_hold sessions (not bought back that day); 1/n each, at most n at once (deepest first)."""
+    C, M, E = c.to_numpy(float), ma50.to_numpy(float), eligible.to_numpy(bool)
+    out, held = np.zeros(C.shape), {}
+    for t in range(len(C)):
+        sold = set()
+        for j in list(held):
+            held[j] += 1
+            if not C[t, j] < M[t, j] or held[j] >= max_hold:
+                del held[j]
+                sold.add(j)
+        gap = np.nan_to_num(1 - C[t] / M[t], nan=-1.0)
+        new = [j for j in np.argsort(-gap, kind="stable") if E[t, j] and gap[j] >= depth and j not in held and j not in sold]
+        for j in new[:n - len(held)]:
+            held[j] = 0
+        out[t, list(held)] = 1 / n
+    return pd.DataFrame(out, index=c.index, columns=c.columns)
+
+
+def earnings_drift(c, spy, earnings, hold=60):
+    """Excess return vs SPY (%) of each stock's last earnings reaction day (the report day for AM reports, else the next
+    session), kept for `hold` sessions from that close; NaN otherwise."""
+    out, idx = np.full(c.shape, np.nan), c.index
+    pos = {s: j for j, s in enumerate(c.columns)}
+    e = earnings[earnings["Symbol"].isin(pos)].sort_values("Earnings Date")
+    for sym, day, when in zip(e["Symbol"], e["Earnings Date"], e.get("Time", pd.Series("", index=e.index)).astype(str)):
+        k = idx.searchsorted(day, side="left" if when.strip().upper() == "AM" else "right")
+        if 1 <= k < len(idx):
+            j = pos[sym]
+            out[k:k + hold, j] = (c.iat[k, j] / c.iat[k - 1, j] - spy.iat[k] / spy.iat[k - 1]) * 100
+    return pd.DataFrame(out, index=idx, columns=c.columns)
+
+
+def risk_parity(tgt, close, days, window=63):
+    """Same picks and total weight, re-split for equal risk contributions (63-day covariance; cyclical coordinate descent),
+    recomputed when the picks change and on `days`; 1/volatility weights stay where the covariance is incomplete."""
+    r, T = close.pct_change(fill_method=None), tgt.to_numpy(float)
+    out, key, cur, reb = T.copy(), None, None, days.reindex(tgt.index).fillna(False).to_numpy(bool)
+    for t in range(len(T)):
+        picked = np.flatnonzero(T[t] > 0)
+        k = (tuple(picked), round(T[t].sum(), 8))
+        if k != key or reb[t]:
+            key, cur = k, T[t].copy()
+            cov = r.iloc[max(0, t - window + 1):t + 1, picked].cov().to_numpy()
+            if len(picked) > 1 and np.isfinite(cov).all():
+                x = np.full(len(picked), 1 / len(picked))
+                for _ in range(100):
+                    for i in range(len(x)):
+                        b = cov[i] @ x - cov[i, i] * x[i]
+                        x[i] = (-b + np.sqrt(b * b + 4 * cov[i, i] / len(x))) / (2 * cov[i, i])
+                cur[picked] = x / x.sum() * T[t].sum()
+        out[t] = cur
+    return pd.DataFrame(out, index=tgt.index, columns=tgt.columns)
+
+
+def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
+    """Everything the strategies rank on, as Date x Symbol frames, from saved data only: `sig` = signal_analysis.csv rows
+    (SIG_COLS), `facts` = factor_history.csv (the daily snapshot of news sentiment and the company-report score; each day
+    uses the latest snapshot on or before it), `bench` = benchmark_prices.csv (SPY, QQQ, sector ETFs), `bars` =
+    forward_bars() (volume). "through" = the last day the bars cover (later days wait for the bars)."""
     sig = sig[sig["Symbol"].isin(sig.loc[sig["Strategy_Score"].notna(), "Symbol"].unique())]   # scored stocks (no QQQ)
-    f = {c: _wide(sig, c) for c in SIG_COLS[2:] if c not in ("Regime_On", "final_trade")}
+    f = {col: _wide(sig, col) for col in SIG_COLS[2:] if col not in ("Regime_On", "final_trade")}
     dates, c, live, rs, tech = f["Close"].index, f["Close"], f["Strategy_Score"], f["RS_Score"], f["Technical_Score"]
+    cols, eligible, earnings = c.columns, f["Strategy_Score"].notna(), be.load_earnings() if earnings is None else earnings
     snap = {}
     for col in ("SentimentScore", "Fundamental_Weight"):
-        s = pd.DataFrame(index=dates, columns=c.columns, dtype=float)
+        snap[col] = pd.DataFrame(index=dates, columns=cols, dtype=float)
         if facts is not None and len(facts):
             fa = facts.assign(bar_date=pd.to_datetime(facts["bar_date"])).sort_values("as_of")
-            fa = fa.drop_duplicates(["bar_date", "Symbol"], keep="last")
-            w = _wide(fa, col, index="bar_date").reindex(columns=c.columns)
-            s = w.reindex(w.index.union(dates)).ffill().reindex(dates)
-        snap[col] = s
-    quant, vol = quant_score(f), be.volatility(c)
-    uptrend = c > f["ma_200"]
+            w = _wide(fa.drop_duplicates(["bar_date", "Symbol"], keep="last"), col, index="bar_date").reindex(columns=cols)
+            snap[col] = w.reindex(w.index.union(dates)).ffill().reindex(dates)
+    b = pd.DataFrame(index=dates) if bench is None else \
+        bench.assign(Date=pd.to_datetime(bench["Date"])).set_index("Date").sort_index()
+    b = b.reindex(b.index.union(dates)).ffill().reindex(dates)
+    etf_of = {s: be.sector_mapping.sector_etf_for(s) for s in cols}
+    by_etf = lambda x: pd.DataFrame({s: x[etf_of[s]] if etf_of[s] in x else np.nan for s in cols}, index=dates)
+    bx = bar_features(forward_bars() if bars is None else bars, dates, cols)
+    quant, vol, up = quant_score(f, bx["vwap_ratio"]), be.volatility(c), c > f["ma_200"]
+    regime = sig.groupby("Date")["Regime_On"].first().reindex(dates).fillna(0).astype(bool)
+    weekly = be.weekly_rebalance_days(dates, live=True)
+    ret = lambda n: c / c.shift(n) - 1
+    mom_12_1, etf_3m = (c.shift(21) / c.shift(252) - 1) * 100, by_etf(b / b.shift(63) - 1)
     scores = {
         "live": live, "tech": tech, "rs": rs,
         "quant": quant - 50,                                  # > 0 = Quant Score above 50 (the copy's min score)
         "quant_rs": 100 * (0.5 * _pct(quant) + 0.5 * _pct(rs)),
         "sentiment": (100 * (0.8 * _pct(live) + 0.2 * _pct(snap["SentimentScore"].fillna(0.0)))).where(live > 0),
         "fundamental": snap["Fundamental_Weight"],
-        "mom_12_1": (c.shift(21) / c.shift(252) - 1) * 100,
-        "mom_6": (c / c.shift(126) - 1) * 100,
-        "low_vol": (1 / vol).where(uptrend),
-        "dip": ((f["ma_50"] / c - 1) * 100).where(uptrend),
+        "mom_12_1": mom_12_1,
+        "mom_6": ret(126) * 100,
+        "low_vol": (1 / vol).where(up),
+        "dual": (ret(252) * 100).where(regime, axis=0),
+        "mom_risk": ret(126) / (c.pct_change(fill_method=None).rolling(126).std() * np.sqrt(126)),
+        "high_52": c / c.rolling(252).max(),
+        "reversal": (-ret(5) * 100).where(up),
+        "quality_mom": (100 * (0.5 * _pct(snap["Fundamental_Weight"]) + 0.5 * _pct(mom_12_1))),
+        "drift": earnings_drift(c, b["SPY"] if "SPY" in b else pd.Series(1.0, index=dates), earnings),
+        "sector_rot": live.where(etf_3m.rank(axis=1, method="dense", ascending=False).le(3)),   # top 3 ETF returns
+        "breakout": bx["vol_jump"].where((c >= 0.98 * c.rolling(55).max()) & (bx["vol_jump"] >= 1.3))
+                    .rolling(20, min_periods=1).max().where(c > f["ma_50"]),     # a breakout in the last 20 sessions
     }
-    held = _wide(sig, "final_trade").map(lambda x: {"BUY": 1.0, "SELL": 0.0}.get(x, np.nan)).ffill().fillna(0.0)
-    eligible = live.notna()
-    legacy = (held.where(eligible, 0.0)).div(eligible.sum(axis=1), axis=0)
-    return {"close": c.ffill(), "scores": scores, "eligible": eligible, "vol": vol, "legacy": legacy,
-            "regime": sig.groupby("Date")["Regime_On"].first().reindex(dates).fillna(0).astype(bool),
-            "weekly": be.weekly_rebalance_days(dates, live=True),
+    # Legacy combined_signal (Stock Analysis Legacy/main_signal_analysis.ipynb): missing news / fundamentals = that day's mean
+    fill = lambda x: x.T.fillna(x.mean(axis=1)).T.fillna(0.0)
+    legacy = (0.60 * tech + 0.25 * fill(snap["Fundamental_Weight"]).clip(-10, 10) * 10
+              + 0.10 * (by_etf(b / b.shift(4) - 1) * 300).clip(-30, 30) / 30 * 100
+              + 0.05 * fill(snap["SentimentScore"]).clip(-10, 10) * 10)
+    held = legacy.gt(20).astype(float).where(legacy.gt(20) | legacy.lt(-25)).ffill().fillna(0.0).where(eligible, 0.0)
+    n = eligible.sum(axis=1)
+    weights = {"legacy": held.div(n, axis=0),
+               "dip": dip_weights(c, f["ma_50"], eligible),
+               "trend": _carry(((f["ma_50"] > f["ma_200"]) & eligible).astype(float).div(n, axis=0), weekly)}
+    have = bx["vwap_ratio"].notna().any(axis=1)
+    return {"close": c.ffill(), "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
+            "weekly": weekly, "earnings": earnings,
             "monthly": pd.Series([be.next_sessions(d, 1)[0].month != d.month for d in dates], index=dates),
-            "earnings": be.load_earnings() if earnings is None else earnings}
+            "through": have[have].index.max() if have.any() else pd.Timestamp(0)}
 
 
 def strategy_targets(cfg, inp):
-    """Daily live target weights of one STRATEGIES entry (Date x Symbol), through the engine's own selection code
-    (be.winner_targets): only overrides are passed, WINNER itself is never changed."""
-    if cfg.get("score") == "legacy":
-        tgt = inp["legacy"]
+    """Daily live target weights of one STRATEGIES entry (Date x Symbol). Ranked ones go through the engine's own selection
+    code (be.winner_targets): only overrides are passed, WINNER itself is never changed."""
+    if cfg.get("weights"):
+        tgt = inp["weights"][cfg["weights"]]
     else:
         cal, tb = cfg.get("calendar", "mwf"), cfg.get("tiebreak", "rs")
         tgt, _ = be.winner_targets(inp["scores"][cfg.get("score", "live")], inp["eligible"], inp["vol"], inp["regime"],
                                    inp["weekly" if cal == "mwf" else cal], tiebreak_w=inp["scores"].get(tb),
                                    midweek=None if cal == "mwf" else False, selection=cfg.get("select"),
                                    earnings_block_days=cfg.get("earnings", "winner"), earnings=inp["earnings"])
+        if cfg.get("reweight") == "risk_parity":
+            tgt = risk_parity(tgt, inp["close"][tgt.columns], inp["weekly"])
     return be.live_weights(tgt.clip(upper=MAX_WEIGHT)).reindex(columns=inp["close"].columns).fillna(0.0)
 
 
-def update_strategies(sig=None, facts=None, earnings=None, path=STRATEGIES_CSV, hold_path=HOLDINGS_CSV,
-                      start=be.FORWARD_START):
+def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None, path=STRATEGIES_CSV,
+                      hold_path=HOLDINGS_CSV, start=be.FORWARD_START):
     """Add every trading day after each strategy's last saved day (the first one: the start close, value 1.0 after its
-    buys). Saved days are never redone. Returns the number of (strategy, day) rows added."""
+    buys), up to the last day the volume bars cover. Saved days are never redone. Returns the number of rows added."""
     sig = _read(SIGNAL_CSV, usecols=SIG_COLS, parse_dates=["Date"]) if sig is None else sig
     facts = _read(FACTOR_CSV) if facts is None else facts
-    inp = strategy_inputs(sig, facts, earnings)
+    bench = _read(BENCH_CSV) if bench is None else bench
+    inp = strategy_inputs(sig, facts, earnings, bench, bars)
     close = inp["close"]
     days = close.index[close.index >= pd.Timestamp(start)]
+    if inp.get("through") is not None and len(days) and days[-1] > inp["through"]:
+        print(f"waiting for volume bars after {inp['through']:%b %-d} (days after it are added on a later run)")
+        days = days[days <= inp["through"]]
     old = _read(path, parse_dates=["Date"])
     old_h = _read(hold_path, parse_dates=["Date"])
     rows, hold = [], []

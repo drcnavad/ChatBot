@@ -6,7 +6,7 @@
 #                                     non-decision trading days, normally Tue/Thu; no paid APIs, never orders)
 #   com.stockanalysis.forwardtest     Mon-Fri 4:15 PM CT, on wake: forward_test.py --record (one row per trading day in
 #                                     Reports/forward_test_daily.csv; read-only GETs, never orders; + the paper
-#                                     strategies' days in Reports/forward_strategies*.csv from saved data)
+#                                     strategies' days in Reports/forward_strategies*.csv from saved data + free daily bars)
 #   com.stockanalysis.dashboard-8502  always on (restarted if it stops): the app on http://localhost:8502
 # run_all.py decides whether anything is due (a decision after its 2:30 PM slot, or a missed one caught up at the next
 # regular session until the next slot); idle starts print one "idle:" line. run_state last_decision and lock files

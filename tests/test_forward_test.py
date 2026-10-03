@@ -3,7 +3,7 @@ before it is ignored, a position held into it starts at the start close), trades
 per side, and the empty state is None (the panel then says no closed trades yet). 2) forward_test.py (the live account):
 picks start from a flat position on/after the start, trading cost vs the decision price, deposits are not returns, weekly
 median / drawdown, and record() saves one row per trading day (idle on holidays) through a FAKE account - no requests,
-temporary files only."""
+temporary files only. 3) The paper strategies on fake bars / benchmarks / earnings (never a download)."""
 import os
 import sys
 
@@ -181,23 +181,30 @@ SIG = fake_sig(sdays)
 FACTS = pd.DataFrame({"as_of": "2026-09-01 15:31", "bar_date": "2026-09-01", "Symbol": SYMS,
                       "SentimentScore": rng.normal(1, 3, len(SYMS)), "Fundamental_Weight": rng.uniform(-3, 8, len(SYMS))})
 NO_EARN = pd.DataFrame(columns=["Symbol", "Earnings Date"])
+EARN = pd.DataFrame({"Symbol": SYMS * 2, "Earnings Date": pd.to_datetime(["2026-08-04"] * 30 + ["2026-09-15"] * 30),
+                     "Time": ["AM", "PM"] * 30})
+BENCH = pd.DataFrame({"Date": sdays, **{s: 100 * np.exp(np.cumsum(rng.normal(0.0003, 0.012, len(sdays))))
+                                       for s in ["SPY", "QQQ", *be.SECTOR_ETFS]}})
+_c = SIG.pivot(index="Date", columns="Symbol", values="Close").stack().rename("Close").reset_index()
+BARS = [_c.assign(Open=_c["Close"], High=_c["Close"] * 1.01, Low=_c["Close"] * 0.985,
+                  Volume=rng.lognormal(13, 0.5, len(_c)))[["Symbol", "Date", *be.BAR_COLS]]]
 w0 = dict(be.WINNER)
-inp = ft.strategy_inputs(SIG, FACTS, NO_EARN)
+inp = ft.strategy_inputs(SIG, FACTS, EARN, BENCH, BARS)
 tg = {c["name"]: ft.strategy_targets(c, inp).loc["2026-10-02":] for c in ft.STRATEGIES}
 check(f"registry: {len(ft.STRATEGIES)} strategies with unique names, each with a one-line rule",
-      len({c["name"] for c in ft.STRATEGIES}) == len(ft.STRATEGIES) >= 15 and all(c.get("rule") for c in ft.STRATEGIES))
+      len({c["name"] for c in ft.STRATEGIES}) == len(ft.STRATEGIES) >= 28 and all(c.get("rule") for c in ft.STRATEGIES))
 check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%), at most 99% invested",
       all((t.to_numpy() >= 0).all() and t.to_numpy().max() <= 0.198 + 1e-12 and t.sum(axis=1).max() <= 0.99 + 1e-9
           and t.sum(axis=1).max() > 0 for t in tg.values()),
       {k: (round(t.to_numpy().max(), 4), round(t.sum(axis=1).max(), 4)) for k, t in tg.items()})
-check("registry: the strategies are not copies of each other (distinct holdings over the test)",
-      len({tuple(map(tuple, (t > 0).to_numpy())) for t in tg.values()}) >= len(ft.STRATEGIES) - 3)
+check("registry: the strategies are not copies of each other (distinct weights over the test)",
+      len({t.round(4).to_numpy().tobytes() for t in tg.values()}) >= len(ft.STRATEGIES) - 3)
 check("registry: WINNER untouched", be.WINNER == w0)
 
 import filecmp  # noqa: E402
 with tempfile.TemporaryDirectory() as tmp:
     P = lambda n: dict(path=os.path.join(tmp, n + ".csv"), hold_path=os.path.join(tmp, n + "_h.csv"))
-    n1 = ft.update_strategies(SIG, FACTS, NO_EARN, **P("a"))
+    n1 = ft.update_strategies(SIG, FACTS, NO_EARN, BENCH, BARS, **P("a"))
     v = pd.read_csv(P("a")["path"], parse_dates=["Date"])
     n_days = (sdays >= pd.Timestamp(be.FORWARD_START)).sum()
     check("update: one row per strategy and trading day from the Oct 2 close, each at 1.0 on Oct 2",
@@ -205,9 +212,12 @@ with tempfile.TemporaryDirectory() as tmp:
     import shutil  # noqa: E402
     shutil.copy(P("a")["path"], os.path.join(tmp, "a_copy.csv"))
     check("idempotent: a re-run the same day adds nothing and leaves the files unchanged",
-          ft.update_strategies(SIG, FACTS, NO_EARN, **P("a")) == 0 and filecmp.cmp(P("a")["path"], os.path.join(tmp, "a_copy.csv"), shallow=False))
-    ft.update_strategies(SIG[SIG["Date"] <= "2026-10-07"], FACTS, NO_EARN, **P("b"))    # missed days ...
-    nb = ft.update_strategies(SIG, FACTS, NO_EARN, **P("b"))                            # ... caught up later
+          ft.update_strategies(SIG, FACTS, NO_EARN, BENCH, BARS, **P("a")) == 0 and filecmp.cmp(P("a")["path"], os.path.join(tmp, "a_copy.csv"), shallow=False))
+    early = [BARS[0][BARS[0]["Date"] <= "2026-10-05"]]                                  # bars only through Oct 5
+    n_early = ft.update_strategies(SIG[SIG["Date"] <= "2026-10-07"], FACTS, NO_EARN, BENCH, early, **P("b"))
+    check("update: days after the last volume bar wait for the bars", n_early == len(ft.STRATEGIES) * 2, n_early)
+    ft.update_strategies(SIG[SIG["Date"] <= "2026-10-07"], FACTS, NO_EARN, BENCH, BARS, **P("b"))  # missed days ...
+    nb = ft.update_strategies(SIG, FACTS, NO_EARN, BENCH, BARS, **P("b"))                          # ... caught up later
     a_, b_ = pd.read_csv(P("a")["path"]), pd.read_csv(P("b")["path"])
     ha, hb = pd.read_csv(P("a")["hold_path"]), pd.read_csv(P("b")["hold_path"])
     check("catch-up: missed days are added from the saved bars, same values and holdings as running every day",
@@ -228,7 +238,7 @@ with tempfile.TemporaryDirectory() as tmp:
         t.loc[:"2026-10-05", "AAA"], t.loc["2026-10-06":, "BBB"] = 0.99, 0.99
         return t
     try:
-        ft.strategy_inputs = lambda sig, facts=None, earnings=None: {"close": sig.pivot(index="Date", columns="Symbol", values="Close")}
+        ft.strategy_inputs = lambda sig, *a, **k: {"close": sig.pivot(index="Date", columns="Symbol", values="Close")}
         ft.strategy_targets, ft.STRATEGIES = fake_targets, [{"name": "X", "rule": "x"}]
         ft.update_strategies(hs[hs["Date"] <= "2026-10-05"], None, NO_EARN, **P("h"))   # resume across the switch
         ft.update_strategies(hs, None, NO_EARN, **P("h"))
@@ -240,6 +250,37 @@ with tempfile.TemporaryDirectory() as tmp:
     check("accounting: 1.0 at the start close, follows the closes, pays 0.1% per side on a change, cash earns 0",
           hv.index[0] == pd.Timestamp("2026-10-02") and hv.iloc[0] == 1.0 and abs(hv["2026-10-05"] - a5) < 1e-12
           and abs(hv["2026-10-06"] - after) < 1e-12 and abs(hv.iloc[-1] - after) < 1e-12, hv.round(6).to_dict())
+
+# the rules that are not rankings, on tiny hand-made data
+ud = pd.bdate_range("2026-01-05", periods=8)
+uc = pd.DataFrame({"A": [100, 91, 90, 95, 100, 101, 90, 89.0], "B": [100, 100, 100, 100, 100, 100, 100, 91.0]}, index=ud)
+um = pd.DataFrame(100.0, index=ud, columns=uc.columns)
+dw = ft.dip_weights(uc, um, uc.notna(), n=2)
+check("buy the dip: in at 8%+ below the 50-day, out at the average, back in on a new dip, 1/n each",
+      list(dw["A"]) == [0, 0.5, 0.5, 0.5, 0, 0, 0.5, 0.5] and list(dw["B"]) == [0] * 7 + [0.5], dw.to_dict("list"))
+check("buy the dip: sold after max_hold sessions, not bought back the same day (still 10% below)",
+      list(ft.dip_weights(uc, um, uc.notna(), max_hold=1, n=2)["A"][:4]) == [0, 0.5, 0, 0],
+      ft.dip_weights(uc, um, uc.notna(), max_hold=1, n=2)["A"].tolist())
+spy = pd.Series(100.0, index=ud)
+spy.iloc[3] = 101.0
+ed = ft.earnings_drift(uc, spy, pd.DataFrame({"Symbol": ["A", "B"], "Earnings Date": [ud[2], ud[2]], "Time": ["PM", "AM"]}), hold=2)
+check("earnings drift: the reaction day (next session after a PM report, same day for AM) vs SPY, kept for `hold` sessions",
+      ed["A"].iloc[3:5].round(6).tolist() == [round((95 / 90 - 101 / 100) * 100, 6)] * 2 and ed["A"].iloc[[2, 5]].isna().all()
+      and ed["B"].iloc[2:4].tolist() == [0.0, 0.0] and ed["B"].iloc[4:].isna().all(), ed.to_dict("list"))
+r = rng.normal(0, 1, (80, 3)) * [0.01, 0.02, 0.04]
+rc = pd.DataFrame(100 * np.exp(np.cumsum(r, axis=0)), index=pd.bdate_range("2026-01-01", periods=80), columns=list("XYZ"))
+rt = pd.DataFrame(0.3, index=rc.index, columns=rc.columns)
+rp = ft.risk_parity(rt, rc, pd.Series(rc.index == rc.index[-1], index=rc.index)).iloc[-1]   # recomputed on the last day
+cov = rc.pct_change().iloc[-63:].cov().to_numpy()
+contrib = rp.to_numpy() * (cov @ rp.to_numpy())
+check("risk parity: same total, equal risk contributions, the calmest stock gets the most",
+      abs(rp.sum() - 0.9) < 1e-12 and np.allclose(contrib, contrib.mean(), rtol=1e-6) and rp["X"] > rp["Y"] > rp["Z"], rp.to_dict())
+vb = pd.DataFrame({"Symbol": "A", "Date": pd.bdate_range("2026-01-05", periods=20), "Open": 1.0, "High": 12.0, "Low": 8.0,
+                   "Close": [10.0] * 19 + [10.5], "Volume": [100.0] * 19 + [300.0]})
+vf = ft.bar_features([vb], pd.DatetimeIndex(vb["Date"]), ["A"])
+vw = (10 * 100 * 19 + (12 + 8 + 10.5) / 3 * 300) / (100 * 19 + 300)
+check("Quant Score VWAP part: close / 20-day VWAP of the typical price", abs(vf["vwap_ratio"]["A"].iloc[-1] - 10.5 / vw) < 1e-12
+      and vf["vwap_ratio"]["A"].iloc[:-1].isna().all(), vf["vwap_ratio"]["A"].tail(2).tolist())
 
 # the real saved data (read-only; output to temporary files): the live rules recomputed = the live Strategy_Weight
 LIVE_FILES = [os.path.join(ROOT, "Reports", f) for f in ("signal_analysis.csv", "strategy_picks.csv", "run_state.json",
@@ -253,13 +294,13 @@ def digest():
 
 if os.path.exists(ft.SIGNAL_CSV):
     before = digest()
-    with tempfile.TemporaryDirectory() as tmp:
-        ft.update_strategies(path=os.path.join(tmp, "s.csv"), hold_path=os.path.join(tmp, "h.csv"))
-        h = pd.read_csv(os.path.join(tmp, "h.csv"), parse_dates=["Date"])
+    real_inp = ft.strategy_inputs(pd.read_csv(ft.SIGNAL_CSV, usecols=ft.SIG_COLS, parse_dates=["Date"]),
+                                  ft._read(ft.FACTOR_CSV), None, ft._read(ft.BENCH_CSV), bars=[])   # no bar download
     real = pd.read_csv(ft.SIGNAL_CSV, usecols=["Date", "Symbol", "Strategy_Weight"], parse_dates=["Date"])
     d0 = pd.Timestamp(be.FORWARD_START)
     live = real[(real["Date"] == d0) & (real["Strategy_Weight"] > 0)].set_index("Symbol")["Strategy_Weight"].sort_index()
-    mine = h[(h["Strategy"] == ft.LIVE) & (h["Date"] == d0)].set_index("Symbol")["Weight"].sort_index()
+    mine = ft.strategy_targets(ft.STRATEGIES[0], real_inp).loc[d0]
+    mine = mine[mine > 0].sort_index()
     check("live rules recomputed from the saved files = the live Strategy_Weight of Oct 2 (apples to apples)",
           list(live.index) == list(mine.index) and np.allclose(live, mine, atol=1e-9), (live.to_dict(), mine.to_dict()))
     check("no live file changed (signal_analysis, picks, run_state, pending orders, orders log); WINNER untouched",
