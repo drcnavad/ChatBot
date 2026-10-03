@@ -3,8 +3,8 @@ Stock Analysis dashboard (Streamlit).
 
 Page layout, top to bottom:
   1. Title bar.
-  2. "Dashboard" tab: a compact summary (key numbers, current picks, earnings this week)
-     and the single-stock view. Open any stock directly with  http://localhost:8502/?symbol=NVDA
+  2. "Dashboard" tab: the single-stock view (clickable rank tiers, stock picker, chart). Open any stock directly with
+     http://localhost:8502/?symbol=NVDA
   3. "Details" tab: everything else (latest signals, the last decision, the strategy rules and decisions, data freshness),
      each in its own expander.
 
@@ -932,38 +932,7 @@ def render_top_bar(p):
 
 
 # =====================================================================================================================
-# 10. Dashboard tab: summary
-# =====================================================================================================================
-def render_summary(p):
-    """Short summary only: holdings now, the latest data date, the next rebalance, and where the details are.
-    (The decision details - signals, reasons, every stock - live in the Details tab.)"""
-    section("Summary")
-    la = p.by_symbol
-    held = la[la["Strategy_Weight"].fillna(0) > 0]
-    latest = p.df["Date"].max()
-    c = st.columns(3)
-    c[0].metric("Stocks held", len(held))
-    c[1].metric("Latest data", f"{latest:%a %b %-d} close")
-    c[2].metric("Next rebalance", f"{p.plan_day:%a %b %-d}" if p.plan_day is not None else "—",
-                help="Full weekly rebalance (Mon/Wed closes are mid-week checks)." if MIDWEEK else None)
-    table = pd.DataFrame({
-        "Symbol": held.index,
-        "Weight %": (held["Strategy_Weight"] * 100).round(2).to_numpy(),
-        "Rank today": held["Strategy_Rank"].round(0).astype("Int64").to_numpy(),
-        "Sector": [symbol_sector.get(s, "—") for s in held.index],
-        "Next earnings": last_next_earnings(list(held.index))["Next ED"].to_numpy(),
-    }).sort_values(["Weight %", "Rank today"], ascending=[False, True]).reset_index(drop=True)
-    event = st.dataframe(table, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
-                         key="summary_tbl")
-    open_symbol(table, event, "summary")
-    plan = f", the {p.plan_day:%a %b %-d} plan" if p.plan_day is not None else ""
-    st.caption(f"Holdings at the {latest:%a %b %-d} close. Every stock's signal, rank and score today{plan}: "
-               f"🔎 Details tab → **{latest_signals_title(p)}** · the last decision and its reasons: "
-               f"🔎 Details tab → **Last decision · {p.off_date:%a %b %-d}**.")
-
-
-# =====================================================================================================================
-# 11. Dashboard tab: single-stock view
+# 10. Dashboard tab: single-stock view
 # =====================================================================================================================
 def ticker_label(p, s):
     if s in p.short.index:
@@ -1406,7 +1375,7 @@ def render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end
 
 
 # =====================================================================================================================
-# 12. Details tab
+# 11. Details tab
 # =====================================================================================================================
 def latest_signals_title(p):
     return f"Latest signals · {p.df['Date'].max():%a %b %-d} close"
@@ -1581,7 +1550,7 @@ def render_details(p):
 
 
 # =====================================================================================================================
-# 13. Main
+# 12. Main
 # =====================================================================================================================
 def main():
     with st.spinner("Loading data..."):
@@ -1603,7 +1572,6 @@ def main():
         st.rerun()
     tab_main, tab_details = st.tabs(["📈 Dashboard", "🔎 Details"])
     with tab_main:
-        render_summary(p)
         ticker, tdata = render_stock_picker(p, jumped)
         if ticker in p.short.index:
             render_short_stock(ticker, p.short.loc[ticker])

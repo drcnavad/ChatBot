@@ -3,7 +3,7 @@ as HTML (no escaped tags / code blocks / unbalanced tags), the price chart draws
 rank == Strategy_Rank and the portfolio slot == position among the picks, the dated decision badge / "Strategy rank ·
 <latest close>" / "<rebalance day> plan" chip agree with strategy_changes / signal_analysis / strategy_picks (and with the
 "Latest signals" and "Last decision" tables in Details), the Strategy tab widgets work, the rules text matches
-backtest_engine.WINNER, removed sections stay gone (incl. the alert banner and the Strategy Health tab), and the rank tiers render with a ?symbol= link
+backtest_engine.WINNER, removed sections stay gone (incl. the alert banner, the Summary section and the Strategy Health tab), and the rank tiers render with a ?symbol= link
 per ranked stock.
 Run: python tests/run_tests.py  (or python tests/test_app.py)"""
 import base64
@@ -236,10 +236,11 @@ for want in (f"Strategy rules ({W['tag']})", f"{W['w_tech']:g} × Technical", f"
     expect(want in rules, f"rules text is missing {want!r}")
 expect("next open" not in blob, "outdated 'next open' wording (orders go out the same evening)")
 
-# ---------------------------------------------------------------- removed: alert banner, Strategy Health tab
+# ---------------------------------------------------------------- removed: alert banner, Summary section, Strategy Health tab
 box = [m.value for m in at.markdown if "sa-alert " in m.value]
 expect(len(box) == 0, f"the alert banner was removed from the dashboard, found {len(box)}")
 expect([t.label for t in at.tabs] == ["📈 Dashboard", "🔎 Details"], f"tabs: {[t.label for t in at.tabs]} (Strategy Health removed)")
+expect(not [m for m in at.markdown if '<div class="sa-section">Summary</div>' in m.value], "the Summary section was removed")
 
 # ---------------------------------------------------------------- rank tiers: horizontal clickable lists by rank
 tier_md = [m.value for m in at.markdown if "Rank 1 to 20" in m.value and "?symbol=" in m.value]
