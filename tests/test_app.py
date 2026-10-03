@@ -139,6 +139,12 @@ for sym in TICKERS:
     want_sl = f"{exp_slot[sym]} of 10" if sym in exp_slot else "— (not picked)"
     expect(rk and sl and rk.group(1) == want_rk and sl.group(1) == want_sl,
            f"{sym}: header rank/slot {rk and rk.group(1)!r}/{sl and sl.group(1)!r}, expected {want_rk!r}/{want_sl!r}")
+    more = next((m.value for m in at.markdown if "More about" in m.value), "")
+    ct = re.search(r"Closed trades</div><div[^>]*>(\d+)<", more)
+    if sym in sm.tradable_symbols:      # the per-stock forward test replaced the backtest panel; empty state while 0 trades
+        expect("Per-stock forward test" in more and "Per-stock backtest" not in more and ct
+               and (("Forward test started Oct 2, 2026; no closed trades yet" in more) == (ct.group(1) == "0")),
+               f"{sym}: forward test panel / empty state ({ct and ct.group(1)!r})")
 
 # ---------------------------------------------------------------- decision badge / rank label / plan chip / Details tables agree
 # decision in force = strategy_changes.csv (what the app reads); today's rank = latest signal_analysis; plan = strategy_picks

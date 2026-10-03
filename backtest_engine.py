@@ -1867,3 +1867,32 @@ def per_stock_table(run, inp, start=WALK_FORWARD_START):
                      "Held % of sessions": held[sym].mean() * 100 if sym in held else 0.0,
                      "Buy & hold %": bh, "First bar": first.date() if first is not None else None})
     return pd.DataFrame(rows)
+
+
+# ----------------------------------------------------------------------------- per-stock forward test (dashboard)
+FORWARD_START = "2026-10-02"          # the dashboard's per-stock forward test counts trades and stats from this close on
+
+
+def forward_test(close, weight, start=FORWARD_START):
+    """One stock's live rules from `start` on. `close` and `weight` (the live daily target, Strategy_Weight) are Series by
+    date; earlier bars only warm up the indicators that made the targets. Flat at `start`: a trade opens at the close of the
+    first session on/after `start` with a target > 0 and closes at the close where it returns to 0 (orders go out that day
+    at 2:30 PM CT), COST per side. Returns the stats (None while there is nothing to count yet)."""
+    c = close.loc[pd.Timestamp(start):].dropna()
+    held = weight.reindex(c.index).fillna(0).to_numpy() > 0
+    trades, entry = [], None
+    for i, h in enumerate(held):
+        if h and entry is None:
+            entry = i
+        elif not h and entry is not None:
+            trades.append((c.iloc[i] * (1 - COST) / (c.iloc[entry] * (1 + COST)) - 1, i - entry))
+            entry = None
+    ret, hold = np.array([t[0] for t in trades]), [t[1] for t in trades]
+    return {"Start": pd.Timestamp(start), "Sessions": len(c), "Closed trades": len(trades),
+            "Win rate %": (ret > 0).mean() * 100 if trades else None,
+            "Median trade %": np.median(ret) * 100 if trades else None,
+            "Median hold (sessions)": float(np.median(hold)) if trades else None,
+            "Held % of sessions": held.mean() * 100 if len(c) else None,
+            "Buy & hold %": (c.iloc[-1] / c.iloc[0] - 1) * 100 if len(c) else None,
+            "Open trade": None if entry is None else {"Entry": c.index[entry], "Price": float(c.iloc[entry]),
+                                                      "Change %": (c.iloc[-1] / c.iloc[entry] - 1) * 100}}

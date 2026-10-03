@@ -180,7 +180,6 @@ HOLDINGS_CSV = os.path.join(REPORTS, "strategy_holdings.csv")
 DECISIONS_CSV = os.path.join(REPORTS, "strategy_decisions.csv")
 MIDWEEK_CSV = os.path.join(REPORTS, "strategy_midweek_check.csv")
 BENCH_CSV = os.path.join(REPORTS, "benchmark_prices.csv")
-PER_STOCK_CSV = os.path.join(REPORTS, "backtest_per_stock.csv")        # written by backtest.ipynb
 NEWS_CSV = os.path.join(REPORTS, "news_cleaned_df.csv")
 SHORT_HISTORY_CSV = os.path.join(REPORTS, "short_history_reference.csv")   # main_signal_analysis.ipynb: too new to trade
 COMPANY_XLSX = os.path.join(REPORTS, "complete_company_analysis.xlsx")
@@ -1245,11 +1244,11 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
                      **(grid | dict(showgrid=False)))
     fig.update_yaxes(**grid)
     fig.update_yaxes(title_text="Price ($)", tickformat='$,.0f', row=1, col=1)
-    return fig, chart, events, x_start, x_end
+    return fig
 
 
 def stock_chart_inputs(ticker, tdata):
-    """Chart-option checkboxes + the built figure and its data (the figure is displayed later, below the detail block)."""
+    """Chart-option checkboxes + the built figure (displayed later, below the detail block)."""
     has_strategy = bool(tdata['Strategy_Score'].notna().any())
     o = st.columns(4)
     show_strategy = o[0].checkbox("Strategy score", value=True, key="show_strategy", disabled=not has_strategy)
@@ -1257,9 +1256,8 @@ def stock_chart_inputs(ticker, tdata):
     show_classic = o[2].checkbox("RSI & MACD", value=True, key="show_classic")
     show_legacy = o[3].checkbox("Legacy signals (old rules)", value=False, key="show_legacy",
                                 help="The old BUY/SELL streak bars and flip lines from final_trade (pre-v3 rules). Not the live strategy.")
-    fig, chart, events, x_start, x_end = build_price_chart(ticker, tdata, show_strategy and has_strategy, show_rs,
-                                                           show_classic, show_legacy)
-    return fig, has_strategy, chart, events, x_start, x_end
+    fig = build_price_chart(ticker, tdata, show_strategy and has_strategy, show_rs, show_classic, show_legacy)
+    return fig, has_strategy
 
 
 def render_stock_figure(fig, ticker):
@@ -1294,8 +1292,8 @@ def _detail_group(title, stats_html, note=""):
             f'<div style="display:flex;flex-wrap:wrap;gap:10px 28px;">{stats_html}</div>{note_html}</div>')
 
 
-def render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end):
-    """Always-open detail card above the chart: moving averages, fundamentals/news, per-stock backtest."""
+def render_stock_more(ticker, tdata, has_strategy):
+    """Always-open detail card above the chart: moving averages, fundamentals/news, per-stock forward test."""
     latest = tdata.nlargest(1, 'Date').iloc[0]
     ma_stats = [(ma.upper().replace('_', ' '), fmt(num(latest[ma]), ",.2f", "$")) for ma in MA_COLS]
 
@@ -1328,57 +1326,40 @@ def render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end
                  + (f" \u00b7 newest relevant news {last_news:%b %-d}" if pd.notna(last_news)
                     else " \u00b7 no relevant news in the last 10 days"))
 
-    bt_stats, bt_notes, explainer_html = [], [], ""
-    if has_strategy:
-        n_entries = int(((events['Kind'] == 'entry') & (events['Fill'].fillna(x_end) >= x_start)).sum()) if len(events) else 0
-        held_share = (chart['Strategy_Weight'].fillna(0) > 0).mean() * 100
-        bt_notes.append(f"Last 12 months: held on {held_share:.0f}% of sessions, "
-                        f"{n_entries} Buy decision{'' if n_entries == 1 else 's'}.")
-    ps = row_for(PER_STOCK_CSV, ticker)
-    if ps is not None and pd.notna(ps.get("First bar")):
-        trades = int(ps["Closed trades"])
-        med = ps["Median trade %"] if trades else None
-        bnh = ps["Buy & hold %"]
-        first_bar_dt = pd.to_datetime(ps["First bar"], errors="coerce")
-        first_bar_txt = first_bar_dt.strftime("%b %d, %Y") if pd.notna(first_bar_dt) else str(ps["First bar"])
-        bt_stats = [
-            ("First bar", first_bar_txt, "#0f172a"),
-            ("Closed trades", f"{trades}", "#0f172a"),
-            ("Win rate", fmt(ps["Win rate %"], ".0f", suffix="%") if trades else None, "#0f172a"),
-            ("Median trade", fmt(med, "+.1f", suffix="%") if trades else None, sign_color(med)),
-            ("Median hold", f"{ps['Median hold (sessions)']:.0f} sessions" if trades else None, "#0f172a"),
-            ("Held % of sessions", fmt(ps["Held % of sessions"], ".0f", suffix="%"), "#0f172a"),
-            ("Buy & hold", fmt(bnh, "+.0f", suffix="%"), sign_color(bnh)),
-        ]
-        bt_notes.append(f"Backtest of the live rules from {first_bar_txt} (next-open fills, 0.1%/side).")
-        # TEMPORARY plain-English explainer (Chirag asked for it; remove when he says so)
-        if trades > 0:
-            wr = float(ps["Win rate %"])
-            wins = int(round(trades * wr / 100))
-            med_txt = f"lost {abs(med):.1f}%" if med < 0 else f"gained {med:.1f}%"
-            bnh_txt = f"up {bnh:.0f}%" if bnh >= 0 else f"down {abs(bnh):.0f}%"
-            explainer_html = (
-                '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;'
-                'padding:12px 16px;margin:2px 0 12px 0;font-size:0.85rem;color:#1e3a5f;line-height:1.6;">'
-                f"<b>What this means:</b> since {first_bar_txt} the live rules traded {esc(ticker)} {trades} times "
-                f"and made money on about {wins} of them ({wr:.0f}% win rate). The typical trade {med_txt} and lasted "
-                f"about {ps['Median hold (sessions)']:.0f} trading days \u2014 the strategy barely held {esc(ticker)}, "
-                f"only {ps['Held % of sessions']:.0f}% of all sessions. Simply buying {esc(ticker)} on {first_bar_txt} "
-                f"and holding would be {bnh_txt} today "
-                f"($10,000 \u2192 ${10000 * (1 + bnh / 100):,.0f}).</div>")
+    fw_stats, fw_note = [], ""
+    if has_strategy:            # per-stock forward test: only sessions from FORWARD_START on count
+        from backtest_engine import FORWARD_START, forward_test
+        s_ = tdata.sort_values('Date').set_index('Date')
+        fw = forward_test(s_['Close'], s_['Strategy_Weight'], FORWARD_START)
+        start_txt, since = f"{fw['Start']:%b %-d, %Y}", f"since {fw['Start']:%b %-d}"
+        bench = load_benchmarks()
+        q = bench["QQQ"].loc[fw["Start"]:].dropna() if bench is not None and "QQQ" in bench else pd.Series(dtype=float)
+        qqq = (q.iloc[-1] / q.iloc[0] - 1) * 100 if len(q) else None
+        n, ot, med, bnh = fw["Closed trades"], fw["Open trade"], fw["Median trade %"], fw["Buy & hold %"]
+        fw_stats = [("Start", start_txt, "#0f172a"), ("Closed trades", f"{n}", "#0f172a"),
+                    ("Open trade", f"{ot['Entry']:%b %-d} @ ${ot['Price']:,.2f} · {ot['Change %']:+.2f}%" if ot else "none",
+                     sign_color(ot["Change %"]) if ot else "#0f172a")]
+        if n:
+            fw_stats += [("Win rate", fmt(fw["Win rate %"], ".0f", suffix="%"), "#0f172a"),
+                         ("Median trade", fmt(med, "+.2f", suffix="%"), sign_color(med)),
+                         ("Median hold", f"{fw['Median hold (sessions)']:.0f} sessions", "#0f172a")]
+        fw_stats += [("Held % of sessions", fmt(fw["Held % of sessions"], ".0f", suffix="%"), "#0f172a"),
+                     (f"Buy & hold {since}", fmt(bnh, "+.2f", suffix="%"), sign_color(bnh)),
+                     (f"QQQ {since}", fmt(qqq, "+.2f", suffix="%"), sign_color(qqq))]
+        fw_note = (("" if n else f"Forward test started {start_txt}; no closed trades yet. ")
+                   + f"Live rules from the {start_txt} close on: only sessions from then count (earlier history only "
+                   "warms up the indicators); trades at the decision-day close, 0.1%/side. QQQ is not traded, "
+                   "comparison only.")
 
     groups = _detail_group("Moving averages", "".join(_mini_stat(l, v) for l, v in ma_stats))
     groups += _detail_group("Fundamentals & news",
                             "".join(_mini_stat(l, v, c) for l, v, c in fund_stats), fund_note)
-    if bt_stats:
-        groups += _detail_group("Per-stock backtest",
-                                "".join(_mini_stat(l, v, c) for l, v, c in bt_stats), " ".join(bt_notes))
-    elif bt_notes:
-        groups += _detail_group("Per-stock backtest", "", " ".join(bt_notes))
+    if fw_stats:
+        groups += _detail_group("Per-stock forward test", "".join(_mini_stat(l, v, c) for l, v, c in fw_stats), fw_note)
     show_html('<div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;'
               'padding:4px 20px 14px 20px;box-shadow:0 1px 3px rgba(15,23,42,.06);margin:6px 0 10px 0;">'
               f'<div style="font-size:1.02rem;font-weight:700;color:#0f172a;padding:12px 0 2px 0;">More about {esc(ticker)}</div>'
-              + groups + '</div>' + explainer_html)
+              + groups + '</div>')
 
 
 # =====================================================================================================================
@@ -1633,8 +1614,8 @@ def main():
             render_short_stock(ticker, p.short.loc[ticker])
         else:
             render_stock_header(p, ticker, tdata)
-            fig, has_strategy, chart, events, x_start, x_end = stock_chart_inputs(ticker, tdata)
-            render_stock_more(ticker, tdata, has_strategy, chart, events, x_start, x_end)
+            fig, has_strategy = stock_chart_inputs(ticker, tdata)
+            render_stock_more(ticker, tdata, has_strategy)
             render_stock_figure(fig, ticker)
     with tab_details:
         render_details(p)

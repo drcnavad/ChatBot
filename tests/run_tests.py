@@ -51,6 +51,7 @@
                          counts, bar cache) equal sector_mapping's
   test_decision_bars.py  decision days keep their 2:30 PM bar (saved as ratios, split-safe; never overwritten after the
                          trade; unchanged bars when nothing is saved or the file is bad)
+  test_forward_test.py   dashboard per-stock forward test: counts only from FORWARD_START (2026-10-02), empty state
 Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
 import os
 import subprocess
@@ -65,7 +66,7 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
          "test_paper_trade_math_audit.py", "test_run_log.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
          "test_live_rules_audit.py", "test_catch_up.py",
          "test_alpaca_api_names.py", "test_smart_orders.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py",
-         "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py"]
+         "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py", "test_forward_test.py"]
 
 
 def main():
