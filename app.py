@@ -5,8 +5,8 @@ Page layout, top to bottom:
   1. Title bar.
   2. "Dashboard" tab: the single-stock view (clickable rank tiers, stock picker, chart). Open any stock directly with
      http://localhost:8502/?symbol=NVDA
-  3. "Details" tab: everything else (live Alpaca holdings, latest signals, the last decision, the strategy rules and
-     decisions, data freshness), each in its own expander.
+  3. "Details" tab, each in its own expander: live Alpaca holdings, latest signals, the last decision (one view),
+     data freshness, and the strategy rules at the bottom.
 
 The app only READS the Reports/*.csv files written by `python run_all.py` for strategy data, plus the live holdings from the
 Alpaca account (read-only GETs via alpaca_paper.py, at most once a minute). It never places orders and never calls
@@ -1459,40 +1459,9 @@ def render_short_stock(sym, r):
     st.plotly_chart(fig, width="stretch", key=f"short_chart_{sym}")
 
 
-def render_all_signals(p):
-    """Every stock with its signal (the decisions in force) in one table; click a row to open the stock."""
-    today = p.df["Date"].max()
-    plan_when = f"{p.plan_day:%a %b %-d}" if p.plan_day is not None else "next"
-    st.caption(f"Decisions in force (last decision {p.off_date:%a %b %-d}). Rank at {p.off_date:%b %-d} decision = the rank "
-               f"the decision used; Rank today = at the {today:%a %b %-d} close. Next rebalance plan = what the {plan_when} "
-               "rebalance would do at the latest close (the numbers the trade step uses).")
-    rank_then = f"Rank at {p.off_date:%b %-d} decision"
-    board = p.board_off.rename(columns={"Rank": rank_then})
-    board[rank_then] = board[rank_then].round(0).astype("Int64")
-    board.insert(4, "Rank today", board["Symbol"].map(p.by_symbol["Strategy_Rank"]).round(0).astype("Int64"))
-    board.insert(5, "Next rebalance plan", [plan_text(p.plan, s) if s in symbol_sector or s in p.plan else "—"
-                                            for s in board["Symbol"]])
-    board.insert(6, "Rank change", board["Symbol"].map(lambda s: p.rank_change.get(s, (np.nan,))[0]))
-    counts = board["Signal"].value_counts()
-    filters = {"Portfolio & changes": ["Buy", "Hold", "Sold"],
-               "Watch list": ["Watch", "Watch (sector limit)"],
-               "All stocks": list(SIGNAL_COLOR)}
-    show = st.radio("Show", list(filters), horizontal=True, key="signals_filter", label_visibility="collapsed")
-    part = board[board["Signal"].isin(filters[show])].reset_index(drop=True)
-    st.caption(f"Buy {counts.get('Buy', 0)} · Hold {counts.get('Hold', 0)} · "
-               f"Sold {counts.get('Sold', 0)} · Watch {counts.get('Watch', 0) + counts.get('Watch (sector limit)', 0)} · "
-               f"Score below 0 {counts.get('Score below 0', 0)}. Ranks = position among all ranked stocks (Rank change: + = moved up "
-               f"since the last decision day); Portfolio slot = position among the {N_PICKS} picks. Click a row to open the stock on the Dashboard tab.")
-    event = st.dataframe(part.round({"Score": 1, "Portfolio weight %": 2}), hide_index=True,
-                         width="stretch",
-                         on_select="rerun", selection_mode="single-row", key=f"sig_tbl_{show}",
-                         column_config={"Why": st.column_config.TextColumn("Why", width="large")})
-    open_symbol(part, event, "signals")
-
-
-
-def render_rules_and_changes(p):
-    """Decision dates, the full rules text and each change at the latest decision with the rule that decided it."""
+def render_last_decision(p):
+    """The decisions in force, in ONE view: decision dates, then every stock with its signal, reason, ranks, weight before
+    and after, and the next rebalance plan (filters: portfolio & changes / watch list / all). Click a row to open the stock."""
     reb_days = p.df.loc[p.df["Rebalance_Day"] == 1, "Date"]
     mw = p.midweek[p.midweek["Event"] == "mid-week check"] if p.midweek is not None else None
     if mw is not None and len(mw):
@@ -1506,27 +1475,39 @@ def render_rules_and_changes(p):
     c[0].metric("Last weekly rebalance", f"{reb_days.max():%a %b %-d}" if not reb_days.empty else "—")
     c[1].metric("Last mid-week check", mw_val)
     c[2].metric("Next decision", f"{p.next_kind} · {p.next_dec:%a %b %-d}" if p.next_dec is not None else "—")
-    st.markdown(rules_text())
-
-    changes = read_report_csv(CHANGES_CSV)
-    if changes is None or changes.empty:
-        st.caption("Run `python run_all.py` to list the portfolio changes.")
-        return
-    st.markdown("**What changed at the latest decision**")
-    sub = changes[changes["Symbol"].notna()].copy()
-    earn = sub["Reason"].astype(str).str.startswith("earnings in")
-    if not st.checkbox("Show Watch (sector limit) names too", value=False, key="changes_all"):
-        sub, earn = sub[(sub["Status"] != "not selected") | earn], earn[(sub["Status"] != "not selected") | earn]
-    sub[["Old_Weight", "New_Weight"]] = (sub[["Old_Weight", "New_Weight"]] * 100).round(2)
-    order = {"add": 0, "drop": 1, "hold": 2, "not selected": 3}
-    sub = sub.sort_values(["Status", "Rank"], key=lambda s: s.map(order) if s.name == "Status" else s)
-    sub["Signal"] = sub["Status"].map({"add": "Buy", "hold": "Hold", "drop": "Sold",
-                                       "not selected": "Watch (sector limit)"}).where(~earn, "Not bought (earnings)")
-    sub["Why"] = [plain_reason(g, rs, rk, sc) for g, rs, rk, sc in zip(sub["Signal"], sub["Reason"], sub["Rank"], sub["Score"])]
-    st.dataframe(sub[["Symbol", "Signal", "Why", "Rank", "Score", "Sector", "Old_Weight", "New_Weight"]]
-                 .rename(columns={"Old_Weight": "Old portfolio weight %", "New_Weight": "New portfolio weight %"}).round(2),
-                 width="stretch", hide_index=True)
-    st.caption(f"Decision date {sub['Date'].iloc[0] if len(sub) else '—'} · orders go out that day at 2:30 PM CT (see the rules above).")
+    today = p.df["Date"].max()
+    plan_when = f"{p.plan_day:%a %b %-d}" if p.plan_day is not None else "next"
+    rank_then = f"Rank at {p.off_date:%b %-d} decision"
+    board = p.board_off.rename(columns={"Rank": rank_then})
+    board[rank_then] = board[rank_then].round(0).astype("Int64")
+    board.insert(4, "Rank today", board["Symbol"].map(p.by_symbol["Strategy_Rank"]).round(0).astype("Int64"))
+    board.insert(5, "Next rebalance plan", [plan_text(p.plan, s) if s in symbol_sector or s in p.plan else "—"
+                                            for s in board["Symbol"]])
+    board.insert(6, "Rank change", board["Symbol"].map(lambda s: p.rank_change.get(s, (np.nan,))[0]))
+    ch = read_report_csv(CHANGES_CSV)
+    ok = ch is not None and {"Symbol", "Old_Weight"} <= set(ch.columns)
+    before = ch[ch["Symbol"].notna()].drop_duplicates("Symbol").set_index("Symbol")["Old_Weight"] if ok else {}
+    board.insert(board.columns.get_loc("Portfolio weight %"), "Weight before %",
+                 board["Symbol"].map(lambda s: before.get(s, np.nan) * 100))
+    board.loc[board["Signal"] == "Sold", "Portfolio weight %"] = 0.0      # after the decision a sold stock weighs 0
+    counts = board["Signal"].value_counts()
+    filters = {"Portfolio & changes": ["Buy", "Hold", "Sold"],
+               "Watch list": ["Watch", "Watch (sector limit)"],
+               "All stocks": list(SIGNAL_COLOR)}
+    show = st.radio("Show", list(filters), horizontal=True, key="signals_filter", label_visibility="collapsed")
+    part = board[board["Signal"].isin(filters[show])].reset_index(drop=True)
+    st.caption(f"Buy {counts.get('Buy', 0)} · Hold {counts.get('Hold', 0)} · "
+               f"Sold {counts.get('Sold', 0)} · Watch {counts.get('Watch', 0) + counts.get('Watch (sector limit)', 0)} · "
+               f"Score below 0 {counts.get('Score below 0', 0)}. {rank_then} = the rank the decision used; Rank today = at "
+               f"the {today:%a %b %-d} close (Rank change: + = moved up since the decision day); Weight before % → Portfolio "
+               f"weight % = the portfolio before and after the decision; Portfolio slot = position among the {N_PICKS} picks; "
+               f"Next rebalance plan = what the {plan_when} rebalance would do at the latest close (the numbers the trade "
+               "step uses). Orders for a decision go out that day at 2:30 PM CT. Click a row to open the stock on the "
+               "Dashboard tab.")
+    event = st.dataframe(part.round({"Score": 1, "Weight before %": 2, "Portfolio weight %": 2}), hide_index=True,
+                         width="stretch", on_select="rerun", selection_mode="single-row", key=f"sig_tbl_{show}",
+                         column_config={"Why": st.column_config.TextColumn("Why", width="large")})
+    open_symbol(part, event, "signals")
 
 
 def render_data_and_settings(p):
@@ -1539,6 +1520,13 @@ def render_data_and_settings(p):
         st.success("All report files are within their expected refresh window.")
 
 
+@st.cache_resource(show_spinner=False)
+def _fill_history():
+    """The fill history kept for the whole dashboard process (alpaca_paper.FillHistory: only new fills are read)."""
+    import alpaca_paper as ap
+    return ap.FillHistory()
+
+
 @st.cache_data(ttl=3600, max_entries=4, show_spinner=False)
 def _read_holdings(refresh_key):
     """One read of the Alpaca LIVE account (GET only: positions, account, fills) and the QQQ quote per refresh_key
@@ -1547,7 +1535,7 @@ def _read_holdings(refresh_key):
     import alpaca_paper as ap
     acct = ap.PaperAccount()
     q = live_quote("QQQ")
-    return {"positions": acct.position_dicts(), "fills": acct.fills(), "equity": acct.account_summary()["Equity"],
+    return {"positions": acct.position_dicts(), "fills": _fill_history().update(acct), "equity": acct.account_summary()["Equity"],
             "qqq_now": q[0] if q else None, "as_of": datetime.now(CT)}
 
 
@@ -1598,11 +1586,11 @@ def render_details(p):
     with st.expander(latest_signals_title(p), expanded=True):
         render_latest_signals(p)
     with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=False):
-        render_all_signals(p)
-    with st.expander("Rules and latest decisions", expanded=False):
-        render_rules_and_changes(p)
+        render_last_decision(p)
     with st.expander("Data freshness and settings", expanded=False):
         render_data_and_settings(p)
+    with st.expander("Strategy rules", expanded=False):
+        st.markdown(rules_text())
 
 
 # =====================================================================================================================

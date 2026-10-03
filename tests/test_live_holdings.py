@@ -1,5 +1,6 @@
 """The Details tab's live holdings table (alpaca_paper.holdings_table + app.render_live_holdings) with a FAKE Alpaca client:
   - only allow-listed read-only GETs (positions, account, fills with paging), never an order call
+  - the fill history is kept: a full read once a day, then only new fills (one request)
   - First bought = the earliest buy still in the position (FIFO: sells use the oldest shares; a full exit restarts)
   - per-stock numbers from Alpaca's fields, the Total row, Weight % of equity, the QQQ row (fixed Oct 2, 2026 close)
   - refresh: a new read each minute in market hours (8:30 AM-3:00 PM CT), each hour otherwise; the table reruns itself
@@ -60,7 +61,7 @@ class FakeAccount(ap.PaperAccount):
             return POS
         if path == "/account":
             return {"equity": "1000", "cash": "249", "buying_power": "249", "long_market_value": "751", "last_equity": "990"}
-        newest_first = FILLS[::-1]
+        newest_first = [f for f in FILLS[::-1] if f["transaction_time"] > params.get("after", "")]
         start = 0 if "page_token" not in params else [f["id"] for f in newest_first].index(params["page_token"]) + 1
         return newest_first[start:start + params["page_size"]]
 
@@ -100,8 +101,28 @@ check("QQQ ignores the stocks' purchase dates (same % for any fills)",
 check("no QQQ price: no QQQ row", len(ap.holdings_table(POS, got, 1000.0)) == 4)
 check("no positions: empty table", ap.holdings_table([], [], 1000.0, 760.0).empty)
 
-# ---------------------------------------------------------------- refresh: every minute in market hours, hourly otherwise
+# ---------------------------------------------------------------- fill history kept between reads (request count stays flat)
 from datetime import datetime  # noqa: E402
+day1, day2 = (datetime(2026, 10, 6, h, tzinfo=ap.CT) for h in (10, 23))
+h, FakeAccount.calls = ap.FillHistory(), []
+first_read = h.update(acct, now=day1)
+full_pages = len(FakeAccount.calls)
+check("first read of the day pages the whole history", len(first_read) == len(FILLS) and full_pages == 2, full_pages)
+FILLS.append(fill("DDD", "buy", 1, "2026-10-06"))
+FakeAccount.calls = []
+second = h.update(acct, now=day1)
+check("later read: ONE request, only fills after the newest kept (1 min overlap), new fill added once",
+      len(FakeAccount.calls) == 1 and "after" in FakeAccount.calls[0][1] and len(second) == len(FILLS)
+      and sum(f["symbol"] == "DDD" for f in second) == 1, (FakeAccount.calls, len(second)))
+check("kept history gives the same First bought dates as a full re-read", ap.first_buy_dates(second) == ap.first_buy_dates(acct.fills()))
+FakeAccount.calls = []
+check("nothing new: still one request, no duplicates", len(h.update(acct, now=day1)) == len(FILLS) and len(FakeAccount.calls) == 1)
+FakeAccount.calls = []
+h.update(acct, now=day2.replace(day=7))
+check("next day: a full re-read (safety net)", len(FakeAccount.calls) == 2 and all("after" not in q for _, q in FakeAccount.calls))
+FILLS.pop()
+
+# ---------------------------------------------------------------- refresh: every minute in market hours, hourly otherwise
 key = lambda s: ap.holdings_refresh_key(datetime.fromisoformat(s).replace(tzinfo=ap.CT))
 check("market hours: a new key each minute (Tue 10:31:05 = 10:31:59, 10:32 differs)",
       key("2026-10-06 10:31:05") == key("2026-10-06 10:31:59") != key("2026-10-06 10:32:00"))
@@ -126,6 +147,7 @@ try:
     FakeAccount.calls = []
     ap.holdings_refresh_key = lambda now=None: "k1"
     st.cache_data.clear()
+    st.cache_resource.clear()
     at = AppTest.from_file("app.py", default_timeout=180).run()
     frames = [d.value for d in at.dataframe if "First bought" in d.value.columns]
     check("app: no exceptions, holdings table on the Details tab", not at.exception and len(frames) == 1, [str(e) for e in at.exception])
@@ -138,6 +160,8 @@ try:
     ap.holdings_refresh_key = lambda now=None: "k2"
     at.run()
     check("app: new refresh key (next minute / hour) -> one new read", reads() == 2, reads())
+    acts = [q for p, q in FakeAccount.calls if p == "/account/activities"]
+    check("app: the second read asks only for new fills (after=...)", "after" in acts[-1] and sum("after" in q for q in acts) == 1, acts)
     FakeAccount.fail = "GET /positions failed: HTTP 401 Unauthorized"
     ap.holdings_refresh_key = lambda now=None: "k3"
     at.run()
@@ -150,6 +174,7 @@ try:
 finally:
     ap.PaperAccount, ap.holdings_refresh_key, FakeAccount.fail = real, real_key, None
     st.cache_data.clear()
+    st.cache_resource.clear()
 
 src = open(os.path.join(ROOT, "alpaca_paper.py")).read()
 check("alpaca_paper.py stays read-only (GET only, no order calls)",

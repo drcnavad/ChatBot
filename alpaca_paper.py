@@ -28,6 +28,7 @@ import argparse
 import json
 import os
 import re
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -177,9 +178,10 @@ class PaperAccount:
         """Open positions as Alpaca returns them (GET /positions), for the dashboard's holdings table."""
         return self._get("/positions")
 
-    def fills(self, max_pages=50):
-        """Every order fill on the account (GET /account/activities, type FILL), oldest first."""
-        out, params = [], {"activity_types": "FILL", "page_size": 100, "direction": "desc"}
+    def fills(self, after=None, max_pages=50):
+        """Every order fill on the account (GET /account/activities, type FILL), oldest first; only those after the
+        time `after` (ISO, UTC) when given."""
+        out, params = [], {"activity_types": "FILL", "page_size": 100, "direction": "desc", **({"after": after} if after else {})}
         for _ in range(max_pages):
             page = self._get("/account/activities", params)
             out += page
@@ -187,6 +189,28 @@ class PaperAccount:
                 break
             params = {**params, "page_token": page[-1]["id"]}
         return out[::-1]
+
+
+class FillHistory:
+    """The fill history kept between the dashboard's reads, so the request count does not grow with the history: the
+    first read of each day (CT) pages through every fill; later reads ask only for fills after the newest one kept (one
+    minute of overlap, de-duplicated by id). On any problem it re-reads everything."""
+
+    def __init__(self):
+        self.fills, self.day, self._lock = [], None, threading.Lock()
+
+    def update(self, account, now=None):
+        today = (now or datetime.now(CT)).astimezone(CT).date()
+        with self._lock:
+            try:
+                if self.day != today or not self.fills:
+                    raise LookupError("full read")
+                last = max(pd.to_datetime(f["transaction_time"], utc=True) for f in self.fills) - pd.Timedelta(minutes=1)
+                seen = {f["id"] for f in self.fills}
+                self.fills += [f for f in account.fills(after=last.strftime("%Y-%m-%dT%H:%M:%SZ")) if f["id"] not in seen]
+            except Exception:
+                self.fills, self.day = account.fills(), today
+            return list(self.fills)
 
 
 # --- the dashboard's live holdings table (pure: no requests here) -------------------------------------------------------

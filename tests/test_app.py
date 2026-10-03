@@ -209,7 +209,16 @@ expect(set(lt_all.get("Symbol", [])) == set(latest.index), "Latest signals shoul
 # (the pipeline runs on decision days only, so there is nothing hypothetical left to show)
 expect(not any(r.key == "changes_view" for r in at.radio), "stale changes_view preview radio still present")
 expect(not any(r.key == "signals_view" for r in at.radio), "stale signals_view preview radio still present")
-at = at.checkbox(key="changes_all").check().run(); page_ok(at, "changes_all")
+at = at.radio(key="signals_filter").set_value("All stocks").run(); page_ok(at, "signals_filter all")
+# ONE decision view: the old "What changed at the latest decision" table (rules area) is merged into "Last decision"
+expect(not any(c.key == "changes_all" for c in at.checkbox), "stale 'What changed' checkbox still present")
+expect(not any("What changed at the latest decision" in m.value for m in at.markdown), "duplicate 'What changed' view is back")
+why = [d.value for d in at.dataframe if "Why" in d.value.columns]
+expect(len(why) == 1 and {"Weight before %", "Portfolio weight %", "Next rebalance plan"} <= set(why[0].columns)
+       and len(why[0]) == len(latest), f"one decision table with every stock and before/after weights: {[list(w.columns) for w in why]}")
+dec_labels = [e.label for e in at.expander if "decision" in e.label.lower()]
+expect(len(dec_labels) == 1 and dec_labels[0].startswith(f"Last decision · {fmt(dec_day)}"), f"decision expanders: {dec_labels}")
+expect([e.label for e in at.expander][-1] == "Strategy rules", f"the rules must be the last Details section: {[e.label for e in at.expander]}")
 # the Holdings risk and Order preview expanders were removed from the Details tab
 expect(not any(t.key == "order_positions" for t in at.text_area), "stale order preview positions box still present")
 expect(not any(s.key == "order_target" for s in at.selectbox), "stale order preview target selectbox still present")
