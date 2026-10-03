@@ -1,17 +1,27 @@
-# Streamlit app
-streamlit>=1.28.0
-pandas>=2.0.0
-openpyxl>=3.1.0
-plotly>=5.0.0
-huggingface_hub>=0.20.0
-python-dotenv>=1.0.0
+# Pinned to the versions the pipeline runs with (anaconda Python 3.13.9, checked 2026-10-02).
+# Install: /opt/anaconda3/bin/python -m pip install -r requirements.txt
 
-# Data pipeline (notebooks + company_report_autofetch.py)
-numpy>=1.24.0
-alpaca-py>=0.40.0
-yfinance>=0.2.0
-newsapi-python>=0.2.7
-finnhub-python>=2.4.0
-transformers>=4.50.0
-torch>=2.0.0
-jupyter>=1.0.0
+# Dashboard (app.py)
+streamlit==1.51.0
+plotly==6.5.0
+huggingface_hub==0.36.0       # optional AI summaries (button only)
+
+# Shared
+pandas==2.3.3
+numpy==2.3.5
+openpyxl==3.1.5               # complete_company_analysis.xlsx
+python-dotenv==1.2.1          # keys from .env
+requests==2.32.5              # company_report_autofetch.py (Alpha Vantage)
+
+# Market data and the live account (backtest_engine.py, paper_trade.py; alpaca_paper.py uses the standard library)
+alpaca-py==0.43.2
+
+# Notebooks (run by run_all.py through jupyter nbconvert)
+jupyter==1.1.1
+nbconvert==7.16.6
+nbformat==5.10.4
+yfinance==1.0                 # earnings report times, fallback prices
+finnhub-python==2.4.26        # next earnings dates + company news
+newsapi-python==0.2.7         # news
+transformers==4.57.3          # FinBERT news sentiment
+torch==2.9.1
