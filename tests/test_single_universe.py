@@ -6,7 +6,8 @@ sector mapping ... all files should use that updated list"). Fails when any othe
   2. a dict literal keyed by >= 20 such tickers (a second symbol map), except the allowlisted per-stock metadata maps below;
   3. a strategy-tag literal like "C6-U91" in production code (the U-count must come from len(tradable_symbols));
   4. a literal stock count like "91 stocks" (50..300) in a production string (counts must be computed);
-and checks that the derived lists really are the sector_mapping ones (engine, autofetch, news/earnings call counts).
+and checks that the derived lists really are the sector_mapping ones (engine, autofetch, company-report scoring,
+news/earnings call counts).
 Docstrings and comments are documentation and are not scanned. No network calls.
 Run: PYTHONPATH=. python tests/test_single_universe.py"""
 import ast
@@ -141,6 +142,27 @@ check("news / earnings call counts come from the list", run_all.N_CALLS == len(s
 check("every tradable stock has a sector and a name in sector_mapping",
       all(sm.symbol_sector.get(s) and sm.symbol_name.get(s) for s in sm.tradable_symbols),
       [s for s in sm.tradable_symbols if not (sm.symbol_sector.get(s) and sm.symbol_name.get(s))])
+# company_report_processing.ipynb scores only the stocks in sector_mapping.py: the first cell is run on a temp balance_sheet.csv
+# holding a listed stock, a fundamentals extra, a removed stock and an unknown one (no network: that cell only reads the csv)
+import tempfile  # noqa: E402
+_nb = json.load(open("company_report_processing.ipynb", encoding="utf-8"))
+_cell = "".join(next(c for c in _nb["cells"] if c.get("cell_type") == "code")["source"])
+_keep = [sm.tradable_symbols[0], sm.fundamentals_extra[0]]
+_syms = _keep + ["MU", "ZZZZ"]
+_old_dir = sm.REPORTS_DIR
+with tempfile.TemporaryDirectory() as _d:
+    be.pd.DataFrame({"Symbol": _syms, "FiscalDateEnding": "2026-06-30", "Date": "2026-07-01", "DateAdded": "2026-07-01",
+                     **{c: 1.0 for c in ["TotalAssets", "TotalLiabilities", "TotalShareholderEquity",
+                                         "CommonStockSharesOutstanding", "TotalDebt", "CashAndEquivalents"]}}
+                    ).to_csv(os.path.join(_d, "balance_sheet.csv"), index=False)
+    sm.REPORTS_DIR = _d
+    try:
+        _ns = {}
+        exec(compile(_cell, "company_report_processing.ipynb#cell1", "exec"), _ns)
+    finally:
+        sm.REPORTS_DIR = _old_dir
+check("company reports score only sector_mapping.py stocks (removed / unknown symbols in balance_sheet.csv dropped)",
+      sorted(_ns["df"]["Symbol"]) == sorted(_keep), sorted(_ns["df"]["Symbol"]))
 _cache = be.CACHE_DIR / be.LONG_CACHE
 miss = sorted(set(be.TRADABLE + be.BENCHMARKS + be.SECTOR_ETFS) - set(be.pd.read_pickle(_cache)["Symbol"])) if _cache.exists() else []
 check("backtest bar cache has every stock of the list (a new stock is fetched by be.ensure_long_cache on the next run)",
