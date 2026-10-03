@@ -8,7 +8,7 @@ It picks the mode by itself (clock in US Central time):
            processing    company_report_processing.ipynb + scoring company_report_scoring.ipynb (company reports)
            sentiment     sentiment_analysis.ipynb online - NewsAPI 1 call per stock in sector_mapping.stock_symbols (incl. QQQ;
                          free limit 100/day -> never twice within 24 h) + Finnhub, same count
-           earnings      earnings_date.ipynb online - Finnhub 1 call per stock (throttled below 60/min) + yfinance
+           earnings      earnings_date.ipynb online - Finnhub 1 call per tradable stock (throttled below 60/min) + yfinance
            main          main_signal_analysis.ipynb - fresh Alpaca daily bars (market data only), ranks, picks, mid-week check
            validate      the report files the app reads
   QUICK  any other time: main + validate only. Zero quota APIs (only Alpaca market-data bars).
@@ -109,10 +109,10 @@ STEPS = [
     ("validate", "check", None, "always"),
 ]
 import sector_mapping  # noqa: E402  the stock list (single source of truth) -> the per-run API call counts
-N_CALLS = len(sector_mapping.stock_symbols)   # one news / earnings call per stock + QQQ
+N_CALLS = len(sector_mapping.stock_symbols)   # one news call per stock + QQQ
 NEWS_DAILY_LIMIT = 100                        # NewsAPI free tier
 EXPECTED_CALLS = {"fundamentals": "Alpha Vantage <= 24", "sentiment": f"NewsAPI {N_CALLS} + Finnhub {N_CALLS}",
-                  "earnings": f"Finnhub {N_CALLS}"}
+                  "earnings": f"Finnhub {len(sector_mapping.tradable_symbols)}"}   # earnings: tradable stocks (no QQQ)
 if N_CALLS > NEWS_DAILY_LIMIT:
     print(f"WARNING: sector_mapping.stock_symbols has {N_CALLS} symbols - one news run needs {N_CALLS} NewsAPI calls, "
           f"over the free limit of {NEWS_DAILY_LIMIT}/day; the last ones will fail")
