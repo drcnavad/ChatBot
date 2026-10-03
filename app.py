@@ -208,6 +208,7 @@ CT = ZoneInfo("America/Chicago")
 MA_COLS = ['ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']
 MA_COLORS = ['#0ea5e9', '#8b5cf6', '#f59e0b', '#a16207', '#94a3b8']   # chart lines: sky, violet, amber, brown, slate
 TEAL, HOLD_SHADE = "#0f766e", "rgba(245,158,11,0.10)"               # price line; held periods (yellow = hold)
+EARN_LINE = dict(color="rgba(234,88,12,0.45)", width=1, dash="dot")  # dotted vertical line at each earnings date
 
 # file -> (what it is, max age in days before it is flagged stale)
 FRESHNESS = {
@@ -259,7 +260,8 @@ def fmt(v, spec, prefix="", suffix=""):
 
 # One color rule for both tabs: green = good / Bullish / buy / positive, yellow = hold / neutral / caution / warning,
 # red = bad / Bearish / sell / negative / error. Plain labels and headings stay slate (INK).
-GOOD, CAUTION, BAD, INK = "#15803d", "#b45309", "#b91c1c", "#0f172a"
+GOOD, CAUTION, BAD, INK, MUTED = "#15803d", "#b45309", "#b91c1c", "#0f172a", "#94a3b8"   # MUTED = no data / cash
+DD_RED = -10.0           # max drawdown: down to -10% yellow, worse than -10% red (0 = none yet, plain)
 SCORE_GOOD = 40          # scores (strategy, technical, strength): above 40 green (about top-20 level), 0-40 yellow, below 0 red
 TONE_WORDS = ((GOOD, ("buy", "bull", "fresh", "ok", "success", "add")),
               (BAD, ("sell", "sold", "bear", "score below", "missing", "error", "fail", "drop", "exit")),
@@ -283,11 +285,23 @@ def score_tone(v):
     return tone(v, SCORE_GOOD, 0.0)
 
 
-def toned(df, cols, **kw):
-    """DataFrame (or Styler) -> Styler with `cols` colored by tone(); st.dataframe keeps the column_config formats."""
+def toned(df, cols, fn=None, **kw):
+    """DataFrame (or Styler) -> Styler with `cols` colored by fn (default tone(v, **kw)); st.dataframe keeps the
+    column_config formats."""
     sty = df if isinstance(df, Styler) else df.style
-    css = lambda v: "" if tone(v, **kw) == INK else f"color: {tone(v, **kw)}; font-weight: 600"
+    fn = fn or (lambda v: tone(v, **kw))
+    css = lambda v: "" if fn(v) == INK else f"color: {fn(v)}; font-weight: 600"
     return sty.map(css, subset=[c for c in cols if c in sty.data.columns])
+
+
+def drawdown_tone(v):
+    return INK if v is None or pd.isna(v) or v == 0 else tone(v, 0.0, DD_RED)
+
+
+def live_row(sty, col, name):
+    """Highlight the row whose `col` starts with `name` (the live rules) in the teal theme."""
+    return sty.apply(lambda r: ["background-color: #f0fdfa; font-weight: 700" if str(r[col]).startswith(name) else ""] * len(r),
+                     axis=1)
 
 
 def sign_color(v):
@@ -1178,6 +1192,10 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
     fig.add_trace(go.Scatter(x=earnings.index, y=earnings['Close'], name='Earnings date', mode='markers',
                              marker=dict(symbol='circle', size=9, color='#f97316'),
                              hovertemplate='<b>Earnings</b> %{x|%b %d, %Y}<br>$%{y:.2f}<extra></extra>'), row=1, col=1)
+    for d in earnings.index:
+        fig.add_vline(x=d, line=EARN_LINE, row=1, col=1)
+    fig.add_trace(go.Scatter(x=[x_start], y=[None], mode="lines", name="Earnings (dotted line; next one ahead)",
+                             line=EARN_LINE, hoverinfo="skip"), row=1, col=1)
     for ma, color in zip(MA_COLS, MA_COLORS):
         name = ma.upper().replace('_', ' ')
         fig.add_trace(go.Scatter(x=chart.index, y=chart[ma], name=name, line=dict(color=color, width=1), mode='lines',
@@ -1224,7 +1242,7 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
     if ned and pd.Timestamp(ned) - x_end <= pd.Timedelta(days=62):
         ned = pd.Timestamp(ned)
         x_right = max(x_end, ned) + pd.Timedelta(days=4)
-        fig.add_vline(x=ned, line=dict(color='#f97316', width=1.2, dash='dash'), row="all", col=1)
+        fig.add_vline(x=ned, line=EARN_LINE | dict(width=1.5), row="all", col=1)
         fig.add_annotation(x=ned, y=1, xref="x", yref="y domain", text=f"next earnings {ned:%b %-d}", showarrow=False,
                            yanchor="bottom", xanchor="right", font=dict(size=10, color='#c2410c'))
 
@@ -1333,7 +1351,7 @@ def render_stock_figure(fig, ticker):
                                                                           (names.get("sector"), "orange")) if name)
     show_html(f'<div class="sa-note"><b>How to read the chart</b> · <b>Price</b>: <b style="color:{GOOD};">▲ Buy</b> / '
               f'<b style="color:{BAD};">▼ Sold</b> = the strategy\'s decisions (hollow = orders pending), yellow shading = held, '
-              'orange dots = earnings. · <b>Strategy score</b>: above 0 and rising is good (a positive trend and stronger than '
+              'orange dots and dotted orange lines = earnings dates (the line past the last bar = the next one). · <b>Strategy score</b>: above 0 and rising is good (a positive trend and stronger than '
               'its peers); below 0 and falling is bad. · <b>Performance</b>: % price change since the chart start: '
               f'<b>{esc(ticker)}</b> (blue) vs {vs}. {esc(ticker)} above the others = it has beaten them; a widening gap = it is '
               'getting stronger than the market / its sector.</div>')
@@ -1645,7 +1663,9 @@ def render_forward_test():
     board = ft.leaderboard(daily, bench.reset_index() if bench is not None else None, values)
     board = board.rename(columns={"Total return %": f"Total return since {start[:-6]} %"}).assign(
         Rank=lambda b: b["Rank"].map(lambda r: "–" if pd.isna(r) else str(r)))   # – = not ranked (comparison / no full week yet)
-    st.dataframe(board, hide_index=True, width="stretch", height=35 * (len(board) + 1) + 3,     # every row, no scrolling
+    sty = toned(toned(board, [c for c in board.columns if "return" in c]), ["Max drawdown %"], fn=drawdown_tone)
+    st.dataframe(live_row(sty, "Strategy", ft.LIVE), hide_index=True, width="stretch",
+                 height=35 * (len(board) + 1) + 3,                                                # every row, no scrolling
                  column_config={c: PCT_COL for c in board.columns if c.endswith("%")})
     acct = ""
     if daily is not None and len(daily):
@@ -1666,8 +1686,10 @@ def render_forward_rules():
     """Details tab: each forward-test strategy's one-line rule and its holdings on the latest saved day."""
     import forward_test as ft
     held, h = ft.holdings(), read_report_csv(ft.HOLDINGS_CSV)
-    st.dataframe(pd.DataFrame([{"Strategy": c["name"], "Rule": c["rule"], "Holdings now (target weight)": held.get(c["name"], "cash")}
-                               for c in ft.STRATEGIES]), hide_index=True, width="stretch")
+    rules = pd.DataFrame([{"Strategy": c["name"], "Rule": c["rule"], "Holdings now (target weight)": held.get(c["name"], "cash")}
+                          for c in ft.STRATEGIES])
+    sty = toned(rules, ["Holdings now (target weight)"], fn=lambda v: MUTED if v == "cash" else INK)
+    st.dataframe(live_row(sty, "Strategy", ft.LIVE), hide_index=True, width="stretch")
     if h is not None and len(h):
         st.caption(f"Holdings as of the {pd.Timestamp(h['Date'].max()):%a %b %-d} close (Reports/forward_strategies_holdings.csv "
                    "has every day). Paper only: none of these is traded.")
