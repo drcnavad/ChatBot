@@ -5,7 +5,7 @@ It picks the mode by itself (clock in US Central time):
          the Friday rebalance (the week's last session, e.g. Thursday when Friday is a holiday) and the Mon/Wed checks
          (the first session on/after Mon/Wed, e.g. Tuesday after a Monday holiday) - backtest_engine.next_decision:
            fundamentals  company_report_autofetch.py - Alpha Vantage rotation, max 12 stocks = max 24 calls (free limit 25/day)
-           processing    company_report_processing.ipynb + scoring company_report_scoring.ipynb (company reports)
+           processing    company_report_processing.ipynb (company reports: ratios, fair value and score)
            sentiment     sentiment_analysis.ipynb online - NewsAPI 1 call per stock in sector_mapping.stock_symbols (incl. QQQ;
                          free limit 100/day -> never twice within 24 h) + Finnhub, same count
            earnings      earnings_date.ipynb online - Finnhub 1 call per tradable stock (throttled below 60/min) + yfinance
@@ -13,7 +13,7 @@ It picks the mode by itself (clock in US Central time):
            validate      the report files the app reads
   QUICK  any other time: main + validate only. Zero quota APIs (only Alpaca market-data bars).
 Both end with a short summary: what ran, API calls used, data date, and the next check / rebalance.
-The upstream online steps (fundamentals, processing, scoring, sentiment, earnings) are optional: if one
+The upstream online steps (fundamentals, processing, sentiment, earnings) are optional: if one
 fails, the pipeline warns and continues - main_signal_analysis.ipynb reuses the last good upstream tables,
 so the 2:30 PM trade still runs on fresh signals. Only a main or validate failure stops the pipeline.
 
@@ -22,7 +22,7 @@ so the 2:30 PM trade still runs on fresh signals. Only a main or validate failur
     python run_all.py --quick         # force quick mode
     python run_all.py --dry-run       # show the plan (mode, steps, expected API calls) and exit - nothing runs
     python run_all.py --positions f.csv       # alert on another positions file (default: my_positions.csv if it exists)
-    python run_all.py --only main | --from scoring | --list | --keep-going
+    python run_all.py --only main | --from processing | --list | --keep-going
     python run_all.py --sync-live     # also refresh my_positions.csv from your Alpaca LIVE account (off by default)
     python run_all.py --trade         # after the pipeline, auto-trade the LIVE account (REAL MONEY) for the due decision
                                       # (pulls live positions + equity; Friday rebalance brings every target
@@ -102,7 +102,6 @@ KEEP_LOGS = 30
 STEPS = [
     ("fundamentals", "script", "company_report_autofetch.py", "full"),
     ("processing", "notebook", "company_report_processing.ipynb", "full"),
-    ("scoring", "notebook", "company_report_scoring.ipynb", "full"),
     ("sentiment", "notebook", "sentiment_analysis.ipynb", "full"),
     ("earnings", "notebook", "earnings_date.ipynb", "full"),
     ("main", "notebook", "main_signal_analysis.ipynb", "always"),
@@ -121,7 +120,7 @@ if N_CALLS > NEWS_DAILY_LIMIT:
 # outputs degrade gracefully: main_signal_analysis.ipynb reuses the last good
 # upstream tables (weighted_sentiment.csv, balance_sheet_weights.csv,
 # earnings_date.csv), which are informational inputs to scoring, not load-bearing.
-OPTIONAL_STEPS = frozenset({"fundamentals", "processing", "scoring", "sentiment", "earnings"})
+OPTIONAL_STEPS = frozenset({"fundamentals", "processing", "sentiment", "earnings"})
 
 
 def _stop_on_failure(name, keep_going):

@@ -8,7 +8,7 @@
   test_run_all_helpers.py run_all.py helpers: _notebook_error_summary
                          extracts cell/line/error from nbconvert output, run_cmd returns (rc, output)
   test_run_all_optional.py run_all.py optional steps: upstream API failures (fundamentals /
-                         processing / scoring / sentiment / earnings) never stop the pipeline or
+                         processing / sentiment / earnings) never stop the pipeline or
                          block trading; only main/validate failures are critical
   test_app.py            Streamlit AppTest: page, charts, displayed ranks, Details widgets, captions, removed sections
   test_paper_account.py  alpaca_paper.py + run_all --sync-live against a local MOCK server

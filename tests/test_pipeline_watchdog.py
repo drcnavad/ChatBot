@@ -45,7 +45,7 @@ class TestClassify(unittest.TestCase):
             "FileNotFoundError: [Errno 2] No such file or directory: 'Reports/weighted_sentiment.csv'")
         self.assertEqual((kind, step), ("missing_upstream", "sentiment"))
         kind, step = wd.classify_failure("OSError: [Errno 2] No such file: 'Reports/balance_sheet_weights.csv'")
-        self.assertEqual((kind, step), ("missing_upstream", "scoring"))
+        self.assertEqual((kind, step), ("missing_upstream", "processing"))
         # a missing file with no known producer is not auto-resumed
         self.assertEqual(wd.classify_failure("FileNotFoundError: 'Reports/mystery.csv'"), ("unknown", None))
 
@@ -61,7 +61,7 @@ class TestResume(unittest.TestCase):
 
     def test_after_last_done(self):
         cp = {"phase": "steps", "failed_step": None, "steps_done": ["fundamentals", "processing"]}
-        self.assertEqual(wd.resume_step(cp), "scoring")
+        self.assertEqual(wd.resume_step(cp), "sentiment")
 
     def test_no_checkpoint(self):
         self.assertIsNone(wd.resume_step({}))
@@ -69,9 +69,9 @@ class TestResume(unittest.TestCase):
 
     def test_build_resume_argv(self):
         self.assertEqual(wd.build_resume_argv(["--trade"], "main"), ["--trade", "--from", "main"])
-        self.assertEqual(wd.build_resume_argv(["--trade", "--from", "main"], "scoring"),
+        self.assertEqual(wd.build_resume_argv(["--trade", "--from", "main"], "processing"),
                          ["--trade", "--from", "main"])          # already scoped: untouched
-        self.assertEqual(wd.build_resume_argv(["--only", "main"], "scoring"), ["--only", "main"])
+        self.assertEqual(wd.build_resume_argv(["--only", "main"], "processing"), ["--only", "main"])
         self.assertEqual(wd.build_resume_argv(["--trade"], None), ["--trade"])
 
 
@@ -98,7 +98,7 @@ class TestCheckpointRoundtrip(unittest.TestCase):
 
 class TestMainFlow(unittest.TestCase):
     CP = {"run_id": "r1", "argv": ["--trade"], "mode": "full", "phase": "steps",
-          "failed_step": "sentiment", "steps_done": ["fundamentals", "processing", "scoring"]}
+          "failed_step": "sentiment", "steps_done": ["fundamentals", "processing"]}
 
     def test_transient_retries_then_succeeds(self):
         calls = []

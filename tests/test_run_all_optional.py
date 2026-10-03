@@ -26,7 +26,7 @@ def check(ok, what):
 
 
 def test_optional_steps_cover_the_upstream_api_steps():
-    check(r.OPTIONAL_STEPS == {"fundamentals", "processing", "scoring", "sentiment", "earnings"},
+    check(r.OPTIONAL_STEPS == {"fundamentals", "processing", "sentiment", "earnings"},
           f"OPTIONAL_STEPS is exactly the five upstream API steps (got {sorted(r.OPTIONAL_STEPS)})")
 
 
@@ -62,7 +62,7 @@ def test_critical_failures():
           "no failures -> nothing critical")
     check(r._critical_failures(["sentiment"]) == [],
           "sentiment-only failure is not critical (trade may proceed)")
-    check(r._critical_failures(["fundamentals", "processing", "scoring", "sentiment", "earnings"]) == [],
+    check(r._critical_failures(["fundamentals", "processing", "sentiment", "earnings"]) == [],
           "all-optional failures are not critical")
     check(r._critical_failures(["sentiment", "main"]) == ["main"],
           "main failure stays critical alongside optional ones")
@@ -84,7 +84,7 @@ def test_trade_decision():
     proceed, reason = r._trade_decision(["sentiment"])
     check(proceed is True and "non-critical" in reason,
           "sentiment-only failure -> trade proceeds (not silently skipped)")
-    proceed, _ = r._trade_decision(["fundamentals", "processing", "scoring", "sentiment", "earnings"])
+    proceed, _ = r._trade_decision(["fundamentals", "processing", "sentiment", "earnings"])
     check(proceed is True,
           "all-optional failures -> trade still proceeds")
     proceed, _ = r._trade_decision(["sync_live"])

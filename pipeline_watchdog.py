@@ -111,7 +111,7 @@ NO_RETRY_PHASES = ("trade", "fill-check")
 UPSTREAM_STEP = {
     "weighted_sentiment.csv": "sentiment",
     "news_cleaned_df.csv": "sentiment",
-    "balance_sheet_weights.csv": "scoring",
+    "balance_sheet_weights.csv": "processing",
     "earnings_date.csv": "earnings",
     "signal_analysis.csv": "main",
     "strategy_picks.csv": "main",
