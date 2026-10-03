@@ -332,6 +332,11 @@ dp = pd.DataFrame([[1.0, 2.0, 3.0]] * 6, index=ds.index, columns=ds.columns)    
 d1, d2 = ft.atr_dip_weights(ds, dp, hold=3, n=2), ft.atr_dip_weights(ds, dp, hold=3, n=2, room=np.array([2, 2, 1, 2, 2, 2]))
 check("ATR dip buy: 1/n each, best rank first, sold after `hold` sessions (bought again on a new signal)",
       d1["A"].tolist() == [0.5] * 6 and d1["B"].sum() == 0 and d1["C"].tolist() == [0, 0.5, 0.5, 0.5, 0, 0], d1.to_dict("list"))
+dsell = pd.DataFrame(False, index=ds.index, columns=ds.columns)
+dsell.iloc[[2, 4], 2] = dsell.iloc[5, 0] = True                      # C: sell on days 2 and 4; A: sell on day 5
+d3 = ft.atr_dip_weights(ds.assign(C=ds["C"] | (ds.index == ds.index[4])), dp, hold=None, n=2, sell=dsell)   # C dips again on 4
+check("ATR dip buy, sell on signal: no fixed hold, sold on its sell day, not bought on a sell day",
+      d3["A"].tolist() == [0.5] * 5 + [0] and d3["C"].tolist() == [0, 0.5, 0, 0, 0, 0] and d3["B"].sum() == 0, d3.to_dict("list"))
 check("ATR dip buy: fewer rooms than positions -> the oldest is sold",
       d2["A"].tolist() == [0.5, 0.5, 0, 0.5, 0.5, 0.5] and d2["C"].tolist() == [0, 0.5, 0.5, 0.5, 0, 0], d2.to_dict("list"))
 r = rng.normal(0, 1, (80, 3)) * [0.01, 0.02, 0.04]

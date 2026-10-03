@@ -1,7 +1,7 @@
 """Forward test from backtest_engine.FORWARD_START (Fri Oct 2, 2026), counted only from that close on, never backtested:
 
   1. the real Alpaca account (read-only GET requests through alpaca_paper; no orders, ever), and
-  2. STRATEGIES: 35 paper-only strategies next to it (the live rules recomputed the same way + 34 others). They are
+  2. STRATEGIES: 36 paper-only strategies next to it (the live rules recomputed the same way + 35 others). They are
      never traded; each one is a list of target weights built from data the pipeline already saves every day
      (Reports/signal_analysis.csv, factor_history.csv, earnings_date.csv, benchmark_prices.csv) + daily volume from
      Alpaca's free market data (forward_bars(): one bar download per run, the same request the pipeline makes).
@@ -16,8 +16,8 @@
                                            max drawdown, weeks; ranked by RANK_RULE (chosen before any result)
 
 Same accounting for every strategy: decision at that day's close (the 2:30 PM bar on decision days, as saved), trades at
-that price whenever its target changes, be.COST (0.1%) per side, no stock above 20%, the live 99% invested convention
-(be.live_weights), cash earns 0. A saved day is never redone: a re-run only adds the days after the last saved one (so
+that price whenever its target changes (an ATR stop on a gap-down reaction day sells at the open), be.COST (0.1%) per
+side, no stock above 20%, the live 99% invested convention (be.live_weights), cash earns 0. A saved day is never redone: a re-run only adds the days after the last saved one (so
 running twice never double-counts) and a missed day is caught up from the saved bars.
 
     python forward_test.py --record   # strategies + today's account row (launchd com.stockanalysis.forwardtest, 4:15 PM CT)
@@ -143,6 +143,10 @@ STRATEGIES = [
               "each (at most 10, best rank first), sold after 10 trading days."),
     dict(name="ATR dip buy, not after earnings", weights="atr_dip_ex_earn",
          rule="The ATR dip buy, but not within 10 trading days after the stock's earnings."),
+    dict(name="ATR dip buy, sell on signal", weights="atr_dip_signal",
+         rule="Buy a stock that closes 3x ATR(14) or more below its 20-day high close (live top 30, not a SELL); 10% each "
+              "(at most 10, best rank first), held until the signal analysis says SELL (score below 0) or its live rank "
+              "falls below 30 (the live Mon/Wed exit rank); no fixed hold."),
     dict(name="Live + ATR dip buys in spare cash", spare_dips=True,
          rule="The live rules; cash they leave unused (empty slots, half size when QQQ is weak) buys the not-after-earnings "
               "ATR dips at 10% each (not within 5 days before earnings either), sold after 10 trading days or when the "
@@ -367,22 +371,23 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False):
     return pd.DataFrame(out, index=dates, columns=cols), pd.DataFrame(opens, index=dates, columns=cols)
 
 
-def atr_dip_weights(signal, priority, hold=10, n=10, room=None, taken=None):
+def atr_dip_weights(signal, priority, hold=10, n=10, room=None, taken=None, sell=None):
     """ATR dip buys: buy at the close of a signal day (1/n each, best priority first, at most `room` positions that day,
-    default n), sell at the close `hold` sessions later. taken = stocks it may not hold that day (sold if held); with
-    fewer rooms than positions the oldest are sold first."""
+    default n), sell at the close `hold` sessions later (None = no fixed hold) or on a `sell` day. taken = stocks it may
+    not hold that day (sold if held); with fewer rooms than positions the oldest are sold first."""
     S, P = signal.to_numpy(bool), np.nan_to_num(priority.reindex_like(signal).to_numpy(float), nan=-np.inf)
     room = np.full(len(S), n) if room is None else room
     tk = np.zeros(S.shape, bool) if taken is None else taken
+    X = np.zeros(S.shape, bool) if sell is None else sell.reindex_like(signal).fillna(False).to_numpy(bool)
     out, held = np.zeros(S.shape), {}                     # column -> sessions held
     for t in range(len(S)):
         for j in list(held):
             held[j] += 1
-            if held[j] >= hold or tk[t, j]:
+            if (hold and held[j] >= hold) or tk[t, j] or X[t, j]:
                 del held[j]
         while len(held) > room[t]:
             del held[max(held, key=held.get)]
-        new = [j for j in np.argsort(-P[t], kind="stable") if S[t, j] and j not in held and not tk[t, j]]
+        new = [j for j in np.argsort(-P[t], kind="stable") if S[t, j] and j not in held and not tk[t, j] and not X[t, j]]
         for j in new[:max(0, room[t] - len(held))]:
             held[j] = 0
         out[t, list(held)] = 1 / n
@@ -448,9 +453,11 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     top30 = live.where(eligible & (live > 0)).rank(axis=1, ascending=False, method="first") <= 30
     dip_a = (c <= c.rolling(20).max() - 3 * atr) & top30                 # 3x ATR(14) below the 20-day high close
     dip_b = dip_a & ~after_earn
+    sell_now = _wide(sig, "final_trade").reindex(index=dates, columns=cols).eq("SELL") | ~top30   # SELL or rank worse than 30
     soon = be.earnings_days_ahead(dates, list(cols), earnings, be.WINNER.get("earnings_block_days")).notna()
     n = eligible.sum(axis=1)
-    weights = {"atr_dip": atr_dip_weights(dip_a, live), "atr_dip_ex_earn": atr_dip_weights(dip_b, live),"legacy": held.div(n, axis=0),
+    weights = {"atr_dip": atr_dip_weights(dip_a, live), "atr_dip_ex_earn": atr_dip_weights(dip_b, live),
+               "atr_dip_signal": atr_dip_weights(dip_a, live, hold=None, sell=sell_now),"legacy": held.div(n, axis=0),
                "dip": dip_weights(c, f["ma_50"], eligible),
                "trend": _carry(((f["ma_50"] > f["ma_200"]) & eligible).astype(float).div(n, axis=0), weekly)}
     have = bx["vwap_ratio"].notna().any(axis=1)
