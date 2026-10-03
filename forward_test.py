@@ -5,8 +5,9 @@ against QQQ and SPY, counted only from that close on. Read-only: GET requests th
                                    net deposits, positions, closed picks / winners, $ traded and its cost vs the decision
                                    price (the stock's close in signal_analysis.csv on the order's As_Of day, which on a
                                    decision day is the 2:30 PM bar the strategy decided on)
-  summary()                        Strategy (equity net of new deposits) / QQQ / SPY: total return, median weekly return,
-                                   max drawdown (QQQ/SPY closes from Reports/benchmark_prices.csv)
+                                   and the no-orders shadow's value (shadow_values)
+  summary()                        Strategy (equity net of new deposits) / shadow / QQQ / SPY: total return, median weekly
+                                   return, max drawdown (QQQ/SPY closes from Reports/benchmark_prices.csv)
 
     python forward_test.py --record   # save today's row (launchd com.stockanalysis.forwardtest, Mon-Fri 4:15 PM CT)
     python forward_test.py            # print the summary from the saved rows (no requests)
@@ -31,7 +32,8 @@ ORDERS_CSV = os.path.join(REPORTS, "live_orders_log.csv")
 SIGNAL_CSV = os.path.join(REPORTS, "signal_analysis.csv")
 CT = ZoneInfo("America/Chicago")
 DAILY_COLS = ["Date", "Time_CT", "Equity", "Cash", "Net_Deposits", "Positions", "Closed_Picks", "Winning_Picks",
-              "Traded_USD", "Cost_USD"]
+              "Traded_USD", "Cost_USD", "Shadow_Value"]
+SHADOW = "Shadow: no rank-20 limit, no earnings skip (no orders)"
 
 
 def _fill_rows(fills):
@@ -83,6 +85,31 @@ def trade_cost(fills, orders, closes, start=be.FORWARD_START):
     return traded, cost
 
 
+def shadow_values(sig, start=be.FORWARD_START):
+    """Value (1.0 at the `start` close, after its buys) of the no-orders shadow: the live rules without the rank-20 pick limit (T20 /
+    cap_soft) and without the earnings skip (E5), on the saved inputs in signal_analysis.csv `sig` (scores, RS tiebreak,
+    market filter, closes; the live targets rebuild exactly from them). Trades at the close whenever its target changes,
+    be.COST (0.1%) per side, 99% invested like the live weights. Only overrides are passed: WINNER is never changed."""
+    wide = lambda c: sig.pivot(index="Date", columns="Symbol", values=c)
+    score, close = wide("Strategy_Score"), wide("Close")
+    tgt, _ = be.winner_targets(score, score.notna(), be.volatility(close[score.columns]),
+                               sig.groupby("Date")["Regime_On"].first().astype(bool),
+                               be.weekly_rebalance_days(score.index, live=True), tiebreak_w=wide("RS_Score"),
+                               selection={"max_pick_rank": None, "cap_soft": False}, earnings_block_days=None)
+    w = be.live_weights(tgt).reindex(columns=close.columns).fillna(0.0).loc[pd.Timestamp(start):]
+    cash, shares, prev, out = 1.0, pd.Series(0.0, index=close.columns), None, {}
+    for d, wd in w.iterrows():
+        px = close.loc[d].fillna(0.0)
+        value = cash + (shares * px).sum()
+        if prev is None or not np.allclose(wd, prev):
+            value -= be.COST * (wd * value - shares * px).abs().sum()
+            shares = (wd * value / px.where(px > 0)).fillna(0.0)
+            cash, prev = value - (shares * px).sum(), wd
+        out[d] = value
+    out = pd.Series(out, dtype=float)
+    return out / out.iloc[0] if len(out) else out      # 1.0 after the start close's buys, like the account baseline
+
+
 def _read(path, **kw):
     return pd.read_csv(path, **kw) if os.path.exists(path) else None
 
@@ -97,14 +124,15 @@ def record(account=None, now=None, path=DAILY_CSV):
         import alpaca_paper as ap
         account = ap.PaperAccount()
     s, fills = account.account_summary(), account.fills()
-    sig = _read(SIGNAL_CSV, usecols=["Date", "Symbol", "Close"], parse_dates=["Date"])
+    sig = _read(SIGNAL_CSV, usecols=["Date", "Symbol", "Close", "RS_Score", "Strategy_Score", "Regime_On"], parse_dates=["Date"])
+    shadow = shadow_values(sig) if sig is not None else pd.Series(dtype=float)
     closes = {} if sig is None else dict(zip(zip(sig["Date"], sig["Symbol"]), sig["Close"]))
     pk = picks(fills)
     traded, cost = trade_cost(fills, _read(ORDERS_CSV), closes)
     row = {"Date": f"{now:%Y-%m-%d}", "Time_CT": f"{now:%H:%M}", "Equity": s["Equity"], "Cash": s["Cash"],
            "Net_Deposits": account.net_deposits(), "Positions": len(account.position_dicts()),
            "Closed_Picks": len(pk), "Winning_Picks": int((pk["P/L $"] > 0).sum()), "Traded_USD": round(traded, 2),
-           "Cost_USD": round(cost, 2)}
+           "Cost_USD": round(cost, 2), "Shadow_Value": round(float(shadow.iloc[-1]), 6) if len(shadow) else np.nan}
     old = _read(path, dtype={"Date": str})
     new = pd.DataFrame([row])
     if old is not None and (old["Date"] != row["Date"]).any():
@@ -133,6 +161,8 @@ def summary(daily=None, bench=None, start=be.FORWARD_START):
         d = daily.assign(Date=pd.to_datetime(daily["Date"])).set_index("Date").sort_index().loc[start:]
         if len(d):
             rows.append(("Strategy (live account)", d["Equity"] - (d["Net_Deposits"] - d["Net_Deposits"].iloc[0])))
+            if "Shadow_Value" in d:
+                rows.append((SHADOW, d["Shadow_Value"]))
     if bench is not None:
         b = bench.assign(Date=pd.to_datetime(bench["Date"])).set_index("Date").sort_index().loc[start:]
         rows += [(f"{s} (comparison, not traded)", b[s]) for s in ("QQQ", "SPY") if s in b]

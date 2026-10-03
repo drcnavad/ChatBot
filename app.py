@@ -108,7 +108,8 @@ def rules_text():
             "the next market session, unless the next decision is already due; a decision never runs twice.\n"
             "- **Signals** (the strategy's decision, dated): Buy = enters the portfolio · Hold = stays · Sold = leaves · "
             f"Watch = ranked but not picked · Score below {WINNER.get('min_score', 0):g} = not eligible. The plan chip = what "
-            "the next Friday rebalance would do at the latest close.\n")
+            "the next Friday rebalance would do at the latest close.\n"
+            "- **Changes:** Don't change the strategy until 12+ weeks of forward results (from Oct 2, 2026) compare against QQQ.\n")
 
 
 # =====================================================================================================================
@@ -1593,7 +1594,8 @@ def render_forward_test():
                + (f"Closed picks {n}, win rate {w / n:.0%}" if n else f"Forward test started {start}; no closed picks yet")
                + f" · traded \\${traded:,.0f}, cost vs the decision price {'-' if cost < 0 else ''}\\${abs(cost):,.2f}"
                + (f" ({cost / traded * 1e4:+.1f} bps; + = it cost money)" if traded else "")
-               + ". Strategy = account equity net of new deposits; QQQ / SPY = daily closes, comparison only. Median weekly "
+               + ". Strategy = account equity net of new deposits; Shadow = the same rules without the rank-20 pick limit and "
+               "the earnings skip, at closes with 0.1% per side, never traded; QQQ / SPY = daily closes, comparison only. Median weekly "
                "= Friday to Friday. Saved by the 4:15 PM CT job (read-only, no orders); details in forward_test.ipynb.")
 
 

@@ -213,16 +213,18 @@ finally:
 
 # ------------------------------------------------------------------ run_all: never twice, idle runs are silent
 state_path = os.path.join(tmp, "run_state.json")
-saved_ra = {k: getattr(ra, k) for k in ("STATE_FILE", "TRADE_LOCK", "LOG_DIR", "_pipeline", "load_state")}
+saved_ra = {k: getattr(ra, k) for k in ("STATE_FILE", "TRADE_LOCK", "LOG_DIR", "_pipeline", "load_state", "RUN_LOG")}
 calls = []
 try:
     ra.STATE_FILE, ra.TRADE_LOCK, ra.LOG_DIR = state_path, os.path.join(tmp, ".trade.lock"), os.path.join(tmp, "logs")
+    ra.RUN_LOG = os.path.join(tmp, "run_log.csv")          # never the real run log
     ra._pipeline = lambda *a, **k: calls.append(a[-2:]) or 0
     json.dump({"last_decision": "2026-09-30"}, open(state_path, "w"))
     with redirect_stdout(io.StringIO()) as out:
         rc = ra.main(["--trade", "--scheduled", "--now", "2026-10-03 11:00"])
-    check("idle launchd run (Saturday): one 'idle:' line, no run log, no lock, nothing runs",
-          rc == 0 and out.getvalue().startswith("idle:") and not os.path.exists(ra.LOG_DIR) and not calls, out.getvalue())
+    check("idle launchd run (Saturday): ends with one 'idle:' line, no run log file of its own, no lock, nothing runs",
+          rc == 0 and out.getvalue().strip().splitlines()[-1].startswith("idle:") and not os.path.exists(ra.LOG_DIR)
+          and not calls, out.getvalue())
     real_load = saved_ra["load_state"]
     seq = [{"last_decision": "2026-09-30"}, {"last_decision": "2026-10-02"}]   # another run finishes Friday meanwhile
     ra.load_state = lambda path=None: seq.pop(0) if seq else real_load(path)

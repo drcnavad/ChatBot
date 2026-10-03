@@ -70,6 +70,8 @@ PENDING_ORDERS_JSON = os.path.join(PROJECT_ROOT, "Reports", "live_pending_orders
 ORDER_COLUMNS = ["Symbol", "Side", "Shares", "Price", "Est_Value", "Current_Shares", "Target_Shares",
                  "Target_Weight_%", "Target_Value"]
 NO_TRADE_BAND = 0.01   # Friday rebalance: a target holding within 1 percentage point of its weight is not traded
+MAX_ORDER_PCT = 0.30   # safety cap: a BUY worth more than 30% of equity is refused (not sent, not carried to 9 AM).
+                       # Normal buys stay under it: the largest target weight since Jul 2024 is 27.06% (inverse-vol sizing).
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
 INVESTED_CAP = 0.99   # trim fix: a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED, tests check)
 CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills a bit above the estimate still fit.
@@ -737,6 +739,22 @@ def apply_buying_power_guard(orders, buying_power, fractional=False, cushion=CAS
             orders.at[i, "Est_Value"] = round(q * price, 2)
             orders.at[i, "Target_Shares"] = _safe_number(orders.at[i, "Current_Shares"]) + q
     return orders
+
+
+def apply_order_cap(orders, equity, cap=MAX_ORDER_PCT):
+    """Refuse every BUY row worth more than `cap` x equity (shares x price): its Side becomes 'SKIP (over order cap)',
+    so it is never sent or staged for 9 AM. Sells are not capped (a sell is already clamped to the shares held). An
+    unusable equity number refuses every BUY (fail closed). Returns (orders, refused BUY rows with their Est_Value)."""
+    orders = orders.copy()
+    try:
+        limit = float(equity) * cap
+    except (TypeError, ValueError):
+        limit = float("nan")
+    value = pd.to_numeric(orders["Shares"], errors="coerce") * pd.to_numeric(orders["Price"], errors="coerce")
+    over = (orders["Side"] == "BUY") & ~(value <= limit)          # a NaN value or limit is refused too
+    refused = orders[over].assign(Est_Value=value[over].round(2))
+    orders.loc[over, "Side"] = "SKIP (over order cap)"
+    return orders, refused
 
 
 # ----------------------------------------------------------------------------- positions file, LIVE submission, command line
@@ -2206,6 +2224,11 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
     skipped_bp = orders[orders["Side"] == "SKIP (no buying power)"]
     if not skipped_bp.empty:
         print(f"  Buying-power guard: {len(skipped_bp)} BUY row(s) SKIPPED - insufficient buying power")
+    orders, refused = apply_order_cap(orders, equity)
+    for r in refused.itertuples():
+        log_event("Trade", "warning", "no", f"Order cap: BUY {r.Symbol} {_fmt_shares(r.Shares)} shares (~${r.Est_Value:,.0f}) "
+                  f"was not sent - over {MAX_ORDER_PCT:.0%} of equity (${equity:,.0f}) for one order. It is not carried to "
+                  "9 AM. Place it by hand only if it is right.")
     cols = ["Symbol", "Side", "Shares", "Order_ID", "Status"]
     drop_superseded_orders(pending_path=PENDING_ORDERS_JSON)
     defer = session or _past_evening_cutoff()
@@ -2232,6 +2255,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
                              "the morning fill check completes any remainder)"))
         else:
             keep_idx.append(r.Index)
+    dup_rows += [(r.Symbol, "BUY", r.Shares, None, f"SKIPPED: over the {MAX_ORDER_PCT:.0%} of equity order cap")
+                 for r in refused.itertuples()]
     orders_to_send = orders.loc[keep_idx]
     if defer:
         # Extended hours are over: submit nothing now. Stage the planned orders so the

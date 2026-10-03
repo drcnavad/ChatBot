@@ -884,6 +884,8 @@ def main(argv=None):
             logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)   # before the run log
             state.update(report_superseded(gone, now))
         if a.scheduled and how in (None, "wait") and not a.dry_run:
+            if how == "wait":                                  # a missed decision: one run-log row, then quiet
+                state.update(report_waiting(D, gate_why, state))
             print(f"idle: {now:%a %b %d %I:%M %p} CT - {gate_why}", flush=True)   # launchd wake/interval run: no log
             return 0
     if a.scheduled and not a.trade and not a.fill_check:       # the weekday dashboard refresh: no orders, ever
@@ -994,6 +996,18 @@ def main(argv=None):
 
     return _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_path, ckpt_write, ckpt_clear, clock,
                      D, how)
+
+
+def report_waiting(D, why, state):
+    """Log once (run log row) that decision D missed its 2:30 PM CT slot and waits for the next session. Returns the
+    state changes ({} when already reported)."""
+    import backtest_engine as be
+    if str(state.get("last_missed_notice") or "") >= D.date().isoformat():
+        return {}
+    rest = why.split(": ", 1)[-1]
+    log_event("Missed decision", "warning", "no", f"The {D:%a %b %d} {be.decision_kind(D)} did not run at its "
+              f"{SLOT_TEXT} slot (the Mac was asleep or off). {rest[:1].upper() + rest[1:]}. No money moved yet.")
+    return update_state(last_missed_notice=D.date().isoformat())
 
 
 def report_superseded(prev, now_ct):

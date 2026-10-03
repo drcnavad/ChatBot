@@ -53,6 +53,8 @@
                          trade; unchanged bars when nothing is saved or the file is bad)
   test_forward_test.py   forward testing from FORWARD_START (2026-10-02): per-stock panel cutoff / empty state;
                          forward_test.py picks, trade cost, summary, daily record (fake account, no requests)
+  test_safety_guards.py  mocked: BUYs over 30% of equity refused (not sent, not carried to 9 AM, one run-log row);
+                         a missed scheduled decision gets one run-log warning while it waits
 Only the files in TESTS run (never Archive/). Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
 import os
 import subprocess
@@ -67,7 +69,7 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
          "test_paper_trade_math_audit.py", "test_run_log.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
          "test_live_rules_audit.py", "test_catch_up.py",
          "test_alpaca_api_names.py", "test_smart_orders.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py",
-         "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py", "test_forward_test.py"]
+         "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py", "test_forward_test.py", "test_safety_guards.py"]
 
 
 def main():

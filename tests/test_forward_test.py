@@ -133,6 +133,39 @@ with tempfile.TemporaryDirectory() as tmp:
     check("record: one row per trading day, a re-run replaces it", list(saved["Date"]) == ["2026-10-05", "2026-10-06"]
           and saved["Time_CT"].iloc[0] == "16:40" and list(saved.columns) == ft.DAILY_COLS, saved)
     check("record: picks, winners and positions saved", r1["Closed_Picks"] == 2 and r1["Winning_Picks"] == 1 and r1["Positions"] == 1, r1)
+# shadow (no orders): the live rules minus T20 / cap_soft and E5, passed as overrides only; closes, 0.1% per side
+sd = pd.bdate_range("2026-09-28", "2026-10-09")
+sig = pd.DataFrame([{"Date": d, "Symbol": sym, "Close": px, "RS_Score": 0.0, "Strategy_Score": 1.0, "Regime_On": 1}
+                    for i, d in enumerate(sd) for sym, px in (("AAA", 100.0 + (i >= 5) * 10), ("BBB", 50.0))])
+seen_kw, w0 = {}, dict(be.WINNER)
+real_wt = ft.be.winner_targets
+
+
+def fake_targets(score, *a, **k):
+    seen_kw.update(k)
+    t = pd.DataFrame(0.0, index=score.index, columns=score.columns)
+    t.loc[:"2026-10-05", "AAA"] = 1.0                          # all in AAA from the start (99% live) ...
+    t.loc["2026-10-06":, "BBB"] = 1.0                          # ... switched to BBB at the Oct 6 close
+    return t, None
+
+
+try:
+    ft.be.winner_targets = fake_targets
+    v = ft.shadow_values(sig)
+finally:
+    ft.be.winner_targets = real_wt
+check("shadow: only the overrides (no rank-20 limit, strict sector cap, no earnings skip), WINNER untouched",
+      seen_kw.get("selection") == {"max_pick_rank": None, "cap_soft": False} and seen_kw.get("earnings_block_days") is None
+      and be.WINNER == w0, seen_kw)
+# Oct 2 = 1.0 after its buys; AAA +10% on Oct 5 (99% invested); Oct 6 switch to BBB pays 0.1% on both legs; then flat
+a5 = 0.01 + 0.99 * 1.1
+after = a5 - be.COST * (0.99 * 1.1 + 0.99 * a5)      # sell all AAA + buy 99% BBB
+check("shadow: starts at 1.0 on the start close, follows the closes, pays 0.1% per side on a change",
+      v.index[0] == pd.Timestamp("2026-10-02") and v.iloc[0] == 1.0 and abs(v["2026-10-05"] - a5) < 1e-9
+      and abs(v["2026-10-06"] - after) < 1e-9 and abs(v.iloc[-1] - after) < 1e-9, v.round(6).to_dict())
+dsh = daily.assign(Shadow_Value=[1.0] * len(daily))
+check("summary: the shadow row sits right after the live strategy",
+      list(ft.summary(dsh, bench)["Series"])[:2] == ["Strategy (live account)", ft.SHADOW])
 src = open(os.path.join(ROOT, "forward_test.py"), encoding="utf-8").read()
 check("forward_test.py has no order code (read-only)",
       not any(w in src for w in ("submit_order", "cancel_order", "OrderRequest", "TradingClient", "import paper_trade", "requests.post")))
