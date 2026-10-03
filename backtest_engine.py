@@ -514,24 +514,19 @@ def generate_strict_signals(df):
     # --- OBV momentum ---
     # obv_slope = 3-day OBV change / 20-day average volume (computed in calculate_technical_indicators).
     # Threshold is in the same units (1.0 = one average day of net buying), not on a 0-100 rescale.
-    if 'obv_slope' not in df.columns:
-        df['obv_slope'] = df.groupby('Symbol')['obv'].transform(lambda s: s.diff().rolling(OBV_SLOPE_DAYS).sum())
     df['signal_obv'] = np.where(df['obv_slope'] > OBV_THRESHOLD, 1,
                                 np.where(df['obv_slope'] < -OBV_THRESHOLD, -1, 0))
 
     return df
 
-def rsi_signals(group, lower=20, upper=85, ma_period=3, use_trend=True, oversold_threshold=30):
+def rsi_signals(group, lower=20, upper=85, ma_period=3, oversold_threshold=30):
     """RSI signals for one symbol: +1 when RSI is oversold (< 30) and the price is at/above its short MA,
     -1 when RSI is overbought (> 70) and the price is at/below it."""
     group = group.copy()
     group['rsi_signal'] = 0
     
     # Rolling MA trend filter
-    if use_trend:
-        group['ma'] = group['Close'].rolling(ma_period).mean()  # no bfill (would use future bars)
-    else:
-        group['ma'] = group['Close'] * 0 + 1  # all True
+    group['ma'] = group['Close'].rolling(ma_period).mean()  # no bfill (would use future bars)
     
     # --- BUY ---
     # STRICT: RSI oversold in uptrend - price must be above MA (not in downtrend)
@@ -576,11 +571,7 @@ def fi_signals_strict(df, lookback=3, min_fi=2):
     df['fi_streak'] = df['fi_direction'].groupby((df['fi_direction'] != df['fi_direction'].shift()).cumsum()).cumcount() + 1
     
     # STRICT: For BUY, require price to be in uptrend (Close > MA10) to avoid buying in downtrends
-    # Calculate MA10 for trend confirmation if not already present
-    ma_10_was_present = 'ma_10' in df.columns
-    if not ma_10_was_present:
-        df['ma_10'] = df['Close'].rolling(window=10).mean()
-    
+    # (ma_10 comes from calculate_technical_indicators)
     # Buy after lookback consecutive positives AND price above MA10 (uptrend confirmation)
     buy_condition = (df['fi_direction'] == 1) & (df['fi_streak'] >= lookback)
     trend_confirmation = df['Close'] > df['ma_10']  # Price in uptrend
@@ -591,9 +582,7 @@ def fi_signals_strict(df, lookback=3, min_fi=2):
     downtrend_confirmation = df['Close'] < df['ma_10']  # Price in downtrend
     df.loc[sell_condition & downtrend_confirmation, 'fi_signal'] = -1
 
-    # Clean up helper columns (drop ma_10 only if we created it)
-    if not ma_10_was_present and 'ma_10' in df.columns:
-        df = df.drop(columns=['ma_10'])
+    # Clean up helper columns
     df = df.drop(columns=["fi_direction", "fi_streak"], errors='ignore')
     return df
 
@@ -677,11 +666,7 @@ def fibonacci_signals(df, close_col='Close'):
     tolerance = 0.015  # Reduced to 1.5% tolerance for stricter matching
     
     # STRICT: Require trend confirmation - price should be above MA50 for BUY signals
-    # This ensures we're buying at support in an uptrend, not in a downtrend
-    ma_50_was_present = 'ma_50' in df.columns
-    if not ma_50_was_present:
-        df['ma_50'] = df[close_col].rolling(window=50).mean()
-    
+    # This ensures we're buying at support in an uptrend, not in a downtrend (ma_50 from calculate_technical_indicators)
     # Buy signals: Price near support levels (fib_61.8%, fib_50%, fib_38.2%)
     for fib_level in ['fib_61.8%', 'fib_50%', 'fib_38.2%']:
         if fib_level in df.columns:
@@ -701,19 +686,9 @@ def fibonacci_signals(df, close_col='Close'):
             near_resistance = distance <= tolerance
             price_below_fib = df[close_col] <= df[fib_level] * 1.02  # Allow slight above
             # STRICT: Require price below MA50 (downtrend) to avoid selling in uptrends
-            # Note: ma_50 is still available here since we haven't dropped it yet
             downtrend_confirmation = df[close_col] < df['ma_50']
             df.loc[near_resistance & price_below_fib & downtrend_confirmation, 'fib_signal'] = -1
-    
-    # Clean up: drop ma_50 only if we created it (after both BUY and SELL signals are processed)
-    if not ma_50_was_present and 'ma_50' in df.columns:
-        df = df.drop(columns=['ma_50'])
-    
     return df
-
-
-
-
 
 
 def weighted_signal(df, weights=None, signal_cols=None, final_col='combined_signal'):
