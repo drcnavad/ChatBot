@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from pandas.io.formats.style import Styler
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
@@ -148,9 +149,22 @@ st.markdown("""
     .sa-chip { font-size: 0.75rem; font-weight: 600; color: #0f766e; background: #ccfbf1; border: 1px solid #99f6e4;
                padding: 0.35rem 0.7rem; border-radius: 999px; white-space: nowrap; }
     .sa-section { font-weight: 700; color: #0f172a; margin: 0.6rem 0 0.2rem; font-size: 1.02rem; }
-    .sa-hero { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 1rem 1.25rem; margin: 0.5rem 0 1rem; }
-    .sa-hero-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-    .sa-ident { display: flex; align-items: center; gap: 0.85rem; }
+    .sa-chip-warn { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+    .sa-hero, .sa-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 1rem 1.25rem; margin: 0.5rem 0 0.9rem;
+                         box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+    .sa-card-title { font-size: 1.02rem; font-weight: 700; color: #0f172a; margin-bottom: 0.35rem; }
+    .sa-card-title span { font-size: 0.8rem; font-weight: 500; color: #64748b; margin-left: 0.35rem; }
+    .sa-tier { display: flex; gap: 0.75rem; align-items: baseline; padding: 0.45rem 0; border-top: 1px solid #f1f5f9; }
+    .sa-tier > b { flex: 0 0 8.5rem; font-size: 0.7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #64748b; }
+    .sa-tier-syms { display: flex; flex-wrap: wrap; gap: 0.3rem; font-size: 0.8rem; color: #64748b; align-items: center; }
+    .sa-tier-syms .symbol-link { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 7px; padding: 1px 7px; font-size: 0.8rem; color: #334155; }
+    .sa-tier-syms .symbol-link.t-good { color: #15803d; background: #f0fdf4; border-color: #bbf7d0; }
+    .sa-tier-syms .symbol-link.t-warn { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+    .sa-tier-syms .symbol-link.t-bad { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+    .sa-tier-syms .symbol-link.sel { outline: 2px solid #0f766e; outline-offset: 1px; }
+    .sa-note { font-size: 0.78rem; color: #475569; background: #f0fdfa; border: 1px solid #ccfbf1; border-radius: 10px;
+               padding: 0.55rem 0.8rem; margin-top: 0.6rem; line-height: 1.5; }
+    .sa-ident { display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap; }
     .sa-sym { font-size: 1.75rem; font-weight: 700; color: #0f172a; font-family: 'JetBrains Mono', monospace; }
     .sa-price { font-size: 1.25rem; font-weight: 700; color: #334155; font-family: 'JetBrains Mono', monospace; }
     .sa-live { font-size: 0.85rem; font-weight: 600; color: #334155; font-family: 'JetBrains Mono', monospace; margin-top: 0.15rem; }
@@ -160,11 +174,15 @@ st.markdown("""
     .sa-badge-bull { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
     .sa-badge-bear { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
     .sa-badge-hold { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
-    .sa-badge-holdpos { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
     .sa-badge-grey { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
     .sa-why { font-size: 0.8rem; color: #64748b; margin-top: 0.35rem; }
-    .sa-stats { display: flex; flex-wrap: wrap; gap: 0.5rem 1.35rem; justify-content: flex-end; }
-    .sa-stat { min-width: 3.5rem; }
+    .sa-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 0.5rem; margin-top: 0.8rem; }
+    .sa-stat { background: #f8fafc; border: 1px solid #eef2f7; border-radius: 10px; padding: 0.45rem 0.7rem; }
+    .sa-stats .sa-stat-label { white-space: normal; }
+    .sa-group { padding: 0.75rem 0 0.25rem; border-top: 1px solid #f1f5f9; }
+    .sa-group-title { font-size: 0.7rem; font-weight: 700; letter-spacing: .09em; color: #64748b; text-transform: uppercase; }
+    [data-testid="stMetric"] { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 0.6rem 0.85rem; }
+    [data-testid="stAlert"] { border-radius: 12px; }
     .sa-stat-label { font-size: 0.66rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
     .sa-stat-val { font-size: 0.95rem; font-weight: 700; color: #0f172a; font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
 </style>
@@ -188,6 +206,8 @@ SHORT_HISTORY_CSV = os.path.join(REPORTS, "short_history_reference.csv")   # mai
 COMPANY_XLSX = os.path.join(REPORTS, "complete_company_analysis.xlsx")
 CT = ZoneInfo("America/Chicago")
 MA_COLS = ['ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']
+MA_COLORS = ['#0ea5e9', '#8b5cf6', '#f59e0b', '#a16207', '#94a3b8']   # chart lines: sky, violet, amber, brown, slate
+TEAL, HOLD_SHADE = "#0f766e", "rgba(245,158,11,0.10)"               # price line; held periods (yellow = hold)
 
 # file -> (what it is, max age in days before it is flagged stale)
 FRESHNESS = {
@@ -221,8 +241,8 @@ def show_html(markup):
     st.markdown("".join(line.strip() for line in str(markup).splitlines()), unsafe_allow_html=True)
 
 
-def symbol_link(sym):
-    return f'<a href="?symbol={quote(sym)}" class="symbol-link" target="_self">{esc(sym)}</a>'
+def symbol_link(sym, cls=""):
+    return f'<a href="?symbol={quote(sym)}" class="symbol-link {cls}" target="_self">{esc(sym)}</a>'
 
 
 def section(title):
@@ -237,8 +257,46 @@ def fmt(v, spec, prefix="", suffix=""):
     return f"{prefix}{v:{spec}}{suffix}" if v is not None else "—"
 
 
+# One color rule for both tabs: green = good / Bullish / buy / positive, yellow = hold / neutral / caution / warning,
+# red = bad / Bearish / sell / negative / error. Plain labels and headings stay slate (INK).
+GOOD, CAUTION, BAD, INK = "#15803d", "#b45309", "#b91c1c", "#0f172a"
+SCORE_GOOD = 40          # scores (strategy, technical, strength): above 40 green (about top-20 level), 0-40 yellow, below 0 red
+TONE_WORDS = ((GOOD, ("buy", "bull", "fresh", "ok", "success", "add")),
+              (BAD, ("sell", "sold", "bear", "score below", "missing", "error", "fail", "drop", "exit")),
+              (CAUTION, ("hold", "keep", "watch", "neutral", "stale", "warn", "wait", "pending", "swap", "skip", "earn", "within")))
+TONE_CLASS = {GOOD: "t-good", CAUTION: "t-warn", BAD: "t-bad"}
+
+
+def tone(v, good=0.0, bad=0.0):
+    """Color of a value. Text: by its first word (Buy / Hold / Sold, fresh / stale / missing...; other text stays plain).
+    Number: above `good` green, below `bad` red, in between yellow (good == bad: exactly that value stays plain)."""
+    if v is None or (not isinstance(v, str) and pd.isna(v)):
+        return INK
+    if isinstance(v, str):
+        t = re.sub(r"^[^a-z]+", "", v.strip().lower())
+        return next((c for c, words in TONE_WORDS if t.startswith(words)), INK)
+    v = float(v)
+    return GOOD if v > good else BAD if v < bad else (INK if good == bad else CAUTION)
+
+
+def score_tone(v):
+    return tone(v, SCORE_GOOD, 0.0)
+
+
+def toned(df, cols, **kw):
+    """DataFrame (or Styler) -> Styler with `cols` colored by tone(); st.dataframe keeps the column_config formats."""
+    sty = df if isinstance(df, Styler) else df.style
+    css = lambda v: "" if tone(v, **kw) == INK else f"color: {tone(v, **kw)}; font-weight: 600"
+    return sty.map(css, subset=[c for c in cols if c in sty.data.columns])
+
+
 def sign_color(v):
-    return "#0f172a" if v is None else ("#15803d" if v >= 0 else "#b91c1c")
+    return tone(v)
+
+
+def md_tone(text, color):
+    """Markdown text in the tone color (st.caption / st.markdown color syntax)."""
+    return {GOOD: f":green[{text}]", CAUTION: f":orange[{text}]", BAD: f":red[{text}]"}.get(color, text)
 
 
 def stat_html(label, value, color="#0f172a", tip=None):
@@ -573,12 +631,11 @@ def ai_analysis_dialog(ticker, ticker_df, signal, why):
 # =====================================================================================================================
 # 6. Plain-language signals (display only; the CSV values stay unchanged)
 # =====================================================================================================================
-SIGNAL_COLOR = {"Buy": "#15803d", "Hold": "#2563eb", "Sold": "#b91c1c", "Score below 0": "#b91c1c",
-                "Watch": "#b45309", "Watch (sector limit)": "#b45309", "Not ranked": "#64748b"}
-SIGNAL_BADGE = {"Buy": "sa-badge-bull", "Hold": "sa-badge-holdpos", "Sold": "sa-badge-bear",
+SIGNALS = ["Buy", "Hold", "Sold", "Score below 0", "Watch", "Watch (sector limit)", "Not ranked"]
+SIGNAL_BADGE = {"Buy": "sa-badge-bull", "Hold": "sa-badge-hold", "Sold": "sa-badge-bear",
                 "Score below 0": "sa-badge-bear", "Watch": "sa-badge-hold", "Watch (sector limit)": "sa-badge-hold",
                 "Not ranked": "sa-badge-grey"}
-PLAN_BADGE = {"Buy": "sa-badge-bull", "Keep": "sa-badge-holdpos", "Sell": "sa-badge-bear"}
+PLAN_BADGE = {"Buy": "sa-badge-bull", "Keep": "sa-badge-hold", "Sell": "sa-badge-bear"}
 
 
 def plain_reason(signal, reason, rank=None, score=None):
@@ -936,7 +993,7 @@ def render_top_bar(p):
             <h1>Stock Analysis</h1>
             <p>Weekly top-{N_PICKS} ranking{" + Mon/Wed swap check" if MIDWEEK else ""} · technical + strength vs sector/SPY</p>
           </div>
-          <div class="sa-chip">Updated {esc(updated + note)}</div>
+          <div class="sa-chip{" sa-chip-warn" if stale else ""}">Updated {esc(updated + note)}</div>
         </div>""")
 
 
@@ -966,19 +1023,21 @@ def render_rank_tiers(p):
              ("Rank 21 to 50", ranked[(ranked["Strategy_Rank"] > 20) & (ranked["Strategy_Rank"] <= 50)]),
              ("Rank 51+", ranked[ranked["Strategy_Rank"] > 50])]
     current = st.session_state.get("ticker_dropdown")
+    held = lambda s: TONE_CLASS.get(tone(p.sig_off.get(s)), "") if p.sig_off.get(s) in ("Buy", "Hold", "Sold") else ""
     rows = []
     for title, df in tiers:
-        links = []
-        for s in df.index:
-            link = symbol_link(s)
-            if s == current:
-                link = f'<b style="background:#dbeafe;border-radius:6px;padding:1px 5px;">{link}</b>'
-            links.append(link)
-        rows.append(f'<div style="margin:3px 0;"><b>{title}:</b> {" \u00b7 ".join(links) or "\u2014"}</div>')
+        links = " ".join(symbol_link(s, held(s) + (" sel" if s == current else "")) for s in df.index)
+        rows.append(f'<div class="sa-tier"><b>{title}:</b><div class="sa-tier-syms">{links or "\u2014"}</div></div>')
     if len(p.short):
-        links = [f"{symbol_link(s)} (rough {esc(str(r['Rough_Signal']))}, less reliable)" for s, r in p.short.iterrows()]
-        rows.append(f'<div style="margin:3px 0;"><b>Not traded yet (short history, not ranked):</b> {" \u00b7 ".join(links)}</div>')
-    show_html('<div style="font-size:0.92rem;line-height:2.0;">' + "".join(rows) + "</div>")
+        links = " ".join(f'{symbol_link(s)} <span style="color:{tone(r["Rough_Signal"])};">(rough {esc(str(r["Rough_Signal"]))}, '
+                         'less reliable)</span>' for s, r in p.short.iterrows())
+        rows.append(f'<div class="sa-tier"><b>Not traded yet (short history, not ranked):</b><div class="sa-tier-syms">{links}</div></div>')
+    day = p.df["Date"].max()
+    show_html(f'<div class="sa-card"><div class="sa-card-title">Stock list<span>ranks at the {day:%a %b %-d} close · '
+              'click a stock to open it</span></div>' + "".join(rows)
+              + f'<div class="sa-note">Color = the decision in force ({p.off_date:%b %-d}): <b style="color:{GOOD};">green Buy</b> · '
+              f'<b style="color:{CAUTION};">yellow Hold</b> · <b style="color:{BAD};">red Sold</b> · grey = not in the portfolio. '
+              'Teal outline = the stock shown below.</div></div>')
 
 
 def render_stock_picker(p, jumped):
@@ -994,7 +1053,6 @@ def render_stock_picker(p, jumped):
     if jumped or pending:  # opened from a link or a table: scroll the stock view into sight
         components.html("<script>const el = window.parent.document.getElementById('ticker-focus');"
                         "if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});</script>", height=0)
-    section("Stock view")
     render_rank_tiers(p)
     pick_col, ai_col = st.columns([3, 1])
     ticker = pick_col.selectbox("Ticker", options=p.options, format_func=lambda s: ticker_label(p, s),
@@ -1047,7 +1105,7 @@ def render_stock_header(p, ticker, tdata):
         plan_html = (f'<span class="sa-badge {PLAN_BADGE.get(action, "sa-badge-grey")}" title="{esc(tip)}">'
                      f'{esc(when + " plan: " + plan_text(p.plan, ticker))}</span>')
     stats = [
-        stat_html("Strategy score", fmt(score, ".1f")),
+        stat_html("Strategy score", fmt(score, ".1f"), score_tone(score)),
         stat_html(f"Strategy rank · {day:%a %b %-d} close", f"#{rank:.0f} / {n_ranked}" if rank is not None else "—",
                   tip=f"Position by strategy score among the {n_ranked} ranked stocks at the {day:%a %b %-d} close (1 = best)"
                       + (f". At the {p.off_date:%a %b %-d} decision it was #{rank_then:.0f}." if rank_then is not None
@@ -1056,8 +1114,8 @@ def render_stock_header(p, ticker, tdata):
                   tip="Position among the 10 stocks picked at the last decision, in rank order. The picks skip stocks "
                       f"whose sector already has {SECTOR_MAX}, so the slot can be smaller than the rank."),
         stat_html("Portfolio weight", fmt(weight * 100 if weight > 0 else None, ".1f", suffix="%")),
-        stat_html("Technical", fmt(num(latest.get('Technical_Score')), ".1f")),
-        stat_html("Strength vs sector/SPY", fmt(num(latest.get('RS_Score')), ".1f"), sign_color(num(latest.get('RS_Score')))),
+        stat_html("Technical", fmt(num(latest.get('Technical_Score')), ".1f"), score_tone(num(latest.get('Technical_Score')))),
+        stat_html("Strength vs sector/SPY", fmt(num(latest.get('RS_Score')), ".1f"), score_tone(num(latest.get('RS_Score')))),
         stat_html("Next earnings", pd.Timestamp(next_ed).strftime("%b %d") if next_ed else "—"),
     ]
     hold = row_for(HOLDINGS_CSV, ticker) if weight > 0 else None
@@ -1069,18 +1127,18 @@ def render_stock_header(p, ticker, tdata):
         ]
     show_html(f"""
         <div class="sa-hero">
-          <div class="sa-hero-row">
-            <div class="sa-ident">
-              <div class="sa-sym">{esc(ticker)}</div>
-              <div class="sa-price" title="Latest completed daily bar — the strategy's official price">{fmt(num(latest['Close']), ",.2f", "$")}</div>
-              {live_html}
-              <span class="sa-badge {SIGNAL_BADGE.get(status, 'sa-badge-grey')}" title="The strategy's decision in force (last decision)">{esc(badge)}</span>
-              {plan_html}
-              {chips_html}
-            </div>
-            <div class="sa-stats">{"".join(stats)}</div>
+          <div class="sa-ident">
+            <div class="sa-sym">{esc(ticker)}</div>
+            <div class="sa-price" title="Latest completed daily bar — the strategy's official price">{fmt(num(latest['Close']), ",.2f", "$")}</div>
+            {live_html}
+            <span class="sa-badge {SIGNAL_BADGE.get(status, 'sa-badge-grey')}" title="The strategy's decision in force (last decision)">{esc(badge)}</span>
+            {plan_html}
+            {chips_html}
           </div>
           <div class="sa-why">{esc(status + ": " + why) if why else ""}</div>
+          <div class="sa-stats">{"".join(stats)}</div>
+          <div class="sa-note">Scores: <b style="color:{GOOD};">green above {SCORE_GOOD}</b> · <b style="color:{CAUTION};">yellow 0 to {SCORE_GOOD}</b> ·
+            <b style="color:{BAD};">red below 0</b> (only stocks above 0 can be picked). Rank 1 = best. P&amp;L and returns: green up, red down.</div>
         </div>""")
 
 
@@ -1095,17 +1153,17 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
         + (["rsi", "macd"] if show_classic else [])
     height_of = {"price": 0.44, "score": 0.20, "rs": 0.18, "rsi": 0.11, "macd": 0.11}
     titles = {
-        "price": "<b>Price · Buy ▲ / Sold ▼ decisions · shaded = Hold</b>",
-        "score": f"Strategy score (green) = {W_TECH:g} × Technical (grey) + {1 - W_TECH:g} × Strength vs sector/SPY (red)",
+        "price": "<b>Price</b> · ▲ Buy / ▼ Sold decisions · yellow shading = held",
+        "score": f"<b>Strategy score</b> (teal) = {W_TECH:g} × Technical (grey) + {1 - W_TECH:g} × Strength vs sector/SPY (violet)",
         "rs": ("<b>Performance since " + f"{x_start:%b %-d, %Y}" + "</b> (% price change): " + " · ".join(
             f'<span style="color:{RS_COLORS[k]};">━ {name}</span>' for k, (name, _s) in rs_lines.items())),
-        "rsi": "RSI", "macd": "MACD",
+        "rsi": "<b>RSI</b> (above 70 = stretched up, below 30 = stretched down)", "macd": "<b>MACD</b> (indigo) vs signal (dashed)",
     }
     heights = [height_of[x] for x in panels]
     row_of = {x: i + 1 for i, x in enumerate(panels)}
     fig = make_subplots(rows=len(panels), cols=1, shared_xaxes=True, vertical_spacing=0.05,
                         row_heights=[h / sum(heights) for h in heights], subplot_titles=[titles[x] for x in panels])
-    fig.update_annotations(font=dict(size=12, color='#374151', family='Arial, sans-serif'), yshift=4)
+    fig.update_annotations(font=dict(size=12, color='#334155', family=CHART_FONT), yshift=4)
 
     # Price line (hover shows the day's status), earnings dates, moving averages
     status_txt = []
@@ -1114,24 +1172,24 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
         bits = [sig] + ([f"weight {w * 100:.1f}%"] if sig == "Hold" else []) \
             + ([f"rank #{r:.0f}"] if pd.notna(r) else []) + ([f"score {s:.1f}"] if pd.notna(s) else [])
         status_txt.append(" · ".join(bits))
-    fig.add_trace(go.Scatter(x=chart.index, y=chart['Close'], name='Close', line=dict(color='#27ae60', width=2.5), mode='lines',
+    fig.add_trace(go.Scatter(x=chart.index, y=chart['Close'], name='Close', line=dict(color=TEAL, width=2.5), mode='lines',
                              customdata=status_txt, hovertemplate='<b>Close</b> $%{y:.2f}<br>%{customdata}<extra></extra>'), row=1, col=1)
     earnings = chart[chart['is_earnings_date'] == 1]
     fig.add_trace(go.Scatter(x=earnings.index, y=earnings['Close'], name='Earnings date', mode='markers',
                              marker=dict(symbol='circle', size=9, color='#f97316'),
                              hovertemplate='<b>Earnings</b> %{x|%b %d, %Y}<br>$%{y:.2f}<extra></extra>'), row=1, col=1)
-    for ma, color in zip(MA_COLS, ['#ffd700', '#e74c3c', '#3498db', '#8b4513', '#808080']):
+    for ma, color in zip(MA_COLS, MA_COLORS):
         name = ma.upper().replace('_', ' ')
         fig.add_trace(go.Scatter(x=chart.index, y=chart[ma], name=name, line=dict(color=color, width=1), mode='lines',
                                  hovertemplate=f'<b>{name}</b> $%{{y:.2f}}<extra></extra>'), row=1, col=1)
     if periods:
         fig.add_trace(go.Scatter(x=[x_start], y=[None], mode="markers", name="Hold (shaded period)", hoverinfo="skip",
-                                 marker=dict(symbol="square", size=12, color="rgba(37,99,235,0.25)")), row=1, col=1)
+                                 marker=dict(symbol="square", size=12, color="rgba(245,158,11,0.35)")), row=1, col=1)
 
     # Entry / exit markers on the session after the decision (hollow = decided at the latest close, orders pending)
     shown = events[events['Fill'].fillna(x_end) >= x_start] if len(events) else events
-    for kind, marker, color, name in (("entry", "triangle-up", "#15803d", "Buy (strategy decision)"),
-                                      ("exit", "triangle-down", "#b91c1c", "Sold (strategy decision)")):
+    for kind, marker, color, name in (("entry", "triangle-up", GOOD, "Buy (strategy decision)"),
+                                      ("exit", "triangle-down", BAD, "Sold (strategy decision)")):
         e = shown[shown['Kind'] == kind] if len(shown) else shown
         if e.empty:
             continue
@@ -1149,7 +1207,7 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
     if len(regime_off):
         fig.add_trace(go.Scatter(
             x=regime_off.index, y=[top_y] * len(regime_off), mode='markers', name=f'Market filter OFF (positions {HALVED})',
-            marker=dict(symbol='diamond', size=8, color='#d97706'),
+            marker=dict(symbol='diamond', size=8, color=CAUTION),
             hovertemplate=f'<b>Market filter OFF</b> %{{x|%b %d}}: {REGIME_OFF},<br>all positions {HALVED} that week<extra></extra>'),
             row=1, col=1)
 
@@ -1180,7 +1238,7 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
             live_day = lts.tz_convert(CT).normalize().tz_localize(None)
             fig.add_trace(go.Scatter(
                 x=[live_day], y=[lp], name="Live", mode="markers",
-                marker=dict(symbol="circle", size=8, color="#16a34a", line=dict(width=2, color="#ffffff")),
+                marker=dict(symbol="circle", size=8, color=TEAL, line=dict(width=2, color="#ffffff")),
                 hovertemplate="<b>Live</b> $%{y:.2f}<br>%{x|%b %d, %Y} · intraday, display only<extra></extra>"),
                 row=1, col=1)
             x_right = max(x_right, live_day) + pd.Timedelta(days=2)
@@ -1201,8 +1259,8 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
     if "score" in row_of:  # score panel
         r = row_of["score"]
         for col, name, color, width, dash in (("Technical_Score", "Technical", "#9ca3af", 1.25, "dot"),
-                                              ("RS_Score", "Strength vs sector/SPY", "#dc2626", 1.5, "solid"),
-                                              ("Strategy_Score", "Strategy score", "#16a34a", 2, "solid")):
+                                              ("RS_Score", "Strength vs sector/SPY", "#8b5cf6", 1.5, "solid"),
+                                              ("Strategy_Score", "Strategy score", TEAL, 2, "solid")):
             fig.add_trace(go.Scatter(x=chart.index, y=chart[col], name=name, mode='lines', line=dict(color=color, width=width, dash=dash),
                                      showlegend=False, hovertemplate=f'<b>{name}</b> %{{y:.1f}}<extra></extra>'), row=r, col=1)
         fig.add_hline(y=0, line=dict(color='rgba(100,116,139,0.5)', width=1, dash='dot'), row=r, col=1)
@@ -1215,34 +1273,35 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
         fig.add_hline(y=0, line=dict(color='rgba(100,116,139,0.5)', width=1, dash='dot'), row=r, col=1)
     if "rsi" in row_of:
         r = row_of["rsi"]
-        fig.add_trace(go.Scatter(x=chart.index, y=chart['RSI'], name='RSI', line=dict(color='#ff7f0e', width=1.5), mode='lines',
+        fig.add_trace(go.Scatter(x=chart.index, y=chart['RSI'], name='RSI', line=dict(color='#0ea5e9', width=1.5), mode='lines',
                                  showlegend=False, hovertemplate='<b>RSI</b> %{y:.1f}<extra></extra>'), row=r, col=1)
-        fig.add_hline(y=70, line_dash="dash", line_color="rgba(200, 0, 0, 0.3)", row=r, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="rgba(0, 200, 0, 0.3)", row=r, col=1)
+        fig.add_hline(y=70, line_dash="dash", line_color="rgba(185,28,28,0.35)", row=r, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="rgba(21,128,61,0.35)", row=r, col=1)
         fig.update_yaxes(range=[0, 100], row=r, col=1)
         r = row_of["macd"]
-        fig.add_trace(go.Scatter(x=chart.index, y=chart['macd'], name='MACD', line=dict(color='#d62728', width=1.5), mode='lines',
+        fig.add_trace(go.Scatter(x=chart.index, y=chart['macd'], name='MACD', line=dict(color='#4f46e5', width=1.5), mode='lines',
                                  showlegend=False, hovertemplate='<b>MACD</b> %{y:.3f}<extra></extra>'), row=r, col=1)
-        fig.add_trace(go.Scatter(x=chart.index, y=chart['MACD Signal'], name='MACD signal', line=dict(color='#1f77b4', width=1.5, dash='dash'),
+        fig.add_trace(go.Scatter(x=chart.index, y=chart['MACD Signal'], name='MACD signal', line=dict(color='#94a3b8', width=1.5, dash='dash'),
                                  mode='lines', showlegend=False, hovertemplate='<b>Signal</b> %{y:.3f}<extra></extra>'), row=r, col=1)
         fig.add_hline(y=0, line_dash="dot", line_color="rgba(128, 128, 128, 0.4)", row=r, col=1)
 
     # Held periods shaded on all panels (added last, with exclude_empty_subplots=False, or plotly drops them)
     for start, end in periods:
         if end >= x_start:
-            fig.add_vrect(x0=max(start, x_start), x1=end, fillcolor="rgba(37,99,235,0.08)", line_width=0, layer="below",
+            fig.add_vrect(x0=max(start, x_start), x1=end, fillcolor=HOLD_SHADE, line_width=0, layer="below",
                           row="all", col=1, exclude_empty_subplots=False)
 
-    grid = dict(showgrid=True, gridcolor='rgba(200, 198, 195, 0.35)', showline=True, linecolor='rgba(200, 198, 195, 0.4)',
-                tickfont=dict(size=10, color='#6b7280'), zeroline=False)
+    grid = dict(showgrid=True, gridcolor='#eef2f7', showline=True, linecolor='#e2e8f0', tickfont=dict(size=10, color='#64748b'),
+                zeroline=False)
     fig.update_layout(
         height=int(560 + 170 * (len(panels) - 1)), hovermode='x unified', margin=dict(l=50, r=30, t=90, b=64),
         plot_bgcolor='#ffffff', paper_bgcolor='#ffffff', dragmode=False,
-        legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="center", x=0.5, font=dict(size=10, color='#374151'),
-                    bgcolor='rgba(255, 255, 255, 0.95)', bordercolor='#e2e8f0', borderwidth=1),
-        font=dict(family=CHART_FONT, size=11, color='#374151'),
+        legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="center", x=0.5, font=dict(size=10, color='#334155'),
+                    title=dict(text="<b>Legend</b>  ", font=dict(size=10, color='#64748b')),
+                    bgcolor='#f8fafc', bordercolor='#e2e8f0', borderwidth=1),
+        font=dict(family=CHART_FONT, size=11, color='#334155'),
         hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family=CHART_FONT))
-    fig.update_xaxes(type="date", range=[x_start, x_right], showspikes=True, spikemode="across", spikethickness=1, spikecolor="#6b7280",
+    fig.update_xaxes(type="date", range=[x_start, x_right], showspikes=True, spikemode="across", spikethickness=1, spikecolor="#94a3b8",
                      dtick=7 * 24 * 60 * 60 * 1000, tickformat='%b %d', tickangle=-45,
                      **(grid | dict(showgrid=False)))
     fig.update_yaxes(**grid)
@@ -1253,6 +1312,7 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
 def stock_chart_inputs(ticker, tdata):
     """Chart-option checkboxes + the built figure (displayed later, below the detail block)."""
     has_strategy = bool(tdata['Strategy_Score'].notna().any())
+    show_html('<div class="sa-group-title" style="margin:0.4rem 0 0.1rem;">Chart panels</div>')
     o = st.columns(4)
     show_strategy = o[0].checkbox("Strategy score", value=True, key="show_strategy", disabled=not has_strategy)
     show_rs = o[1].checkbox("Relative strength", value=True, key="show_rs")
@@ -1269,41 +1329,34 @@ def render_stock_figure(fig, ticker):
     st.plotly_chart(fig, width="stretch", config={
         'displaylogo': False, 'scrollZoom': False, 'doubleClick': 'reset',
         'modeBarButtonsToRemove': ['pan2d', 'select2d', 'lasso2d', 'autoScale2d', 'zoomIn2d', 'zoomOut2d']})
-    st.caption("**How to read the panels** \u00b7 **Strategy score** \u2014 above 0 is good (a positive trend and "
-               "stronger than its peers on balance; only stocks above 0 can be picked) and rising is better; below 0 and falling is bad. "
-               f"\u00b7 **Performance** \u2014 % price change since the chart start: **{ticker}** (blue) vs "
-               + " and ".join(f"**{name}** ({color})" for name, color in ((names.get("market"), "grey"),
+    vs = " and ".join(f"<b>{esc(name)}</b> ({color})" for name, color in ((names.get("market"), "grey"),
                                                                           (names.get("sector"), "orange")) if name)
-               + f". {ticker}'s line above the others = it has beaten them since then; the gap widening = "
-               "it is getting stronger than the market / its sector.")
+    show_html(f'<div class="sa-note"><b>How to read the chart</b> · <b>Price</b>: <b style="color:{GOOD};">▲ Buy</b> / '
+              f'<b style="color:{BAD};">▼ Sold</b> = the strategy\'s decisions (hollow = orders pending), yellow shading = held, '
+              'orange dots = earnings. · <b>Strategy score</b>: above 0 and rising is good (a positive trend and stronger than '
+              'its peers); below 0 and falling is bad. · <b>Performance</b>: % price change since the chart start: '
+              f'<b>{esc(ticker)}</b> (blue) vs {vs}. {esc(ticker)} above the others = it has beaten them; a widening gap = it is '
+              'getting stronger than the market / its sector.</div>')
 
 
-def _mini_stat(label, value, color="#0f172a"):
-    """One compact label-above-value stat for the stock detail card."""
-    v = "\u2014" if value is None else str(value)
-    return (f'<div style="min-width:60px;"><div style="font-size:0.66rem;font-weight:600;letter-spacing:.05em;'
-            f'color:#94a3b8;text-transform:uppercase;white-space:nowrap;">{esc(label)}</div>'
-            f'<div style="font-size:0.95rem;font-weight:700;color:{color};margin-top:2px;white-space:nowrap;">{esc(v)}</div></div>')
-
-
-def _detail_group(title, stats_html, note=""):
-    """One titled row inside the stock detail card."""
-    note_html = f'<div style="font-size:0.74rem;color:#94a3b8;margin-top:8px;">{esc(note)}</div>' if note else ""
-    return (f'<div style="padding:12px 0;border-top:1px solid #f1f5f9;">'
-            f'<div style="font-size:0.7rem;font-weight:700;letter-spacing:.09em;color:#64748b;'
-            f'text-transform:uppercase;margin-bottom:9px;">{esc(title)}</div>'
-            f'<div style="display:flex;flex-wrap:wrap;gap:10px 28px;">{stats_html}</div>{note_html}</div>')
+def _detail_group(title, stats, note=""):
+    """One titled row of stat tiles inside the stock detail card; stats = [(label, value, color)]."""
+    return (f'<div class="sa-group"><div class="sa-group-title">{esc(title)}</div><div class="sa-stats" style="margin-top:0.5rem;">'
+            + "".join(stat_html(l, "\u2014" if v is None else v, c) for l, v, c in stats) + "</div>"
+            + (f'<div class="sa-why">{esc(note)}</div>' if note else "") + "</div>")
 
 
 def render_stock_more(ticker, tdata, has_strategy):
     """Always-open detail card above the chart: moving averages, fundamentals/news, per-stock forward test."""
     latest = tdata.nlargest(1, 'Date').iloc[0]
-    ma_stats = [(ma.upper().replace('_', ' '), fmt(num(latest[ma]), ",.2f", "$")) for ma in MA_COLS]
+    close = num(latest['Close'])
+    ma_stats = [(ma.upper().replace('_', ' '), fmt(num(latest[ma]), ",.2f", "$"),     # green = the close is above it
+                 tone(close - num(latest[ma])) if close and num(latest[ma]) else INK) for ma in MA_COLS]
 
     # Context: latest-day values only, NOT part of the backtested rules
     company_df = load_company()
     comp = company_metrics(ticker, company_df)
-    close, fv = num(latest['Close']), comp.get('fair_value')
+    fv = comp.get('fair_value')
     upside = (fv / close - 1) * 100 if fv and close else None
     sentiment = num(latest['SentimentScore'])
     comp_row = company_df[company_df['Symbol'].astype(str).str.upper() == ticker] if 'Symbol' in company_df else pd.DataFrame()
@@ -1313,16 +1366,16 @@ def render_stock_more(ticker, tdata, has_strategy):
     news_dates = pd.to_datetime(news.loc[news['symbol'] == ticker, 'date'], utc=True, format='mixed', errors='coerce')
     last_news = news_dates.max() if len(news_dates) else pd.NaT
     fund_stats = [
-        ("Balance sheet", fmt(num(latest['Fundamental_Weight']), ".2f"), "#0f172a"),
-        ("Sentiment", fmt(sentiment, ".2f"), sign_color(sentiment)),
-        ("Fair value", fmt(fv, ",.2f", "$"), "#0f172a"),
-        ("Upside", fmt(upside, "+.1f", suffix="%"), sign_color(upside)),
-        ("P/E", fmt(comp.get('pe_ratio'), ".1f"), "#0f172a"),
-        ("P/B", fmt(comp.get('pb_ratio'), ".2f"), "#0f172a"),
-        ("Rev YoY", fmt(comp.get('revenue_growth_yoy'), ".1f", suffix="%"), "#0f172a"),
-        ("ROE", fmt(comp.get('roe'), ".1f", suffix="%"), "#0f172a"),
-        ("Net margin", fmt(comp.get('net_margin'), ".1f", suffix="%"), "#0f172a"),
-        ("Debt/Eq", fmt(comp.get('debt_to_equity'), ".2f"), "#0f172a"),
+        ("Balance sheet", fmt(num(latest['Fundamental_Weight']), ".2f"), tone(num(latest['Fundamental_Weight']))),
+        ("Sentiment", fmt(sentiment, ".2f"), tone(sentiment)),
+        ("Fair value", fmt(fv, ",.2f", "$"), INK),
+        ("Upside", fmt(upside, "+.1f", suffix="%"), tone(upside)),
+        ("P/E", fmt(comp.get('pe_ratio'), ".1f"), INK),
+        ("P/B", fmt(comp.get('pb_ratio'), ".2f"), INK),
+        ("Rev YoY", fmt(comp.get('revenue_growth_yoy'), ".1f", suffix="%"), tone(comp.get('revenue_growth_yoy'))),
+        ("ROE", fmt(comp.get('roe'), ".1f", suffix="%"), tone(comp.get('roe'))),
+        ("Net margin", fmt(comp.get('net_margin'), ".1f", suffix="%"), tone(comp.get('net_margin'))),
+        ("Debt/Eq", fmt(comp.get('debt_to_equity'), ".2f"), INK),
     ]
     fund_note = ("Context only (latest day, not part of the backtested rules) \u00b7 fundamentals: "
                  + (f"quarter ending {fiscal:%Y-%m-%d}" if pd.notna(fiscal) else "none on file")
@@ -1339,14 +1392,14 @@ def render_stock_more(ticker, tdata, has_strategy):
         q = bench["QQQ"].loc[fw["Start"]:].dropna() if bench is not None and "QQQ" in bench else pd.Series(dtype=float)
         qqq = (q.iloc[-1] / q.iloc[0] - 1) * 100 if len(q) else None
         n, ot, med, bnh = fw["Closed trades"], fw["Open trade"], fw["Median trade %"], fw["Buy & hold %"]
-        fw_stats = [("Start", start_txt, "#0f172a"), ("Closed trades", f"{n}", "#0f172a"),
+        fw_stats = [("Start", start_txt, INK), ("Closed trades", f"{n}", INK),
                     ("Open trade", f"{ot['Entry']:%b %-d} @ ${ot['Price']:,.2f} · {ot['Change %']:+.2f}%" if ot else "none",
-                     sign_color(ot["Change %"]) if ot else "#0f172a")]
+                     sign_color(ot["Change %"]) if ot else INK)]
         if n:
-            fw_stats += [("Win rate", fmt(fw["Win rate %"], ".0f", suffix="%"), "#0f172a"),
+            fw_stats += [("Win rate", fmt(fw["Win rate %"], ".0f", suffix="%"), tone(fw["Win rate %"], 50, 50)),
                          ("Median trade", fmt(med, "+.2f", suffix="%"), sign_color(med)),
-                         ("Median hold", f"{fw['Median hold (sessions)']:.0f} sessions", "#0f172a")]
-        fw_stats += [("Held % of sessions", fmt(fw["Held % of sessions"], ".0f", suffix="%"), "#0f172a"),
+                         ("Median hold", f"{fw['Median hold (sessions)']:.0f} sessions", INK)]
+        fw_stats += [("Held % of sessions", fmt(fw["Held % of sessions"], ".0f", suffix="%"), INK),
                      (f"Buy & hold {since}", fmt(bnh, "+.2f", suffix="%"), sign_color(bnh)),
                      (f"QQQ {since}", fmt(qqq, "+.2f", suffix="%"), sign_color(qqq))]
         fw_note = (("" if n else f"Forward test started {start_txt}; no closed trades yet. ")
@@ -1354,15 +1407,11 @@ def render_stock_more(ticker, tdata, has_strategy):
                    "warms up the indicators); trades at the decision-day close, 0.1%/side. QQQ is not traded, "
                    "comparison only.")
 
-    groups = _detail_group("Moving averages", "".join(_mini_stat(l, v) for l, v in ma_stats))
-    groups += _detail_group("Fundamentals & news",
-                            "".join(_mini_stat(l, v, c) for l, v, c in fund_stats), fund_note)
+    groups = _detail_group("Moving averages (green = the close is above it)", ma_stats)
+    groups += _detail_group("Fundamentals & news", fund_stats, fund_note)
     if fw_stats:
-        groups += _detail_group("Per-stock forward test", "".join(_mini_stat(l, v, c) for l, v, c in fw_stats), fw_note)
-    show_html('<div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;'
-              'padding:4px 20px 14px 20px;box-shadow:0 1px 3px rgba(15,23,42,.06);margin:6px 0 10px 0;">'
-              f'<div style="font-size:1.02rem;font-weight:700;color:#0f172a;padding:12px 0 2px 0;">More about {esc(ticker)}</div>'
-              + groups + '</div>')
+        groups += _detail_group("Per-stock forward test", fw_stats, fw_note)
+    show_html(f'<div class="sa-card"><div class="sa-card-title">More about {esc(ticker)}</div>' + groups + '</div>')
 
 
 # =====================================================================================================================
@@ -1393,7 +1442,9 @@ def render_latest_signals(p):
                   "no decision today: Hold = in the portfolio, Watch = ranked but not held, Score below 0 = not eligible")
                + f" · {plan_when} plan = what the {plan_when} full rebalance would do at this close (Reports/strategy_picks.csv, "
                "the numbers the trade step uses; final at that close). Click a row to open the stock.")
-    event = st.dataframe(table.round({"Score today": 1, "Held now %": 2}), hide_index=True, width="stretch",
+    table = table.round({"Score today": 1, "Held now %": 2})
+    event = st.dataframe(toned(toned(table, ["Signal today", f"{plan_when} plan"]), ["Score today"], good=SCORE_GOOD),
+                         hide_index=True, width="stretch",
                          on_select="rerun", selection_mode="single-row", key="latest_signals_tbl",
                          column_config={"Score today": SCORE_COL, "Held now %": PCT_COL})
     open_symbol(table, event, "latest_signals")
@@ -1433,8 +1484,9 @@ def render_short_stock(sym, r):
     c[2].metric("RSI 14", f"{r['RSI_14']:.1f}")
     for i, n in enumerate((10, 30, 50)):
         c[3 + i].metric(f"MA {n}", f"${r[f'MA_{n}']:,.2f}")
-    st.caption(f"Since first close {r['Return_Since_First_Close_%']:+.1f}% · 21-day {r['Return_21d_%']:+.1f}% · "
-               f"63-day {r['Return_63d_%']:+.1f}% · {abs(r['Off_High_%']):.1f}% below its high of ${r['High_Since_First']:,.2f}. "
+    ret = lambda v: md_tone(f"{v:+.1f}%", tone(v))
+    st.caption(f"Since first close {ret(r['Return_Since_First_Close_%'])} · 21-day {ret(r['Return_21d_%'])} · "
+               f"63-day {ret(r['Return_63d_%'])} · {abs(r['Off_High_%']):.1f}% below its high of ${r['High_Since_First']:,.2f}. "
                "Rough signal: Buy if the close is above the 10-day, the 10-day above the 30-day and the 30-day above the 50-day "
                "average with RSI 50-70; Sell if the close is below both the 30- and 50-day averages or RSI is under 40; otherwise "
                "Hold. Less reliable than the real signal (no 200-day history) and never used for trading.")
@@ -1442,13 +1494,14 @@ def render_short_stock(sym, r):
     if closes is None:
         st.caption("Price chart unavailable right now (yfinance).")
         return
-    fig = go.Figure(go.Scatter(x=closes.index, y=closes, name="Close", line=dict(color="#0f172a")))
-    for n, color in ((10, "#2563eb"), (30, "#16a34a"), (50, "#d97706")):
+    fig = go.Figure(go.Scatter(x=closes.index, y=closes, name="Close", line=dict(color=TEAL, width=2.5)))
+    for n, color in zip((10, 30, 50), MA_COLORS):
         fig.add_trace(go.Scatter(x=closes.index, y=closes.rolling(n).mean(), name=f"MA {n}", line=dict(color=color, width=1)))
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10), xaxis=dict(type="date"),
                       title=f"{sym} daily close (display only, yfinance)", plot_bgcolor="#ffffff", paper_bgcolor="#ffffff",
-                      font=dict(family=CHART_FONT, size=11, color="#374151"), yaxis=dict(tickformat="$,.0f", gridcolor="#eef2f7"),
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                      font=dict(family=CHART_FONT, size=11, color="#334155"), yaxis=dict(tickformat="$,.0f", gridcolor="#eef2f7"),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="#f8fafc",
+                                  bordercolor="#e2e8f0", borderwidth=1, title=dict(text="<b>Legend</b>  ")))
     st.plotly_chart(fig, width="stretch", key=f"short_chart_{sym}")
 
 
@@ -1486,7 +1539,7 @@ def render_last_decision(p):
     counts = board["Signal"].value_counts()
     filters = {"Portfolio & changes": ["Buy", "Hold", "Sold"],
                "Watch list": ["Watch", "Watch (sector limit)"],
-               "All stocks": list(SIGNAL_COLOR)}
+               "All stocks": SIGNALS}
     show = st.radio("Show", list(filters), horizontal=True, key="signals_filter", label_visibility="collapsed")
     part = board[board["Signal"].isin(filters[show])].reset_index(drop=True)
     st.caption(f"Buy {counts.get('Buy', 0)} · Hold {counts.get('Hold', 0)} · "
@@ -1497,16 +1550,19 @@ def render_last_decision(p):
                f"Next rebalance plan = what the {plan_when} rebalance would do at the latest close (the numbers the trade "
                "step uses). Orders for a decision go out that day at 2:30 PM CT. Click a row to open the stock on the "
                "Dashboard tab.")
-    event = st.dataframe(part.round({"Score": 1, "Weight before %": 2, "Portfolio weight %": 2}), hide_index=True,
+    shown = toned(part.round({"Score": 1, "Weight before %": 2, "Portfolio weight %": 2}),
+                  ["Signal", "Next rebalance plan", "Rank change", "Earnings soon"])
+    event = st.dataframe(toned(shown, ["Score"], good=SCORE_GOOD), hide_index=True,
                          width="stretch", on_select="rerun", selection_mode="single-row", key=f"sig_tbl_{show}",
                          column_config={"Why": st.column_config.TextColumn("Why", width="large"), "Score": SCORE_COL,
+                                        "Rank change": st.column_config.NumberColumn(format="%+.0f"),
                                         "Weight before %": PCT_COL, "Portfolio weight %": PCT_COL})
     open_symbol(part, event, "signals")
 
 
 def render_data_and_settings(p):
     """Data freshness table."""
-    st.dataframe(p.freshness, width="stretch", hide_index=True)
+    st.dataframe(toned(p.freshness, ["Status"]), width="stretch", hide_index=True)
     stale = p.freshness[p.freshness["Status"].str.startswith("⚠️")]
     if not stale.empty:
         st.warning("Stale or missing: " + ", ".join(stale["File"]) + " — run `python run_all.py`.")
@@ -1561,8 +1617,7 @@ def render_live_holdings():
         return
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
     money, pct = st.column_config.NumberColumn(format="dollar"), st.column_config.NumberColumn(format="%+.2f%%")
-    pl = lambda v: "" if v != v else f"color: {'#15803d' if v > 0 else '#b91c1c' if v < 0 else '#64748b'}"
-    st.dataframe(table.style.map(pl, subset=["P/L $", "P/L %", "Today %"]), hide_index=True, width="stretch",
+    st.dataframe(toned(table, ["P/L $", "P/L %", "Today %"]), hide_index=True, width="stretch",
                  height=35 * (len(table) + 1) + 3,                  # every row visible, no inner scroll
                  column_config={"Shares": st.column_config.NumberColumn(format="%.2f"), "Avg price": money,
                                 "Cost basis": money, "Market value": money, "P/L $": money, "Price": money,
