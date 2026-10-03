@@ -12,10 +12,10 @@ Rules enforced everywhere:
   * QQQ / SPY / sector ETFs are benchmarks and inputs, never traded by the strategies
 
 Fidelity limits (what the backtest does NOT model):
-  * fills are modeled at the next session's open; live trades evening extended-hours limit
-    orders plus a morning fill-check for leftovers
+  * fills are modeled at the next session's open; live decides and trades at 2:30 PM CT with limit
+    orders at the bid/ask, plus a 9 AM CT fill check for leftovers
   * no partial fills and no rejected orders (every modeled order fills in full at the open)
-  * fractional shares (live trades whole shares)
+  * fractional shares (live: 2 decimals in market hours, whole shares after hours)
   * 0.1%/side cost only: no spread, no borrow fees, no corporate-action handling
   * a symbol untradable on its add day (halt) is not bought later; a delisted holding is
     liquidated at its last close on the first session with no bars
@@ -904,7 +904,7 @@ def _peer_median(r, symbols, sector_of, min_peers=3, leave_one_out=True):
     by_sector = {}
     for s in symbols:
         by_sector.setdefault(sector_of.get(s), []).append(s)
-    for sec, members in by_sector.items():
+    for members in by_sector.values():
         block = r[members]
         for s in members:
             peers = block.drop(columns=[s]) if leave_one_out else block
@@ -1024,9 +1024,9 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
     before buys; buys are scaled to available cash. 0.1%/side cost on traded notional, no interest
     on cash.
 
-    Fidelity limits (honest): fills are modeled at the next session's open (live uses evening
-    extended-hours limit orders plus a morning fill-check); no partial fills, no rejected orders,
-    no corporate-action handling; fractional shares (live trades whole shares); a symbol untradable
+    Fidelity limits (honest): fills are modeled at the next session's open (live trades at 2:30 PM CT
+    with limit orders at the bid/ask plus a 9 AM CT fill check); no partial fills, no rejected orders,
+    no corporate-action handling; fractional shares; a symbol untradable
     on its add day (halt) is not bought later - its add day has passed.
     """
     dates = open_w.index

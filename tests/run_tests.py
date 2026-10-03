@@ -27,7 +27,7 @@
                          transient retry policy, no-retry rule for trade/fill-check phases,
                          diagnose-only contract (LLM stubbed, no network)
   test_alpaca_paper_reads.py mocked tests for alpaca_paper.py's read-only views: open_orders,
-                         market_clock, portfolio_history parsing + the read-only guardrails
+                         market_clock parsing + the read-only guardrails
                          (live endpoint allowlist, no order-placing code)
   test_catch_up.py       missed-decision catch-up: each decision runs once (2:30 PM slot or the next regular session),
                          superseded at the next slot; weekends wait for the open; holidays; send_now fill gate

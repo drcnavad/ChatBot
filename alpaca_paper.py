@@ -9,8 +9,7 @@ Safety rules built into this module:
   * Only the live endpoint https://api.alpaca.markets/v2 is accepted; any other URL (the paper
     paper-api.alpaca.markets host, plain http, another version or host) raises PaperAccountError
     before a request is made.
-  * Only HTTP GET requests to /account, /positions, /orders, /clock, /account/portfolio/history and
-    /account/activities (deposits/withdrawals) are possible.
+  * Only HTTP GET requests to /account, /positions, /orders, /clock and /account/activities (deposits/withdrawals) are possible.
     There is no code here that places, changes or cancels orders.
   * The keys come from .env (ALPACA_LIVE_KEY_ID, ALPACA_LIVE_SECRET_KEY). They are sent only in the request headers
     and are never printed, logged or written to a file.
@@ -47,8 +46,7 @@ LIVE_BASE_URL = "https://api.alpaca.markets/v2"       # the ONLY accepted endpoi
 KEY_ENV, SECRET_ENV = "ALPACA_LIVE_KEY_ID", "ALPACA_LIVE_SECRET_KEY"
 # Also accepted, in this order, if the names above are empty: Alpaca's standard key names.
 FALLBACK_NAMES = [("ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY")]
-ALLOWED_PATHS = ("/account", "/positions", "/orders", "/clock",
-                 "/account/portfolio/history", "/account/activities")   # read-only endpoints (GET only, live host only)
+ALLOWED_PATHS = ("/account", "/positions", "/orders", "/clock", "/account/activities")   # read-only endpoints (GET only, live host only)
 _LOCAL_TEST_URL = re.compile(r"http://(127\.0\.0\.1|localhost):\d{2,5}/v2")   # tests only (mock server on this machine)
 CT = ZoneInfo("America/Chicago")
 
@@ -173,22 +171,6 @@ class PaperAccount:
             if len(page) < 100:
                 return total
             params = {**params, "page_token": page[-1]["id"]}
-
-    def portfolio_history(self, period="1M", timeframe="1D"):
-        """Equity curve: one row per bar with As_Of (CT), Equity, P/L $ and P/L %.
-
-        Used for drift detection (is the account behaving like the strategy expects?). """
-        h = self._get("/account/portfolio/history", {"period": period, "timeframe": timeframe})
-        ts, eq = h.get("timestamp") or [], h.get("equity") or []
-        pl, plp = h.get("profit_loss") or [], h.get("profit_loss_pct") or []
-        rows = []
-        for i, t in enumerate(ts):
-            dt = pd.to_datetime(t, unit="s", utc=True, errors="coerce")
-            rows.append({"As_Of (CT)": dt.tz_convert(CT).strftime("%Y-%m-%d %H:%M") if pd.notna(dt) else "",
-                         "Equity": float(eq[i]) if i < len(eq) and eq[i] is not None else float("nan"),
-                         "P/L $": float(pl[i]) if i < len(pl) and pl[i] is not None else 0.0,
-                         "P/L %": float(plp[i]) * 100 if i < len(plp) and plp[i] is not None else 0.0})
-        return pd.DataFrame(rows, columns=["As_Of (CT)", "Equity", "P/L $", "P/L %"])
 
 
 # --- files for the rest of the pipeline --------------------------------------------------------------------------------

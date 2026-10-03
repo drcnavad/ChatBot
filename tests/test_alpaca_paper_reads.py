@@ -1,5 +1,4 @@
-"""Mocked tests for the new alpaca_paper.py read-only views (open_orders, market_clock,
-portfolio_history): parsing is correct and the module stays read-only (no order placement,
+"""Mocked tests for the alpaca_paper.py read-only views (open_orders, market_clock): parsing is correct and the module stays read-only (no order placement,
 live endpoint allowlist intact). Zero network calls.
 Run from the project root:  python tests/test_alpaca_paper_reads.py
 """
@@ -35,10 +34,6 @@ def make_fake():
         "/orders": [dict(ORDER), dict(ORDER, symbol="AAPL", status="held", side="sell")],
         "/clock": {"is_open": False, "next_open": "2026-09-28T13:30:00Z",
                    "next_close": "2026-09-28T20:00:00Z", "timestamp": "2026-09-26T16:00:00Z"},
-        "/account/portfolio/history": {"timestamp": [1758844800, 1758931200],
-                                       "equity": [100000.0, 100500.25],
-                                       "profit_loss": [0.0, 500.25],
-                                       "profit_loss_pct": [0.0, 0.005]},
     })
 
 
@@ -60,19 +55,6 @@ class TestNewReads(unittest.TestCase):
         self.assertIn("2026-09-28", mc["Next open (CT)"])
         self.assertIn("2026-09-28", mc["Next close (CT)"])
 
-    def test_portfolio_history(self):
-        ph = make_fake().portfolio_history()
-        self.assertEqual(list(ph.columns), ["As_Of (CT)", "Equity", "P/L $", "P/L %"])
-        self.assertEqual(len(ph), 2)
-        self.assertAlmostEqual(ph["Equity"].iloc[1], 100500.25)
-        self.assertAlmostEqual(ph["P/L %"].iloc[1], 0.5)
-
-    def test_portfolio_history_ragged(self):
-        f = FakeAccount({"/account/portfolio/history": {"timestamp": [1], "equity": [5.0]}})
-        ph = f.portfolio_history()
-        self.assertEqual(len(ph), 1)
-        self.assertEqual(ph["P/L $"].iloc[0], 0.0)      # missing series degrade gracefully
-
     def test_recent_orders_unchanged(self):
         ro = make_fake().recent_orders()
         self.assertEqual(len(ro), 2)
@@ -84,7 +66,6 @@ class TestNewReads(unittest.TestCase):
 class TestReadOnlyGuardrails(unittest.TestCase):
     def test_new_paths_allowlisted(self):
         self.assertIn("/clock", ap.ALLOWED_PATHS)
-        self.assertIn("/account/portfolio/history", ap.ALLOWED_PATHS)
 
     def test_dangerous_paths_refused_without_network(self):
         acct = ap.PaperAccount.__new__(ap.PaperAccount)
