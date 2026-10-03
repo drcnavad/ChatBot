@@ -1,7 +1,7 @@
 """Forward test from backtest_engine.FORWARD_START (Fri Oct 2, 2026), counted only from that close on, never backtested:
 
   1. the real Alpaca account (read-only GET requests through alpaca_paper; no orders, ever), and
-  2. STRATEGIES: 32 paper-only strategies next to it (the live rules recomputed the same way + 31 others). They are
+  2. STRATEGIES: 35 paper-only strategies next to it (the live rules recomputed the same way + 34 others). They are
      never traded; each one is a list of target weights built from data the pipeline already saves every day
      (Reports/signal_analysis.csv, factor_history.csv, earnings_date.csv, benchmark_prices.csv) + daily volume from
      Alpaca's free market data (forward_bars(): one bar download per run, the same request the pipeline makes).
@@ -67,7 +67,8 @@ RANK_RULE = ("Ranked by median weekly return (Friday to Friday); a tie goes to t
 # weights, half size when QQQ is below its 200-day average, no buys 5 days before earnings. "select" changes rank_targets
 # keys (n, sector_cap, vol_sizing, regime, ...), "earnings" None drops the earnings skip, "calendar" is "mwf" / "weekly"
 # (Friday only) / "monthly" (last session of the month). "weights" = a rule that is not a ranking (its own weights below);
-# "reweight" = the same picks with other weights; "stop" = the live rules + an ATR stop around earnings (STOPS).
+# "reweight" = the same picks with other weights; "stop" = the live rules + an ATR stop around earnings (STOPS);
+# "spare_dips" = the live rules + ATR dip buys with the cash they leave unused.
 PLAIN = {"max_pick_rank": None, "cap_soft": False}       # walk every rank, strict max 4 per sector
 EQ = {**PLAIN, "vol_sizing": False}                      # ... and an equal weight per stock
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
@@ -137,6 +138,15 @@ STRATEGIES = [
          rule="The live rules + the same stop from a holding's first trading day after earnings through 10 trading days "
               "later: sold at the close at or below its highest close since bought minus 3x ATR(14); the best stock the "
               "live rules would buy takes the slot."),
+    dict(name="ATR dip buy (top 30)", weights="atr_dip",
+         rule="Buy a stock ranked in the live top 30 when it closes 3x ATR(14) or more below its 20-day high close; 10% "
+              "each (at most 10, best rank first), sold after 10 trading days."),
+    dict(name="ATR dip buy, not after earnings", weights="atr_dip_ex_earn",
+         rule="The ATR dip buy, but not within 10 trading days after the stock's earnings."),
+    dict(name="Live + ATR dip buys in spare cash", spare_dips=True,
+         rule="The live rules; cash they leave unused (empty slots, half size when QQQ is weak) buys the not-after-earnings "
+              "ATR dips at 10% each (not within 5 days before earnings either), sold after 10 trading days or when the "
+              "live rules buy that stock or need the cash."),
     dict(name="Risk parity", reweight="risk_parity",
          rule="The live picks, weighted so each stock adds the same risk (63-day volatility and correlation)."),
 ]
@@ -357,6 +367,28 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False):
     return pd.DataFrame(out, index=dates, columns=cols), pd.DataFrame(opens, index=dates, columns=cols)
 
 
+def atr_dip_weights(signal, priority, hold=10, n=10, room=None, taken=None):
+    """ATR dip buys: buy at the close of a signal day (1/n each, best priority first, at most `room` positions that day,
+    default n), sell at the close `hold` sessions later. taken = stocks it may not hold that day (sold if held); with
+    fewer rooms than positions the oldest are sold first."""
+    S, P = signal.to_numpy(bool), np.nan_to_num(priority.reindex_like(signal).to_numpy(float), nan=-np.inf)
+    room = np.full(len(S), n) if room is None else room
+    tk = np.zeros(S.shape, bool) if taken is None else taken
+    out, held = np.zeros(S.shape), {}                     # column -> sessions held
+    for t in range(len(S)):
+        for j in list(held):
+            held[j] += 1
+            if held[j] >= hold or tk[t, j]:
+                del held[j]
+        while len(held) > room[t]:
+            del held[max(held, key=held.get)]
+        new = [j for j in np.argsort(-P[t], kind="stable") if S[t, j] and j not in held and not tk[t, j]]
+        for j in new[:max(0, room[t] - len(held))]:
+            held[j] = 0
+        out[t, list(held)] = 1 / n
+    return pd.DataFrame(out, index=signal.index, columns=signal.columns)
+
+
 def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     """Everything the strategies rank on, as Date x Symbol frames, from saved data only: `sig` = signal_analysis.csv rows
     (SIG_COLS), `facts` = factor_history.csv (the daily snapshot of news sentiment and the company-report score; each day
@@ -409,13 +441,22 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
               + 0.10 * (by_etf(b / b.shift(4) - 1) * 300).clip(-30, 30) / 30 * 100
               + 0.05 * fill(snap["SentimentScore"]).clip(-10, 10) * 10)
     held = legacy.gt(20).astype(float).where(legacy.gt(20) | legacy.lt(-25)).ffill().fillna(0.0).where(eligible, 0.0)
+    atr = bx["atr_ratio"] * c
+    after_earn = np.zeros(c.shape, bool)                  # the reaction day + 10 sessions after each report
+    for j, _, r in earnings_events(dates, cols, earnings):
+        after_earn[r:r + 11, j] = True
+    top30 = live.where(eligible & (live > 0)).rank(axis=1, ascending=False, method="first") <= 30
+    dip_a = (c <= c.rolling(20).max() - 3 * atr) & top30                 # 3x ATR(14) below the 20-day high close
+    dip_b = dip_a & ~after_earn
+    soon = be.earnings_days_ahead(dates, list(cols), earnings, be.WINNER.get("earnings_block_days")).notna()
     n = eligible.sum(axis=1)
-    weights = {"legacy": held.div(n, axis=0),
+    weights = {"atr_dip": atr_dip_weights(dip_a, live), "atr_dip_ex_earn": atr_dip_weights(dip_b, live),"legacy": held.div(n, axis=0),
                "dip": dip_weights(c, f["ma_50"], eligible),
                "trend": _carry(((f["ma_50"] > f["ma_200"]) & eligible).astype(float).div(n, axis=0), weekly)}
     have = bx["vwap_ratio"].notna().any(axis=1)
     return {"close": c.ffill(), "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
-            "weekly": weekly, "earnings": earnings, "atr": bx["atr_ratio"] * c, "open": bx["open_ratio"] * c,
+            "weekly": weekly, "earnings": earnings, "atr": atr,
+            "dip_spare": dip_b & ~soon.reindex(index=dates, columns=cols).fillna(False), "open": bx["open_ratio"] * c,
             "monthly": pd.Series([be.next_sessions(d, 1)[0].month != d.month for d in dates], index=dates),
             "through": have[have].index.max() if have.any() else pd.Timestamp(0)}
 
@@ -436,6 +477,9 @@ def strategy_targets(cfg, inp):
                                    earnings_block_days=cfg.get("earnings", "winner"), earnings=inp["earnings"])
         if cfg.get("reweight") == "risk_parity":
             tgt = risk_parity(tgt, inp["close"][tgt.columns], inp["weekly"])
+        if cfg.get("spare_dips"):                         # the cash the live rules leave unused buys ATR dips (10% each)
+            tgt = tgt + atr_dip_weights(inp["dip_spare"][tgt.columns], inp["scores"]["live"], taken=(tgt > 0).to_numpy(),
+                                        room=np.floor((1 - tgt.sum(axis=1)).to_numpy() * 10 + 1e-9).astype(int))
     return be.live_weights(tgt.clip(upper=MAX_WEIGHT)).reindex(columns=inp["close"].columns).fillna(0.0)
 
 

@@ -200,6 +200,10 @@ check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%
 check("registry: the strategies are not copies of each other (distinct weights over the test)",
       len({t.round(4).to_numpy().tobytes() for t in tg.values()}) >= len(ft.STRATEGIES) - 3)
 check("registry: WINNER untouched", be.WINNER == w0)
+lv, sp = (ft.strategy_targets(c, inp) for c in ft.STRATEGIES if c["name"] in (ft.LIVE, "Live + ATR dip buys in spare cash"))
+check("live + ATR dips in spare cash: exactly the live weights, plus 10% dip positions in other stocks only with spare cash",
+      np.allclose(sp.where(lv > 0, 0), lv) and (sp.where(lv == 0, 0).isin([0, ft.be.live_weights(0.1)])).all().all()
+      and (sp.sum(axis=1) <= 0.99 + 1e-9).all() and (sp.where(lv == 0, 0).to_numpy() > 0).any(), (lv > 0).sum(axis=1).min())
 live_raw, _ = be.winner_targets(inp["scores"]["live"], inp["eligible"], inp["vol"], inp["regime"], inp["weekly"],
                                 tiebreak_w=inp["scores"]["rs"], earnings=EARN)
 check("ATR stops: with no stop the day-by-day replay = be.winner_targets exactly (every day, both windows)",
@@ -322,6 +326,14 @@ ed = ft.earnings_drift(uc, spy, pd.DataFrame({"Symbol": ["A", "B"], "Earnings Da
 check("earnings drift: the reaction day (next session after a PM report, same day for AM) vs SPY, kept for `hold` sessions",
       ed["A"].iloc[3:5].round(6).tolist() == [round((95 / 90 - 101 / 100) * 100, 6)] * 2 and ed["A"].iloc[[2, 5]].isna().all()
       and ed["B"].iloc[2:4].tolist() == [0.0, 0.0] and ed["B"].iloc[4:].isna().all(), ed.to_dict("list"))
+ds = pd.DataFrame(False, index=pd.bdate_range("2026-01-05", periods=6), columns=list("ABC"))
+ds.iloc[0, 0] = ds.iloc[1, 1] = ds.iloc[1, 2] = ds.iloc[3, 0] = True
+dp = pd.DataFrame([[1.0, 2.0, 3.0]] * 6, index=ds.index, columns=ds.columns)           # C ranks best, then B
+d1, d2 = ft.atr_dip_weights(ds, dp, hold=3, n=2), ft.atr_dip_weights(ds, dp, hold=3, n=2, room=np.array([2, 2, 1, 2, 2, 2]))
+check("ATR dip buy: 1/n each, best rank first, sold after `hold` sessions (bought again on a new signal)",
+      d1["A"].tolist() == [0.5] * 6 and d1["B"].sum() == 0 and d1["C"].tolist() == [0, 0.5, 0.5, 0.5, 0, 0], d1.to_dict("list"))
+check("ATR dip buy: fewer rooms than positions -> the oldest is sold",
+      d2["A"].tolist() == [0.5, 0.5, 0, 0.5, 0.5, 0.5] and d2["C"].tolist() == [0, 0.5, 0.5, 0.5, 0, 0], d2.to_dict("list"))
 r = rng.normal(0, 1, (80, 3)) * [0.01, 0.02, 0.04]
 rc = pd.DataFrame(100 * np.exp(np.cumsum(r, axis=0)), index=pd.bdate_range("2026-01-01", periods=80), columns=list("XYZ"))
 rt = pd.DataFrame(0.3, index=rc.index, columns=rc.columns)
