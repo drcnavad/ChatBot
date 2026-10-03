@@ -730,6 +730,9 @@ def signal_board(df):
     ch = read_report_csv(CHANGES_CSV)
     sub = ch[ch["Symbol"].notna()] if ch is not None else pd.DataFrame()
     if not sub.empty:
+        # The decisions in force are the LATEST ones: sort newest-first so iloc[0]
+        # and drop_duplicates(keep="first") both pick the latest decision per symbol.
+        sub = sub.sort_values("Date", ascending=False)
         date = pd.Timestamp(sub["Date"].iloc[0])
     else:
         reb = df.loc[df["Rebalance_Day"] == 1, "Date"]
@@ -1555,7 +1558,9 @@ def render_last_decision(p):
     board.insert(6, "Rank change", board["Symbol"].map(lambda s: p.rank_change.get(s, (np.nan,))[0]))
     ch = read_report_csv(CHANGES_CSV)
     ok = ch is not None and {"Symbol", "Old_Weight"} <= set(ch.columns)
-    before = ch[ch["Symbol"].notna()].drop_duplicates("Symbol").set_index("Symbol")["Old_Weight"] if ok else {}
+    # Newest decision first so drop_duplicates keeps the latest Old_Weight per symbol.
+    _ch = ch.sort_values("Date", ascending=False) if ok else None
+    before = _ch[_ch["Symbol"].notna()].drop_duplicates("Symbol").set_index("Symbol")["Old_Weight"] if ok else {}
     board.insert(board.columns.get_loc("Portfolio weight %"), "Weight before %",
                  board["Symbol"].map(lambda s: before.get(s, np.nan) * 100))
     board.loc[board["Signal"] == "Sold", "Portfolio weight %"] = 0.0      # after the decision a sold stock weighs 0

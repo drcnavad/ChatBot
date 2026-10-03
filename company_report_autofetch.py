@@ -37,7 +37,9 @@ MANUAL_SYMBOL = ""  # e.g. "UPST" -> fetch only this stock now; "" -> daily rota
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
-ALPHA_VANTAGE_API = os.environ["ALPHAVANTAGE_API_KEY"]
+ALPHA_VANTAGE_API = os.getenv("ALPHAVANTAGE_API_KEY")
+if not ALPHA_VANTAGE_API:
+    raise EnvironmentError("Missing ALPHAVANTAGE_API_KEY in .env - add it to run the fundamentals step")
 REPORTS_DIR = os.path.join(PROJECT_ROOT, "Reports")
 BALANCE_CSV = os.path.join(REPORTS_DIR, "balance_sheet.csv")
 RUN_LOG_CSV = os.path.join(REPORTS_DIR, "fetch_run_log.csv")  # Symbol | RunDate | IncomeStatus | BalanceStatus
@@ -132,6 +134,8 @@ def save_fundamentals(new_df):
 
 
 def load_run_log():
+    if not os.path.exists(RUN_LOG_CSV):
+        return pd.DataFrame(columns=["Symbol", "RunDate", "IncomeStatus", "BalanceStatus"])
     log = pd.read_csv(RUN_LOG_CSV)
     log["RunDate"] = pd.to_datetime(log["RunDate"], errors="coerce").dt.date
     return log.dropna(subset=["RunDate"])
@@ -139,7 +143,7 @@ def load_run_log():
 
 def log_run(symbol, income_status, balance_status):
     pd.DataFrame([[symbol, datetime.now().date(), income_status, balance_status]]).to_csv(
-        RUN_LOG_CSV, mode="a", header=False, index=False
+        RUN_LOG_CSV, mode="a", header=not os.path.exists(RUN_LOG_CSV), index=False
     )
 
 

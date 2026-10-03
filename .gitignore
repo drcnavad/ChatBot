@@ -76,3 +76,6 @@ Reports/.*.lock
 # live order state + watchdog resume point (account data, never commit)
 Reports/live_pending_orders.json*
 Reports/.pipeline_checkpoint.json
+
+# pre-earnings stop state (account data: the stop sales, never commit)
+Reports/earnings_stop_state.json*
