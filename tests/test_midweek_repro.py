@@ -1,11 +1,13 @@
 """Regression: the LIVE engine (backtest_engine.winner_targets) reproduces the tested backtests exactly, on the live universe
 (sector_mapping.tradable_symbols; pinned for the 91-stock list of 2026-10-01 = tag C6-U91, see PINNED_UNIVERSE):
-  1. plain C6-U91-MW (Mon/Wed top 3 in / below 15 out):  +463.17%, Sharpe 1.4156, never-seen 0.7617
-  2. C6-U91-MW30 (+ sell anything worse than rank 30 at the Mon/Wed checks): +466.67%, Sharpe 1.4423, never-seen 0.7584
+  1. plain C6-U91-MW (Mon/Wed top 3 in / below 15 out):  +477.60%, Sharpe 1.4277, never-seen 0.7717
+  2. C6-U91-MW30 (+ sell anything worse than rank 30 at the Mon/Wed checks): +482.97%, Sharpe 1.4561, never-seen 0.7711
   3. C6-U91-T20-MW30 (picks only from ranks 1-20, sector cap relaxed to fill 10 slots, top-3 swaps ignore the cap):
-     +451.51%, Sharpe 1.3227, never-seen 0.5887
+     +477.79%, Sharpe 1.3520, never-seen 0.6378
   4. C6-U91-T20-MW30-E5 (the live rules from 2026-09-25: + no new buys with earnings within 5 days; PARTIAL - the earnings
-     dates on disk start in late 2024): +414.17%, Sharpe 1.2700
+     dates on disk start in late 2024): +438.29%, Sharpe 1.2979
+  All four with the 20% max weight per stock (WINNER["max_weight"], user decision 2026-10-02; pins re-baselined then -
+  without it: 1. +463.17% / 1.4156 / 0.7617, 2. +466.67% / 1.4423 / 0.7584, 3. +451.51% / 1.3227 / 0.5887, 4. +414.17% / 1.2700).
   (3 and 4 were user decisions, not pre-registered tests.) Pins re-baselined 2026-10-01 for the universe change (user decision:
   drop ADBE AFRM MU SOFI MDB MSTR, add TTWO; TTWO bars added to Reports/cache/bars_daily_long.pkl), after the engine still
   matched the independent re-implementation exactly and the live decision history over the overlap. Previous pins (U96, 96
@@ -33,10 +35,10 @@ import backtest_setup as g
 PINNED_UNIVERSE = "82c08da0d768"   # sha1 of the sorted SCORED universe (tradable_symbols minus short-history stocks), 12 hex
 FINGERPRINT = hashlib.sha1(",".join(sorted(g.U)).encode()).hexdigest()[:12]
 PINNED = FINGERPRINT == PINNED_UNIVERSE
-EXPECTED = {(None, False, False): (463.17, 1.4156), (30, False, False): (466.67, 1.4423), (30, True, False): (451.51, 1.3227),
-            (30, True, True): (414.17, 1.2700)}
-EXPECTED_NEVER_SEEN = {(None, False, False): 0.7617, (30, False, False): 0.7584, (30, True, False): 0.5887,
-                       (30, True, True): 0.5887}
+EXPECTED = {(None, False, False): (477.60, 1.4277), (30, False, False): (482.97, 1.4561), (30, True, False): (477.79, 1.3520),
+            (30, True, True): (438.29, 1.2979)}
+EXPECTED_NEVER_SEEN = {(None, False, False): 0.7717, (30, False, False): 0.7711, (30, True, False): 0.6378,
+                       (30, True, True): 0.6378}
 if not PINNED:
     print(f"SKIP PINNED NUMBERS: the stock list changed ({len(g.U)} stocks, fingerprint {FINGERPRINT} != {PINNED_UNIVERSE}); "
           f"exactness checks still run - re-baseline EXPECTED / PINNED_UNIVERSE once they pass")
@@ -68,6 +70,7 @@ def check(exit_all, t20=False, e5=False):
     print(f"[{label}] total {m['Total Return %']:.2f}%  Sharpe {m['Sharpe']:.4f}  max DD {m['Max DD %']:.2f}%  "
           f"never-seen Sharpe {ns['Sharpe']:.4f}")
     assert diff < (1e-12 if t20 else 1e-300) and same_swaps and same_sells, (diff, same_swaps, same_sells)
+    assert t_live.to_numpy().max() <= be.WINNER["max_weight"] + 1e-12, "a target above the 20% max weight (swaps included)"
     if e5:
         skips = [c for c in chk if "earnings in" in str(c.get("Note", ""))]
         print(f"[{label}] mid-week checks where an earnings block stopped a swap: {len(skips)}")

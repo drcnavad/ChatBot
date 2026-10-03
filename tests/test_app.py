@@ -213,7 +213,8 @@ expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Series
 expect(not _ft or list(_ft[0]["Series"])[:2] == ["Strategy (live account)", "Shadow: no rank-20 limit, no earnings skip (no orders)"],
        f"shadow row next to the live strategy: {list(_ft[0]['Series']) if _ft else None}")
 _rule = "Don't change the strategy until 12+ weeks of forward results (from Oct 2, 2026) compare against QQQ."
-expect(sum(_rule in m.value for m in at.markdown) + sum(_rule in c.value for c in at.caption) == 1, "the 12-week rule is shown once")
+for _rule in (_rule, "No single stock gets more than 20%; any extra stays in cash."):
+    expect(sum(_rule in m.value for m in at.markdown) + sum(_rule in c.value for c in at.caption) == 1, f"shown once: {_rule}")
 # short history: no Details section any more; the stocks sit in the clickable stock list (see the rank tiers test)
 expect(not any(l.startswith("Reference only") for l in labels), f"stale short-history Details section: {labels}")
 lt_all = next((d.value for d in at.dataframe if "Signal today" in d.value.columns), pd.DataFrame())

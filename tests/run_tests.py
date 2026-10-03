@@ -53,7 +53,7 @@
                          trade; unchanged bars when nothing is saved or the file is bad)
   test_forward_test.py   forward testing from FORWARD_START (2026-10-02): per-stock panel cutoff / empty state;
                          forward_test.py picks, trade cost, summary, daily record (fake account, no requests)
-  test_safety_guards.py  mocked: BUYs over 30% of equity refused (not sent, not carried to 9 AM, one run-log row);
+  test_safety_guards.py  20% max weight per stock (extra stays cash); mocked: BUYs over 20% of equity refused (backstop);
                          a missed scheduled decision gets one run-log warning while it waits
 Only the files in TESTS run (never Archive/). Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
 import os

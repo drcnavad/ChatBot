@@ -27,6 +27,8 @@ MAX_RANK = be.WINNER.get("max_pick_rank")          # T20: picks only from ranks 
 SOFT = bool(be.WINNER.get("cap_soft"))             # T20: fill free slots ignoring the cap; mid-week swaps ignore the cap
 MODE = be.WINNER.get("rs_benchmark", "etf")
 EARN_DAYS = be.WINNER.get("earnings_block_days")   # E5: no new buy with earnings in the next N calendar days
+MAX_W = be.WINNER.get("max_weight")               # no stock above 20%; saved rows decided before the rule (to 2026-10-02) stay as decided
+MAX_W_AFTER = pd.Timestamp("2026-10-02")
 _ed = pd.read_csv("Reports/earnings_date.csv")
 EARN = {}
 for _s, _d in zip(_ed["Symbol"].astype(str).str.strip().str.upper(), pd.to_datetime(_ed["Earnings Date"], errors="coerce")):
@@ -179,6 +181,8 @@ def audit(D, compare_col):
     w = inv / inv.sum() * len(picked) / 10
     if int(day.Regime_On.iloc[0]) == 0:
         w *= 0.5
+    if MAX_W and D > MAX_W_AFTER:
+        w = np.minimum(w, MAX_W)
     w = np.floor(w * be.LIVE_INVESTED * 10_000) / 10_000     # live weights: x 99%, each rounded down to 0.01%
     actual = t[compare_col].fillna(0)
     held = sorted(actual.index[actual > 0])

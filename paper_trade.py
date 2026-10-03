@@ -70,8 +70,8 @@ PENDING_ORDERS_JSON = os.path.join(PROJECT_ROOT, "Reports", "live_pending_orders
 ORDER_COLUMNS = ["Symbol", "Side", "Shares", "Price", "Est_Value", "Current_Shares", "Target_Shares",
                  "Target_Weight_%", "Target_Value"]
 NO_TRADE_BAND = 0.01   # Friday rebalance: a target holding within 1 percentage point of its weight is not traded
-MAX_ORDER_PCT = 0.30   # safety cap: a BUY worth more than 30% of equity is refused (not sent, not carried to 9 AM).
-                       # Normal buys stay under it: the largest target weight since Jul 2024 is 27.06% (inverse-vol sizing).
+MAX_ORDER_PCT = 0.20   # backstop: a BUY worth more than 20% of equity is refused (not sent, not carried to 9 AM).
+                       # Normal buys stay under it: each target weight is clipped to 20% (WINNER["max_weight"], 19.8% live).
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
 INVESTED_CAP = 0.99   # trim fix: a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED, tests check)
 CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills a bit above the estimate still fit.

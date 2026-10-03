@@ -1,7 +1,9 @@
 """Live-bot safety guards (mocks and temp files only: no broker, no network; the real run log / run_state are never
 written):
-  * paper_trade.MAX_ORDER_PCT: a BUY worth more than 30% of equity is refused - not sent, not staged for 9 AM, one plain
-    run-log row; sells are never capped; normal orders (every target weight since Jul 2024, today's plans) stay under it
+  * backtest_engine WINNER["max_weight"]: each target weight is clipped to 20% after the vol weights and the regime halving;
+    the extra stays in cash (19.8% live after the 99% round-down)
+  * paper_trade.MAX_ORDER_PCT (backstop): a BUY worth more than 20% of equity is refused - not sent, not staged for 9 AM, one
+    plain run-log row; sells are never capped; today's plans stay under it
   * run_all: a scheduled decision that missed its 2:30 PM slot and waits for the market gets ONE run-log warning row
     (then the launchd runs stay quiet; the watchdog still sees 'idle:' as the last line); --dry-run writes nothing
 Run: python tests/run_tests.py  (or python tests/test_safety_guards.py)"""
@@ -39,20 +41,36 @@ def t(s):
     return datetime.fromisoformat(s).replace(tzinfo=ra.CT)
 
 
-# ------------------------------------------------------------------ order cap (pure)
-check("cap constant is 30% of equity", pt.MAX_ORDER_PCT == 0.30)
-o = pd.DataFrame([{"Symbol": "OK", "Side": "BUY", "Shares": 29.0, "Price": 100.0},
-                  {"Symbol": "BIG", "Side": "BUY", "Shares": 31.0, "Price": 100.0},
+# ------------------------------------------------------------------ 20% max weight per stock (engine)
+import backtest_engine as be
+check("max weight: WINNER says 20% and the rank args pass it on",
+      be.WINNER["max_weight"] == 0.20 and be.winner_rank_args(None)["max_weight"] == 0.20)
+d, cols = pd.bdate_range("2026-01-05", periods=2), [f"S{i}" for i in range(10)]
+score = pd.DataFrame([[10.0 - i for i in range(10)]] * 2, index=d, columns=cols)
+vol = pd.DataFrame([[0.005] + [0.02] * 9] * 2, index=d, columns=cols)   # S0: 1/4 the vol -> 4/13 = 30.8% unclipped
+kw = dict(n=10, rebalance_days=pd.Series([True, False], index=d), sector_cap=1.0, regime_scale=0.5)
+for on in (True, False):
+    reg = pd.Series(on, index=d)
+    raw = be.rank_targets(score, score.notna(), vol, regime=reg, **kw).iloc[0]
+    cut = be.rank_targets(score, score.notna(), vol, regime=reg, max_weight=0.20, **kw).iloc[0]
+    want = raw.clip(upper=0.20)
+    check(f"max weight (regime {'on' if on else 'off'}): {raw['S0']:.2%} -> {cut['S0']:.2%}, the others unchanged, the extra in cash",
+          (cut - want).abs().max() < 1e-15 and cut.sum() <= raw.sum() and cut.max() <= 0.20, (raw.round(4).tolist(), cut.round(4).tolist()))
+live = be.live_weights(cut)
+check("max weight: after the 99% round-down the biggest live weight is 19.8% and the total stays <= 99%",
+      live.max() <= 0.198 and live.sum() <= 0.99, live.tolist())
+
+# ------------------------------------------------------------------ order cap (pure backstop)
+check("cap constant is 20% of equity", pt.MAX_ORDER_PCT == 0.20)
+o = pd.DataFrame([{"Symbol": "OK", "Side": "BUY", "Shares": 19.0, "Price": 100.0},
+                  {"Symbol": "BIG", "Side": "BUY", "Shares": 21.0, "Price": 100.0},
                   {"Symbol": "OUT", "Side": "SELL", "Shares": 50.0, "Price": 100.0}], columns=pt.ORDER_COLUMNS)
 capped, refused = pt.apply_order_cap(o, 10000.0)
-check("cap: a 29% buy passes, a 31% buy is refused, a 50% sell is never capped",
+check("cap: a 19% buy passes, a 21% buy is refused, a 50% sell is never capped",
       list(capped["Side"]) == ["BUY", "SKIP (over order cap)", "SELL"] and list(refused["Symbol"]) == ["BIG"]
-      and refused["Est_Value"].iloc[0] == 3100.0, capped.to_dict("records"))
+      and refused["Est_Value"].iloc[0] == 2100.0, capped.to_dict("records"))
 check("cap: unusable equity refuses every buy (fail closed), sells untouched",
       list(pt.apply_order_cap(o, float("nan"))[0]["Side"]) == ["SKIP (over order cap)"] * 2 + ["SELL"])
-w = pd.read_csv(os.path.join(ROOT, "Reports", "signal_analysis.csv"), usecols=["Strategy_Weight"])["Strategy_Weight"]
-check(f"cap: every target weight since Jul 2024 is under it (max {w.max():.2%}), so a normal buy is never refused",
-      w.max() < pt.MAX_ORDER_PCT, w.max())
 pos = pt.read_positions_csv(os.path.join(ROOT, "my_positions.csv")) if os.path.exists(os.path.join(ROOT, "my_positions.csv")) else {}
 for src in ("auto", "provisional", "current"):
     plan, _m, _t = pt.plan_orders(src, 58235.07, pos, fractional=True)
@@ -80,7 +98,7 @@ try:
     staged = [x["symbol"] for x in json.load(open(pend))["orders"]]
     big = res[res["Symbol"] == "BIG"]
     check("auto_trade: the 40% buy is not staged / sent (not carried to 9 AM), the normal one is",
-          staged == ["AAA"] and len(big) == 1 and big["Status"].iloc[0].startswith("SKIPPED: over the 30%"), (staged, res.to_dict("records")))
+          staged == ["AAA"] and len(big) == 1 and big["Status"].iloc[0].startswith("SKIPPED: over the 20%"), (staged, res.to_dict("records")))
     cap_rows = [a for a in seen if "Order cap" in a[3]]
     check("auto_trade: one plain run-log warning row for the refused order",
           len(cap_rows) == 1 and cap_rows[0][:3] == ("Trade", "warning", "no") and "BIG 40 shares" in cap_rows[0][3], seen)

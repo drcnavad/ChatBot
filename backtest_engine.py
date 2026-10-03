@@ -67,6 +67,7 @@ WINNER = {
     "min_score": 0.0,       # only stocks with a score above 0 can be picked
     "sector_cap": 0.4,      # at most 40% of the picks per sector (= 4 of 10)
     "vol_sizing": True,     # weights proportional to 1 / 63-day volatility
+    "max_weight": 0.20,     # no stock above 20% (after the vol weights and the regime halving); the extra stays in cash
     "buffer_rank": None,    # no rank buffer (tested, did not help)
     "atr_stop_k": 3.0,      # ATR multiple of the stop level in strategy_holdings.csv (reference only, never an automatic exit)
     "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF ('sector_median' / 'median_all': tested, not live)
@@ -143,7 +144,7 @@ def winner_rank_args(regime):
     return dict(n=S["n"], regime=regime if S["use_regime"] else None, min_score=S["min_score"],
                 sector_cap=S["sector_cap"], vol_sizing=S["vol_sizing"], buffer_rank=S["buffer_rank"],
                 regime_scale=S["regime_scale"] if S["use_regime"] else None,
-                max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")))
+                max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"))
 
 
 WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
@@ -1220,7 +1221,8 @@ def deterministic_rank(score_w, eligible_w=None, tiebreak_w=None):
 
 def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=None, min_score=0.0,
                  sector_cap=0.4, vol_sizing=True, buffer_rank=None, regime_scale=None, decision_log=None,
-                 tiebreak_w=None, max_pick_rank=None, cap_soft=False, buy_block=None, held_w=None, start_holdings=None):
+                 tiebreak_w=None, max_pick_rank=None, cap_soft=False, buy_block=None, held_w=None, start_holdings=None,
+                 max_weight=None):
     """Weekly top-N by score with sector cap and inverse-volatility weights.
 
     On rebalance days: candidates = eligible & score > min_score, best first, at most floor(sector_cap*n)
@@ -1239,6 +1241,7 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
     buy_block: optional frame of days until earnings (earnings_days_ahead; NaN = no block): such a stock is not bought unless
                already held; its slot goes to the next candidate. held_w: holdings that count as "already held" (default:
                this function's own carried holdings). start_holdings: holdings before the first date (default: none).
+    max_weight: if given, each weight is clipped to it after the vol weights and the regime scaling; the extra stays cash.
     """
     dates, cols = score_w.index, list(score_w.columns)
     S = score_w.to_numpy(float)
@@ -1310,6 +1313,8 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
                 new[picked] = inv / inv.sum() * (len(picked) / n)
                 if soft and not R[t]:
                     new *= regime_scale
+                if max_weight:
+                    new = np.minimum(new, max_weight)
             if decision_log is not None:
                 for j in range(len(cols)):
                     if new[j] == 0 and current[j] == 0 and j not in reason:

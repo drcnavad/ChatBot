@@ -68,6 +68,7 @@ W_TECH = WINNER.get("w_tech", 0.5)                                   # score = W
 REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day average"   # market filter off
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
+MAX_WEIGHT = WINNER.get("max_weight")                                # no stock above this weight; the extra stays cash
 
 
 def rules_text():
@@ -89,6 +90,7 @@ def rules_text():
             f"- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger), scaled to {LIVE_INVESTED:.0%} invested, "
             "each weight rounded down to 0.01%.\n"
             + (f"- **Market filter:** with {REGIME_OFF} at a rebalance, every weight is {HALVED}.\n" if SCALE else "")
+            + (f"- **Max per stock:** No single stock gets more than {MAX_WEIGHT:.0%}; any extra stays in cash.\n" if MAX_WEIGHT else "")
             + (f"- **Rebalance:** every pick is brought back to its weight unless it is within {band * 100:g} percentage point "
                "of it; overweight holdings are trimmed so new buys get their full weight.\n" if band else "")
             + (f"- **{days} swap:** if a stock that is not held ranks in the top {MIDWEEK['enter_top']} and a held stock has "

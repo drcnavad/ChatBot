@@ -54,6 +54,7 @@ def order_at(t):
     return sorted(np.where(ok)[0], key=lambda k: (-s[k], -tb[k] if tb[k] == tb[k] else np.inf, U[k]))
 
 
+MAX_W = 0.20    # no stock above 20% after the vol weights and the regime halving (WINNER["max_weight"]); the extra stays cash
 PLAIN = dict(max_pick_rank=None, cap_soft=False)    # the tested C6 selection (walk all ranks, hard max-4 cap)
 REG_ = reg.reindex(idx).astype("boolean").fillna(False).to_numpy(bool)
 
@@ -66,7 +67,7 @@ def targets(reb):
 def targets_t20(reb, max_rank=20, n=10):
     """INDEPENDENT weekly selection of the T20 rule (no engine selection code): walk ranks 1..max_rank with max CAP per sector,
     then fill free slots from the unused ranks 1..max_rank in rank order ignoring the cap; weights ~ 1/vol x (#picked / n),
-    x 0.5 when QQQ is at/below its 200-day average on the rebalance day. Returns (targets, log of cap-relaxed picks)."""
+    x 0.5 when QQQ is at/below its 200-day average on the rebalance day, each clipped to MAX_W. Returns (targets, log of cap-relaxed picks)."""
     W = reb.reindex(idx).astype("boolean").fillna(False).to_numpy(bool)
     out = np.zeros((len(idx), len(U))); cur = np.zeros(len(U)); relaxed = []
     for t in range(len(idx)):
@@ -85,6 +86,7 @@ def targets_t20(reb, max_rank=20, n=10):
                 cur[picked] = inv / inv.sum() * (len(picked) / n)
                 if not REG_[t]:
                     cur *= 0.5
+                cur = np.minimum(cur, MAX_W)
         out[t] = cur
     return pd.DataFrame(out, index=idx, columns=U), pd.DataFrame(relaxed)
 
@@ -122,6 +124,7 @@ def select_t20(t, held, block, max_rank=20, n=10):
         cur[picked] = inv / inv.sum() * (len(picked) / n)
         if not REG_[t]:
             cur *= 0.5
+        cur = np.minimum(cur, MAX_W)
     return cur
 
 
