@@ -1,4 +1,4 @@
-"""ONE command for the whole Stock Analysis pipeline:   python run_all.py      (or open run_all.ipynb and Run All)
+"""ONE command for the whole Stock Analysis pipeline:   python run_all.py
 
 It picks the mode by itself (clock in US Central time):
   FULL   on a strategy decision day after 2:30 PM CT, when the full online update has not run yet today. Decision days =

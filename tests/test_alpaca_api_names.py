@@ -95,7 +95,7 @@ for name, build in builds.items():
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.trading.client import TradingClient
 for f, src in sources():
-    if f not in ("paper_trade.py", "alpaca_paper.py", "run_all.py", "live_trade.ipynb", "backtest_engine.py"):
+    if f not in ("paper_trade.py", "alpaca_paper.py", "run_all.py", "backtest_engine.py"):
         continue
     for name in sorted(set(re.findall(r"\b(?:client|data_client|market_data_client\(\))\.(\w+)\(", src))):
         check(f"{f}: client.{name}() exists on the real Alpaca client",
