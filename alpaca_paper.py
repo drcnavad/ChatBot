@@ -108,6 +108,8 @@ class PaperAccount:
             raise PaperAccountError(f"GET {path} failed: HTTP {e.code} {e.reason}") from None
         except urllib.error.URLError as e:
             raise PaperAccountError(f"GET {path} failed: {e.reason}") from None
+        except (TimeoutError, OSError, ValueError) as e:   # a read timeout / dropped connection / non-JSON reply
+            raise PaperAccountError(f"GET {path} failed: {type(e).__name__}: {e}") from None
 
     # --- the read-only views ---------------------------------------------------------------------------------------
     @staticmethod

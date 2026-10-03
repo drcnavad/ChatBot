@@ -271,6 +271,7 @@ def drop_partial_last_bar(bars, now=None, close_buffer_min=30):
     """Drop today's bar if the US session (16:00 ET + buffer) has not finished yet - except on a decision day from its
     decision slot (2:30 PM CT) on: that decision is made on today's bar as of then (the price ~30 min before the close)."""
     now = now or datetime.now(EASTERN)
+    now = now.astimezone(EASTERN) if now.tzinfo else now   # an aware time in another zone (CT) is read in ET
     today = pd.Timestamp(now.date())
     session_done = (now.hour * 60 + now.minute) >= (16 * 60 + close_buffer_min)
     if not session_done and decision_bar_ready(now):
