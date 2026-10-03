@@ -106,7 +106,7 @@ def rules_text():
                "calendar days; on Friday its slot goes to the next eligible stock (else cash), mid-week it is just not bought. "
                "A held stock is not topped up before them.\n" if EARNINGS else "")
             + "- **Pre-earnings stop:** a held stock with earnings within 7 calendar days is sold if its price falls to its "
-            "highest close since bought - 3.5 × ATR(14), from 7 days before the report through the reaction day (checked "
+            "highest close since bought - 3 × ATR(14), from 7 days before the report through the reaction day (checked "
             "every 10 minutes in the pre-market, regular and after-hours sessions; in regular hours every share at once, "
             "outside them the whole shares and the fraction at the 9 AM CT check). One sale per report; the cash waits for "
             "the next scheduled run, and the stock is not bought back until after its reaction day.\n"
@@ -1714,7 +1714,7 @@ def render_earnings_stops():
                    f"{datetime.fromtimestamp(os.path.getmtime(path)):%a %b %-d %-I:%M %p} CT).")
     else:
         st.dataframe(t.drop(columns="Checked_At_CT"), hide_index=True, width="stretch")
-        st.caption(f"Last check {t['Checked_At_CT'].iloc[0]} CT. Stop = highest close since entry - 3.5 × ATR(14); "
+        st.caption(f"Last check {t['Checked_At_CT'].iloc[0]} CT. Stop = highest close since entry - 3 × ATR(14); "
                    "Price = the latest quote's mid price.")
     try:
         with open(os.path.join(REPORTS, "earnings_stop_state.json")) as f:
@@ -1739,7 +1739,7 @@ def render_details(p):
         render_latest_signals(p)
     with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=False):
         render_last_decision(p)
-    with st.expander("Pre-earnings stops (3.5× ATR, live account)", expanded=False):
+    with st.expander("Pre-earnings stops (3× ATR, live account)", expanded=False):
         render_earnings_stops()
     with st.expander("Data freshness and settings", expanded=False):
         render_data_and_settings(p)

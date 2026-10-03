@@ -1,7 +1,7 @@
 """Pre-earnings ATR stop for the LIVE account (approved by Chirag, Sat Oct 3, 2026, 1:07 AM CT).
 
 Rule: a stock the live account holds whose next earnings date (Reports/earnings_date.csv) is within the next 7 calendar
-days gets a stop = its highest daily close since entry - 3.5 x ATR(14) (Wilder, as in the engine). The stop is active
+days gets a stop = its highest daily close since entry - 3 x ATR(14) (Wilder, as in the engine). The stop is active
 from the day the earnings date enters the 7-day window through the first reaction day (an AM report reacts that day;
 an after-close or unknown-time report reacts the next trading day). Entry = the oldest buy fill still held (FIFO).
 
@@ -41,7 +41,7 @@ EARNINGS_CSV = os.path.join(REPORTS, "earnings_date.csv")
 STATE_JSON = (os.environ.get("STOCK_ANALYSIS_EARNINGS_STOP_STATE")    # sales done (+ reaction day: the buy-back block
               or os.path.join(REPORTS, "earnings_stop_state.json"))     # in paper_trade) + once-a-day log notes
 STATUS_CSV = os.path.join(REPORTS, "earnings_stops.csv")           # the latest check, for the dashboard
-K_ATR, ATR_LEN, ARM_DAYS = 3.5, 14, 7
+K_ATR, ATR_LEN, ARM_DAYS = 3.0, 14, 7     # 3x ATR since Oct 3, 2026 (was 3.5x; the forward test keeps 3.5x)
 REGULAR_MAX_AGE, EXTENDED_MAX_AGE = 60, 900                         # quote age limits (seconds)
 REGULAR_MAX_SPREAD, EXTENDED_MAX_SPREAD = 0.005, 0.02               # spread limits (share of the mid price)
 STATUS_COLS = ["Checked_At_CT", "Symbol", "Shares", "Entry_Date", "Earnings_Date", "Report_Time", "Reaction_Day",
@@ -328,7 +328,7 @@ def _sell(c, q, session, now, state, pending_path):
                 f"limit at ${limit:,.2f} (bid ${q[0]:,.2f})" if whole else "No whole share to sell")
         log_event("ok", "yes" if filled > 0 else "unknown",
                   f"Pre-earnings stop: {s} fell to ${(q[0] + q[1]) / 2:,.2f}, at or below its stop ${c['stop']:,.2f} "
-                  f"(highest close since entry ${c['peak']:,.2f} - 3.5 x ATR ${c['atr']:,.2f}). {sent}."
+                  f"(highest close since entry ${c['peak']:,.2f} - {K_ATR:g} x ATR ${c['atr']:,.2f}). {sent}."
                   + (f" The {frac:g} fractional share goes to the 9 AM CT fill check." if frac > 0 else "")
                   + f" Earnings {e:%a %b %-d} ({c['e_time']}). The cash waits for the next scheduled run; {s} is not bought back "
                   f"until after {c['react']:%a %b %-d}.",
@@ -396,7 +396,7 @@ def run_check(now=None, dry_run=False, pending_path=None):
         if not dry_run and key not in state["armed"] and key not in state["sold"]:
             state["armed"][key] = str(today)    # first time in the window: one info row
             log_event("ok", "no", f"Pre-earnings stop armed for {s}: stop ${c['stop']:,.2f} (highest close since "
-                      f"{c['entry']:%b %-d} ${c['peak']:,.2f} - 3.5 x ATR ${c['atr']:,.2f}); earnings {c['e_date']:%a %b %-d} "
+                      f"{c['entry']:%b %-d} ${c['peak']:,.2f} - {K_ATR:g} x ATR ${c['atr']:,.2f}); earnings {c['e_date']:%a %b %-d} "
                       f"({c['e_time']}), active through {c['react']:%a %b %-d}.")
         rows.append({"Checked_At_CT": stamp, "Symbol": s, "Shares": c["shares"], "Entry_Date": str(c["entry"]),
                      "Earnings_Date": f"{c['e_date']:%Y-%m-%d}", "Report_Time": c["e_time"], "Reaction_Day": f"{c['react']:%Y-%m-%d}",
@@ -421,7 +421,7 @@ def run_check(now=None, dry_run=False, pending_path=None):
 def _print_dry(now, session, table, held):
     print(f"DRY RUN {now.astimezone(be.CENTRAL):%a %b %-d %Y %H:%M} CT - nothing is sent or written. Session now: {session or 'closed'}.")
     print(f"Rule: held stock with earnings within {ARM_DAYS} calendar days -> stop = highest close since entry - "
-          f"{K_ATR} x ATR({ATR_LEN}), active through the reaction day. Held: {len(held)} stocks.")
+          f"{K_ATR:g} x ATR({ATR_LEN}), active through the reaction day. Held: {len(held)} stocks.")
     if table.empty:
         print("No held stock is in a pre-earnings stop window.")
     else:

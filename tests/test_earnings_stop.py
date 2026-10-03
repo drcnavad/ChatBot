@@ -1,8 +1,8 @@
-"""Mocked tests (zero broker calls, zero network) for the live pre-earnings 3.5 x ATR stop (earnings_stop.py).
+"""Mocked tests (zero broker calls, zero network) for the live pre-earnings 3 x ATR stop (earnings_stop.py).
 
 Window: 7 calendar days before the earnings date through the reaction day (AM: that day; PM/unknown: next session).
 Sessions: pre-market 4:00, regular 9:30, after hours until 8 PM ET (5 PM on early-close days); weekends/holidays idle.
-Stop = highest close since entry - 3.5 x ATR(14) (the engine's ATR). At or below: one whole-share limit SELL at the
+Stop = highest close since entry - 3 x ATR(14) (the engine's ATR). At or below: one whole-share limit SELL at the
 bid - 0.05%, extended_hours outside regular hours, the fraction to the 9 AM fill check; never twice (state + broker
 client id); fails closed on unreadable reads, open orders and running jobs. Dry run: no trading client, no files.
 
@@ -77,7 +77,8 @@ peak, atr, stop = es.stop_level(bars, entry)
 ref = be.calculate_technical_indicators(bars.copy())["atr"].iloc[-1]
 check("ATR(14) equals the engine's", abs(atr - ref) < 1e-9, (atr, ref))
 check("peak = highest close since entry (an earlier spike is ignored)", peak == close[20:].max() and peak < 200)
-check("stop = peak - 3.5 x ATR", abs(stop - (peak - 3.5 * atr)) < 1e-9)
+check("live multiple is 3 x ATR (the forward-test variant stays 3.5x)", es.K_ATR == 3.0)
+check("stop = peak - 3 x ATR", abs(stop - (peak - 3 * atr)) < 1e-9)
 check("too few bars -> no stop", es.stop_level(bars.head(14), days[0].date()) is None)
 
 # ----------------------------------------------------------------------------- the live check, fully mocked

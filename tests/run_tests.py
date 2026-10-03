@@ -57,7 +57,7 @@
                          dip / ATR dip buys / earnings drift / risk parity / VWAP / ATR stops (replay = live, stop + refill, open
                          sales) by hand, fake bars (no download), live rules =
                          live Strategy_Weight, no live file / WINNER change
-  test_earnings_stop.py  live pre-earnings 3.5x ATR stop (mocked broker, quotes and bars): window through the reaction
+  test_earnings_stop.py  live pre-earnings 3x ATR stop (mocked broker, quotes and bars): window through the reaction
                          day, sessions, stop = engine ATR, one whole-share limit SELL (extended_hours outside regular
                          hours), fraction to 9 AM, never twice, fails closed; dry run sends and writes nothing
   test_safety_guards.py  20% max weight per stock (extra stays cash); mocked: BUYs over 20% of equity refused (backstop);
