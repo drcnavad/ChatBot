@@ -24,6 +24,7 @@ Market data only: market_data_client() (historical bars). No trading endpoints.
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -275,6 +276,48 @@ def drop_partial_last_bar(bars, now=None, close_buffer_min=30):
     if not session_done and (bars["Date"] == today).any():
         return bars[bars["Date"] < today].reset_index(drop=True), True
     return bars, False
+
+
+DECISION_BARS_CSV = REPORTS_DIR / "decision_bars.csv"   # each decision day's 2:30 PM bar, as ratios (keep_decision_bars)
+BAR_COLS = ["Open", "High", "Low", "Close", "Volume"]
+
+
+def keep_decision_bars(bars, now=None, path=DECISION_BARS_CSV, state_path=REPORTS_DIR / "run_state.json"):
+    """Every decision day keeps the bar its 2:30 PM CT run traded on, not the final close, so later runs rebuild the same
+    decision and the strategy record matches the account. The 2:30 run (today's bar before the close, decision not traded
+    yet) saves today's bar as ratios to the previous session: prices / previous close, volume / previous volume. Ratios stay
+    right after splits and dividends. Every run rebuilds the saved days from them. Never raises: on a problem the bars are
+    returned unchanged."""
+    try:
+        now = now or datetime.now(EASTERN)
+        et = now.astimezone(EASTERN) if now.tzinfo else now
+        today, path = pd.Timestamp(et.date()), Path(path)
+        prev = bars.groupby("Symbol")[["Close", "Volume"]].shift(1)
+        base = np.column_stack([prev["Close"]] * 4 + [prev["Volume"]]).astype(float)
+        saved = pd.read_csv(path, parse_dates=["Date"]) if path.exists() else pd.DataFrame(columns=["Date", "Symbol", *BAR_COLS])
+        state = json.loads(Path(state_path).read_text()) if Path(state_path).exists() else {}
+        traded = str(state.get("last_decision") or "") >= str(today.date())
+        live = bars["Date"].eq(today) & (decision_bar_ready(now) and et.hour * 60 + et.minute < 16 * 60 + 30 and not traded)
+        if live.any():   # the 2:30 run: save today's bar (it is the bar being traded, so it is used as is)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ratio = bars.loc[live, BAR_COLS].to_numpy(float) / base[live.to_numpy()]
+            new = bars.loc[live, ["Date", "Symbol"]].assign(**dict(zip(BAR_COLS, ratio.T)))
+            saved = pd.concat([saved[saved["Date"] != today], new]) if len(saved) else new
+            saved.to_csv(path.with_suffix(".tmp"), index=False)
+            path.with_suffix(".tmp").replace(path)
+            saved = saved[saved["Date"] != today]
+        if not len(saved):
+            return bars
+        r = bars[["Date", "Symbol"]].merge(saved, on=["Date", "Symbol"], how="left")[BAR_COLS].to_numpy(float)
+        fix = np.isfinite(r) & np.isfinite(base)
+        if not fix.any():
+            return bars
+        vals = bars[BAR_COLS].to_numpy(float)
+        vals[fix] = (r * base)[fix]
+        return bars.assign(**dict(zip(BAR_COLS, vals.T)))
+    except Exception as e:
+        log.warning("decision bars (Reports/decision_bars.csv) not used: %s", e)
+        return bars
 
 
 def ensure_long_cache(cache_name=LONG_CACHE, start=LONG_START, data_client=None):
