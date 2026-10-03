@@ -10,7 +10,7 @@
   test_run_all_optional.py run_all.py optional steps: upstream API failures (fundamentals /
                          processing / scoring / sentiment / earnings) never stop the pipeline or
                          block trading; only main/validate failures are critical
-  test_app.py            Streamlit AppTest: page, charts, displayed ranks, Details widgets, captions, holdings alert
+  test_app.py            Streamlit AppTest: page, charts, displayed ranks, Details widgets, captions, removed sections
   test_paper_account.py  alpaca_paper.py + run_all --sync-live against a local MOCK server
   test_dashboard_http.py the app on test port 8599 answers 200 for / and /?symbol=NVDA (never touches 8502, the running app)
   test_paper_trade_live_safety.py  mocked (zero broker calls) regression tests for the LIVE paper_trade.py:
@@ -47,9 +47,6 @@
   test_single_universe.py  sector_mapping.py is the only stock list: no hardcoded ticker list / symbol map / C6-U<n>
                          tag / "NN stocks" count in any other .py or notebook; derived lists (engine, autofetch, call
                          counts, bar cache) equal sector_mapping's
-  test_strategy_health.py  strategy_health.py: reference parsing, equity stats, trend/drawdown/Sharpe
-                         bands, composite score levels, regime detection, fail-soft on missing files
-                         (synthetic data, no network, no streamlit)
   test_decision_bars.py  decision days keep their 2:30 PM bar (saved as ratios, split-safe; never overwritten after the
                          trade; unchanged bars when nothing is saved or the file is bad)
 Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
@@ -64,7 +61,7 @@ ROOT = os.path.dirname(HERE)
 TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_run_all_helpers.py", "test_run_all_optional.py",
          "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_live_safety.py", "test_fill_check_fractional.py",
          "test_paper_trade_math_audit.py", "test_run_log.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
-         "test_strategy_health.py", "test_live_rules_audit.py", "test_catch_up.py",
+         "test_live_rules_audit.py", "test_catch_up.py",
          "test_alpaca_api_names.py", "test_smart_orders.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py",
          "test_decision_bars.py", "test_refresh_job.py"]
 

@@ -1377,7 +1377,7 @@ def midweek_check_days(dates, days=("Mon", "Wed"), rebalance_days=None):
 
 
 def midweek_swap_pairs(cur, order, rank, sectors, enter_top=3, exit_below=15, cap=4, skip=None):
-    """The mid-week swap rule on one check day (used by apply_midweek_swaps and by holdings_alert for real positions).
+    """The mid-week swap rule on one check day (used by apply_midweek_swaps).
 
     cur: weight array (modified in place: each entrant takes the sold holding's weight); order: qualifying column indices,
     best first; rank: {index: rank}; sectors: sector per column. While a held name ranks worse than exit_below (or has no
@@ -1409,8 +1409,8 @@ def midweek_swap_pairs(cur, order, rank, sectors, enter_top=3, exit_below=15, ca
 
 
 def midweek_exit_sells(cur, rank, exit_all_below):
-    """The mid-week exit rule on one check day, applied AFTER midweek_swap_pairs (used by apply_midweek_swaps and by
-    holdings_alert). Every holding ranked worse than exit_all_below (or with no rank) is sold; the cash stays idle until the
+    """The mid-week exit rule on one check day, applied AFTER midweek_swap_pairs (used by apply_midweek_swaps).
+    Every holding ranked worse than exit_all_below (or with no rank) is sold; the cash stays idle until the
     next weekly rebalance. cur is modified in place. Returns [(sold, weight)] in column order."""
     if not exit_all_below:
         return []

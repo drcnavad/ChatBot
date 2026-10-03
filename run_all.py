@@ -12,7 +12,7 @@ It picks the mode by itself (clock in US Central time):
            main          main_signal_analysis.ipynb - fresh Alpaca daily bars (market data only), ranks, picks, mid-week check
            validate      the report files the app reads
   QUICK  any other time: main + validate only. Zero quota APIs (only Alpaca market-data bars).
-Both end with a short summary: what ran, API calls used, data date, the holdings ALERT line and the next check / rebalance.
+Both end with a short summary: what ran, API calls used, data date, and the next check / rebalance.
 The upstream online steps (fundamentals, processing, scoring, sentiment, earnings) are optional: if one
 fails, the pipeline warns and continues - main_signal_analysis.ipynb reuses the last good upstream tables,
 so the evening trade still runs on fresh signals. Only a main or validate failure stops the pipeline.
@@ -832,7 +832,7 @@ def main(argv=None):
     p.add_argument("--force-news", action="store_true", help="allow NewsAPI even if it ran within the last 24 h")
     p.add_argument("--force-fundamentals", action="store_true", help="allow a second Alpha Vantage rotation the same day")
     p.add_argument("--dry-run", action="store_true", help="print the plan and exit (nothing runs, nothing is written)")
-    p.add_argument("--positions", help="positions CSV for the holdings alert (default: my_positions.csv if it exists)")
+    p.add_argument("--positions", help="where --sync-live writes the positions CSV (default: my_positions.csv)")
     p.add_argument("--only", choices=[s[0] for s in STEPS], help="run just this step")
     p.add_argument("--from", dest="start", choices=[s[0] for s in STEPS], help="start at this step (mode rules still apply)")
     p.add_argument("--backtests", action="store_true", help="also run backtest.ipynb (≈10 s; rewrites Reports/backtest_*.csv)")
@@ -1176,7 +1176,7 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
         done.update(last_full_date=now.date().isoformat(), last_full_at=clock())
     state.update(update_state(**done))
     live_synced = False
-    if a.sync_live:                                        # opt-in: refresh the positions file before the alert
+    if a.sync_live:                                        # opt-in: refresh the positions file (read-only)
         logging.info("=== sync_live (alpaca_paper.py, read-only)")
         try:
             sync_live(a.positions)
@@ -1218,13 +1218,6 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
         logging.info("  Data through %s  |  rules %s", info["data_date"], info["rules"])
         for line in info["decisions"][-3:]:
             logging.info("  %s", line)
-    if any(n == "main" for n, ok, _ in ran if ok) or a.only == "validate":
-        try:
-            import holdings_alert
-            for line in holdings_alert.alert_text(holdings_alert.build_alert(positions_path=a.positions)):
-                logging.info("  ALERT %s", line)
-        except Exception as e:                              # presentation only
-            logging.warning("  holdings alert unavailable: %s", e)
     if info["next"]:
         logging.info("  %s", info["next"])
     logging.info("  Next full online update: %s  |  log %s", next_full_update(now, state), os.path.relpath(log_path, ROOT))

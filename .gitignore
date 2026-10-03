@@ -34,7 +34,7 @@ Thumbs.db
 
 # Data files: everything the pipeline (re)writes stays local - it is regenerated on every run.
 # Tracked seeds: the backtest reference results (written only by a manual backtest.ipynb run;
-# strategy_health.py, the app and run_all.py's output check read them).
+# the app and run_all.py's output check read them).
 Reports/cache/
 Reports/*.csv
 Reports/*.xlsx

@@ -121,12 +121,10 @@ check("no hardcoded stock count ('NN stocks') in production strings", not counts
 # --- the derived lists really are the sector_mapping ones ------------------------------------------------------------
 import backtest_engine as be  # noqa: E402
 import run_all  # noqa: E402
-import strategy_health as sh  # noqa: E402
 
 check("backtest/live engine universe == sector_mapping.tradable_symbols", be.TRADABLE == list(sm.tradable_symbols))
 check("strategy tag U-count == stocks scored (the list minus short-history stocks)",
       be.WINNER["tag"].startswith(f"C6-U{be.scored_stock_count()}-"), be.WINNER["tag"])
-check("strategy_health.LIVE_STRATEGY == the engine tag", sh.LIVE_STRATEGY == be.WINNER["tag"], (sh.LIVE_STRATEGY, be.WINNER["tag"]))
 # company_report_autofetch.py is checked from its source (importing it would load .env for the Alpha Vantage key)
 _af = ast.parse(open("company_report_autofetch.py", encoding="utf-8").read())
 _all = [ast.unparse(n.value) for n in ast.walk(_af) if isinstance(n, ast.Assign)

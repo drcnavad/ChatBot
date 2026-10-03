@@ -3,15 +3,14 @@ as HTML (no escaped tags / code blocks / unbalanced tags), the price chart draws
 rank == Strategy_Rank and the portfolio slot == position among the picks, the dated decision badge / "Strategy rank ·
 <latest close>" / "<rebalance day> plan" chip agree with strategy_changes / signal_analysis / strategy_picks (and with the
 "Latest signals" and "Last decision" tables in Details), the Strategy tab widgets work, the rules text matches
-backtest_engine.WINNER, removed sections stay gone, the rank tiers render with a ?symbol= link per ranked stock, and the holdings-alert module still builds
-(strategy holdings + a temporary positions file, deleted afterwards; the dashboard banner itself was removed).
+backtest_engine.WINNER, removed sections stay gone (incl. the alert banner and the Strategy Health tab), and the rank tiers render with a ?symbol= link
+per ranked stock.
 Run: python tests/run_tests.py  (or python tests/test_app.py)"""
 import base64
 import json
 import os
 import re
 import sys
-import tempfile
 from html.parser import HTMLParser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,7 +22,6 @@ from markdown_it import MarkdownIt
 from streamlit.testing.v1 import AppTest
 
 import backtest_engine as be
-import holdings_alert
 import sector_mapping as sm
 
 FAIL = []
@@ -238,54 +236,10 @@ for want in (f"Strategy rules ({W['tag']})", f"{W['w_tech']:g} × Technical", f"
     expect(want in rules, f"rules text is missing {want!r}")
 expect("next open" not in blob, "outdated 'next open' wording (orders go out the same evening)")
 
-# ---------------------------------------------------------------- holdings alert (strategy + temporary positions file)
+# ---------------------------------------------------------------- removed: alert banner, Strategy Health tab
 box = [m.value for m in at.markdown if "sa-alert " in m.value]
 expect(len(box) == 0, f"the alert banner was removed from the dashboard, found {len(box)}")
-a = holdings_alert.build_alert(use_positions=False)
-print("alert (strategy):", " | ".join(holdings_alert.alert_text(a, urls=False)))
-held = latest[latest.Strategy_Weight.fillna(0) > 0].index.tolist()
-with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
-    f.write("Symbol,Shares\n" + "\n".join(f"{s},10" for s in held[:-1] + ["PLTR"]) + "\n")
-try:
-    b = holdings_alert.build_alert(positions_path=f.name)
-    print("alert (temp positions, last holding replaced by off-universe PLTR):", " | ".join(holdings_alert.alert_text(b, urls=False)))
-    expect(b["uses_positions"] and b["lines"], "positions-file alert empty")
-    if holdings_alert.exit_below():               # the off-universe PLTR is never ranked -> the latest check calls for selling it
-        expect("PLTR" in " ".join(holdings_alert.alert_text(b, urls=False)), "rank-exit alert for an unranked holding missing")
-finally:
-    os.remove(f.name)
-
-# ---------------------------------------------------------------- alert on a historical check day with a rank exit
-if holdings_alert.exit_below():
-    dec = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
-    ex = dec[dec.Reason.astype(str).str.startswith("mid-week exit")]
-    sig_all = pd.read_csv("Reports/signal_analysis.csv", usecols=["Date", "Symbol", "Close", "Strategy_Score", "Strategy_Rank",
-                                                                  "Strategy_Weight", "Rebalance_Day", "Midweek_Check"], parse_dates=["Date"])
-    for D in sorted(ex.Date.unique())[-2:]:
-        c = holdings_alert.build_alert(sig=sig_all[sig_all.Date <= D], use_positions=False, now=pd.Timestamp(D) + pd.Timedelta(hours=20))
-        txt = " | ".join(holdings_alert.alert_text(c, urls=False))
-        print(f"alert as of the {pd.Timestamp(D).date()} check:", txt)
-        want = sorted(ex.loc[ex.Date == D, "Symbol"])
-        expect(c["level"] == "red" and all(w in txt for w in want) and "hold cash until" in txt,
-               f"exit alert on {pd.Timestamp(D).date()} should sell {want}: {txt}")
-
-# ---------------------------------------------------------------- earnings rule in the alert (fake dates, in memory only)
-if be.WINNER.get("earnings_block_days"):
-    sig_d = pd.read_csv("Reports/signal_analysis.csv", usecols=["Date", "Symbol", "Close", "Strategy_Score", "Strategy_Rank",
-                                                                "Strategy_Weight"], parse_dates=["Date"])
-    day_df = sig_d[sig_d.Date == sig_d.Date.max()]
-    d0 = holdings_alert._Day(day_df, sm.tradable_symbols)
-    top3 = [d0.symbols[j] for j in d0.order[:3]]
-    D0 = pd.Timestamp(day_df.Date.iloc[0])
-    fake = pd.DataFrame({"Symbol": top3, "Earnings Date": [D0 + pd.Timedelta(days=k) for k in (1, 5, 6)]})
-    d1 = holdings_alert._Day(day_df, sm.tradable_symbols, fake)
-    weak = {d1.symbols[j]: 0.1 for j in d1.order[40:42]}          # two holdings ranked far below 15
-    swaps = holdings_alert.evaluate(d1, weak)[0]
-    blocked = holdings_alert.blocked_entrants(d1, weak)
-    print("earnings rule (fake dates +1/+5/+6 days for the top 3):", swaps, blocked)
-    expect(sorted(d1.symbols[j] for j in d1.earn_days) == sorted(top3[:2]), "earnings window should be d < E <= d + 5")
-    expect(all(buy not in top3[:2] for _, buy, _ in swaps), "blocked name swapped in")
-    expect(len(blocked) == 2 and "not bought: earnings in 1 day" in blocked[0], f"blocked-entrant text: {blocked}")
+expect([t.label for t in at.tabs] == ["📈 Dashboard", "🔎 Details"], f"tabs: {[t.label for t in at.tabs]} (Strategy Health removed)")
 
 # ---------------------------------------------------------------- rank tiers: horizontal clickable lists by rank
 tier_md = [m.value for m in at.markdown if "Rank 1 to 20" in m.value and "?symbol=" in m.value]

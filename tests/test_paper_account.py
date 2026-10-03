@@ -18,7 +18,6 @@ sys.path.insert(0, ROOT)
 import pandas as pd
 
 import alpaca_paper as ap
-import holdings_alert
 
 FAIL = []
 KEY, SECRET = "test-key-id", "test-secret-value"
@@ -142,10 +141,6 @@ try:
     ap.sync_paper_account(acct, positions_csv=p_csv, snapshot_csv=snap, history_csv=hist)
     mp = pd.read_csv(p_csv)
     expect(list(mp.columns) == ["Symbol", "Shares"] and dict(zip(mp.Symbol, mp.Shares)) == {"MRK": 25, "NVDA": 10}, "my_positions.csv = Symbol,Shares")
-    rp = holdings_alert.read_positions(p_csv)
-    expect(set(rp.Symbol) == {"MRK", "NVDA"}, "holdings_alert reads the synced positions file")
-    alert = holdings_alert.build_alert(positions_path=p_csv)
-    expect(alert["uses_positions"] and alert["lines"], "holdings alert builds from the synced file")
     sn = pd.read_csv(snap)
     expect({"CASH", "TOTAL EQUITY", "NVDA", "MRK"} <= set(sn.Symbol), "snapshot has positions + cash/equity rows")
     expect(len(pd.read_csv(hist)) == 2 and r["Positions"] == 2, "history appends one row per sync")

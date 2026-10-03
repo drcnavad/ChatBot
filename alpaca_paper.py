@@ -15,10 +15,10 @@ Safety rules built into this module:
     and are never printed, logged or written to a file.
 
 Outputs of sync_paper_account():
-  my_positions.csv                        Symbol,Shares of the live positions (read by holdings_alert.py and the app alert)
+  my_positions.csv                        Symbol,Shares of the live positions (paper_trade.py --positions reads it)
   Reports/live_portfolio_snapshot.csv    positions + cash/equity rows at the time of the sync
   Reports/live_account_history.csv       one row per sync (equity, cash, buying power, number of positions,
-                                         lifetime net deposits - strategy_health.py excludes them from P&L)
+                                         lifetime net deposits)
 
     python alpaca_paper.py            # print the summary, positions and recent orders (no files written)
     python alpaca_paper.py --sync     # ... and write the three files above
@@ -175,7 +175,7 @@ class PaperAccount:
 
 # --- files for the rest of the pipeline --------------------------------------------------------------------------------
 def write_positions_csv(positions, path=POSITIONS_CSV):
-    """my_positions.csv (Symbol,Shares) in the format holdings_alert.py and paper_trade.py read."""
+    """my_positions.csv (Symbol,Shares) in the format paper_trade.py reads."""
     out = positions.loc[positions["Qty"] != 0, ["Symbol", "Qty"]].rename(columns={"Qty": "Shares"})
     out.to_csv(path, index=False)
     return path

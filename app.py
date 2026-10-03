@@ -1581,80 +1581,6 @@ def render_details(p):
 
 
 # =====================================================================================================================
-# 12b. Strategy health — is the live account behaving like the backtest said it would?
-# =====================================================================================================================
-def render_health():
-    """Live equity vs the backtest reference (see strategy_health.py for the bands)."""
-    try:
-        import strategy_health as sh
-    except Exception as e:  # deployed without the pipeline modules
-        st.caption(f"Strategy health unavailable: {e}")
-        return
-    rep = sh.build_report(*sh.default_paths(ROOT))
-    ref = rep["ref"]
-    st.markdown("**Strategy health** — live account vs the backtest "
-                f"({sh.LIVE_STRATEGY} walk-forward: Sharpe {ref['sharpe']:.2f}, max DD {ref['max_dd_pct']:.1f}%, "
-                f"win rate {ref['win_rate_pct']:.1f}%, CAGR {ref['cagr_pct']:.1f}%)")
-    if rep["data_state"] == "empty":
-        st.info("No live account history yet — `Reports/live_account_history.csv` is written by the pipeline's "
-                "account sync (`run_all.py --sync-live`). The backtest stats above are what the health score "
-                "will be measured against once trading starts.")
-        return
-    s = rep["stats"]
-
-    def _d(x):
-        try:
-            return f"${x:,.0f}" if x == x else "\u2014"  # NaN -> em dash
-        except TypeError:
-            return "\u2014"
-
-    c = st.columns(4)
-    c[0].metric("Equity", _d(s["equity_now"]))
-    c[1].metric("P&L since start", _d(s["pnl_dollars"]), f"{s['total_return_pct']:+.1f}%"
-                if s["total_return_pct"] == s["total_return_pct"] else None,
-                help="Deposits and withdrawals are excluded (time-weighted return).")
-    c[2].metric("CAGR (live)", f"{s['cagr_pct']:.1f}%" if s["cagr_pct"] == s["cagr_pct"] else "\u2014")
-    c[3].metric("Current drawdown", f"{s['current_dd_pct']:.1f}%", _d(s["dd_dollars"]))
-    if rep["data_state"] == "warming_up":
-        st.info(f"Only {rep['n_sessions']} sessions of live history — the health score needs {sh.WARMUP_MIN}. "
-                "The trajectory below is shown against the backtest's expected path.")
-    else:
-        color = {"green": "#15803d", "yellow": "#b45309", "red": "#b91c1c", "grey": "#64748b"}[rep["level"]]
-        st.markdown(f"<div style='font-size:2.2em;font-weight:700;color:{color}'>{rep['score']:.0f} / 100</div>",
-                    unsafe_allow_html=True)
-        st.write(rep["verdict"])
-        if rep["data_state"] == "provisional":
-            st.caption("Provisional — fewer than 63 sessions, so the Sharpe leg is not yet fully meaningful.")
-        for name, label in (("trend", "Trend — live CAGR vs backtest"), ("drawdown", "Drawdown vs backtest worst"),
-                            ("sharpe", "Consistency — rolling 63-day Sharpe")):
-            sc, lvl, txt = rep[name]
-            if name == "drawdown" and s["dd_dollars"] == s["dd_dollars"] and s["dd_dollars"] < 0:
-                txt += f" ({_d(s['dd_dollars'])} on current equity)"
-            dot = {"green": "🟢", "yellow": "🟡", "red": "🔴", "grey": "⚪"}[lvl]
-            st.markdown(f"{dot} **{label}** ({sc:.0f}/100) — {txt}")
-    if rep["live_rebased"] is not None and len(rep["live_rebased"]) >= 2:
-        fig = go.Figure()
-        x = list(rep["live_rebased"].index)
-        fig.add_trace(go.Scatter(x=x, y=rep["live_rebased"].to_numpy(), name="Live equity", line=dict(width=2.5)))
-        fig.add_trace(go.Scatter(x=x, y=rep["expected"].reindex(rep["live_rebased"].index).to_numpy(),
-                                 name=f"Backtest path ({ref['cagr_pct']:.0f}% CAGR)", line=dict(dash="dash")))
-        if rep["qqq"] is not None:
-            qx = list(rep["qqq"].index)
-            fig.add_trace(go.Scatter(x=qx, y=rep["qqq"].to_numpy(), name="QQQ", line=dict(dash="dot")))
-        fig.update_layout(title="Live equity vs backtest path (rebased to 100)", xaxis_title="Date",
-                          yaxis_title="Rebased", hovermode="x unified", height=380,
-                          legend=dict(orientation="h", y=1.02))
-        st.plotly_chart(fig, width="stretch")
-    if rep.get("regime"):
-        st.info("Regime: " + rep["regime"]["text"])
-    with st.expander("When to review the strategy", expanded=False):
-        for t in rep["review_triggers"]:
-            st.markdown(f"- {t}")
-        st.caption("Score bands — trend: 100 at/above the backtest CAGR, 50 at zero · drawdown: full marks below "
-                   "half the backtest worst (-30.8%), alert beyond it · Sharpe: full marks ≥ 1.0, alert below zero.")
-
-
-# =====================================================================================================================
 # 13. Main
 # =====================================================================================================================
 def main():
@@ -1675,7 +1601,7 @@ def main():
         st.cache_data.clear()
         st.cache_resource.clear()
         st.rerun()
-    tab_main, tab_details, tab_health = st.tabs(["📈 Dashboard", "🔎 Details", "🩺 Strategy Health"])
+    tab_main, tab_details = st.tabs(["📈 Dashboard", "🔎 Details"])
     with tab_main:
         render_summary(p)
         ticker, tdata = render_stock_picker(p, jumped)
@@ -1688,8 +1614,6 @@ def main():
             render_stock_figure(fig, ticker)
     with tab_details:
         render_details(p)
-    with tab_health:
-        render_health()
 
 
 main()
