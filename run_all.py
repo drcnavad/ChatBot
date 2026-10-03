@@ -22,7 +22,7 @@ so the evening trade still runs on fresh signals. Only a main or validate failur
     python run_all.py --quick         # force quick mode
     python run_all.py --dry-run       # show the plan (mode, steps, expected API calls) and exit - nothing runs
     python run_all.py --positions f.csv       # alert on another positions file (default: my_positions.csv if it exists)
-    python run_all.py --only main | --from scoring | --list | --backtests | --visualization | --keep-going
+    python run_all.py --only main | --from scoring | --list | --backtests | --keep-going
     python run_all.py --sync-live     # also refresh my_positions.csv from your Alpaca LIVE account (off by default)
     python run_all.py --trade         # after the pipeline, auto-trade the LIVE account (REAL MONEY) for the due decision
                                       # (pulls live positions + equity; Friday rebalance brings every target
@@ -106,7 +106,6 @@ STEPS = [
     ("sentiment", "notebook", "sentiment_analysis.ipynb", "full"),
     ("earnings", "notebook", "earnings_date.ipynb", "full"),
     ("main", "notebook", "main_signal_analysis.ipynb", "always"),
-    ("visualization", "notebook", "company_report_visualization.ipynb", "visualization"),
     ("backtest", "notebook", "backtest.ipynb", "backtests"),
     ("validate", "check", None, "always"),
 ]
@@ -823,7 +822,6 @@ def main(argv=None):
     p.add_argument("--positions", help="positions CSV for the holdings alert (default: my_positions.csv if it exists)")
     p.add_argument("--only", choices=[s[0] for s in STEPS], help="run just this step")
     p.add_argument("--from", dest="start", choices=[s[0] for s in STEPS], help="start at this step (mode rules still apply)")
-    p.add_argument("--visualization", action="store_true", help="also run company_report_visualization.ipynb")
     p.add_argument("--backtests", action="store_true", help="also run backtest.ipynb (≈10 s; rewrites Reports/backtest_*.csv)")
     p.add_argument("--keep-going", action="store_true", help="continue after a failed step (still exits 1)")
     p.add_argument("--list", action="store_true", help="list the steps and exit")

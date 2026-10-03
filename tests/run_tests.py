@@ -11,7 +11,7 @@
                          processing / scoring / sentiment / earnings) never stop the pipeline or
                          block trading; only main/validate failures are critical
   test_app.py            Streamlit AppTest: page, charts, displayed ranks, Details widgets, captions, holdings alert
-  test_paper_account.py  alpaca_paper.py + alpaca_paper_account.ipynb + run_all --sync-live against a local MOCK server
+  test_paper_account.py  alpaca_paper.py + run_all --sync-live against a local MOCK server
   test_dashboard_http.py the app on test port 8599 answers 200 for / and /?symbol=NVDA (never touches 8502, the running app)
   test_paper_trade_live_safety.py  mocked (zero broker calls) regression tests for the LIVE paper_trade.py:
                          live- / live-fill- order id namespace, paper=False LIVE client from LIVE keys,

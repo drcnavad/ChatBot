@@ -1,8 +1,8 @@
-"""alpaca_paper.py / alpaca_paper_account.ipynb / run_all.py --sync-live against a MOCK Alpaca server on 127.0.0.1.
+"""alpaca_paper.py / run_all.py --sync-live against a MOCK Alpaca server on 127.0.0.1.
 
 No request ever goes to Alpaca: the client is pointed at a local mock (allowed only with the test-only flag), dummy keys are
 passed explicitly (.env is not read), and every file is written to a temporary folder (the real my_positions.csv and
-Reports/ are never touched). Checks: URL guard, read-only GET requests, headers, parsing, files, notebook top-to-bottom.
+Reports/ are never touched). Checks: URL guard, read-only GET requests, headers, parsing, files.
 Run: python tests/run_tests.py  (or python tests/test_paper_account.py)"""
 import functools
 import json
@@ -162,25 +162,6 @@ try:
     finally:
         ap.PaperAccount, ap.POSITIONS_CSV, ap.SNAPSHOT_CSV, ap.HISTORY_CSV = real
     expect(run_all.main(["--dry-run", "--quick", "--sync-live"]) == 0, "run_all --dry-run --sync-live plans without calling")
-
-    # ------------------------------------------------------------ the notebook, top to bottom, against the mock
-    import nbformat
-    from nbclient import NotebookClient
-    nb = nbformat.read(os.path.join(ROOT, "alpaca_paper_account.ipynb"), as_version=4)
-    nb_tmp = os.path.join(tmp, "nb")
-    os.makedirs(nb_tmp)
-    inject = (f"import functools, alpaca_paper\n"
-              f"alpaca_paper.PaperAccount = functools.partial(alpaca_paper.PaperAccount, {KEY!r}, {SECRET!r}, "
-              f"base_url={MOCK!r}, _allow_local_test=True)\n"
-              f"alpaca_paper.POSITIONS_CSV = {os.path.join(nb_tmp, 'my_positions.csv')!r}\n"
-              f"alpaca_paper.SNAPSHOT_CSV = {os.path.join(nb_tmp, 'snapshot.csv')!r}\n"
-              f"alpaca_paper.HISTORY_CSV = {os.path.join(nb_tmp, 'history.csv')!r}\n")
-    nb.cells.insert(0, nbformat.v4.new_code_cell(inject))
-    NotebookClient(nb, timeout=120, kernel_name="python3", resources={"metadata": {"path": ROOT}}).execute()
-    text = json.dumps([c.get("outputs", []) for c in nb.cells])
-    expect("Connected to" in text and "Saved 2 positions" in text and '"error"' not in text, "notebook runs top to bottom (mock)")
-    expect(os.path.exists(os.path.join(nb_tmp, "my_positions.csv")), "notebook wrote the (temporary) positions file")
-    expect(SECRET not in text, "notebook output never shows the secret")
 
     # ------------------------------------------------------------ read-only: only GETs, correct headers, no order code
     expect(REQUESTS and all(q["method"] == "GET" for q in REQUESTS), f"only GET requests ({len(REQUESTS)} made)")
