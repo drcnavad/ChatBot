@@ -617,6 +617,19 @@ def fill_check_allowed(now_ct, pending_path=None):
     return True, "ok", False
 
 
+def refresh_idle(now_ct):
+    """Why the weekday dashboard refresh (launchd refresh job: --quick --scheduled, never --trade) does nothing now, else
+    None. It refreshes only a trading day that is not a decision day (the 2:30 PM decision run refreshes those) and only
+    once the day's bar is final (after 4:30 PM ET), so it never overlaps a decision run."""
+    if not is_trading_day(now_ct.date()):
+        return "market closed today (weekend or holiday) - nothing to refresh"
+    if decision_day(now_ct.date()):
+        return "decision day - the 2:30 PM CT decision run refreshes the dashboard"
+    if (now_ct.astimezone(ET).hour, now_ct.astimezone(ET).minute) < BAR_FINAL_ET:
+        return "today's daily bar is not final yet (after 4:30 PM ET = 3:30 PM CT)"
+    return None
+
+
 def fill_check_idle(now_ct):
     """Plain reason when a scheduled fill check has nothing to do now (then it writes no log and no run-log row),
     else None (orders to send, superseded rows to drop, or a problem to report)."""
@@ -834,7 +847,8 @@ def main(argv=None):
                    help="morning fill check: complete the previous evening's unfilled extended-hours orders "
                         "with regular-hours limit orders (no notebooks run; LIVE - real money)")
     p.add_argument("--scheduled", action="store_true",
-                   help="launchd runs: nothing due -> one 'idle:' line (no log); --trade retries a failed decision <= 3 times")
+                   help="launchd runs: nothing due -> one 'idle:' line (no log); --trade retries a failed decision <= 3 times; "
+                        "alone (with --quick) = the weekday dashboard refresh after the close on non-decision days")
     p.add_argument("--now", help=argparse.SUPPRESS)          # tests: pretend it is this CT time ("2026-09-28 15:40")
     p.add_argument("--no-resume", action="store_true", help="do not resume from a previous failed run's checkpoint")
     a = p.parse_args(argv)
@@ -874,6 +888,17 @@ def main(argv=None):
             state.update(report_superseded(gone, now))
         if a.scheduled and how in (None, "wait") and not a.dry_run:
             print(f"idle: {now:%a %b %d %I:%M %p} CT - {gate_why}", flush=True)   # launchd wake/interval run: no log
+            return 0
+    if a.scheduled and not a.trade and not a.fill_check:       # the weekday dashboard refresh: no orders, ever
+        idle = refresh_idle(now)
+        if idle is None and _ckpt_on and not a.dry_run:        # a trade run holds the lock: never run beside it
+            free, held_by = acquire_trade_lock()
+            if free:
+                release_trade_lock()
+            else:
+                idle = f"a trade run is in progress ({held_by})"
+        if idle:
+            print(f"idle: {now:%a %b %d %I:%M %p} CT - {idle}", flush=True)
             return 0
     if a.fill_check and a.scheduled and not a.dry_run:
         idle = fill_check_idle(now)

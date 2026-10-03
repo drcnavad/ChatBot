@@ -45,8 +45,9 @@ project's .env file (loaded automatically) or the environment:
   Diagnose-only contract: the LLM explains the failure and proposes a fix for human
   review. It is never applied automatically.
 
-The launchd jobs (launchd/*.plist) run pipeline_watchdog.py, so it rides along with each scheduled run -
-between runs the pipeline is idle and there is nothing to watch.
+The trade and fill-check launchd jobs (launchd/com.stockanalysis.evening / .morning) run pipeline_watchdog.py, so it
+rides along with each scheduled trade run - between runs the pipeline is idle and there is nothing to watch. The
+dashboard refresh job (.refresh) runs run_all.py directly: it sends no orders.
 """
 import collections
 import json

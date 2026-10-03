@@ -2,6 +2,8 @@
 # Install (or refresh after editing) the Stock Analysis launchd jobs:  bash launchd/install_schedule.sh
 #   com.stockanalysis.evening         Mon-Fri 2:30 PM CT, at login, on wake, every 30 min: pipeline_watchdog.py --trade --scheduled
 #   com.stockanalysis.morning         Mon-Fri 9:00 AM CT, at login, on wake, every 30 min: pipeline_watchdog.py --fill-check --scheduled
+#   com.stockanalysis.refresh         Mon-Fri 3:45 PM CT, on wake: run_all.py --quick --scheduled (dashboard refresh on
+#                                     non-decision trading days, normally Tue/Thu; no paid APIs, never orders)
 #   com.stockanalysis.dashboard-8502  always on (restarted if it stops): the app on http://localhost:8502
 # run_all.py decides whether anything is due (a decision after its 2:30 PM slot, or a missed one caught up at the next
 # regular session until the next slot); idle starts print one "idle:" line. run_state last_decision and lock files
