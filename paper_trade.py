@@ -1322,7 +1322,6 @@ def _symbol_state(client, sym):
     return held, open_orders
 
 
-
 def _today_ct():
     from datetime import datetime
     from zoneinfo import ZoneInfo
