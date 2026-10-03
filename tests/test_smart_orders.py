@@ -352,27 +352,51 @@ check("Friday rows: ENPH (fully filled Friday) not touched; file cleared", "ENPH
 lg = pd.read_csv(log)
 check("Friday rows: the evening fill price is logged (ENPH 33.40)", lg.loc[lg.Symbol == "ENPH", "Fill_Price"].iloc[0] == 33.4)
 
-# ------------------------------------------------------------------ SIP when the data plan allows it, else IEX (no keys read)
+# ------------------------------------------------------------------ SIP when it works, else IEX; neither -> skip (no keys read)
 class DataClient:
-    def __init__(self, sip_ok):
-        self.sip_ok, self.feeds = sip_ok, []
+    def __init__(self, sip_ok=True, iex_ok=True):
+        self.ok, self.feeds = {"sip": sip_ok, "iex": iex_ok}, []
 
     def get_stock_latest_quote(self, req):
         self.feeds.append(req.feed.value)
-        if req.feed.value == "sip" and not self.sip_ok:
-            raise RuntimeError("subscription does not permit querying recent SIP data")
+        if not self.ok[req.feed.value]:
+            raise RuntimeError(f"{req.feed.value}: subscription does not permit querying recent data")
         sym = req.symbol_or_symbols if isinstance(req.symbol_or_symbols, str) else req.symbol_or_symbols[0]
         return {sym: types.SimpleNamespace(bid_price=99.9, ask_price=100.0, timestamp=datetime.now(timezone.utc))}
 
 
+pt._latest_quote = REAL_LATEST                # the real feed logic below, with fake data clients
 for sip_ok, want in ((True, "sip"), (False, "iex")):
     dc = DataClient(sip_ok)
     pt.quote_client = lambda dc=dc: dc
     pt._QUOTES.clear()
-    quotes = [REAL_LATEST(sym) for sym in ("AAA", "BBB")]
-    check(f"feed: {'SIP allowed' if sip_ok else 'SIP refused'} -> {want.upper()} (one SPY check, then every quote on {want})",
-          dc.feeds == ["sip", want, want] and [q[3] for q in quotes] == [want, want] and quotes[0][:2] == (99.9, 100.0),
-          dc.feeds)
+    q = pt.smart_quote("AAA", "BUY")
+    check(f"feed: {'SIP works -> SIP' if sip_ok else 'SIP raises -> IEX'}, same limit price (ask 100.00 + 0.05% = 100.05)",
+          q["feed"] == want and q["limit"] == 100.05 and q["skip"] is None
+          and dc.feeds == (["sip"] if sip_ok else ["sip", "iex"]), (q, dc.feeds))
+
+dc = DataClient(sip_ok=False, iex_ok=False)
+pt.quote_client = lambda: dc
+pt._QUOTES.clear()
+q = pt.smart_quote("AAA", "BUY")
+check("feed: SIP and IEX both raise -> no crash, re-quoted 3 times, then skipped as a bad quote",
+      q["skip"] and q["skip"].startswith("no quote") and dc.feeds == ["sip", "iex"] * 3, (q, dc.feeds))
+
+pt._QUOTES.clear()
+pt.quote_client = lambda: (_ for _ in ()).throw(OSError("no market-data client"))
+q = pt.smart_quote("AAA", "SELL")
+check("feed: the data client can't even be made -> no crash, skipped as a bad quote", q["skip"].startswith("no quote"), q)
+
+# both feeds down in a real 2:30 fill check: nothing sent, no crash, carried to the next 9 AM CT check
+dc = DataClient(sip_ok=False, iex_ok=False)
+pt.quote_client = lambda: dc
+pt._QUOTES.clear()
+NOW[0] = datetime(2026, 10, 2, 14, 45, tzinfo=CT)
+b, p = Broker(), pending([{"symbol": "DWN", "side": "BUY", "qty": 5}])
+res = run(b, p, os.path.join(tempfile.mkdtemp(), "live_orders_log.csv"))
+check("feed: both down at 2:30 -> nothing sent, run finishes, DWN kept for the Mon Oct 5 9 AM CT check",
+      not b.submitted and "Mon Oct 5" in status_of(res, "DWN") and left(p)[0].get("retry_on") == "2026-10-05",
+      status_of(res, "DWN"))
 
 for r in [r for r in ROWS if r[2].startswith("Order prices")][-3:]:
     print("   run-log cost row:", r[1], "|", r[2])

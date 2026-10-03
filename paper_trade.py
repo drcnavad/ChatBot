@@ -792,7 +792,7 @@ def _limit_price(price):
 
 
 # ----------------------------------------------------------------------------- smart limit prices from the latest quote
-_QUOTES = {}   # this run's market-data client and quote feed ("sip" or "iex"), found once
+_QUOTES = {}   # this run's market-data client (made once)
 
 
 def quote_client():
@@ -802,23 +802,27 @@ def quote_client():
 
 
 def _latest_quote(sym):
-    """(bid, ask, quote time, feed) for one symbol. Raises when Alpaca can't be read.
+    """(bid, ask, quote time, feed) for one symbol, for the same limit pricing on either feed.
 
-    The feed is found once per run with one test quote: SIP (all US exchanges) when the account's data plan allows it,
-    otherwise IEX (one exchange, free plan). The keys are never read here; Alpaca's answer decides."""
+    Asks SIP first (all US exchanges; needs Alpaca's paid data plan). On any SIP error it asks IEX (one exchange, free
+    plan) instead, so a plan change takes effect on the next quote. Raises only when neither feed answers; smart_quote
+    then re-quotes and finally skips the order. The keys are never read here; Alpaca's answer decides."""
     from alpaca.data.enums import DataFeed
     from alpaca.data.requests import StockLatestQuoteRequest
-    if "feed" not in _QUOTES:
-        data_client = _QUOTES["client"] = quote_client()
+    if "client" not in _QUOTES:
+        _QUOTES["client"] = quote_client()
+    err = None
+    for feed in ("sip", "iex"):
         try:
-            data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols="SPY", feed=DataFeed.SIP))
-            _QUOTES["feed"] = "sip"
+            req = StockLatestQuoteRequest(symbol_or_symbols=sym, feed=DataFeed(feed))
+            q = _QUOTES["client"].get_stock_latest_quote(req)[sym]
+            return _safe_number(q.bid_price), _safe_number(q.ask_price), q.timestamp, feed
         except Exception as e:
-            _QUOTES["feed"] = "iex"
-            print(f"  Quotes: SIP not available ({str(e)[:80]}) - using IEX")
-    data_client, feed = _QUOTES["client"], _QUOTES["feed"]
-    q = data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=sym, feed=DataFeed(feed)))[sym]
-    return _safe_number(q.bid_price), _safe_number(q.ask_price), q.timestamp, feed
+            err = e
+            if feed == "sip" and not _QUOTES.get("sip_note"):   # say it once per run
+                _QUOTES["sip_note"] = True
+                print(f"  Quotes: SIP not available ({str(e)[:80]}) - using IEX")
+    raise err
 
 
 def _tick(price, up):
@@ -840,8 +844,9 @@ def smart_quote(sym, side):
     for n in range(QUOTE_TRIES):
         if n:
             time.sleep(QUOTE_RETRY_SECS)
-        try:
+        try:   # never raises: no answer from either feed (or an odd one) is just a bad quote
             bid, ask, t, feed = _latest_quote(sym)
+            age = (datetime.now(timezone.utc) - t).total_seconds() if t is not None else float("inf")
         except Exception as e:
             q = {"skip": f"no quote ({str(e)[:60]})"}
             continue
@@ -851,7 +856,6 @@ def smart_quote(sym, side):
             continue
         mid = (bid + ask) / 2
         q["spread_pct"] = round((ask - bid) / mid * 100, 3)
-        age = (datetime.now(timezone.utc) - t).total_seconds() if t is not None else float("inf")
         if age > QUOTE_MAX_AGE_SECS:
             q["skip"] = f"stale quote ({age:.0f} s old)" if math.isfinite(age) else "stale quote (no time)"
         elif (ask - bid) / mid > MAX_SPREAD:
@@ -910,7 +914,7 @@ def _log_cost(run, log):
     traded = (pd.to_numeric(log["Fill_Price"], errors="coerce") * pd.to_numeric(log["Shares"], errors="coerce"))[filled].sum()
     spread = pd.to_numeric(log["Spread_%"], errors="coerce").dropna()
     feed = log["Feed"].dropna()
-    msg = f"Order prices ({feed.iloc[0].upper()} quotes): " if len(feed) else "Order prices: "
+    msg = f"Order prices ({'/'.join(sorted(set(map(str, feed)))).upper()} quotes): " if len(feed) else "Order prices: "
     if filled.any() and traded > 0:
         msg += (f"{int(filled.sum())} order(s) filled at limit prices. Paying the bid/ask spread cost about "
                 f"${cost[filled].sum():,.2f} ({cost[filled].sum() / traded:.2%} of ${traded:,.0f} traded) vs the mid price")
