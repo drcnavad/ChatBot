@@ -121,7 +121,7 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
     .stApp, .main { background: #f1f5f9; }
-    .main .block-container { padding: 1rem 2rem 2.5rem 2rem !important; max-width: 1400px; }
+    .main .block-container, [data-testid="stMainBlockContainer"] { padding: 1.25rem 2rem 2.5rem 2rem !important; max-width: 1400px; }
     .stApp > header, header[data-testid="stHeader"], [data-testid="stDecoration"] { display: none !important; height: 0 !important; }
     #MainMenu, footer, header { visibility: hidden; }
     html, body, [class*="css"] { font-family: 'DM Sans', system-ui, sans-serif; }
@@ -133,6 +133,9 @@ st.markdown("""
     [data-testid="stExpander"] { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; }
     [data-baseweb="tab-list"] { background: #e2e8f0; border-radius: 12px; padding: 4px; gap: 4px; }
     [data-baseweb="tab"] { border-radius: 10px; font-weight: 600; color: #64748b; }
+    [data-testid="stExpander"] summary p { font-weight: 600; color: #0f172a; }
+    [data-testid="stDataFrame"] { border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+    [data-testid="stCaptionContainer"] { color: #64748b; line-height: 1.45; }
     .js-plotly-plot { border-radius: 12px; background: #fff; border: 1px solid #e2e8f0; padding: 4px; }
     .symbol-link { color: #0f766e; text-decoration: none; font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; }
     .symbol-link:hover { color: #0d9488; text-decoration: underline; }
@@ -163,6 +166,9 @@ st.markdown("""
     .sa-stat-val { font-size: 0.95rem; font-weight: 700; color: #0f172a; font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
 </style>
 """, unsafe_allow_html=True)
+
+CHART_FONT = "DM Sans, system-ui, sans-serif"
+PCT_COL, SCORE_COL = st.column_config.NumberColumn(format="%.2f%%"), st.column_config.NumberColumn(format="%.1f")
 
 # Report files (all written by run_all.py)
 REPORTS = os.path.join(ROOT, "Reports")
@@ -1232,8 +1238,8 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
         plot_bgcolor='#ffffff', paper_bgcolor='#ffffff', dragmode=False,
         legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="center", x=0.5, font=dict(size=10, color='#374151'),
                     bgcolor='rgba(255, 255, 255, 0.95)', bordercolor='#e2e8f0', borderwidth=1),
-        font=dict(family="Arial, sans-serif", size=11, color='#374151'),
-        hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family="Arial, sans-serif"))
+        font=dict(family=CHART_FONT, size=11, color='#374151'),
+        hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family=CHART_FONT))
     fig.update_xaxes(type="date", range=[x_start, x_right], showspikes=True, spikemode="across", spikethickness=1, spikecolor="#6b7280",
                      dtick=7 * 24 * 60 * 60 * 1000, tickformat='%b %d', tickangle=-45,
                      **(grid | dict(showgrid=False)))
@@ -1404,7 +1410,8 @@ def render_latest_signals(p):
                + f" · {plan_when} plan = what the {plan_when} full rebalance would do at this close (Reports/strategy_picks.csv, "
                "the numbers the trade step uses; final at that close). Click a row to open the stock.")
     event = st.dataframe(table.round({"Score today": 1, "Held now %": 2}), hide_index=True, width="stretch",
-                         on_select="rerun", selection_mode="single-row", key="latest_signals_tbl")
+                         on_select="rerun", selection_mode="single-row", key="latest_signals_tbl",
+                         column_config={"Score today": SCORE_COL, "Held now %": PCT_COL})
     open_symbol(table, event, "latest_signals")
 
 
@@ -1455,7 +1462,9 @@ def render_short_stock(sym, r):
     for n, color in ((10, "#2563eb"), (30, "#16a34a"), (50, "#d97706")):
         fig.add_trace(go.Scatter(x=closes.index, y=closes.rolling(n).mean(), name=f"MA {n}", line=dict(color=color, width=1)))
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10), xaxis=dict(type="date"),
-                      title=f"{sym} daily close (display only, yfinance)")
+                      title=f"{sym} daily close (display only, yfinance)", plot_bgcolor="#ffffff", paper_bgcolor="#ffffff",
+                      font=dict(family=CHART_FONT, size=11, color="#374151"), yaxis=dict(tickformat="$,.0f", gridcolor="#eef2f7"),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     st.plotly_chart(fig, width="stretch", key=f"short_chart_{sym}")
 
 
@@ -1506,7 +1515,8 @@ def render_last_decision(p):
                "Dashboard tab.")
     event = st.dataframe(part.round({"Score": 1, "Weight before %": 2, "Portfolio weight %": 2}), hide_index=True,
                          width="stretch", on_select="rerun", selection_mode="single-row", key=f"sig_tbl_{show}",
-                         column_config={"Why": st.column_config.TextColumn("Why", width="large")})
+                         column_config={"Why": st.column_config.TextColumn("Why", width="large"), "Score": SCORE_COL,
+                                        "Weight before %": PCT_COL, "Portfolio weight %": PCT_COL})
     open_symbol(part, event, "signals")
 
 
@@ -1567,17 +1577,19 @@ def render_live_holdings():
         return
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
     money, pct = st.column_config.NumberColumn(format="dollar"), st.column_config.NumberColumn(format="%+.2f%%")
-    st.dataframe(table, hide_index=True, width="stretch",
+    pl = lambda v: "" if v != v else f"color: {'#15803d' if v > 0 else '#b91c1c' if v < 0 else '#64748b'}"
+    st.dataframe(table.style.map(pl, subset=["P/L $", "P/L %", "Today %"]), hide_index=True, width="stretch",
+                 height=35 * (len(table) + 1) + 3,                  # every row visible, no inner scroll
                  column_config={"Shares": st.column_config.NumberColumn(format="%.2f"), "Avg price": money,
                                 "Cost basis": money, "Market value": money, "P/L $": money, "Price": money,
                                 "P/L %": pct, "Today %": pct, "Weight %": st.column_config.NumberColumn(format="%.2f%%")})
     st.caption(f"As of {data['as_of']:%a %b %-d %I:%M:%S %p} CT, read from Alpaca (read-only). Updates by itself: every "
                "minute in market hours (8:30 AM-3:00 PM CT on trading days), every hour otherwise. "
-               "Cost basis = what you paid; Market value = shares x the latest price; P/L $ and P/L % = market value vs "
+               "Cost basis = what you paid; Market value = shares x the latest price; P/L \\$ and P/L % = market value vs "
                "cost basis; Today % = price change since the last close; Weight % = share of the account's equity (the rest "
                "is cash). First bought = the earliest buy still in the position (sells use up the oldest shares first). "
                f"QQQ is not held: its row invests the same total cost basis in QQQ at its Fri Oct 2, 2026 close "
-               f"(${ap.QQQ_BASE_CLOSE:,.2f}, fixed) and values it at QQQ's latest price, to compare with the Total row.")
+               f"(\\${ap.QQQ_BASE_CLOSE:,.2f}, fixed) and values it at QQQ's latest price, to compare with the Total row.")
 
 
 def render_details(p):
@@ -1609,12 +1621,12 @@ def main():
     render_top_bar(p)
     # One-click freshness: every data cache is already keyed on the Reports/*.csv modification times,
     # so clearing the caches and rerunning always shows the newest pipeline output + live quotes.
-    if st.button("🔄 Refresh data",
+    if st.button("Refresh data",
                    help="Clear all cached data and reload the latest Reports/*.csv files and live quotes."):
         st.cache_data.clear()
         st.cache_resource.clear()
         st.rerun()
-    tab_main, tab_details = st.tabs(["📈 Dashboard", "🔎 Details"])
+    tab_main, tab_details = st.tabs(["Dashboard", "Details"])
     with tab_main:
         ticker, tdata = render_stock_picker(p, jumped)
         if ticker in p.short.index:

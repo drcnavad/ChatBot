@@ -249,7 +249,7 @@ expect("next open" not in blob, "outdated 'next open' wording (orders go out the
 # ---------------------------------------------------------------- removed: alert banner, Summary section, Strategy Health tab
 box = [m.value for m in at.markdown if "sa-alert " in m.value]
 expect(len(box) == 0, f"the alert banner was removed from the dashboard, found {len(box)}")
-expect([t.label for t in at.tabs] == ["📈 Dashboard", "🔎 Details"], f"tabs: {[t.label for t in at.tabs]} (Strategy Health removed)")
+expect([t.label for t in at.tabs] == ["Dashboard", "Details"], f"tabs: {[t.label for t in at.tabs]} (Strategy Health removed)")
 expect(not [m for m in at.markdown if '<div class="sa-section">Summary</div>' in m.value], "the Summary section was removed")
 expect(any("Live holdings are turned off here" in i.value for i in at.info), "holdings expander: off message in tests")
 

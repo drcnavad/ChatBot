@@ -1,10 +1,12 @@
 [theme]
 base = "light"
-primaryColor = "#1a73e8"
-backgroundColor = "#f8f6f0"
-secondaryBackgroundColor = "#faf8f5"
-textColor = "#1f2937"
-font = "sans serif"
+primaryColor = "#0f766e"
+backgroundColor = "#f1f5f9"
+secondaryBackgroundColor = "#f8fafc"
+textColor = "#0f172a"
+borderColor = "#e2e8f0"
+baseRadius = "0.6rem"
+font = "sans-serif"
 
 [server]
 port = 8501
