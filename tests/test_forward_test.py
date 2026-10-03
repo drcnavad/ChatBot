@@ -88,17 +88,36 @@ eq["2026-10-09"] += 3000                       # ... and a real gain that partly
 eq["2026-10-16"] += 6000
 daily = pd.DataFrame({"Date": days, "Equity": eq.values, "Net_Deposits": [0.0] * 2 + [5000.0] * (len(days) - 2)})
 bench = pd.DataFrame({"Date": days, "QQQ": [100.0] * 5 + [110.0] * 5 + [99.0] * 1, "SPY": 100.0})
-sm = ft.summary(daily, bench).set_index("Series")
-st_ = sm.loc["Strategy (live account)"]
-check("summary: deposits are not returns (total +6%)", abs(st_["Total return %"] - 6) < 1e-9, st_.to_dict())
-check("summary: median weekly return Friday to Friday (+3%, +2.91%)",
-      abs(st_["Median weekly return %"] - (3 + (106 / 103 - 1) * 100) / 2) < 1e-9, st_["Median weekly return %"])
-check("summary: max drawdown (103k -> 100k on Oct 12)", abs(st_["Max drawdown %"] - (100 / 103 - 1) * 100) < 1e-9,
+sm = ft.leaderboard(daily, bench, values=pd.DataFrame(columns=["Date", "Strategy", "Value"])).set_index("Strategy")
+st_ = sm.loc[ft.ACCOUNT]
+check("leaderboard: deposits are not returns (total +6%)", abs(st_["Total return %"] - 6) < 1e-9, st_.to_dict())
+check("leaderboard: median weekly return Friday to Friday (+3%, +2.91%), 2 weeks",
+      abs(st_["Median weekly return %"] - (3 + (106 / 103 - 1) * 100) / 2) < 1e-9 and st_["Weeks"] == 2, st_.to_dict())
+check("leaderboard: max drawdown (103k -> 100k on Oct 12)", abs(st_["Max drawdown %"] - (100 / 103 - 1) * 100) < 1e-9,
       st_["Max drawdown %"])
-q = sm.loc["QQQ (comparison, not traded)"]
-check("summary: QQQ from the start close", abs(q["Total return %"] + 1) < 1e-9 and abs(q["Max drawdown %"] - (99 / 110 - 1) * 100) < 1e-9,
+q = sm.loc["QQQ (comparison)"]
+check("leaderboard: QQQ from the start close", abs(q["Total return %"] + 1) < 1e-9 and abs(q["Max drawdown %"] - (99 / 110 - 1) * 100) < 1e-9,
       q.to_dict())
-check("summary: nothing saved yet -> only the comparison rows", list(ft.summary(daily.iloc[:0], bench)["Series"].str.split().str[0]) == ["QQQ", "SPY"])
+check("leaderboard: the account and QQQ / SPY are not ranked", sm.loc[[ft.ACCOUNT, "QQQ (comparison)", "SPY (comparison)"], "Rank"].isna().all())
+vals = pd.DataFrame([{"Date": d, "Strategy": c["name"], "Value": 1.0} for d in days for c in ft.STRATEGIES])
+vals.loc[(vals["Strategy"] == "Top 5") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02   # +2% then flat
+vals.loc[(vals["Strategy"] == "Top 20") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02
+vals.loc[(vals["Strategy"] == "Top 20") & (vals["Date"] == pd.Timestamp("2026-10-05")), "Value"] = 0.95  # same median, deeper drop
+lb = ft.leaderboard(daily, bench, vals)
+check("leaderboard: ranked by median weekly return, a tie goes to the smaller drawdown; Rank counts strategies only",
+      list(lb.dropna(subset=["Rank"])["Strategy"][:2]) == ["Top 5", "Top 20"] and list(lb.dropna(subset=["Rank"])["Rank"][:2]) == [1, 2]
+      and sorted(lb["Rank"].dropna()) == list(range(1, len(ft.STRATEGIES) + 1)), lb.head(4).to_dict("records"))
+check("leaderboard: the live row is marked", (lb["Strategy"] == ft.LIVE + ft.LIVE_MARK).sum() == 1, list(lb["Strategy"]))
+check("leaderboard: no rank before the first full week", ft.leaderboard(daily.iloc[:1], bench, vals[vals["Date"] == "2026-10-02"])["Rank"].isna().all())
+check("verdict: too early before 12 weeks", ft.verdict(lb) == "Week 2 of 12: too early to name a winner.", ft.verdict(lb))
+long_days = pd.bdate_range("2026-10-02", periods=70)
+lv = pd.DataFrame([{"Date": d, "Strategy": c["name"], "Value": 1.0 + i * (0.002 if c["name"] == "Top 5" else 0.0)}
+                   for i, d in enumerate(long_days) for c in ft.STRATEGIES])
+lbq = lambda q_end: ft.leaderboard(daily.iloc[:0], pd.DataFrame({"Date": long_days, "QQQ": 100.0, "SPY": 100.0}).assign(
+    QQQ=lambda x: [100.0] * 69 + [q_end]), lv)
+check("verdict: after 12 weeks the top strategy wins only if it beats live and QQQ",
+      "the winner is Top 5" in ft.verdict(lbq(100.0)) and "no winner" in ft.verdict(lbq(200.0)),
+      (ft.verdict(lbq(100.0)), ft.verdict(lbq(200.0))))
 
 
 class FakeAccount:
@@ -133,41 +152,121 @@ with tempfile.TemporaryDirectory() as tmp:
     check("record: one row per trading day, a re-run replaces it", list(saved["Date"]) == ["2026-10-05", "2026-10-06"]
           and saved["Time_CT"].iloc[0] == "16:40" and list(saved.columns) == ft.DAILY_COLS, saved)
     check("record: picks, winners and positions saved", r1["Closed_Picks"] == 2 and r1["Winning_Picks"] == 1 and r1["Positions"] == 1, r1)
-# shadow (no orders): the live rules minus T20 / cap_soft and E5, passed as overrides only; closes, 0.1% per side
-sd = pd.bdate_range("2026-09-28", "2026-10-09")
-sig = pd.DataFrame([{"Date": d, "Symbol": sym, "Close": px, "RS_Score": 0.0, "Strategy_Score": 1.0, "Regime_On": 1}
-                    for i, d in enumerate(sd) for sym, px in (("AAA", 100.0 + (i >= 5) * 10), ("BBB", 50.0))])
-seen_kw, w0 = {}, dict(be.WINNER)
-real_wt = ft.be.winner_targets
+# ---------------------------------------------------------------- 3) paper strategies (forward_test.STRATEGIES, no orders)
+import numpy as np  # noqa: E402
+import sector_mapping  # noqa: E402
+
+rng = np.random.default_rng(7)
+SYMS = list(sector_mapping.tradable_symbols)[:30]
+sdays = pd.DatetimeIndex([d for d in pd.bdate_range("2025-07-01", "2026-10-16") if be.is_session(d)])
 
 
-def fake_targets(score, *a, **k):
-    seen_kw.update(k)
-    t = pd.DataFrame(0.0, index=score.index, columns=score.columns)
-    t.loc[:"2026-10-05", "AAA"] = 1.0                          # all in AAA from the start (99% live) ...
-    t.loc["2026-10-06":, "BBB"] = 1.0                          # ... switched to BBB at the Oct 6 close
-    return t, None
+def fake_sig(days):
+    """signal_analysis.csv-like rows: random-walk closes and every column the strategies read."""
+    out = []
+    for k, sym in enumerate(SYMS):
+        c = pd.Series(100 * np.exp(np.cumsum(rng.normal(0.0005 * (k % 5 - 2), 0.02, len(days)))), index=days)
+        f = pd.DataFrame({"Date": days, "Symbol": sym, "Close": c.values, "RSI": rng.uniform(25, 75, len(days)),
+                          "macd": rng.normal(0, 1, len(days)), "MACD Signal": rng.normal(0, 1, len(days)),
+                          "Technical_Score": rng.uniform(-60, 90, len(days)), "RS_Score": rng.uniform(-100, 100, len(days)),
+                          "Regime_On": 1, "final_trade": rng.choice(["BUY", "SELL", "HOLD", "HOLD"], len(days))})
+        for n in (10, 30, 50, 100, 200):
+            f[f"ma_{n}"] = c.rolling(n, min_periods=1).mean().values
+        out.append(f)
+    s = pd.concat(out, ignore_index=True)
+    return s.assign(Strategy_Score=0.5 * s["Technical_Score"] + 0.5 * s["RS_Score"])[ft.SIG_COLS]
 
 
-try:
-    ft.be.winner_targets = fake_targets
-    v = ft.shadow_values(sig)
-finally:
-    ft.be.winner_targets = real_wt
-check("shadow: only the overrides (no rank-20 limit, strict sector cap, no earnings skip), WINNER untouched",
-      seen_kw.get("selection") == {"max_pick_rank": None, "cap_soft": False} and seen_kw.get("earnings_block_days") is None
-      and be.WINNER == w0, seen_kw)
-# Oct 2 = 1.0 after its buys; AAA +10% on Oct 5 (99% invested); Oct 6 switch to BBB pays 0.1% on both legs; then flat
-a5 = 0.01 + 0.99 * 1.1
-after = a5 - be.COST * (0.99 * 1.1 + 0.99 * a5)      # sell all AAA + buy 99% BBB
-check("shadow: starts at 1.0 on the start close, follows the closes, pays 0.1% per side on a change",
-      v.index[0] == pd.Timestamp("2026-10-02") and v.iloc[0] == 1.0 and abs(v["2026-10-05"] - a5) < 1e-9
-      and abs(v["2026-10-06"] - after) < 1e-9 and abs(v.iloc[-1] - after) < 1e-9, v.round(6).to_dict())
-dsh = daily.assign(Shadow_Value=[1.0] * len(daily))
-check("summary: the shadow row sits right after the live strategy",
-      list(ft.summary(dsh, bench)["Series"])[:2] == ["Strategy (live account)", ft.SHADOW])
+SIG = fake_sig(sdays)
+FACTS = pd.DataFrame({"as_of": "2026-09-01 15:31", "bar_date": "2026-09-01", "Symbol": SYMS,
+                      "SentimentScore": rng.normal(1, 3, len(SYMS)), "Fundamental_Weight": rng.uniform(-3, 8, len(SYMS))})
+NO_EARN = pd.DataFrame(columns=["Symbol", "Earnings Date"])
+w0 = dict(be.WINNER)
+inp = ft.strategy_inputs(SIG, FACTS, NO_EARN)
+tg = {c["name"]: ft.strategy_targets(c, inp).loc["2026-10-02":] for c in ft.STRATEGIES}
+check(f"registry: {len(ft.STRATEGIES)} strategies with unique names, each with a one-line rule",
+      len({c["name"] for c in ft.STRATEGIES}) == len(ft.STRATEGIES) >= 15 and all(c.get("rule") for c in ft.STRATEGIES))
+check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%), at most 99% invested",
+      all((t.to_numpy() >= 0).all() and t.to_numpy().max() <= 0.198 + 1e-12 and t.sum(axis=1).max() <= 0.99 + 1e-9
+          and t.sum(axis=1).max() > 0 for t in tg.values()),
+      {k: (round(t.to_numpy().max(), 4), round(t.sum(axis=1).max(), 4)) for k, t in tg.items()})
+check("registry: the strategies are not copies of each other (distinct holdings over the test)",
+      len({tuple(map(tuple, (t > 0).to_numpy())) for t in tg.values()}) >= len(ft.STRATEGIES) - 3)
+check("registry: WINNER untouched", be.WINNER == w0)
+
+import filecmp  # noqa: E402
+with tempfile.TemporaryDirectory() as tmp:
+    P = lambda n: dict(path=os.path.join(tmp, n + ".csv"), hold_path=os.path.join(tmp, n + "_h.csv"))
+    n1 = ft.update_strategies(SIG, FACTS, NO_EARN, **P("a"))
+    v = pd.read_csv(P("a")["path"], parse_dates=["Date"])
+    n_days = (sdays >= pd.Timestamp(be.FORWARD_START)).sum()
+    check("update: one row per strategy and trading day from the Oct 2 close, each at 1.0 on Oct 2",
+          n1 == len(ft.STRATEGIES) * n_days and (v.loc[v["Date"] == "2026-10-02", "Value"] == 1.0).sum() == len(ft.STRATEGIES), n1)
+    import shutil  # noqa: E402
+    shutil.copy(P("a")["path"], os.path.join(tmp, "a_copy.csv"))
+    check("idempotent: a re-run the same day adds nothing and leaves the files unchanged",
+          ft.update_strategies(SIG, FACTS, NO_EARN, **P("a")) == 0 and filecmp.cmp(P("a")["path"], os.path.join(tmp, "a_copy.csv"), shallow=False))
+    ft.update_strategies(SIG[SIG["Date"] <= "2026-10-07"], FACTS, NO_EARN, **P("b"))    # missed days ...
+    nb = ft.update_strategies(SIG, FACTS, NO_EARN, **P("b"))                            # ... caught up later
+    a_, b_ = pd.read_csv(P("a")["path"]), pd.read_csv(P("b")["path"])
+    ha, hb = pd.read_csv(P("a")["hold_path"]), pd.read_csv(P("b")["hold_path"])
+    check("catch-up: missed days are added from the saved bars, same values and holdings as running every day",
+          nb == len(ft.STRATEGIES) * (sdays > pd.Timestamp("2026-10-07")).sum() and len(a_) == len(b_)
+          and np.allclose(a_["Value"], b_["Value"], rtol=0, atol=1e-12) and ha[["Date", "Strategy", "Symbol"]].equals(hb[["Date", "Strategy", "Symbol"]]),
+          (nb, len(a_), len(b_)))
+    hv = ft.holdings(P("a")["hold_path"])
+    check("holdings: each strategy's latest holdings for the dashboard", set(hv) <= {c["name"] for c in ft.STRATEGIES} and len(hv) >= 15, list(hv))
+
+    # hand-checked accounting: all in AAA from the start (99% live), +10% on Oct 5, switch to BBB at the Oct 6 close
+    hd = pd.bdate_range("2026-09-28", "2026-10-09")
+    hs = pd.DataFrame([{"Date": d, "Symbol": sym, "Close": px} for i, d in enumerate(hd)
+                       for sym, px in (("AAA", 100.0 + (i >= 5) * 10), ("BBB", 50.0))])
+    real_inputs, real_targets, real_list = ft.strategy_inputs, ft.strategy_targets, ft.STRATEGIES
+
+    def fake_targets(cfg, inp_):
+        t = pd.DataFrame(0.0, index=inp_["close"].index, columns=inp_["close"].columns)
+        t.loc[:"2026-10-05", "AAA"], t.loc["2026-10-06":, "BBB"] = 0.99, 0.99
+        return t
+    try:
+        ft.strategy_inputs = lambda sig, facts=None, earnings=None: {"close": sig.pivot(index="Date", columns="Symbol", values="Close")}
+        ft.strategy_targets, ft.STRATEGIES = fake_targets, [{"name": "X", "rule": "x"}]
+        ft.update_strategies(hs[hs["Date"] <= "2026-10-05"], None, NO_EARN, **P("h"))   # resume across the switch
+        ft.update_strategies(hs, None, NO_EARN, **P("h"))
+    finally:
+        ft.strategy_inputs, ft.strategy_targets, ft.STRATEGIES = real_inputs, real_targets, real_list
+    hv = pd.read_csv(P("h")["path"], parse_dates=["Date"]).set_index("Date")["Value"]
+    a5 = 0.01 + 0.99 * 1.1
+    after = a5 - be.COST * (0.99 * 1.1 + 0.99 * a5)      # sell all AAA + buy 99% BBB
+    check("accounting: 1.0 at the start close, follows the closes, pays 0.1% per side on a change, cash earns 0",
+          hv.index[0] == pd.Timestamp("2026-10-02") and hv.iloc[0] == 1.0 and abs(hv["2026-10-05"] - a5) < 1e-12
+          and abs(hv["2026-10-06"] - after) < 1e-12 and abs(hv.iloc[-1] - after) < 1e-12, hv.round(6).to_dict())
+
+# the real saved data (read-only; output to temporary files): the live rules recomputed = the live Strategy_Weight
+LIVE_FILES = [os.path.join(ROOT, "Reports", f) for f in ("signal_analysis.csv", "strategy_picks.csv", "run_state.json",
+                                                         "live_pending_orders.json", "live_orders_log.csv", "factor_history.csv")]
+
+
+def digest():
+    import hashlib
+    return {f: hashlib.sha256(open(f, "rb").read()).hexdigest() for f in LIVE_FILES if os.path.exists(f)}
+
+
+if os.path.exists(ft.SIGNAL_CSV):
+    before = digest()
+    with tempfile.TemporaryDirectory() as tmp:
+        ft.update_strategies(path=os.path.join(tmp, "s.csv"), hold_path=os.path.join(tmp, "h.csv"))
+        h = pd.read_csv(os.path.join(tmp, "h.csv"), parse_dates=["Date"])
+    real = pd.read_csv(ft.SIGNAL_CSV, usecols=["Date", "Symbol", "Strategy_Weight"], parse_dates=["Date"])
+    d0 = pd.Timestamp(be.FORWARD_START)
+    live = real[(real["Date"] == d0) & (real["Strategy_Weight"] > 0)].set_index("Symbol")["Strategy_Weight"].sort_index()
+    mine = h[(h["Strategy"] == ft.LIVE) & (h["Date"] == d0)].set_index("Symbol")["Weight"].sort_index()
+    check("live rules recomputed from the saved files = the live Strategy_Weight of Oct 2 (apples to apples)",
+          list(live.index) == list(mine.index) and np.allclose(live, mine, atol=1e-9), (live.to_dict(), mine.to_dict()))
+    check("no live file changed (signal_analysis, picks, run_state, pending orders, orders log); WINNER untouched",
+          digest() == before and be.WINNER == w0)
 src = open(os.path.join(ROOT, "forward_test.py"), encoding="utf-8").read()
-check("forward_test.py has no order code (read-only)",
-      not any(w in src for w in ("submit_order", "cancel_order", "OrderRequest", "TradingClient", "import paper_trade", "requests.post")))
+check("forward_test.py has no order code and never writes the live files or WINNER",
+      not any(w in src for w in ("submit_order", "cancel_order", "OrderRequest", "TradingClient", "import paper_trade",
+                                 "requests.post", "run_state", "live_pending_orders", "WINNER.update", "WINNER[")))
 print(f"\n{len(FAIL)} failed" if FAIL else "\nFORWARD TEST OK")
 sys.exit(1 if FAIL else 0)

@@ -201,17 +201,26 @@ for sym in dict.fromkeys(cases):
                and int(b[rank_then]) == int(CH.set_index("Symbol").Rank[sym]),
                f"{sym}: Last decision row {b.to_dict()} disagrees")
     print(f"   {sym}: {badges} · rank {rk and rk.groups()} OK")
-exp_titles = ["Live holdings (Alpaca account)", "Forward test · live account vs QQQ and SPY since Oct 2, 2026",
+import forward_test as ft  # noqa: E402
+exp_titles = ["Live holdings (Alpaca account)",
+              f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
+              "Strategy rules and holdings (paper strategies)",
               f"Latest signals · {fmt(SIG.Date.max())} close", f"Last decision · {fmt(dec_day)}"]
 labels = [e.label for e in at.expander]
-expect(labels[:3] == exp_titles[:3] and any(l.startswith(exp_titles[3]) for l in labels),
-       f"Details expanders {labels[:4]} should start with {exp_titles}")
-expect(sum("forward test" in l.lower() for l in labels) == 1, f"the account forward test is in one place only: {labels}")
+expect(labels[:4] == exp_titles[:4] and any(l.startswith(exp_titles[4]) for l in labels),
+       f"Details expanders {labels[:5]} should start with {exp_titles}")
+expect(sum("forward test" in l.lower() for l in labels) == 1, f"the forward test is in one place only: {labels}")
 _ft = [d.value for d in at.dataframe if "Median weekly return %" in d.value.columns]
-expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Series"]} if _ft else
-       any("Forward test started Oct 2, 2026" in i.value for i in at.info), "forward test table (QQQ + SPY rows) or empty state")
-expect(not _ft or list(_ft[0]["Series"])[:2] == ["Strategy (live account)", "Shadow: no rank-20 limit, no earnings skip (no orders)"],
-       f"shadow row next to the live strategy: {list(_ft[0]['Series']) if _ft else None}")
+expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Strategy"]} if _ft else
+       any("Forward test started Oct 2, 2026" in i.value for i in at.info), "forward test leaderboard (QQQ + SPY rows) or empty state")
+expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Total return since Oct 2 %", "Median weekly return %",
+                                            "Max drawdown %", "Weeks"]
+                   and (_ft[0]["Strategy"] == ft.LIVE + ft.LIVE_MARK).sum() == 1 and (_ft[0]["Rank"] != "–").sum() in (0, len(ft.STRATEGIES))),
+       f"leaderboard: columns, one marked live row, every strategy ranked: {_ft[0].to_dict('list') if _ft else None}")
+expect(not _ft or sum(ft.RANK_RULE in c.value for c in at.caption) == 1, "the ranking rule is written once in the caption")
+_rules = [d.value for d in at.dataframe if "Rule" in d.value.columns]
+expect(len(_rules) == 1 and list(_rules[0]["Strategy"]) == [c["name"] for c in ft.STRATEGIES],
+       "rules and holdings table lists every strategy once")
 _rule = "Don't change the strategy until 12+ weeks of forward results (from Oct 2, 2026) compare against QQQ."
 for _rule in (_rule, "No single stock gets more than 20%; any extra stays in cash."):
     expect(sum(_rule in m.value for m in at.markdown) + sum(_rule in c.value for c in at.caption) == 1, f"shown once: {_rule}")
