@@ -1753,22 +1753,6 @@ def holding_details(weights, open_w, close_w, atr_w, vol_w, k=3.0):
     return pd.DataFrame(rows)
 
 
-def forward_tracking(target, open_w, close_w, first_decision, benchmarks=("QQQ", "SPY"), rebalance=None):
-    """Equity of the live target vs benchmarks, starting with the fill after `first_decision`."""
-    start_candidates = open_w.index[open_w.index > pd.Timestamp(first_decision)]
-    if not len(start_candidates):
-        return pd.DataFrame()
-    start = start_candidates[0]
-    tgt = target.reindex(index=close_w.index, columns=close_w.columns).fillna(0.0)
-    res = simulate(open_w, close_w, tgt, start, rebalance=rebalance)
-    out = pd.DataFrame({"Strategy": res["equity"], "Strategy_Exposure": res["exposure"]})
-    for b in benchmarks:
-        t = pd.DataFrame(0.0, index=close_w.index, columns=close_w.columns)
-        t[b] = 1.0
-        out[b] = simulate(open_w, close_w, t, start)["equity"]
-    return out.rename_axis("Date").reset_index()
-
-
 # ----------------------------------------------------------------------------- backtest of the live rules (Archive/backtest.ipynb)
 WALK_FORWARD_START = "2022-04-01"                              # first trading day of the backtest
 NEVER_SEEN_END = "2024-09-16"                                  # 2022-04 -> 2024-09 was never used to choose the rules

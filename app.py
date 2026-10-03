@@ -214,7 +214,6 @@ EARN_LINE = dict(color="rgba(234,88,12,0.45)", width=1, dash="dot")  # dotted ve
 FRESHNESS = {
     "signal_analysis.csv": ("prices, signals, strategy weights", 3),
     "strategy_picks.csv": ("current / provisional portfolio", 3),
-    "strategy_tracking.csv": ("forward tracking log", 3),
     "strategy_decisions.csv": ("decision history: weekly rebalances + mid-week swaps (chart markers)", 3),
     "strategy_midweek_check.csv": ("this week's decisions: Friday rebalance + Mon/Wed swap checks", 3),
     "benchmark_prices.csv": ("SPY / QQQ / sector ETF closes (RS lines)", 3),
@@ -226,7 +225,7 @@ FRESHNESS = {
     "balance_sheet.csv": ("raw quarterly fundamentals", 100),
     "forward_test_daily.csv": ("forward test, one row per trading day (forward_test.py)", 4),
 }
-APP_FILES = {"signal_analysis.csv", "strategy_picks.csv", "strategy_tracking.csv", "news_cleaned_df.csv", "earnings_date.csv",
+APP_FILES = {"signal_analysis.csv", "strategy_picks.csv", "news_cleaned_df.csv", "earnings_date.csv",
              "complete_company_analysis.xlsx", "strategy_decisions.csv", "benchmark_prices.csv"}
 
 
