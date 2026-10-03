@@ -67,6 +67,8 @@ sys.modules.update(mods)
 
 import pandas as pd
 import paper_trade as pt
+import fake_quotes
+QUOTES = fake_quotes.install(pt)   # every symbol quoted 99.99 / 100.01 (tight, fresh)
 
 NOTES = []  # every run-log row (status, message), checked at the end
 pt.log_event = lambda run, status, moved, message, details="": NOTES.append((status, message))
@@ -250,8 +252,10 @@ def eve(sym, side, qty, order_qty, status, filled, **extra):
 # partial fill
 o, r = eve("ANET", "BUY", 3.58, 3, "expired", 2)
 b = Broker(orders=[o]); p = write_pending([r]); res = run(b, p)
-check("partial fill: only the unfilled 1.58 sent as market", [(x.symbol, x.qty) for x in b.submitted] == [("ANET", 1.58)]
-      and isinstance(b.submitted[0], MarketOrderRequest), [(x.symbol, x.qty) for x in b.submitted])
+check("partial fill: only the unfilled 1.58 sent, as a DAY limit at the ask + 0.05%",
+      [(x.symbol, x.qty) for x in b.submitted] == [("ANET", 1.58)] and isinstance(b.submitted[0], LimitOrderRequest)
+      and b.submitted[0].limit_price == 100.07 and not getattr(b.submitted[0], "extended_hours", False),
+      [(x.symbol, x.qty, getattr(x, "limit_price", None)) for x in b.submitted])
 check("partial fill: deterministic id uses the evening date",
       b.submitted[0].client_order_id.startswith("live-fill-20261002-BUY-ANET-1-"), b.submitted[0].client_order_id)
 check("partial fill: pending file removed when done", not os.path.exists(p))
@@ -385,6 +389,7 @@ check("buying power: two BUYs that fit together are both sent (no double countin
 # $1 minimum for a fractional BUY rest
 o, r = eve("ANET", "BUY", 3.01, 3, "filled", 3)
 r["limit_price"] = 50.0
+QUOTES.quotes["ANET"] = (49.99, 50.01)     # 0.01 share x $50.04 limit = $0.50
 b = Broker(orders=[o]); p = write_pending([r]); res = run(b, p)
 check("rest under $1: not ordered, not retried", not b.submitted and not os.path.exists(p)
       and "under $1" in status_of(res, "ANET"), status_of(res, "ANET"))

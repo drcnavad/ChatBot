@@ -33,6 +33,10 @@
                          superseded at the next slot; weekends wait for the open; holidays; send_now fill gate
   test_alpaca_api_names.py the REAL alpaca-py: every alpaca import / enum member the code uses exists and the
                          exact order + orders-list requests build (no network)
+  test_smart_orders.py   smart limit orders (fake broker + fake quotes, real alpaca-py request classes): ask + 0.05% /
+                         bid - 0.05%; normal / wide / stale / missing quotes; a skipped order's one retry slot at the next
+                         9 AM CT check; partial fills, cancel + replace once, no duplicates; buying-power cap; after hours;
+                         Friday's old pending rows; SIP / IEX feed check; order-log price columns + run-log cost row
   test_run_log.py        Reports/run_log.csv: one plain row per event (trim to 1000, never raises), trade /
                          fill-check / finished rows (which run, steps OK, money moved, next, what to do)
   test_live_weights.py   live weights: 99% target, each rounded down to a 2-decimal percent (never over 100%),
@@ -59,7 +63,7 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
          "test_app.py", "test_paper_account.py", "test_dashboard_http.py", "test_paper_trade_live_safety.py", "test_fill_check_fractional.py",
          "test_paper_trade_math_audit.py", "test_run_log.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
          "test_strategy_health.py", "test_live_rules_audit.py", "test_catch_up.py",
-         "test_alpaca_api_names.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py"]
+         "test_alpaca_api_names.py", "test_smart_orders.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py"]
 
 
 def main():

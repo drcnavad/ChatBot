@@ -301,6 +301,8 @@ picks = pd.DataFrame([{"Strategy": "test", "Regime_On": 1, "Symbol": s, "Sector"
                        "Provisional_Weight": t, "Strategy_Score": 50.0 - i, "Strategy_Rank": float(i + 1), "Technical_Score": 50.0,
                        "RS_Score": 50.0, "Close": c, "Next_Earnings": "2026-11-20"} for i, (s, sec, c, w, t) in enumerate(BOOK)])
 PX = dict(zip(picks.Symbol, picks.Close))
+import fake_quotes  # noqa: E402
+fake_quotes.install(pt, prices=PX)   # each stock quoted with the ask at its price (buy limit = ask + 0.05%)
 tmp = tempfile.mkdtemp()
 SIGNAL_CSV = os.path.join(tmp, "signal_analysis.csv")     # prices for held non-picks
 EARNINGS_CSV = os.path.join(tmp, "earnings_date.csv")     # no earnings within 5 days

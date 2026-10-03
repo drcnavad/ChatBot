@@ -100,10 +100,11 @@ def rules_text():
             + (f"- **Earnings:** a stock that is not held is not bought when its next earnings date is within {EARNINGS} "
                "calendar days; on Friday its slot goes to the next eligible stock (else cash), mid-week it is just not bought. "
                "A held stock is never sold because of earnings, and it is not topped up before them.\n" if EARNINGS else "")
-            + "- **Orders:** sells go first. The same evening (until 7 PM CT): whole-share after-hours limit orders at the "
-            "closing price (later than that, they wait for 9 AM). The 9 AM CT check the next trading day sends the rest as "
-            "market orders (2-decimal shares). A missed decision is caught up at the next market session with market orders, "
-            "unless the next decision is already due; a decision never runs twice.\n"
+            + "- **Orders:** sells go first. Every order is a limit at the live quote: buy at the ask + 0.05%, sell at the "
+            "bid - 0.05% (no market orders). An order whose quote is stale or wider than 0.5% waits for the next 9 AM CT "
+            "check. The 2:30 PM CT run trades in market hours (2-decimal shares); from 5 minutes before the close, "
+            "whole-share after-hours limit orders (until 7 PM CT). The 9 AM CT check the next trading day sends any rest. A missed decision is caught up at "
+            "the next market session, unless the next decision is already due; a decision never runs twice.\n"
             "- **Signals** (the strategy's decision, dated): Buy = enters the portfolio · Hold = stays · Sold = leaves · "
             f"Watch = ranked but not picked · Score below {WINNER.get('min_score', 0):g} = not eligible. The plan chip = what "
             "the next Friday rebalance would do at the latest close.\n")

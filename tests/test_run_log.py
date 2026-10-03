@@ -56,6 +56,8 @@ sys.modules.update(mods)
 import pandas as pd
 import paper_trade as pt
 import run_all
+import fake_quotes
+fake_quotes.install(pt)   # never a real quote
 
 PASS, FAIL = [], []
 
@@ -221,18 +223,18 @@ moved, m = run_all.finished_text("Fri rebalance", datetime(2026, 10, 2, 19, 5, t
                                  table(("AMD", "BUY", 3, None, "STAGED for morning market (past 7 PM CT - not submitted)")))
 check("past 7 PM: queued for 9 AM, no money moved yet", moved == "no"
       and "Orders queued for 9 AM: 1 buy - no money moved yet." in m, m)
-done = table(("ENPH", "SELL", 4, "m1", "COMPLETED via market (staged, filled 0/4)"),
-             ("AMD", "BUY", 3.58, "m2", "COMPLETED via market (staged, filled 0/3.58)"))
+done = table(("ENPH", "SELL", 4, "m1", "COMPLETED via limit $33.4 (staged, filled 0/4)"),
+             ("AMD", "BUY", 3.58, "m2", "COMPLETED via limit $634.2 (staged, filled 0/3.58)"))
 moved, m = run_all.finished_text("Catch-up: Fri Oct 2 rebalance", datetime(2026, 10, 5, 9, 31, tzinfo=CT), ran7, [], True,
                                  "session", table(("AMD", "BUY", 3.58, None, "STAGED ... (catch-up)")), done)
-check("catch-up: sent at market now, counts, money moved", moved == "yes"
-      and "Catch-up orders sent at market (sells first): 1 sell, 1 buy - money moves as they fill; any rest goes out at 9 AM CT."
+check("catch-up: sent now as limit orders, counts, money moved", moved == "yes"
+      and "Catch-up orders sent as limit orders at the live bid/ask (sells first): 1 sell, 1 buy - money moves as they fill; any rest goes out at 9 AM CT."
       in m, m)
 moved, m = run_all.finished_text("Fri rebalance", datetime(2026, 10, 2, 14, 46, tzinfo=CT), ran7, [], True,
-                                 "session", table(("AMD", "BUY", 3.58, None, "STAGED for regular-hours market orders now")), done)
-check("2:30 PM run: sent at market in regular hours (not called a catch-up), money moved", moved == "yes"
+                                 "session", table(("AMD", "BUY", 3.58, None, "STAGED for regular-hours limit orders now")), done)
+check("2:30 PM run: sent in regular hours (not called a catch-up), money moved", moved == "yes"
       and m.startswith("Fri rebalance done 2:46 PM.")
-      and "Orders sent at market (sells first): 1 sell, 1 buy - money moves as they fill; any rest goes out at 9 AM CT." in m, m)
+      and "Orders sent as limit orders at the live bid/ask (sells first): 1 sell, 1 buy - money moves as they fill; any rest goes out at 9 AM CT." in m, m)
 moved, m = run_all.finished_text("Data refresh", end, [("main", True, 1), ("validate", True, 1)], [], False, None, None)
 check("refresh only: no trades, no money moved", moved == "no" and "Data refresh only - no trades, no money moved." in m, m)
 moved, m = run_all.finished_text("Wed check", end, ran7[:6] + [("sentiment", False, 1.0)], ["sentiment"], True,

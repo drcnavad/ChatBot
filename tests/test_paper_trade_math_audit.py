@@ -93,6 +93,8 @@ sys.modules["alpaca.trading.requests"] = _requests
 import pandas as pd
 
 import paper_trade
+import fake_quotes
+fake_quotes.install(paper_trade, default=(99.90, 99.95))   # buy limit 99.95 + 0.05% = $100.00, sell 99.90 - 0.05% = $99.85
 
 FAIL = []
 
@@ -147,7 +149,7 @@ class FakeClient:
         self.submitted.append(req)
         oid = f"fake-{self._next_id}"
         self._next_id += 1
-        o = FakeOrder(id=oid, symbol=req.symbol, qty=req.qty,
+        o = FakeOrder(id=oid, symbol=req.symbol, qty=req.qty, status="filled", filled_qty=req.qty,  # limits fill at once
                       client_order_id=getattr(req, "client_order_id", "") or "")
         self.orders[oid] = o
         self.all_orders.append(o)
@@ -351,8 +353,8 @@ def test_morning_sells_complete_before_buys():
         syms = [r.symbol for r in fake.submitted]
         check(syms == ["AAA", "BBB"],
               f"morning: SELL completes before BUY regardless of file order (got {syms})")
-        check(wait_calls == [["fake-1"]],
-              f"morning: this run's SELL completion is waited on before the BUY (got {wait_calls})")
+        check(wait_calls[:1] == [["fake-1"]] and len(wait_calls) == 2,
+              f"morning: this run's SELL is waited on before the BUY (then the BUY's own fill wait) (got {wait_calls})")
 
 
 def test_morning_buy_cumulative_cash_reserved():

@@ -12,7 +12,8 @@ Submitting talks to the LIVE account (real money):
     python paper_trade.py --submit [--account-size N]
 
 In submit mode the LIVE account's equity (unless --account-size is given) and positions are read from Alpaca,
-sells are sent before buys as DAY market orders (whole shares).
+sells are sent before buys as DAY market orders (whole shares). (Manual command only; the pipeline never sends market
+orders: every pipeline order is a limit at the live quote - see "LIVE order pricing" below.)
 
 Auto mode (used by run_all.py --trade): auto_trade() pulls LIVE positions + equity +
 cash, then plans with target="auto" (buys = Weight * equity, 2-decimal shares, capped at
@@ -21,14 +22,14 @@ actually in the portfolio), and submits whole shares as extended-hours DAY limit
 closing price, so they can fill in the after-hours session (the fractional rest goes out at 9 AM). Before planning, the signal
 CSVs are verified fresh (as of today, CT; for a missed decision caught up later, as of the last complete session and
 not older than that decision) - stale data aborts the trade. A catch-up in regular hours stages its orders (send_now)
-and run_all sends them at once as market orders. Submitted orders are recorded
+and run_all sends them at once (regular-hours limit orders). Submitted orders are recorded
 in Reports/live_pending_orders.json; the next trading morning, complete_unfilled_orders()
 (run_all.py --fill-check) checks their fills and completes any unfilled remainder with
-regular-hours market orders, then reconciles live positions against the strategy targets.
+regular-hours limit orders, then reconciles live positions against the strategy targets.
 Every order event and failure is a plain-language row in Reports/run_log.csv. If auto_trade() runs at or after 7:00 PM CT (extended hours
 are over), it submits nothing and instead stages the planned orders in
 Reports/live_pending_orders.json (no broker order id); the morning fill check then sends
-the full quantities as regular-hours market orders. Evening submission is idempotent: rows
+the full quantities as regular-hours limit orders. Evening submission is idempotent: rows
 already submitted/staged earlier the same evening are recorded after each submit, so a
 retry in the same window skips them instead of duplicating orders. See auto_trade() docstring.
 
@@ -74,6 +75,14 @@ INVESTED_CAP = 0.99   # trim fix: a rebalance with new buys ends at <= 99% inves
 CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills a bit above the estimate still fit.
                        # A cap, not a second scale-down: weights already sum to <= 99% (backtest_engine.LIVE_INVESTED),
                        # and 99% of equity always fits under it, so the account ends ~99% invested, not ~98%.
+# LIVE order pricing: every order is a LIMIT priced from the latest quote, never a market order.
+LIMIT_OFFSET = 0.0005      # buy limit = ask + 0.05%, sell limit = bid - 0.05%
+MAX_SPREAD = 0.005         # a quote with a spread over 0.5% of the mid price is not traded (skipped, see below)
+QUOTE_MAX_AGE_SECS = 60    # a quote older than 60 seconds is stale (not traded)
+QUOTE_TRIES = 3            # a missing / stale / wide quote is asked again twice, 2 seconds apart ...
+QUOTE_RETRY_SECS = 2       # ... then the order is skipped and carried to the next business day's 9 AM CT fill check
+LIMIT_WAIT_SECS = 20       # market hours: a limit not filled after 20 s is canceled and replaced ONCE at a fresh quote
+LIMIT_POLL_SECS = 2        # how often the order status is read while waiting
 
 
 # ----------------------------------------------------------------------------- run log, terminal formatting, data freshness
@@ -126,7 +135,7 @@ def _trade_notice(results, prices=None):
     elif results.loc[staged, "Status"].str.contains("orders now", na=False).all():
         catch = results.loc[staged, "Status"].str.contains("catch-up", na=False).any()
         head, moved = f"{'Catch-up trades' if catch else 'Trades'}: {len(sells)} sell, {len(buys)} buy", "no"
-        tail = (("A missed decision, sent" if catch else "Sent") + " now as market orders: sells first, then buys "
+        tail = (("A missed decision, sent" if catch else "Sent") + " now as limit orders at the live bid/ask: sells first, then buys "
                 "sized from the cash free after the sells; any rest goes out at 9 AM CT. Nothing to do.")
     else:
         head, moved = f"Trades queued: {len(sells)} sell, {len(buys)} buy", "no"
@@ -782,6 +791,142 @@ def _limit_price(price):
     return p if p > 0 else 0
 
 
+# ----------------------------------------------------------------------------- smart limit prices from the latest quote
+_QUOTES = {}   # this run's market-data client and quote feed ("sip" or "iex"), found once
+
+
+def quote_client():
+    """Alpaca market-data client (read-only: quotes only, no trading). Tests replace this with a fake."""
+    import backtest_engine as be
+    return be.market_data_client()
+
+
+def _latest_quote(sym):
+    """(bid, ask, quote time, feed) for one symbol. Raises when Alpaca can't be read.
+
+    The feed is found once per run with one test quote: SIP (all US exchanges) when the account's data plan allows it,
+    otherwise IEX (one exchange, free plan). The keys are never read here; Alpaca's answer decides."""
+    from alpaca.data.enums import DataFeed
+    from alpaca.data.requests import StockLatestQuoteRequest
+    if "feed" not in _QUOTES:
+        data_client = _QUOTES["client"] = quote_client()
+        try:
+            data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols="SPY", feed=DataFeed.SIP))
+            _QUOTES["feed"] = "sip"
+        except Exception as e:
+            _QUOTES["feed"] = "iex"
+            print(f"  Quotes: SIP not available ({str(e)[:80]}) - using IEX")
+    data_client, feed = _QUOTES["client"], _QUOTES["feed"]
+    q = data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=sym, feed=DataFeed(feed)))[sym]
+    return _safe_number(q.bid_price), _safe_number(q.ask_price), q.timestamp, feed
+
+
+def _tick(price, up):
+    """Price on Alpaca's tick (cents, or 4 decimals under $1), rounded up for a buy, down for a sell."""
+    step = 100 if price >= 1 else 10_000
+    x = round(price * step, 6)
+    return (math.ceil(x) if up else math.floor(x)) / step
+
+
+def smart_quote(sym, side):
+    """The limit price for one order: buy at the ask + 0.05%, sell at the bid - 0.05% (LIMIT_OFFSET).
+
+    Returns {bid, ask, spread_pct, limit, feed, skip}. skip is None when the quote is usable, otherwise why not:
+    missing, stale (older than QUOTE_MAX_AGE_SECS) or a spread over MAX_SPREAD. A bad quote is asked again
+    (QUOTE_TRIES in all, QUOTE_RETRY_SECS apart) before giving up."""
+    import time
+    from datetime import datetime, timezone
+    q = {}
+    for n in range(QUOTE_TRIES):
+        if n:
+            time.sleep(QUOTE_RETRY_SECS)
+        try:
+            bid, ask, t, feed = _latest_quote(sym)
+        except Exception as e:
+            q = {"skip": f"no quote ({str(e)[:60]})"}
+            continue
+        q = {"bid": bid, "ask": ask, "spread_pct": None, "limit": None, "feed": feed, "skip": None}
+        if not (bid > 0 and ask >= bid):
+            q["skip"] = "no usable quote (bid/ask missing)"
+            continue
+        mid = (bid + ask) / 2
+        q["spread_pct"] = round((ask - bid) / mid * 100, 3)
+        age = (datetime.now(timezone.utc) - t).total_seconds() if t is not None else float("inf")
+        if age > QUOTE_MAX_AGE_SECS:
+            q["skip"] = f"stale quote ({age:.0f} s old)" if math.isfinite(age) else "stale quote (no time)"
+        elif (ask - bid) / mid > MAX_SPREAD:
+            q["skip"] = f"spread too wide ({q['spread_pct']:.2f}% > {MAX_SPREAD:.1%})"
+        else:
+            q["limit"] = _tick(ask * (1 + LIMIT_OFFSET), True) if side == "BUY" else _tick(bid * (1 - LIMIT_OFFSET), False)
+            return q
+    return q
+
+
+PRICE_COLUMNS = ["Feed", "Bid", "Ask", "Spread_%", "Limit", "Fill_Price", "Slippage_%", "Cost_$"]
+
+
+def _price_cols(q, side, fill_price=None, filled=0.0):
+    """The order-log price columns: quote, limit, fill price and slippage vs the mid price (+ = it cost you)."""
+    q = q or {}
+    bid, ask = q.get("bid"), q.get("ask")
+    row = {"Feed": q.get("feed"), "Bid": bid, "Ask": ask, "Spread_%": q.get("spread_pct"), "Limit": q.get("limit"),
+           "Fill_Price": None, "Slippage_%": None, "Cost_$": None}
+    fp = _safe_number(fill_price)
+    if fp > 0:
+        row["Fill_Price"] = fp
+        if bid and ask:
+            mid, sign = (bid + ask) / 2, (1 if side == "BUY" else -1)
+            row["Slippage_%"] = round(sign * (fp - mid) / mid * 100, 3)
+            row["Cost_$"] = round(sign * (fp - mid) * _safe_number(filled), 2)
+    return row
+
+
+def _append_order_log(log, log_csv):
+    """Append rows to live_orders_log.csv. The first time new columns appear (the price columns) the file is
+    rewritten once with the wider header, so old rows keep their values and the columns stay aligned."""
+    os.makedirs(os.path.dirname(log_csv), exist_ok=True)
+    if os.path.exists(log_csv):
+        try:
+            old = pd.read_csv(log_csv)
+        except Exception:
+            old = None
+        if old is not None and set(log.columns) - set(old.columns):
+            pd.concat([old, log], ignore_index=True).to_csv(log_csv, index=False)
+            return
+        if old is not None:
+            log = log.reindex(columns=old.columns)
+    log.to_csv(log_csv, mode="a", header=not os.path.exists(log_csv), index=False)
+
+
+def _log_cost(run, log):
+    """One plain run-log row: what the bid/ask spread cost on this run's orders (fill price vs the mid price)."""
+    if "Limit" not in log.columns:
+        return
+    skipped = log["Status"].astype(str).str.contains("bad quote", na=False)
+    cost = pd.to_numeric(log["Cost_$"], errors="coerce")
+    filled = cost.notna()
+    if log["Limit"].isna().all() and not skipped.any():
+        return
+    traded = (pd.to_numeric(log["Fill_Price"], errors="coerce") * pd.to_numeric(log["Shares"], errors="coerce"))[filled].sum()
+    spread = pd.to_numeric(log["Spread_%"], errors="coerce").dropna()
+    feed = log["Feed"].dropna()
+    msg = f"Order prices ({feed.iloc[0].upper()} quotes): " if len(feed) else "Order prices: "
+    if filled.any() and traded > 0:
+        msg += (f"{int(filled.sum())} order(s) filled at limit prices. Paying the bid/ask spread cost about "
+                f"${cost[filled].sum():,.2f} ({cost[filled].sum() / traded:.2%} of ${traded:,.0f} traded) vs the mid price")
+    elif log["Limit"].notna().any():
+        msg += f"{int(log['Limit'].notna().sum())} limit order(s) priced from live quotes; their cost shows once they fill"
+    else:
+        msg += "no order priced"
+    if len(spread):
+        msg += f"; typical spread {spread.median():.2f}%"
+    if skipped.any():
+        msg += (f". Not sent because the quote was bad (spread over {MAX_SPREAD:.1%}, stale or missing): "
+                f"{_list_syms(zip(log.loc[skipped, 'Symbol'], log.loc[skipped, 'Shares']))} - tried again automatically "
+                f"(see the order rows for when)")
+    log_event(run, "warning" if skipped.any() else "ok", "no", msg + ". Nothing to do. Log: Reports/live_orders_log.csv")
+
+
 def submit_paper(orders, positions=None, client=None, order_date=None):
     """Send the BUY/SELL rows as DAY market orders to the Alpaca LIVE account (sells first).
 
@@ -825,7 +970,7 @@ def submit_paper_extended(orders, positions=None, record=None, client=None, orde
     shares for the limit order. The fractional rest (e.g. 0.58 of a planned 3.58, or the
     0.054 of a 1.054-share exit) stays in the pending entry ("qty" = planned, "order_qty" =
     whole shares sent) and the next morning's regular-hours fill check buys/sells it with a
-    fractional market order. A row with <1 whole share is STAGED for the morning (when
+    fractional DAY limit order. A row with <1 whole share is STAGED for the morning (when
     `record` is given) instead of submitted; without `record` it is SKIPPED.
     SELL rows are checked against `positions` ({SYMBOL: shares} from the live account when
     given): a symbol not held is SKIPPED, never submitted, and the sell quantity is
@@ -837,9 +982,12 @@ def submit_paper_extended(orders, positions=None, record=None, client=None, orde
     (live-YYYYMMDD-SIDE-SYMBOL-qty-pricecents, via _client_order_id): a crash between the
     broker submit and the local record cannot duplicate the order on retry - the retry
     reconciles with the broker (see _evening_submitted_on_broker).
+    Limit price: from the latest quote (smart_quote: buy at the ask + 0.05%, sell at the bid - 0.05%). A bad quote
+    (missing, stale, spread over 0.5%), or a buy whose ask moved more than the 1% cushion above the planned price
+    (it might not fit the cash), is not sent: it is STAGED for the next business day's 9 AM CT check.
     `client`, when given, is the Alpaca client to use (otherwise one is created);
     `order_date` ("YYYYMMDD") stamps the client order ids (defaults to today, CT).
-    Returns a DataFrame [Symbol, Side, Shares, Order_ID, Status]; Order_ID is None when not submitted.
+    Returns a DataFrame [Symbol, Side, Shares, Order_ID, Status] + the price columns; Order_ID is None when not submitted.
     """
     from alpaca.trading.enums import OrderSide, TimeInForce
     from alpaca.trading.requests import LimitOrderRequest
@@ -867,11 +1015,23 @@ def submit_paper_extended(orders, positions=None, record=None, client=None, orde
             if record is None:
                 results.append((r.Symbol, r.Side, planned, None, "SKIPPED: <1 whole share"))
             else:
-                record(entry)  # the morning fill check sends it as a fractional market order
+                record(entry)  # the morning fill check sends it as a fractional limit order
                 results.append((r.Symbol, r.Side, planned, None,
-                                "STAGED for morning market (<1 whole share after hours)"))
+                                "STAGED for morning (<1 whole share after hours)"))
             continue
-        req = LimitOrderRequest(symbol=r.Symbol, qty=qty, limit_price=price,
+        q = smart_quote(r.Symbol, r.Side)
+        why = q["skip"] or (f"ask ${q['ask']:g} is over {CASH_CUSHION:.0%} above the planned ${price:g}"
+                            if r.Side == "BUY" and q["limit"] > price * (1 + CASH_CUSHION) else None)
+        if why:
+            if record is None:
+                results.append((r.Symbol, r.Side, planned, None, f"SKIPPED (bad quote: {why})", q))
+            else:
+                day = _next_9am()
+                record({**entry, "quote": q, "retry_on": day.date().isoformat()})   # one retry slot: that 9 AM check
+                results.append((r.Symbol, r.Side, planned, None,
+                                f"STAGED for {day:%a %b} {day.day} 9 AM CT (bad quote: {why})", q))
+            continue
+        req = LimitOrderRequest(symbol=r.Symbol, qty=qty, limit_price=q["limit"],
                                 time_in_force=TimeInForce.DAY, extended_hours=True,
                                 side=OrderSide.SELL if r.Side == "SELL" else OrderSide.BUY,
                                 client_order_id=_client_order_id(r.Symbol, r.Side, qty, price, date_str))
@@ -879,12 +1039,28 @@ def submit_paper_extended(orders, positions=None, record=None, client=None, orde
             o = client.submit_order(req)
             rest = round(plan_total - qty, 9)
             note = f" + {rest:g} fractional rest next morning" if rest > 0 else ""
-            results.append((r.Symbol, r.Side, qty, str(o.id), f"submitted ({getattr(o.status, 'value', o.status)}){note}"))
+            results.append((r.Symbol, r.Side, qty, str(o.id),
+                            f"submitted ({getattr(o.status, 'value', o.status)}) at ${q['limit']:g}{note}", q))
             if record is not None:
-                record({**entry, "order_qty": qty, "order_id": str(o.id)})
+                record({**entry, "order_qty": qty, "order_id": str(o.id), "quote": q})
         except Exception as e:  # keep going; report every failure
-            results.append((r.Symbol, r.Side, qty, None, f"FAILED: {e}"))
-    return pd.DataFrame(results, columns=["Symbol", "Side", "Shares", "Order_ID", "Status"])
+            results.append((r.Symbol, r.Side, qty, None, f"FAILED: {e}", q))
+    out = pd.DataFrame([x[:5] for x in results], columns=["Symbol", "Side", "Shares", "Order_ID", "Status"])
+    prices = [_price_cols(x[5] if len(x) > 5 else None, x[1]) for x in results]
+    return out.join(pd.DataFrame(prices, columns=PRICE_COLUMNS, index=out.index))
+
+
+def _next_9am(row=None, pend=None):
+    """9:00 AM CT of the next business day: the one retry slot of an order skipped for a bad quote.
+    None when `row`'s decision is replaced by a newer one before then (it would be dropped unsent)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from run_all import next_trading_day_after
+    d = next_trading_day_after(_today_ct().date())
+    t = datetime(d.year, d.month, d.day, 9, 0, tzinfo=ZoneInfo("America/Chicago"))
+    exp = _order_expiry(row, pend or {}) if row is not None else None
+    return None if exp is not None and exp <= t else t
 
 
 # ----------------------------------------------------------------------------- crash-safe order ids + broker reconciliation
@@ -1011,7 +1187,7 @@ def _stage_orders_for_morning(orders_df, positions, record, reason):
     Used when BUYs cannot be safely sized in the evening (SELLs did not settle in
     time, or buying power is unreadable): the full-size rows are recorded in the
     pending file with no broker order id, and the morning fill-check submits them
-    as regular-hours market orders after the SELLs complete, with its own
+    as regular-hours limit orders after the SELLs complete, with its own
     affordability check. This keeps a transient evening condition from permanently
     shrinking the BUY plan (Bug 1) or submitting oversized BUYs (Bug 2).
     Returns a results DataFrame with STAGED statuses.
@@ -1019,7 +1195,7 @@ def _stage_orders_for_morning(orders_df, positions, record, reason):
     cols = ["Symbol", "Side", "Shares", "Order_ID", "Status"]
     staged, skipped = [], []
     for r in orders_df[orders_df["Side"].isin(["SELL", "BUY"])].itertuples():
-        # Morning = regular-hours market orders: 2-decimal shares, exact qty for full exits.
+        # Morning = regular-hours limit orders: 2-decimal shares, exact qty for full exits.
         qty, is_exit, qty_reason = _plan_qty(r.Symbol, r.Side, r.Shares, positions)
         if qty_reason:
             skipped.append((r.Symbol, r.Side, r.Shares, None, qty_reason))
@@ -1280,7 +1456,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     """Morning fill check for the previous evening's extended-hours orders (LIVE).
 
     Reads Reports/live_pending_orders.json (written by auto_trade), checks each order's fill
-    status on Alpaca, and for anything not fully filled submits a regular-hours DAY market order for the rest in
+    status on Alpaca, and for anything not fully filled submits a regular-hours DAY LIMIT order for the rest in
     fractional shares (2 decimals, rounded down; the exact held quantity for a full exit),
     including the fractional part the whole-share evening order left out. A still-open
     evening order is canceled first and the cancel must be confirmed; the final fill count
@@ -1289,12 +1465,16 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     retry). Nothing is sent while the market is closed. A BUY rest worth under $1 is not
     ordered (Alpaca minimum). Completion marks are saved after every order.
     Partial fills are handled: only the unfilled remainder is ordered.
-    Cash: SELLs go first; each BUY is sized to the cash free right then (limit x 1.01 per share).
+    Prices (smart_quote): buy at the ask + 0.05%, sell at the bid - 0.05%. A bad quote (missing, stale, spread over
+    0.5%) sends nothing: the row waits for the next business day's 9 AM CT check (one retry slot); a bad quote there
+    goes to the normal retries below. A limit not filled after LIMIT_WAIT_SECS is canceled (confirmed) and replaced
+    once at a fresh quote; a replacement still open is left working and looked at again by the next 9 AM CT check.
+    Cash: SELLs go first (and are waited on); each BUY is sized to the cash free right then (its limit x 1.01 per share).
     If only part fits, that part is bought; if under $1 fits, it is logged NO FILL (not enough
     cash) and dropped - the next Friday rebalance re-plans it. Rows left over from an earlier
     evening are completed too, until the next decision slot (then drop_superseded_orders removes them).
     Orders staged by a past-7PM evening run (no broker order id) were never submitted, so the
-    full quantity is sent as a regular-hours market order.
+    full quantity is sent as a regular-hours limit order.
     A rejected evening order is never auto-retried - it is logged as REJECTED for review
     and dropped from the pending list.
 
@@ -1316,7 +1496,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     from zoneinfo import ZoneInfo
 
     from alpaca.trading.enums import OrderSide, TimeInForce
-    from alpaca.trading.requests import MarketOrderRequest
+    from alpaca.trading.requests import LimitOrderRequest
 
     cols = ["Symbol", "Side", "Shares", "Order_ID", "Status"]
 
@@ -1348,6 +1528,103 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         except Exception as e:
             print(f"WARNING: could not save completion marks ({e}) - broker order ids still prevent duplicates")
 
+    def _quote_skip(o, sym, side, q_qty, oid, q):
+        """Bad quote: nothing is sent. The first time, the row waits for the next business day's 9 AM CT check (its
+        one retry slot); a bad quote at that check (or when the next decision comes before it) goes to _retry."""
+        day = _next_9am(o, pend)
+        px[len(results)] = _price_cols(q, side)
+        if day is not None and not o.get("retry_on"):
+            o["retry_on"] = day.date().isoformat()
+            results.append((sym, side, q_qty, oid, f"SKIPPED for now (bad quote: {q['skip']}) - tried again "
+                                                   f"{day:%a %b} {day.day} at the 9 AM CT check"))
+            to_retry.append(o)
+        else:
+            _retry(o, sym, side, q_qty, oid, f"bad quote: {q['skip']}")
+
+    def _read(order_id):
+        """(status, filled qty, average fill price) of one order, or None when it can't be read."""
+        try:
+            x = client.get_order_by_id(order_id)
+        except Exception:
+            return None
+        raw = getattr(x, "status", "")
+        return ((raw.value if hasattr(raw, "value") else str(raw)).lower(), _safe_number(x.filled_qty),
+                _safe_number(getattr(x, "filled_avg_price", None)))
+
+    def _carry(p, rest, order_id, why):
+        """A new pending row for the unfilled rest of limit order p, for the next business day's 9 AM CT check.
+        order_id = the order still working (that check reads its fills first) or None (nothing working: sent fresh)."""
+        o = p["row"]
+        day = _next_9am(o, pend)
+        if order_id and day is None:   # the next decision comes first: the order just works until the close
+            results.append((p["sym"], p["side"], rest, order_id, f"WORKING ({why}) - left open until the close"))
+            return
+        row = {k: v for k, v in o.items() if k not in ("completed_order_id", "tries", "cash_waits", "retry_on")}
+        row.update(qty=rest, order_qty=rest if order_id else None, order_id=order_id, rest_of=p["id"],
+                   evening_date=o.get("evening_date") or pend.get("evening_date"))
+        if day is not None:
+            row["retry_on"] = day.date().isoformat()
+        to_retry.append(row)
+        pend["orders"] = pend.get("orders", []) + [row]
+        _save_pending()
+        results.append((p["sym"], p["side"], rest, order_id, f"CARRIED ({why}) - goes to the "
+                        + (f"{day:%a %b} {day.day} 9 AM CT check" if day else "next fill check")))
+
+    def _chase(orders):
+        """Wait up to LIMIT_WAIT_SECS for this run's new limit orders to fill. One not fully filled is canceled (the
+        cancel must be confirmed) and its rest replaced ONCE at a fresh quote. A replacement still not filled after a
+        second wait is left working (DAY) and looked at again by the next business day's 9 AM CT check."""
+        todo = [p for p in orders if not p.get("chased")]
+        for first in (True, False):
+            if not todo:
+                return
+            _wait_for_terminal_all(client, [p["id"] for p in todo], timeout_secs=LIMIT_WAIT_SECS,
+                                   poll_secs=LIMIT_POLL_SECS)
+            replaced = []
+            for p in todo:
+                p["chased"], side = True, p["side"]
+                cur = _read(p["id"])
+                if cur is not None:
+                    px[p["i"]] = _price_cols(p["q"], side, cur[2], cur[1])
+                    if cur[1] >= p["qty"] - 1e-9:
+                        continue                                   # filled
+                if cur is None or not first:
+                    _carry(p, p["qty"], p["id"], "limit not filled yet")
+                    continue
+                try:
+                    client.cancel_order_by_id(p["id"])
+                except Exception:
+                    pass
+                cur = _read(p["id"]) if _wait_terminal(client, p["id"]) else None
+                if cur is None:                                    # cancel not confirmed: never a second order
+                    _carry(p, p["qty"], p["id"], "limit not filled yet, cancel not confirmed")
+                    continue
+                px[p["i"]] = _price_cols(p["q"], side, cur[2], cur[1])
+                rest = p["qty"] - cur[1] if p["exit"] else _floor2(p["qty"] - cur[1])
+                if rest <= 1e-9 or (side == "BUY" and rest * p["q"]["limit"] < 1.0):
+                    continue                                       # filled while canceling, or a rest under $1
+                q = smart_quote(p["sym"], side)
+                why = q["skip"] and f"bad quote: {q['skip']}"
+                if not why and side == "BUY" and q["limit"] > p["q"]["limit"] * (1 + CASH_CUSHION):
+                    why = f"price ran up over {CASH_CUSHION:.0%} since the first limit"
+                if why:
+                    _carry(p, rest, None, f"first limit filled {cur[1]:g} of {p['qty']:g}; {why}")
+                    continue
+                cid = p["cid"][:46] + "-c"
+                req = LimitOrderRequest(symbol=p["sym"], qty=rest, limit_price=q["limit"], time_in_force=TimeInForce.DAY,
+                                        side=OrderSide.SELL if side == "SELL" else OrderSide.BUY, client_order_id=cid)
+                try:
+                    m = client.submit_order(req)
+                except Exception as e:
+                    _carry(p, rest, None, f"replacement not accepted: {str(e)[:80]}")
+                    continue
+                i = len(results)
+                px[i] = _price_cols(q, side)
+                results.append((p["sym"], side, rest, str(m.id), f"REPLACED at a fresh quote, limit ${q['limit']:g} "
+                                f"(the first limit filled {cur[1]:g} of {p['qty']:g} in {LIMIT_WAIT_SECS} s)"))
+                replaced.append({**p, "qty": rest, "id": str(m.id), "cid": cid, "q": q, "i": i, "chased": False})
+            todo = replaced
+
     _print_header("MORNING FILL CHECK - Alpaca LIVE (REAL MONEY)")
     if not os.path.exists(pending_path):
         print("  No pending extended-hours orders - nothing to do.")
@@ -1365,9 +1642,9 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                             key=lambda o: 0 if isinstance(o, dict) and
                             str(o.get("side")).upper() == "SELL" else 1)
     client = paper_trading_client()
-    # Market orders only go out while the regular session is open: a market order sent
-    # after the close (e.g. the Mac woke late) would queue for a later open at an
-    # unknown price. Nothing is sent and the pending file is kept.
+    # Orders only go out while the regular session is open: a DAY order sent after the
+    # close (e.g. the Mac woke late) would queue for a later open. Nothing is sent and
+    # the pending file is kept.
     try:
         market_open = bool(client.get_clock().is_open)
     except Exception:
@@ -1396,10 +1673,12 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         raise RuntimeError("ABORTED: cannot read broker orders to rule out duplicates - kept for retry")
     # Completion ids use the row's EVENING date, so a retry on any later day still finds them.
     fill_date = str(pend.get("evening_date") or _today_ct().date().isoformat()).replace("-", "")
+    today = _today_ct().date().isoformat()
     results = []
-    to_retry = []  # rows kept for the next fill check: FAILED completions, cash waits and BUY rests
-    morning_sell_ids = []  # market SELL completions submitted by this run (waited on before BUYs)
-    sells_settled = False  # ... have been waited on before the first BUY affordability check
+    px = {}        # results row number -> price columns for the order log (quote, limit, fill, slippage)
+    to_retry = []  # rows kept for the next fill check: FAILED completions, cash waits, BUY rests, bad quotes
+    placed = []    # limit orders sent by this run (waited on, an unfilled one replaced once: _chase)
+    sells_settled = False  # this run's SELLs were waited on before the first BUY affordability check
     reserved_buy_spend = 0.0  # estimated cost of BUY completions already submitted this run
     bp_base = None  # buying power read ONCE after this run's SELLs settled (Alpaca already
     #                 lowers its figure for submitted buys, so re-reading AND subtracting
@@ -1430,9 +1709,14 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             results.append((sym, side, qty, o["completed_order_id"],
                             f"ALREADY COMPLETED (morning order {o['completed_order_id']})"))
             continue
+        if str(o.get("retry_on") or "") > today:
+            # Carried to a later 9 AM CT check (a bad quote, or a limit left working): nothing now.
+            results.append((sym, side, qty, oid, f"WAITING - tried again {o['retry_on']} at the 9 AM CT check"))
+            to_retry.append(o)
+            continue
         if not oid:
             # Staged by a past-7PM evening run (never submitted): the full quantity is unfilled,
-            # so it goes straight to a regular-hours market order below.
+            # so it goes straight to a regular-hours limit order below.
             status, filled = "staged", 0.0
         else:
             try:
@@ -1449,18 +1733,19 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             if status == "filled":  # the whole-share evening order filled completely
                 filled = max(filled, order_qty or 0.0)
             if filled >= qty - 1e-9:
+                px[len(results)] = _price_cols(o.get("quote"), side, getattr(alp, "filled_avg_price", None), filled)
                 results.append((sym, side, qty, oid, f"FILLED ({filled:g}/{qty})"))
                 continue
             if status == "rejected":
                 # A rejected evening order needs a human look (e.g. a buying-power or
-                # corporate-action reject) - it is never auto-retried as a market order.
+                # corporate-action reject) - it is never auto-retried as a limit order.
                 results.append((sym, side, qty, oid, f"REJECTED - not retried, needs review (filled {filled:g}/{qty})"))
                 continue
-        # Anything else not fully filled is completed with a regular-hours market order
+        # Anything else not fully filled is completed with a regular-hours DAY limit order
         # for the unfilled remainder: still-open orders, and terminal-but-unfilled ones
         # (expired / done_for_day / canceled - the normal overnight state of a DAY
         # extended-hours order that did not fill).
-        # Market orders allow fractional shares: round the remainder DOWN to 2 decimals
+        # DAY limit orders allow fractional shares: round the remainder DOWN to 2 decimals
         # (never up - we never order more than the unfilled remainder). This also covers
         # the fractional rest of an evening whole-share order (e.g. 3.58 planned, 3 filled).
         remaining = _remainder(qty, filled, None, False)
@@ -1470,7 +1755,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         if side == "SELL":
             # Never sell what the portfolio does not hold: clamp the remainder to the
             # shares actually held (the evening order may have filled partially, or the
-            # position may have changed overnight). 2-decimal precision for market orders.
+            # position may have changed overnight). 2-decimal precision in regular hours.
             have = _safe_number(live_positions.get(str(sym).upper(), 0.0))
             if have <= 0:
                 results.append((sym, side, qty, oid, "SKIPPED: not in portfolio (0 shares held)"))
@@ -1488,7 +1773,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     pass
                 if not _wait_terminal(client, oid):
                     # Fail closed: the evening order may still fill - retry later instead
-                    # of risking a duplicate market order now.
+                    # of risking a duplicate limit order now.
                     _retry(o, sym, side, remaining, oid, "evening order still open after cancel")
                     continue
                 try:  # re-read: it may have filled while the cancel was processed
@@ -1545,20 +1830,18 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 results.append((sym, side, remaining, oid,
                                 "NO FILL (remainder <=0 after prior attempt)"))
                 continue
+            if side == "BUY" and not sells_settled:
+                _chase(placed)   # this run's SELLs: wait for their fills (an unfilled one replaced once) before buying
+                sells_settled = True
+            q = smart_quote(sym, side)   # the limit price; a bad quote sends nothing now
+            if q["skip"]:
+                _quote_skip(o, sym, side, to_order, oid, q)
+                continue
             if side == "BUY":
-                # Buying-power check for morning BUY completions. SELL completions were
-                # processed first (sorted above): wait for this run's SELLs to settle,
-                # then re-read fresh buying power and verify it covers the estimated market
-                # cost. The estimate uses the evening limit price + 1% cushion; a BUY that
-                # does not fully fit is cut to the part that fits (the rest is not bought).
-                # Fail closed: an unreadable buying-power figure keeps the row for retry;
-                # a missing or invalid price can never be verified, so that row is dropped
-                # loudly instead of being submitted blind or retried forever.
-                if not sells_settled:
-                    if morning_sell_ids:   # market sells fill in seconds; bounded wait so the buys see their cash
-                        _wait_for_terminal_all(client, morning_sell_ids,
-                                               timeout_secs=SELL_SETTLE_WAIT_SECS, poll_secs=5)
-                    sells_settled = True
+                # Buying-power check for morning BUY completions: SELLs were processed (and waited on) first, then
+                # fresh buying power is read once and must cover the BUY at its limit price + the 1% cushion (a limit
+                # never fills above its limit); a BUY that does not fully fit is cut to the part that fits.
+                # Fail closed: an unreadable buying-power figure keeps the row for retry.
                 if bp_base is None:
                     try:
                         bp_base = _read_buying_power(client)
@@ -1567,14 +1850,8 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     if bp_base is not None:
                         print(f"  Buying power after the sells: ${bp_base:,.2f}")
                 bp_now = bp_base
-                est_price = _safe_number(o.get("limit_price"))
-                if est_price > 0 and to_order * est_price < 1.0:
-                    # Alpaca's fractional minimum is $1: a smaller BUY rest would be rejected
-                    # every morning, so it is dropped (not retried).
-                    results.append((sym, side, to_order, oid,
-                                    "NO FILL (rest worth under $1 - below Alpaca's minimum, not ordered)"))
-                    continue
-                if not (est_price > 0):
+                if not (_safe_number(o.get("limit_price")) > 0):
+                    # A row without its planned price is damaged: dropped loudly, never bought blind.
                     msg = (f"FAILED: no usable price for {sym} BUY {to_order:g} shares - "
                            f"affordability cannot be verified (dropped, needs review)")
                     results.append((sym, side, to_order, oid, msg))
@@ -1582,6 +1859,13 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                               f"{sym} buy of {_fmt_shares(to_order)} shares had no saved price, so it was NOT "
                               f"sent (no money moved). Buy it by hand in Alpaca if you still want it. "
                               f"Log: Reports/logs", details=msg)
+                    continue
+                est_price = q["limit"]
+                if to_order * est_price < 1.0:
+                    # Alpaca's fractional minimum is $1: a smaller BUY rest would be rejected
+                    # every morning, so it is dropped (not retried).
+                    results.append((sym, side, to_order, oid,
+                                    "NO FILL (rest worth under $1 - below Alpaca's minimum, not ordered)"))
                     continue
                 if bp_now is None or not math.isfinite(bp_now) or bp_now < 0:
                     msg = (f"SKIP (morning buying power unreadable) - {sym} BUY {to_order:g} shares "
@@ -1593,7 +1877,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                               details=msg)
                     to_retry.append(o)
                     continue
-                unit = est_price * (1 + CASH_CUSHION)  # 1% cushion for market slippage/gaps
+                unit = est_price * (1 + CASH_CUSHION)  # 1% cushion: room for one replacement at a fresh quote
                 est_cost = to_order * unit
                 spendable = bp_now - reserved_buy_spend  # less BUYs already submitted this run
                 if est_cost > spendable:
@@ -1626,9 +1910,8 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                         rest_row["evening_date"] = o.get("evening_date") or pend.get("evening_date")
                         partial += f" - the rest ({rest:g}) goes to the next fill check (9 AM CT at the latest)"
                     to_order, est_cost = fit, fit * unit
-            req = MarketOrderRequest(symbol=sym, qty=to_order, time_in_force=TimeInForce.DAY,
-                                     side=OrderSide.SELL if side == "SELL" else OrderSide.BUY,
-                                     client_order_id=cid)
+            req = LimitOrderRequest(symbol=sym, qty=to_order, limit_price=q["limit"], time_in_force=TimeInForce.DAY,
+                                    side=OrderSide.SELL if side == "SELL" else OrderSide.BUY, client_order_id=cid)
             m = client.submit_order(req)
             o["completed_order_id"] = str(m.id)  # retry-safety: this row is done
             if partial and "the rest" in partial:
@@ -1636,23 +1919,32 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 to_retry.append(rest_row)
                 pend["orders"] = pend.get("orders", []) + [rest_row]   # saved with the marks (crash-safe)
             _save_pending()
-            if side == "SELL":
-                morning_sell_ids.append(str(m.id))  # waited on before the first BUY
-            else:
+            if side == "BUY":
                 reserved_buy_spend += est_cost  # later BUYs are judged on what is left
+            placed.append({"row": o, "sym": sym, "side": side, "qty": to_order, "id": str(m.id), "cid": cid, "q": q,
+                           "exit": side == "SELL" and is_exit, "i": len(results)})
+            px[len(results)] = _price_cols(q, side)
             results.append((sym, side, to_order, str(m.id),
-                            f"COMPLETED via market ({status}, filled {filled:g}/{qty}){partial}"))
-        except Exception as e:                      # e.g. Alpaca rejected the market order, or the network dropped
+                            f"COMPLETED via limit ${q['limit']:g} ({status}, filled {filled:g}/{qty}){partial}"))
+        except Exception as e:                      # e.g. Alpaca rejected the order, or the network dropped
             _retry(o, sym, side, remaining, oid, str(e))
+    try:
+        _chase(placed)   # the BUYs (and any SELLs not waited on yet): wait for fills, replace an unfilled one once
+    except Exception as e:   # the orders are sent and saved (never re-sent); only the fill follow-up is missing
+        print(f"WARNING: could not follow up the limit orders ({e}) - check Alpaca for open orders")
+        log_event("Fill check", "warning", "yes", "The orders went out, but their fills couldn't be checked. Look in "
+                  "Alpaca for any order still open. Log: Reports/logs", details=str(e))
     results = pd.DataFrame(results, columns=cols)
+    prices = pd.DataFrame([px.get(i, {}) for i in results.index], columns=PRICE_COLUMNS, index=results.index)
     if log_csv and not results.empty:
-        log = results.drop(columns=["Order_ID"], errors="ignore").copy()
+        log = results.drop(columns=["Order_ID"]).join(prices)
         log["Submitted_At_CT"] = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d %H:%M:%S")
         log["Target_Source"] = f"fill-check ({pend.get('target_source')})"
         log["As_Of"] = pend.get("as_of")
         log["Equity"] = None
-        os.makedirs(os.path.dirname(log_csv), exist_ok=True)
-        log.to_csv(log_csv, mode="a", header=not os.path.exists(log_csv), index=False)
+        _append_order_log(log, log_csv)
+    if not results.empty:
+        _log_cost("Fill check", results.join(prices))
     if to_retry:
         # Keep only the failed rows (atomic rewrite) so a retry is exact-once.
         pend["orders"] = to_retry
@@ -1838,9 +2130,9 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
     - SELL rows are verified against the live portfolio before anything is sent: a symbol not
       held is SKIPPED (never submitted), and the sell quantity is clamped to the shares
       actually held. After-hours limit orders go out in WHOLE shares; the fractional rest
-      is completed by the next morning's regular-hours fill check (market order, 2 decimals).
+      is completed by the next morning's regular-hours fill check (DAY limit order, 2 decimals).
     - Submits via submit_paper_extended_sequenced() - the SELLs go
-      first as DAY limit orders at the planned closing price with extended_hours=True; after a
+      first as DAY limit orders at the live quote (bid - 0.05%; buys ask + 0.05%) with extended_hours=True; after a
       bounded wait for the sells to fill, buying power is re-read from the broker and each BUY is
       sent for the part that fits it now; the 9 AM check buys the rest from the cash free then.
       Each successfully submitted order is recorded incrementally in
@@ -1849,7 +2141,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
       and the local record cannot duplicate it on retry (the retry reconciles with the broker).
     - If it is at or past 7:00 PM CT (extended hours are over), nothing is submitted: the planned orders are staged in Reports/live_pending_orders.json with no
       broker order id, and the morning fill check (complete_unfilled_orders) sends the full
-      quantities as regular-hours market orders. Staged rows are reported as STAGED, never FAILED.
+      quantities as regular-hours limit orders. Staged rows are reported as STAGED, never FAILED.
     - Idempotent retries: rows already submitted/staged earlier the same evening are recorded
       after each submit, so re-running --trade in the same window skips them instead of
       duplicating orders. Rows found on the broker from this evening but never recorded
@@ -1859,7 +2151,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
       that decision's picks (its point-in-time ranks) and the freshness check accepts its files.
     - session=True (run_all: a missed decision caught up during regular hours): sized at current prices
       (current_prices), nothing is sent here - every order is STAGED with send_now, and run_all sends them at once
-      as regular-hours market orders in 2-decimal shares (complete_unfilled_orders).
+      as regular-hours limit orders in 2-decimal shares (complete_unfilled_orders).
     - Pending rows of an earlier decision whose catch-up window closed are dropped first (drop_superseded_orders).
     - Appends a row per submitted order to Reports/live_orders_log.csv and returns
       (orders, meta, results_df).
@@ -1939,10 +2231,10 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
     orders_to_send = orders.loc[keep_idx]
     if defer:
         # Extended hours are over: submit nothing now. Stage the planned orders so the
-        # morning fill check sends them as regular-hours fractional market orders.
+        # morning fill check sends them as regular-hours fractional limit orders.
         results = pd.concat([_stage_orders_for_morning(
             orders_to_send, positions, lambda e: record_pending_order(e, meta, PENDING_ORDERS_JSON),
-            ("STAGED for regular-hours market orders now"
+            ("STAGED for regular-hours limit orders now"
              + ("" if decision is not None and pd.Timestamp(decision).date() == _today_ct().date() else " (catch-up)"))
             if session
             else "STAGED for morning market (past 7 PM CT - not submitted)"),
@@ -1960,8 +2252,9 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         log["Target_Source"] = meta["source"]
         log["As_Of"] = meta["as_of"]
         log["Equity"] = round(equity, 2)
-        os.makedirs(os.path.dirname(log_csv), exist_ok=True)
-        log.to_csv(log_csv, mode="a", header=not os.path.exists(log_csv), index=False)
+        _append_order_log(log, log_csv)
+    if not results.empty and "Limit" in results.columns:
+        _log_cost("Trade", results)
 
     # --- readable summary + run-log rows ---
     _print_section("Results")

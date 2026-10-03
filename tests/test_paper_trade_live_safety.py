@@ -84,6 +84,9 @@ _dotenv_stub = types.ModuleType("dotenv")
 _dotenv_stub.load_dotenv = lambda *a, **k: None
 sys.modules["dotenv"] = _dotenv_stub
 import paper_trade
+import fake_quotes
+# quotes: AAA sells at the bid 99.95 - 0.05% = 99.90; BBB buys at the ask 49.97 + 0.05% = 50.00; others 99.99 / 100.01
+QUOTES = fake_quotes.install(paper_trade, quotes={"AAA": (99.95, 100.05), "BBB": (49.95, 49.97)})
 
 PASS, FAIL = [], []
 
@@ -124,7 +127,9 @@ class FakeClient:
     def get_all_positions(self): return [FakePos(s, q) for s, q in self.positions.items()]
     def submit_order(self, req):
         self.submitted.append(req)
-        o = FakeOrder(id=f"ord-{len(self.submitted)}", status="accepted",
+        day = not getattr(req, "extended_hours", False) and hasattr(req, "limit_price")  # a market-hours limit fills at once
+        o = FakeOrder(id=f"ord-{len(self.submitted)}", status="filled" if day else "accepted",
+                      filled_qty=req.qty if day else 0, filled_avg_price=getattr(req, "limit_price", None),
                       client_order_id=getattr(req, "client_order_id", ""))
         self.orders_by_id[o.id] = o
         return o
@@ -179,7 +184,8 @@ check("extended: SELL first", getattr(r0, "side", None) == OrderSide.SELL)
 check("extended: limit orders w/ extended_hours",
       isinstance(r0, LimitOrderRequest) and r0.extended_hours is True and r0.time_in_force == TimeInForce.DAY)
 check("extended: whole shares", r0.qty == 10 and isinstance(r0.qty, int))
-check("extended: limit at close", r0.limit_price == 100.0)
+check("extended: SELL limit at the bid - 0.05% (99.95 -> 99.90), BUY at the ask + 0.05% (49.97 -> 50.00)",
+      r0.limit_price == 99.90 and r1.limit_price == 50.00, (r0.limit_price, r1.limit_price))
 check("extended: live- client order id", r0.client_order_id.startswith("live-"), r0.client_order_id)
 check("extended: rows recorded incrementally", len(recorded) == 2 and recorded[0]["order_id"] is not None)
 # SELL clamp: plan says 10 but only 4 held
@@ -270,8 +276,9 @@ check("morning: filled BUY untouched", by_sym.get("BBB", "").startswith("FILLED"
 check("morning: rejected never retried", by_sym.get("CCC", "").startswith("REJECTED"), by_sym.get("CCC"))
 check("morning: staged row sent full qty", "COMPLETED" in by_sym.get("DDD", ""), by_sym.get("DDD"))
 check("morning: malformed row dropped loudly", by_sym.get("?", "").startswith("FAILED"), by_sym.get("?"))
-mkt = [s for s in fc.submitted if isinstance(s, MarketOrderRequest)]
-check("morning: market orders only", len(mkt) == len(fc.submitted) == 2, str(len(fc.submitted)))
+mkt = [s for s in fc.submitted if isinstance(s, LimitOrderRequest) and not getattr(s, "extended_hours", False)
+       and s.time_in_force == TimeInForce.DAY]
+check("morning: DAY limit orders only (no market orders)", len(mkt) == len(fc.submitted) == 2, str(len(fc.submitted)))
 check("morning: SELL remainder clamped (10-4=6)", any(s.qty == 6 and s.side == OrderSide.SELL for s in mkt),
       str([(s.symbol, s.qty) for s in mkt]))
 check("morning: completion ids live-fill-", all(s.client_order_id.startswith("live-fill-") for s in mkt),

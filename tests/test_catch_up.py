@@ -24,6 +24,8 @@ sys.path.insert(0, ROOT)
 import pandas as pd
 
 import paper_trade as pt
+import fake_quotes
+fake_quotes.install(pt)   # never a real quote
 import run_all as ra
 
 CT = ra.CT
@@ -203,7 +205,7 @@ try:
     with redirect_stdout(io.StringIO()):
         _o, meta, res = pt.auto_trade(log_csv=None, decision=pd.Timestamp("2026-10-05"), session=True)
     check("2:30 PM run: orders STAGED to go now (not a catch-up), run log says 'Trades', sells first then buys from free cash",
-          res["Status"].eq("STAGED for regular-hours market orders now").all() and "Trades: 1 sell, 1 buy" in seen["notify"][3]
+          res["Status"].eq("STAGED for regular-hours limit orders now").all() and "Trades: 1 sell, 1 buy" in seen["notify"][3]
           and "sells first" in seen["notify"][3] and json.load(open(pend)).get("send_now") is True, (res.to_dict("records"), seen["notify"]))
 finally:
     for k, v in saved.items():

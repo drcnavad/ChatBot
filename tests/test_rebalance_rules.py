@@ -148,6 +148,8 @@ class Broker:
 
 
 PRICES = {"AAA": 100.0, "BBB": 50.0, "CCC": 20.0, "DDD": 10.0}
+import fake_quotes  # noqa: E402
+fake_quotes.install(pt, prices=PRICES)   # the ask at the planned price; limits fill at ask + 0.05%
 
 
 def pending(rows, evening_date="2026-10-02"):

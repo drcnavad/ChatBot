@@ -52,8 +52,8 @@ for f, src in sources():
 from datetime import datetime
 
 from alpaca.common.enums import Sort
-from alpaca.data.enums import Adjustment
-from alpaca.data.requests import StockBarsRequest, StockLatestTradeRequest
+from alpaca.data.enums import Adjustment, DataFeed
+from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest, StockLatestTradeRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
 from alpaca.trading.requests import GetOrdersRequest, LimitOrderRequest, MarketOrderRequest
@@ -66,6 +66,15 @@ builds = {
     "LimitOrderRequest extended hours, whole shares":
         lambda: LimitOrderRequest(symbol="ANET", qty=3, limit_price=139.66, time_in_force=TimeInForce.DAY,
                                   extended_hours=True, side=OrderSide.BUY, client_order_id="live-20261002-BUY-ANET-3-1"),
+    "LimitOrderRequest market hours, 2-decimal shares, DAY (smart limit)":
+        lambda: LimitOrderRequest(symbol="ANET", qty=1.58, limit_price=139.73, time_in_force=TimeInForce.DAY,
+                                  side=OrderSide.BUY, client_order_id="live-fill-20261002-BUY-ANET-1-13966"),
+    "LimitOrderRequest under $1, 4 decimals": lambda: LimitOrderRequest(
+        symbol="ABCD", qty=12.5, limit_price=0.5126, time_in_force=TimeInForce.DAY, side=OrderSide.SELL),
+    "StockLatestQuoteRequest SIP feed (the plan check)":
+        lambda: StockLatestQuoteRequest(symbol_or_symbols="SPY", feed=DataFeed.SIP),
+    "StockLatestQuoteRequest feed from its name (sip / iex)":
+        lambda: [StockLatestQuoteRequest(symbol_or_symbols="ANET", feed=DataFeed(f)) for f in ("sip", "iex")],
     "MarketOrderRequest 2-decimal shares":
         lambda: MarketOrderRequest(symbol="ANET", qty=0.58, time_in_force=TimeInForce.DAY, side=OrderSide.SELL,
                                    client_order_id="live-fill-20261002-SELL-ANET-0.58-1"),

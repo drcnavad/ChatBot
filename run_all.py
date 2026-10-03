@@ -39,7 +39,7 @@ so the evening trade still runs on fresh signals. Only a main or validate failur
                                       #    DAY limit orders at the plan price; the 9 AM --fill-check completes the rest;
                                       #  - missed (Mac asleep/off): caught up at the next regular session (9:00 AM CT to
                                       #    15 min before the close) with the missed decision's own picks, sized at current
-                                      #    prices, sent at once as regular-hours market orders (2 decimals); evenings,
+                                      #    prices, sent at once as regular-hours limit orders (2 decimals); evenings,
                                       #    nights, weekends and holidays wait for the next session;
                                       #  - superseded (skipped, one Reports/run_log.csv row) once the next decision slot arrives.
     python run_all.py --trade --scheduled   # what launchd runs (see launchd/; at 2:30 PM, login, wake and every 30 min):
@@ -70,7 +70,7 @@ Mon-Fri 9:00 AM CT; both also at login (RunAtLoad), once on wake for a slot miss
 By default no orders are placed. Alpaca account endpoints are only called with --sync-live (3 read-only GETs via
 alpaca_paper.py), --trade (paper_trade.auto_trade(): reads positions + equity, then submits extended-hours DAY
 limit orders to the LIVE account (REAL MONEY)) or --fill-check (paper_trade.complete_unfilled_orders(): checks the evening orders
-and completes unfilled remainders with regular-hours market orders; keys ALPACA_LIVE_KEY_ID /
+and completes unfilled remainders with regular-hours limit orders; keys ALPACA_LIVE_KEY_ID /
 ALPACA_LIVE_SECRET_KEY in .env).
 """
 import argparse
@@ -391,7 +391,7 @@ def fundamentals_allowed(now_ct, state, force=False):
 
 
 # ----------------------------------------------------------------------------- decisions: run once, catch up if missed
-SESSION_FROM = (9, 0)            # catch-up / completion market orders from 9:00 AM CT (30 min after the open) ...
+SESSION_FROM = (9, 0)            # catch-up / completion limit orders from 9:00 AM CT (30 min after the open) ...
 SESSION_STOP_MIN = 15            # ... until 15 min before the close (2:45 PM CT; 11:45 AM on early-close days)
 DECISION_STOP_MIN = 5            # the day's own decision (2:30 PM run) still trades in regular hours until 5 min before the close
 MAX_DECISION_ATTEMPTS = 3        # launchd retries a decision whose run failed at most 3 times ...
@@ -409,7 +409,7 @@ def _parse_ct(text):
 
 
 def in_session(now_ct, stop_min=SESSION_STOP_MIN):
-    """True in the regular-hours window for market orders: a trading day from 9:00 AM CT until `stop_min` min before the close."""
+    """True in the regular-hours window for limit orders: a trading day from 9:00 AM CT until `stop_min` min before the close."""
     import backtest_engine as be
     d = now_ct.date()
     if not is_trading_day(d):
@@ -420,7 +420,7 @@ def in_session(now_ct, stop_min=SESSION_STOP_MIN):
 
 
 def trade_how(D, now_ct):
-    """How the day's own decision D trades at now_ct: 'session' (regular hours: market orders now, sells first) until
+    """How the day's own decision D trades at now_ct: 'session' (regular hours: limit orders now, sells first) until
     5 min before the close, then 'evening' (extended-hours limit orders, completed by the 9 AM check). Checked again
     right before the trade, as the pipeline takes ~13 min."""
     return "session" if in_session(now_ct, DECISION_STOP_MIN) else "evening"
@@ -442,7 +442,7 @@ def decision_gate(now_ct, state, scheduled=False):
     D = the latest decision (Timestamp) whose 2:30 PM CT slot has passed; None when it already ran (run_state
     'last_decision' - a decision never runs twice) or, for launchd runs, when its retries are used up or too recent.
     how = 'session': D is today and the market is open (until 5 min before the close; the normal 2:30 PM run), or D
-                     was missed (Mac asleep/off) and the market is open -> pipeline, then regular-hours market orders
+                     was missed (Mac asleep/off) and the market is open -> pipeline, then regular-hours limit orders
                      in 2-decimal shares now (sells first, buys sized from the buying power after the sells), from
                      D's picks (its point-in-time ranks) sized at current prices.
           'evening': D is today, past that window and extended hours are still open -> pipeline, then whole-share
@@ -474,7 +474,7 @@ def decision_gate(now_ct, state, scheduled=False):
     if now_ct.date() == D.date() and not paper_trade._past_evening_cutoff(now_ct):
         return D, "evening", f"{label} after {SLOT_TEXT}, extended-hours orders"
     if in_session(now_ct):
-        return D, "session", f"catch-up of the missed {label} now, regular-hours market orders ({sup} if not run)"
+        return D, "session", f"catch-up of the missed {label} now, regular-hours limit orders ({sup} if not run)"
     start = next_session_start(now_ct)
     if until and start >= until:
         return None, None, f"missed {label}: no session before the next decision ({sup})"
@@ -566,7 +566,7 @@ def next_trading_day_after(d):
 
 
 def fill_check_allowed(now_ct, pending_path=None):
-    """(allowed, reason, needs_investigation): may the fill check send its market orders now?
+    """(allowed, reason, needs_investigation): may the fill check send its limit orders now?
 
     Orders from an evening run open at 9:00 AM CT on the next trading day; orders staged by a daytime catch-up
     (send_now) at once. Either way only in regular hours (in_session: 9:00 AM CT to 15 min before the close). Rows
@@ -834,7 +834,7 @@ def main(argv=None):
                         "(pulls live positions + equity, submits extended-hours DAY limit orders; LIVE only)")
     p.add_argument("--fill-check", action="store_true",
                    help="morning fill check: complete the previous evening's unfilled extended-hours orders "
-                        "with regular-hours market orders (no notebooks run; LIVE - real money)")
+                        "with regular-hours limit orders (no notebooks run; LIVE - real money)")
     p.add_argument("--scheduled", action="store_true",
                    help="launchd runs: nothing due -> one 'idle:' line (no log); --trade retries a failed decision <= 3 times")
     p.add_argument("--now", help=argparse.SUPPRESS)          # tests: pretend it is this CT time ("2026-09-28 15:40")
@@ -933,7 +933,7 @@ def main(argv=None):
         logging.info("  %-13s %s", "sync_live", "alpaca_paper.py  [Alpaca LIVE account: 3 read-only GET calls]")
     if a.trade:
         logging.info("  %-13s %s", "trade", "paper_trade.auto_trade  [Alpaca LIVE (REAL MONEY): reads positions+equity, " + (
-            "sends regular-hours market orders now, 2-decimal shares]" if how == "session" else
+            "sends regular-hours limit orders now, 2-decimal shares]" if how == "session" else
             "submits whole-share extended-hours DAY limit orders; the 9 AM check sends the fractional rest]"))
     if a.fill_check:
         logging.info("  %-13s %s", "fill-check", "paper_trade.complete_unfilled_orders  [Alpaca LIVE (REAL MONEY): completes unfilled evening orders]")
@@ -1028,7 +1028,7 @@ def _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, cl
 def _trade(D, how, failures, state, clock, ckpt):
     """The --trade phase for decision D (under the trade lock). how = 'evening' (extended-hours limit orders, completed
     by the 9 AM check) or 'session' (a missed decision caught up in regular hours: orders staged, then sent at once as
-    market orders under the fill-check lock). D is marked done (run_state last_decision) as soon as auto_trade returns,
+    limit orders under the fill-check lock). D is marked done (run_state last_decision) as soon as auto_trade returns,
     even with FAILED rows, so a decision is never traded twice. Returns (results, meta)."""
     proceed, reason = _trade_decision(failures)
     if not proceed:
@@ -1068,7 +1068,7 @@ def _trade(D, how, failures, state, clock, ckpt):
         if n_fail:
             failures.append("trade_partial")
         if session and n_sent:
-            logging.info("=== send now (paper_trade.complete_unfilled_orders: regular-hours market orders, 2 decimals)")
+            logging.info("=== send now (paper_trade.complete_unfilled_orders: regular-hours limit orders at the live quote, 2 decimals)")
             try:
                 meta["sent_now"] = paper_trade.complete_unfilled_orders()
                 for r in meta["sent_now"].itertuples():
@@ -1261,7 +1261,7 @@ def finished_text(label, end, ran, failures, trade_run, how, trades, sent_now=No
     if not trade_run:
         moved, money = "no", "Data refresh only - no trades, no money moved."
     elif how == "session" and _count_sides(sent_now, "^COMPLETED"):
-        money = (f"{'Catch-up orders' if label.startswith('Catch-up') else 'Orders'} sent at market (sells first): "
+        money = (f"{'Catch-up orders' if label.startswith('Catch-up') else 'Orders'} sent as limit orders at the live bid/ask (sells first): "
                  f"{_count_sides(sent_now, '^COMPLETED')} - money moves as they fill; any rest goes out at 9 AM CT.")
     elif _count_sides(trades, "^submitted"):
         money = (f"Orders sent: {_count_sides(trades, '^(submitted|STAGED)')} - money moves as they fill; small "
