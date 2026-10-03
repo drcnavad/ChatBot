@@ -56,7 +56,8 @@ LIVE_MARK = " ◀ LIVE"          # the leaderboard row of the live rules
 ACCOUNT = "Your Alpaca account (real)"
 RANK_RULE = ("Ranked by median weekly return (Friday to Friday); a tie goes to the smaller max drawdown. Chosen on Oct 2, "
              f"2026, before any result. After {WEEKS_TO_WIN} full weeks the top strategy is the winner only if its total "
-             f"return also beats {LIVE} and QQQ; otherwise the live rules stay.")
+             f"return also beats {LIVE} and QQQ; otherwise the live rules stay. Nothing switches on its own: the live "
+             "rules change only when you ask.")
 
 
 # ---------------------------------------------------------------------------------------------------- the strategies
