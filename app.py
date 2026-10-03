@@ -200,10 +200,9 @@ FRESHNESS = {
     "complete_company_analysis.xlsx": ("fundamentals / fair value", 30),
     "balance_sheet_weights.csv": ("balance-sheet scores", 30),
     "balance_sheet.csv": ("raw quarterly fundamentals", 100),
-    "backtest_summary.csv": ("backtest of the live rules (backtest.ipynb)", 120),
 }
 APP_FILES = {"signal_analysis.csv", "strategy_picks.csv", "strategy_tracking.csv", "news_cleaned_df.csv", "earnings_date.csv",
-             "complete_company_analysis.xlsx", "backtest_summary.csv", "strategy_decisions.csv", "benchmark_prices.csv"}
+             "complete_company_analysis.xlsx", "strategy_decisions.csv", "benchmark_prices.csv"}
 
 
 # =====================================================================================================================

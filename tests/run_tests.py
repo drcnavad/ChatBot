@@ -52,7 +52,7 @@
   test_decision_bars.py  decision days keep their 2:30 PM bar (saved as ratios, split-safe; never overwritten after the
                          trade; unchanged bars when nothing is saved or the file is bad)
   test_forward_test.py   dashboard per-stock forward test: counts only from FORWARD_START (2026-10-02), empty state
-Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
+Only the files in TESTS run (never Archive/). Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
 import os
 import subprocess
 import tempfile

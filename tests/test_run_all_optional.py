@@ -37,7 +37,7 @@ def test_main_and_validate_are_critical():
 
 def test_every_pipeline_step_is_classified():
     step_names = {s[0] for s in r.STEPS}
-    known = set(r.OPTIONAL_STEPS) | {"main", "validate", "backtest"}
+    known = set(r.OPTIONAL_STEPS) | {"main", "validate"}
     check(step_names <= known,
           f"every STEPS entry is optional, critical, or opt-in (unclassified: {sorted(step_names - known)})")
 

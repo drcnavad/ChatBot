@@ -55,8 +55,9 @@ LONG_CACHE, LONG_START = "bars_daily_long.pkl", "2020-06-01"   # long bar histor
 RS_WINDOWS = (21, 63, 126)
 RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 
-# The live rules. The backtest (backtest.ipynb), the daily pipeline (main_signal_analysis.ipynb), the trade step
-# (paper_trade.py) and the dashboard all read this one dict. Change a rule here, then run `python run_all.py`.
+# The live rules. The daily pipeline (main_signal_analysis.ipynb), the trade step (paper_trade.py), the dashboard and the
+# archived backtest (Archive/backtest.ipynb, reference only) all read this one dict.
+# Change a rule here, then run `python run_all.py`.
 WINNER = {
     "n": 10,                # stocks held
     "w_tech": 0.5,          # score = 0.5 x technical score + 0.5 x relative strength
@@ -121,7 +122,7 @@ def winner_label(n_stocks):
 # Live portfolio size: the live weights (signal_analysis / strategy_picks / changes / mid-week check, read by paper_trade.py
 # and the app) are the rule weights x LIVE_INVESTED, each rounded DOWN to a 2-decimal percent (9.87% = 0.0987), so a full
 # portfolio sums to at most 99% and rounding can never push it over 100%. The regime halving is already in the rule weights
-# (a regime-off week targets at most 49.5%). The regression tests use the unscaled rule weights; backtest.ipynb trades the
+# (a regime-off week targets at most 49.5%). The regression tests use the unscaled rule weights; Archive/backtest.ipynb traded the
 # live weights (run_rules(..., live_sizing=True), since 2026-10-01).
 LIVE_INVESTED = 0.99
 
@@ -1762,7 +1763,7 @@ def forward_tracking(target, open_w, close_w, first_decision, benchmarks=("QQQ",
     return out.rename_axis("Date").reset_index()
 
 
-# ----------------------------------------------------------------------------- backtest of the live rules (backtest.ipynb)
+# ----------------------------------------------------------------------------- backtest of the live rules (Archive/backtest.ipynb)
 WALK_FORWARD_START = "2022-04-01"                              # first trading day of the backtest
 NEVER_SEEN_END = "2024-09-16"                                  # 2022-04 -> 2024-09 was never used to choose the rules
 

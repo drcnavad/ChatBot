@@ -53,6 +53,7 @@ Reports/logs/
 # Documentation (don't push)
 docs/
 *.md
+!Archive/README.md
 
 # personal holdings for the dashboard alert / paper_trade (never commit)
 my_positions.csv
