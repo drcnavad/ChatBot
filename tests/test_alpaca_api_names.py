@@ -22,8 +22,8 @@ def check(name, cond, detail=""):
 
 
 def sources():
-    """(file, python source) for every .py file and every notebook code cell."""
-    for f in sorted(glob.glob("*.py")):
+    """(file, python source) for every .py file (also the dashboard/ package) and every notebook code cell."""
+    for f in sorted(glob.glob("*.py")) + sorted(glob.glob(os.path.join("dashboard", "**", "*.py"), recursive=True)):
         yield f, open(f).read()
     for f in sorted(glob.glob("*.ipynb")):
         for c in json.load(open(f))["cells"]:

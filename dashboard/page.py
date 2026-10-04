@@ -1,0 +1,66 @@
+"""Page state (everything the render functions need, computed once per run) and the title bar."""
+import os
+from datetime import datetime
+from types import SimpleNamespace
+
+import pandas as pd
+import streamlit as st
+
+from dashboard.data import data_freshness, day_rank_change, latest_rows, load_midweek_rows, load_signals
+from dashboard.settings import CT, MIDWEEK, N_PICKS, SIGNAL_CSV
+from dashboard.short_stock import load_short_history
+from dashboard.signals import next_decision_date, rebalance_plan, signal_board
+from dashboard.style import esc, show_html
+
+
+def build_page():
+    mtime = os.path.getmtime(SIGNAL_CSV)
+    df = load_signals(mtime)
+    latest = latest_rows(df, mtime)
+    board_off, off_date = signal_board(df)
+    next_dec, next_kind = next_decision_date(df["Date"].max())
+    plan_day, plan_asof, plan = rebalance_plan(df)
+    ref = load_short_history()
+    short = (ref if ref is not None else pd.DataFrame(columns=["Symbol"])).set_index("Symbol")
+    return SimpleNamespace(
+        df=df, mtime=mtime, latest=latest, by_symbol=latest.set_index("Symbol"),
+        options=latest.sort_values('combined_signal', ascending=False)['Symbol'].tolist()   # dropdown: best score first,
+        + [s for s in short.index if s not in set(latest['Symbol'])],                       # then short-history stocks
+        short=short,
+        rank_change=day_rank_change(df, mtime),
+        board_off=board_off.drop(columns="Tag"), off_date=off_date,
+        tag_off=dict(zip(board_off["Symbol"], board_off["Tag"])),
+        rank_off=dict(zip(board_off["Symbol"], board_off["Rank"])),
+        plan_day=plan_day, plan_asof=plan_asof, plan=plan,
+        sig_off=dict(zip(board_off["Symbol"], board_off["Signal"])),
+        why_off=dict(zip(board_off["Symbol"], board_off["Why"])),
+        slot_off=dict(zip(board_off["Symbol"], board_off["Portfolio slot"])),
+        next_dec=next_dec, next_kind=next_kind, midweek=load_midweek_rows(),
+        freshness=data_freshness(df["Date"].max()),
+    )
+
+
+def open_symbol(table, event, key):
+    """Row click in a table -> open that stock in the stock view (applied on the rerun, before the picker is drawn)."""
+    rows = event.selection.rows if event is not None and hasattr(event, "selection") else []
+    if not rows:
+        return
+    pick = table.iloc[rows[0]]["Symbol"]
+    if st.session_state.get(f"_last_pick_{key}") != pick:
+        st.session_state[f"_last_pick_{key}"] = pick
+        st.session_state["_pending_ticker"] = pick
+        st.rerun()
+
+
+def render_top_bar(p):
+    stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()
+    updated = datetime.fromtimestamp(p.mtime, tz=CT).strftime("%m/%d/%Y %I:%M %p CT")
+    note = f" · ⚠️ {len(stale)} stale file(s), see Details" if stale else ""
+    show_html(f"""
+        <div class="sa-topbar">
+          <div>
+            <h1>Stock Analysis</h1>
+            <p>Weekly top-{N_PICKS} ranking{" + Mon/Wed swap check" if MIDWEEK else ""} · technical + strength vs sector/SPY</p>
+          </div>
+          <div class="sa-chip{" sa-chip-warn" if stale else ""}">Updated {esc(updated + note)}</div>
+        </div>""")

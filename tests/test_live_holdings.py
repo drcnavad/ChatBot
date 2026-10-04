@@ -136,7 +136,7 @@ check("weekend: one key per hour, also at 10 AM", key("2026-10-03 10:01") == key
 check("holiday (Thanksgiving): hourly", key("2026-11-26 10:01") == key("2026-11-26 10:45"))
 check("early close (day after Thanksgiving): per minute until 12:00 PM CT, hourly after",
       key("2026-11-27 11:58") != key("2026-11-27 11:59") and key("2026-11-27 12:01") == key("2026-11-27 12:40"))
-app_src = open(os.path.join(ROOT, "app.py")).read()
+app_src = open(os.path.join(ROOT, "dashboard", "details", "live_holdings.py")).read()   # the panel (app.py is the entry point)
 check("the table reruns by itself (st.fragment run_every=60), not the whole page",
       "@st.fragment(run_every=60)" in app_src.split("def render_live_holdings")[0][-200:])
 
