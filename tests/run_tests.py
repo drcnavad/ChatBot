@@ -70,6 +70,10 @@
                          splits, transfers, short / long-term boundary (leap day), dividends (qualified estimate),
                          netting + $3,000 limit + carryforward, 2026 brackets, NIIT, harvest exclusions, Form 8949 rows,
                          data checks; the app renders it with a fake account (GET only)
+  test_trade_audit.py    trade audit, hand-worked: order source + plan price from the client id, slippage vs plan,
+                         FIFO round trips, reconciliation (manual / orphan orders, pending rows, untracked holdings),
+                         alerts (daily loss, clock drift, NYSE calendar vs Alpaca, rejects, slippage, API), once-only
+                         run-log rows; the app panel with a fake account (GET only)
 Only the files in TESTS run (never Archive/). Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
 import os
 import subprocess
@@ -85,7 +89,8 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
          "test_live_rules_audit.py", "test_catch_up.py",
          "test_alpaca_api_names.py", "test_smart_orders.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py",
          "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py", "test_forward_test.py", "test_earnings_stop.py",
-         "test_safety_guards.py", "test_earnings_planner.py", "test_tax_lots.py"]
+         "test_safety_guards.py", "test_earnings_planner.py", "test_tax_lots.py",
+         "test_trade_audit.py"]
 
 
 def main():

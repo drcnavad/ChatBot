@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Read-only trade audit: Mon-Fri 9:45 AM and 3:45 PM CT. trade_audit.py --write --log writes the order ledger
+     (Reports/live_trade_ledger.csv, plan price vs fill) and the round trips (Reports/live_round_trips.csv), and each NEW
+     alert (daily loss 3% / 5%, Mac clock drift, NYSE calendar vs Alpaca, rejected order, fill over 1% worse than plan,
+     untracked / orphan orders, Alpaca unreadable) as one Reports/run_log.csv row. GET only, never orders.
+     Not loaded until launchd/install_schedule.sh runs (it installs every com.stockanalysis.*.plist). -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.stockanalysis.tradeaudit</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/anaconda3/bin/python</string>
+        <string>/Users/drcnavad/Desktop/Stock Analysis/trade_audit.py</string>
+        <string>--write</string>
+        <string>--log</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/anaconda3/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>45</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>45</integer></dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_tradeaudit.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_tradeaudit.err</string>
+</dict>
+</plist>

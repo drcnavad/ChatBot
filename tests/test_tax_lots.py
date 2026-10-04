@@ -389,7 +389,7 @@ try:
                   if {"Adjustment code", "Holding from", "Method", "Disallowed loss", "Qualified (est.)"} & set(f.columns)),
           by_tbl.to_dict("list"))
     paths = {p for p, _ in FakeAccount.calls}
-    check("app: only allow-listed GET paths, incl. /orders for the bot flag", paths <= {"/positions", "/account", "/account/activities", "/orders"}
+    check("app: only allow-listed GET paths, incl. /orders for the bot flag", paths <= {"/positions", "/account", "/account/activities", "/orders", "/clock"}
           and "/orders" in paths, paths)
     n_hist = sum(1 for p, q in FakeAccount.calls if p == "/account/activities" and q.get("activity_types") is None)
     at.run()

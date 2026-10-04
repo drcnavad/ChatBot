@@ -9,6 +9,8 @@
 #                                     strategies' days in Reports/forward_strategies*.csv from saved data + free daily bars)
 #   com.stockanalysis.earningsstop    every 10 min, at login, on wake: earnings_stop.py --scheduled (LIVE pre-earnings
 #                                     3.5x ATR stop; acts only 3:00 AM-7:00 PM CT on trading days, else one idle line)
+#   com.stockanalysis.tradeaudit      Mon-Fri 9:45 AM + 3:45 PM CT: trade_audit.py --write --log (read-only ledger, round
+#                                     trips, reconciliation + alerts to the run log; GET only, never orders)
 #   com.stockanalysis.dashboard-8502  always on (restarted if it stops): the app on http://localhost:8502
 # run_all.py decides whether anything is due (a decision after its 2:30 PM slot, or a missed one caught up at the next
 # regular session until the next slot); idle starts print one "idle:" line. run_state last_decision and lock files

@@ -79,3 +79,4 @@ Reports/.pipeline_checkpoint.json
 
 # pre-earnings stop state (account data: the stop sales, never commit)
 Reports/earnings_stop_state.json*
+Reports/trade_audit_state.json*
