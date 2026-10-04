@@ -59,6 +59,8 @@ class FakeAccount(ap.PaperAccount):
             raise ap.PaperAccountError(FakeAccount.fail)
         if path == "/positions":
             return POS
+        if path == "/orders":                                   # the tax view's order list (client ids)
+            return []
         if path == "/account":
             return {"equity": "1000", "cash": "249", "buying_power": "249", "long_market_value": "751", "last_equity": "990"}
         newest_first = [f for f in FILLS[::-1] if f["transaction_time"] > params.get("after", "")]
@@ -153,7 +155,7 @@ try:
     check("app: no exceptions, holdings table on the Details tab", not at.exception and len(frames) == 1, [str(e) for e in at.exception])
     check("app: 3 stocks + Total + QQQ rows", len(frames) == 1 and len(frames[0]) == 5 and frames[0]["Stock"].iloc[-1] == ap.QQQ_LABEL)
     check("app: as-of time and how-to-read note", any(c.value.startswith("As of ") and "every hour otherwise" in c.value for c in at.caption))
-    check("app: only read-only GET paths used", FakeAccount.calls and all(p in ("/positions", "/account", "/account/activities")
+    check("app: only read-only GET paths used", FakeAccount.calls and all(p in ("/positions", "/account", "/account/activities", "/orders")
                                                                           for p, _ in FakeAccount.calls), FakeAccount.calls)
     at.run()
     check("app: same refresh key -> cached, no new Alpaca reads", reads() == 1, reads())

@@ -62,6 +62,13 @@
                          hours), fraction to 9 AM, never twice, fails closed; dry run sends and writes nothing
   test_safety_guards.py  20% max weight per stock (extra stays cash); mocked: BUYs over 20% of equity refused (backstop);
                          a missed scheduled decision gets one run-log warning while it waits
+  test_earnings_planner.py Details tab earnings planner (fake bars / calendar): 14-day range, next 3 otherwise, stop =
+                         earnings_stop formula, stop window, median gap / 5-day reaction counts; renders in the app
+  test_tax_lots.py       tax view, hand-worked cases: FIFO / HIFO / LIFO lots, partial and fractional fills, fees, wash
+                         sales before / after a loss sale with partial matching, basis + holding-period carryover, cascades,
+                         splits, transfers, short / long-term boundary (leap day), dividends (qualified estimate),
+                         netting + $3,000 limit + carryforward, 2026 brackets, NIIT, harvest exclusions, Form 8949 rows,
+                         data checks; the app renders it with a fake account (GET only)
 Only the files in TESTS run (never Archive/). Read-only for the project (temporary files only, deleted afterwards). No quota APIs, no Alpaca account calls."""
 import os
 import subprocess
@@ -77,7 +84,7 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
          "test_live_rules_audit.py", "test_catch_up.py",
          "test_alpaca_api_names.py", "test_smart_orders.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py",
          "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py", "test_forward_test.py", "test_earnings_stop.py",
-         "test_safety_guards.py"]
+         "test_safety_guards.py", "test_earnings_planner.py", "test_tax_lots.py"]
 
 
 def main():
