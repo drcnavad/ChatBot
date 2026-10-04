@@ -17,7 +17,11 @@
 
 Same accounting for every strategy: decision at that day's close (the 2:30 PM bar on decision days, as saved), trades at
 that price whenever its target changes (an ATR stop on a gap-down reaction day sells at the open), be.COST (0.1%) per
-side, no stock above 20%, the live 99% invested convention (be.live_weights), cash earns 0. A saved day is never redone: a re-run only adds the days after the last saved one (so
+side, no stock above 20%, the live 99% invested convention (be.live_weights), cash earns 0. Like the live orders, only
+the names whose target changed are traded, except on the strategy's rebalance day (Friday, or the month end for the
+monthly ones), when every holding is brought back to its target; a holding within 1 point of it is left alone (the
+live band; trimmed to its target when the buys need the cash), and with the earnings rule a holding with earnings within
+5 days is not bought up. The dip and threshold rules only trade the names they buy or sell. A saved day is never redone: a re-run only adds the days after the last saved one (so
 running twice never double-counts) and a missed day is caught up from the saved bars.
 
     python forward_test.py --record   # strategies + today's account row (launchd com.stockanalysis.forwardtest, 4:15 PM CT)
@@ -50,6 +54,7 @@ DAILY_COLS = ["Date", "Time_CT", "Equity", "Cash", "Net_Deposits", "Positions", 
 SIG_COLS = ["Date", "Symbol", "Close", "ma_50", "ma_10", "ma_30", "ma_100", "ma_200", "RSI", "macd", "MACD Signal",
             "Technical_Score", "RS_Score", "Strategy_Score", "Regime_On", "final_trade"]
 MAX_WEIGHT = 0.20            # no stock above 20% (the live max_weight rule); the extra stays cash
+BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
 LIVE = "Live rules (C6)"
 LIVE_MARK = " ◀ LIVE"          # the leaderboard row of the live rules
@@ -157,12 +162,16 @@ STRATEGIES = [
          rule="The live rules, but the Mon/Wed top-3 swap replaces a holding ranked worse than 20 (live: 15)."),
     dict(name="Live, swap below 25", midweek={**MIDWEEK, "exit_below": 25},
          rule="The live rules, but the Mon/Wed top-3 swap replaces a holding ranked worse than 25 (live: 15)."),
-    dict(name="Live, exit replaced by top-3", replay={"exit_to_top3": True},
-         rule="The live rules, but on Mon/Wed a holding ranked worse than 30 is swapped for the best top-3 stock not held "
-              "(same weight, earnings rule) instead of being sold to cash; cash until Friday only if none is left."),
+    dict(name="Live, exit replaced by top-10", replay={"exit_to_top": 10},
+         rule="The live rules, but on Mon/Wed (after the top-3 swap) a holding ranked worse than 30 is swapped for the best "
+              "top-10 stock not held (same weight, no buy within 5 days of earnings) instead of being sold to cash; the cash "
+              "waits for Friday only if none is left."),
     dict(name="Risk parity", reweight="risk_parity",
          rule="The live picks, weighted so each stock adds the same risk (63-day volatility and correlation)."),
 ]
+for _c in STRATEGIES:                                     # the live limits the plain rankings keep (said once, here)
+    if (_c.get("select") is PLAIN or _c.get("select") is EQ) and not _c["rule"].startswith("The live rules"):
+        _c["rule"] += " Like live: at most 4 per sector, half size while QQQ is below its 200-day average, score above 0."
 STOPS = {"pre": dict(k=3.5, arm_days=7, gap_open=True), "post": dict(k=3.0, after=10)}   # atr_stop_targets settings
 FWD_BARS = os.path.join(REPORTS, "cache", "forward_bars.pkl")
 FWD_BARS_START = "2026-05-01"      # ~100 sessions before the start: the 50-day volume average is full by Oct 2
@@ -301,7 +310,7 @@ def earnings_events(dates, cols, earnings):
     return ev
 
 
-def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit_to_top3=False):
+def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit_to_top=None):
     """The live rules + an ATR trailing stop around earnings. The live rules are replayed day by day with the engine's own
     pieces, exactly as be.winner_targets does (Friday selection with the real holdings, Mon/Wed swaps and exits). Stop
     window: after = from the reaction day through `after` sessions later; arm_days = a stock kept (HOLD) at a Friday
@@ -309,8 +318,9 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit
     a holding whose close is at or below its highest close since it was bought - k x ATR(14) is sold in full at that close
     (gap_open: on the reaction day an open already below the stop sells at the open); its weight goes to the best stock
     the live rules would buy: ranks 1-20, max 4 per sector unless none fits, no buy within 5 days of earnings, and not a
-    stock stopped out in its window. exit_to_top3: on Mon/Wed a holding ranked worse than the exit rank (30) is first swapped
-    for the best non-held top-3 stock (same weight, earnings rule) and only sold to cash when none is left. Returns (raw
+    stock stopped out in its window. exit_to_top (e.g. 10): on Mon/Wed, after the top-3 swaps, a holding ranked worse than the
+    exit rank (30) is swapped for the best non-held stock in the top `exit_to_top` (same weight, earnings rule) and only sold
+    to cash when none is left. Returns (raw
     weights, open-sale prices)."""
     W, args = be.WINNER, be.winner_rank_args(inp["regime"])
     score, elig, vol, tb = inp["scores"]["live"], inp["eligible"], inp["vol"], inp["scores"]["rs"]
@@ -367,10 +377,10 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit
             skip = {j for j in order[:mw["enter_top"]] if cur[j] == 0 and not np.isnan(BB[t, j])}
             be.midweek_swap_pairs(cur, order, rank, sectors, mw["enter_top"], mw["exit_below"],
                                   10 ** 6 if args["cap_soft"] else per_sector, skip=skip)
-            if exit_to_top3:                              # exits below rank 30 -> the best non-held top-3 stock first
+            if exit_to_top:                               # exits below rank 30 -> the best non-held top-N stock first
                 for h in sorted((j for j in np.where(cur > 0)[0] if rank.get(j, 1e6) > W.get("midweek_exit_below")),
                                 key=lambda j: -rank.get(j, 1e6)):
-                    e = next((j for j in order[:mw["enter_top"]] if cur[j] == 0 and j not in skip), None)
+                    e = next((j for j in order[:exit_to_top] if cur[j] == 0 and np.isnan(BB[t, j])), None)
                     if e is None:
                         break
                     cur[e], cur[h] = cur[h], 0.0
@@ -482,6 +492,7 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     return {"close": c.ffill(), "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
             "weekly": weekly, "earnings": earnings, "atr": atr,
             "dip_spare": dip_b & ~soon.reindex(index=dates, columns=cols).fillna(False), "open": bx["open_ratio"] * c,
+            "soon": soon.reindex(index=dates, columns=cols).fillna(False),          # earnings within 5 days (E5)
             "monthly": pd.Series([be.next_sessions(d, 1)[0].month != d.month for d in dates], index=dates),
             "through": have[have].index.max() if have.any() else pd.Timestamp(0)}
 
@@ -507,6 +518,15 @@ def strategy_targets(cfg, inp):
             tgt = tgt + atr_dip_weights(inp["dip_spare"][tgt.columns], inp["scores"]["live"], taken=(tgt > 0).to_numpy(),
                                         room=np.floor((1 - tgt.sum(axis=1)).to_numpy() * 10 + 1e-9).astype(int))
     return be.live_weights(tgt.clip(upper=MAX_WEIGHT)).reindex(columns=inp["close"].columns).fillna(0.0)
+
+
+def rebalance_days(cfg, inp):
+    """Days on which every holding is brought back to its target (unless within 1 point of it), like the live Friday
+    rebalance: the strategy's calendar (Fridays / month ends); the trend rule on Fridays; the dip and threshold rules
+    never (only the names they buy or sell trade). None when the inputs carry no calendar."""
+    key = {"trend": "weekly"}.get(cfg["weights"]) if cfg.get("weights") else \
+        {"mwf": "weekly"}.get(cfg.get("calendar", "mwf"), cfg.get("calendar"))
+    return inp.get(key) if key else None
 
 
 def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None, path=STRATEGIES_CSV,
@@ -544,6 +564,11 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
             shares, prev = zero.add(h["Shares"], fill_value=0.0), zero.add(h["Weight"], fill_value=0.0)
         w = strategy_targets(cfg, inp).reindex(columns=cols).fillna(0.0)
         opens = inp.get("open_sells", {}).get(name, pd.DataFrame()).reindex(index=todo, columns=cols)
+        full = rebalance_days(cfg, inp)
+        full = pd.Series(False, index=todo) if full is None else full.reindex(todo).fillna(False).astype(bool)
+        soon = inp.get("soon") if not cfg.get("weights") and cfg.get("earnings", "winner") is not None else None
+        soon = (pd.DataFrame(False, index=todo, columns=cols) if soon is None else
+                soon.reindex(index=todo, columns=cols).fillna(False).astype(bool))   # live: held, earnings soon: not topped up
         for d in todo:
             px = close.loc[d].reindex(cols).fillna(last_px)  # a stock gone from the list keeps its last saved price
             at_open = opens.loc[d][(shares > 0) & opens.loc[d].notna()]
@@ -551,9 +576,20 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
             shares = shares.where(~shares.index.isin(at_open.index), 0.0)
             value = cash + (shares * px).sum()
             wd = w.loc[d]
-            if prev is None or not np.allclose(wd, prev):
-                value -= be.COST * (wd * value - shares * px).abs().sum()
-                shares = (wd * value / px.where(px > 0)).fillna(0.0)
+            changed = ~np.isclose(wd, zero if prev is None else prev, rtol=0, atol=1e-12)
+            if changed.any() or full[d]:   # like live: the names whose target changed (all of them on a rebalance day)
+                held_w = shares * px / value if value > 0 else zero
+                in_band = (wd > 0) & (shares > 0) & ((held_w - wd).abs() <= BAND)   # held and within 1 point: left alone
+                move = (changed | (full[d] & ((wd > 0) | (shares > 0)))) & ~in_band \
+                    & ~(soon.loc[d] & (shares > 0) & (wd > held_w))                  # earnings soon: not bought up
+                for m in (move, move | (in_band & (held_w > wd))):  # no cash for the buys: band holds above target trimmed
+                    cost = 0.0
+                    for _ in range(6):        # 0.1% of the dollars actually traded (the buys are sized after the cost)
+                        cost = be.COST * (wd * (value - cost) - shares * px).where(m, 0.0).abs().sum()
+                    new = shares.where(~m, (wd * (value - cost) / px.where(px > 0)).fillna(0.0))
+                    if value - cost - (new * px).sum() >= -1e-12:
+                        break
+                value, shares = value - cost, new
                 cash, prev = value - (shares * px).sum(), wd
             if last is None and d == todo[0]:                 # 1.0 at the start close, after its buys
                 shares, cash, value = shares / value, cash / value, 1.0
@@ -621,7 +657,9 @@ def trade_cost(fills, orders, closes, start=be.FORWARD_START):
 
 
 def _read(path, **kw):
-    return pd.read_csv(path, **kw) if os.path.exists(path) else None
+    """A saved CSV (None if missing). round_trip parsing: a rewrite keeps every saved number exactly (the default parser
+    can change the last digit, so re-saving would alter old rows)."""
+    return pd.read_csv(path, float_precision="round_trip", **kw) if os.path.exists(path) else None
 
 
 def record(account=None, now=None, path=DAILY_CSV):

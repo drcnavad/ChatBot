@@ -198,10 +198,8 @@ check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%
       all((t.to_numpy() >= 0).all() and t.to_numpy().max() <= 0.198 + 1e-12 and t.sum(axis=1).max() <= 0.99 + 1e-9
           and t.sum(axis=1).max() > 0 for t in tg.values()),
       {k: (round(t.to_numpy().max(), 4), round(t.sum(axis=1).max(), 4)) for k, t in tg.items()})
-same_as_live = {"Live, exit replaced by top-3"}           # = live by construction today (checked below)
 check("registry: the strategies are not copies of each other (distinct weights over the fake history)",
-      len({t.round(4).to_numpy().tobytes() for k, t in full.items() if k not in same_as_live})
-      >= len(ft.STRATEGIES) - len(same_as_live) - 3)
+      len({t.round(4).to_numpy().tobytes() for t in full.values()}) >= len(ft.STRATEGIES) - 3)
 check("registry: WINNER untouched", be.WINNER == w0)
 lv, sp = full[ft.LIVE], full["Live + ATR dip buys in spare cash"]
 check("live + ATR dips in spare cash: exactly the live weights, plus 10% dip positions in other stocks only with spare cash",
@@ -216,11 +214,14 @@ chk_days = be.midweek_check_days(live_raw.index, ft.MIDWEEK.get("days", ("Mon", 
 mid = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c.get("midweek") or c.get("replay")}
 tg_live_full = full[ft.LIVE]
 first = {k: int((~np.isclose(v, tg_live_full).all(axis=1)).argmax()) for k, v in mid.items()}
-check("mid-week variants: swap below 20 / 25 = live until a Mon/Wed check, then differ there",
-      all(chk_days.iloc[first[k]] and first[k] > 0 for k in ("Live, swap below 20", "Live, swap below 25")), first)
-check("mid-week variants: exit replaced by top-3 = live on every day (the top-3 swap already replaces the worst-ranked "
-      "holdings first, so a holding worse than 30 is only sold to cash when no top-3 stock is left)",
-      np.allclose(mid["Live, exit replaced by top-3"], tg_live_full))
+check("mid-week variants: swap below 20 / 25 and exit replaced by top-10 = live until a Mon/Wed check, then differ there",
+      all(chk_days.iloc[first[k]] and first[k] > 0 for k in mid), first)
+t10 = first["Live, exit replaced by top-10"]
+prev10, now10, live10 = (x.iloc[i].to_numpy() for x, i in ((tg_live_full, t10 - 1), (mid["Live, exit replaced by top-10"], t10),
+                                                            (tg_live_full, t10)))
+check("exit replaced by top-10: where live sells a holding to cash, the stock that comes in takes its weight (same total)",
+      now10.sum() > live10.sum() - 1e-12 and np.isclose(now10.sum(), prev10.sum()) and set(np.where(now10 > live10)[0]).isdisjoint(np.where(prev10 > 0)[0]),
+      (prev10.sum(), live10.sum(), now10.sum()))
 # stop scenarios: each stock held over a Friday reports (after the close) 2 sessions after that Friday
 L, fridays = live_raw.to_numpy(), np.where(inp["weekly"].to_numpy(bool))[0]
 EARN2 = pd.DataFrame([{"Symbol": s_, "Earnings Date": live_raw.index[f + 2], "Time": "PM"} for j_, s_ in enumerate(live_raw.columns)
@@ -276,6 +277,13 @@ with tempfile.TemporaryDirectory() as tmp:
           n1 == len(ft.STRATEGIES) * n_days and (v.loc[v["Date"] == "2026-10-02", "Value"] == 1.0).sum() == len(ft.STRATEGIES), n1)
     import shutil  # noqa: E402
     shutil.copy(P("a")["path"], os.path.join(tmp, "a_copy.csv"))
+    ft.update_strategies(SIG[SIG["Date"] <= "2026-10-05"], FACTS, NO_EARN, BENCH, BARS, **P("r"))
+    first_rows = open(P("r")["path"]).read() + open(P("r")["hold_path"]).read()
+    ft.update_strategies(SIG, FACTS, NO_EARN, BENCH, BARS, **P("r"))                       # a later run rewrites the files
+    check("a later run keeps every saved row byte-identical (exact float parsing)",
+          (open(P("r")["path"]).read() + open(P("r")["hold_path"]).read()).count("\n") > first_rows.count("\n")
+          and all(l in (open(P("r")["path"]).read() + open(P("r")["hold_path"]).read()).splitlines()
+                  for l in first_rows.splitlines()))
     check("idempotent: a re-run the same day adds nothing and leaves the files unchanged",
           ft.update_strategies(SIG, FACTS, NO_EARN, BENCH, BARS, **P("a")) == 0 and filecmp.cmp(P("a")["path"], os.path.join(tmp, "a_copy.csv"), shallow=False))
     early = [BARS[0][BARS[0]["Date"] <= "2026-10-05"]]                                  # bars only through Oct 5
@@ -301,27 +309,61 @@ with tempfile.TemporaryDirectory() as tmp:
     def fake_targets(cfg, inp_):
         t = pd.DataFrame(0.0, index=inp_["close"].index, columns=inp_["close"].columns)
         t.loc[:"2026-10-05", "AAA"], t.loc["2026-10-06":, "BBB"] = 0.99, 0.99
+        if cfg["name"] == "Z":                        # half / half; Oct 6 only BBB changes; Oct 7 AAA's target moves < 1 point
+            t[:] = 0.0
+            t["AAA"], t["BBB"] = 0.495, 0.495
+            t.loc["2026-10-06":, "BBB"] = 0.3
+            t.loc["2026-10-07":, "AAA"] = 0.52
+        if cfg["name"] == "V":                        # fixed 50 / 49 targets; AAA's +10% on Oct 5 is rebalanced on Friday Oct 9
+            t[:] = 0.0
+            t["AAA"], t["BBB"] = 0.5, 0.49
+        if cfg["name"] == "T":                        # Oct 7: BBB 49.5 -> 49% needs more cash than the 1% left; AAA 51% in band
+            t[:] = 0.0
+            t["AAA"], t["BBB"] = 0.495, 0.495
+            t.loc["2026-10-07":, ["AAA", "BBB"]] = [0.51, 0.49]
         if cfg["name"] == "Y":                        # the same switch, but AAA sold at a 95 open on Oct 6 (a stop)
             inp_.setdefault("open_sells", {})["Y"] = t * np.nan
             inp_["open_sells"]["Y"].loc["2026-10-06", "AAA"] = 95.0
         return t
     try:
-        ft.strategy_inputs = lambda sig, *a, **k: {"close": sig.pivot(index="Date", columns="Symbol", values="Close")}
-        ft.strategy_targets, ft.STRATEGIES = fake_targets, [{"name": "X", "rule": "x"}, {"name": "Y", "rule": "y"}]
+        def fake_inputs(sig, *a, **k):
+            c = sig.pivot(index="Date", columns="Symbol", values="Close")
+            soon = pd.DataFrame(False, index=c.index, columns=c.columns)
+            soon.loc["2026-10-08":, "BBB"] = True                                      # BBB reports within 5 days
+            return {"close": c, "weekly": pd.Series(c.index.dayofweek == 4, index=c.index), "soon": soon}
+        ft.strategy_inputs = fake_inputs
+        ft.strategy_targets, ft.STRATEGIES = fake_targets, [{"name": n, "rule": n} for n in "XYZVT"]
         ft.update_strategies(hs[hs["Date"] <= "2026-10-05"], None, NO_EARN, **P("h"))   # resume across the switch
         ft.update_strategies(hs, None, NO_EARN, **P("h"))
     finally:
         ft.strategy_inputs, ft.strategy_targets, ft.STRATEGIES = real_inputs, real_targets, real_list
     hy = pd.read_csv(P("h")["path"], parse_dates=["Date"])
-    hv, hy = (hy[hy["Strategy"] == x].set_index("Date")["Value"] for x in ("X", "Y"))
+    ht = hy[hy["Strategy"] == "T"].set_index("Date")
+    hv, hy, hz, hw = (hy[hy["Strategy"] == x].set_index("Date")["Value"] for x in "XYZV")
     a5 = 0.01 + 0.99 * 1.1
-    after = a5 - be.COST * (0.99 * 1.1 + 0.99 * a5)      # sell all AAA + buy 99% BBB
+    after = a5 - be.COST * (0.99 * 1.1 + 0.99 * a5) / (1 + 0.99 * be.COST)   # sell all AAA + buy 99% of what is left
     check("accounting: 1.0 at the start close, follows the closes, pays 0.1% per side on a change, cash earns 0",
           hv.index[0] == pd.Timestamp("2026-10-02") and hv.iloc[0] == 1.0 and abs(hv["2026-10-05"] - a5) < 1e-12
           and abs(hv["2026-10-06"] - after) < 1e-12 and abs(hv.iloc[-1] - after) < 1e-12, hv.round(6).to_dict())
-    at_open = (0.01 + 0.0099 * 95 * (1 - be.COST)) * (1 - 0.99 * be.COST)   # AAA sold at the open, then 99% BBB at the close
+    at_open = (0.01 + 0.0099 * 95 * (1 - be.COST)) / (1 + 0.99 * be.COST)   # AAA sold at the open, then 99% BBB at the close
     check("accounting: a stop sale at the open gets the open price (0.1% cost), the refill buys at the close",
           abs(hy["2026-10-05"] - a5) < 1e-12 and abs(hy["2026-10-06"] - at_open) < 1e-12, hy.round(6).to_dict())
+    zh = pd.read_csv(P("h")["hold_path"], parse_dates=["Date"]).query("Strategy == 'Z' and Symbol == 'AAA'").set_index("Date")
+    z6 = 1.0495 - be.COST * (0.495 - 0.3 * 1.0495) / (1 - 0.3 * be.COST)  # Oct 5: .01 + .00495 x 110 + .0099 x 50; Oct 6: only BBB sold down to 30%
+    check("accounting: only names whose target changed trade (AAA keeps its shares); a target within 1 point is left alone",
+          abs(hz["2026-10-05"] - 1.0495) < 1e-12 and abs(hz["2026-10-06"] - z6) < 1e-12 and abs(hz["2026-10-07"] - z6) < 1e-12
+          and np.allclose(zh["Shares"], 0.00495, rtol=0, atol=1e-15), (hz.round(8).to_dict(), zh["Shares"].tolist()))
+    w9 = 1.05 - be.COST * (0.55 - 0.5 * 1.05) / (1 - 0.5 * be.COST)   # Friday: AAA 52.4% -> 50%; BBB (46.7%, earnings soon) is not bought up
+    check("accounting: drift is left alone mid-week and brought back on the Friday rebalance; earnings soon: not bought up",
+          np.allclose(hw["2026-10-05":"2026-10-08"], 1.05, rtol=0, atol=1e-12) and abs(hw["2026-10-09"] - w9) < 1e-12,
+          hw.round(8).to_dict())
+    t7 = 1.0495 - be.COST * (0.0495 - 0.02 * 1.0495) / (1 - 0.02 * be.COST)   # BBB bought up, AAA trimmed, 0.1% of both
+    check("accounting: buys that need more than the cash first trim a band hold above its target (no negative cash)",
+          abs(ht.at[pd.Timestamp("2026-10-07"), "Value"] - t7) < 1e-12 and (ht["Cash"] >= -1e-12).all(), ht.round(8).to_dict())
+    rd = {c["name"]: ft.rebalance_days(c, {"weekly": "W", "monthly": "M"}) for c in ft.STRATEGIES}
+    check("rebalance days: the calendar of each rule (Fridays, month ends, never for the dip and threshold rules)",
+          rd[ft.LIVE] == rd["Friday only"] == rd["Short-term reversal"] == "W" and rd["Monthly"] == "M"
+          and rd["Dual momentum"] == "M" and rd["Buy the dip"] is None and set(rd.values()) <= {"W", "M", None}, rd)
 
 # the rules that are not rankings, on tiny hand-made data
 ud = pd.bdate_range("2026-01-05", periods=8)
@@ -388,8 +430,8 @@ if os.path.exists(ft.SIGNAL_CSV):
                                      real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"])
     check("ATR stops on the real data: with no stop the replay = the live targets on every saved day",
           all(ft.atr_stop_targets(real_inp, **{**ft.STOPS[m], "k": np.inf})[0].equals(real_live) for m in ft.STOPS))
-    check("exit replaced by top-3 on the real data = the live targets on every saved day",
-          ft.atr_stop_targets(real_inp, k=np.inf, exit_to_top3=True)[0].equals(real_live))
+    check("exit replaced by top-N on the real data: with N = 3 the replay = the live targets on every saved day",
+          ft.atr_stop_targets(real_inp, k=np.inf, exit_to_top=3)[0].equals(real_live))
     mine = ft.strategy_targets(ft.STRATEGIES[0], real_inp).loc[d0]
     mine = mine[mine > 0].sort_index()
     check("live rules recomputed from the saved files = the live Strategy_Weight of Oct 2 (apples to apples)",
