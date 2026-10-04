@@ -190,17 +190,20 @@ BARS = [_c.assign(Open=_c["Close"], High=_c["Close"] * 1.01, Low=_c["Close"] * 0
                   Volume=rng.lognormal(13, 0.5, len(_c)))[["Symbol", "Date", *be.BAR_COLS]]]
 w0 = dict(be.WINNER)
 inp = ft.strategy_inputs(SIG, FACTS, EARN, BENCH, BARS)
-tg = {c["name"]: ft.strategy_targets(c, inp).loc["2026-10-02":] for c in ft.STRATEGIES}
+full = {c["name"]: ft.strategy_targets(c, inp) for c in ft.STRATEGIES}
+tg = {k: t.loc["2026-10-02":] for k, t in full.items()}
 check(f"registry: {len(ft.STRATEGIES)} strategies with unique names, each with a one-line rule",
       len({c["name"] for c in ft.STRATEGIES}) == len(ft.STRATEGIES) >= 28 and all(c.get("rule") for c in ft.STRATEGIES))
 check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%), at most 99% invested",
       all((t.to_numpy() >= 0).all() and t.to_numpy().max() <= 0.198 + 1e-12 and t.sum(axis=1).max() <= 0.99 + 1e-9
           and t.sum(axis=1).max() > 0 for t in tg.values()),
       {k: (round(t.to_numpy().max(), 4), round(t.sum(axis=1).max(), 4)) for k, t in tg.items()})
-check("registry: the strategies are not copies of each other (distinct weights over the test)",
-      len({t.round(4).to_numpy().tobytes() for t in tg.values()}) >= len(ft.STRATEGIES) - 3)
+same_as_live = {"Live, exit replaced by top-3"}           # = live by construction today (checked below)
+check("registry: the strategies are not copies of each other (distinct weights over the fake history)",
+      len({t.round(4).to_numpy().tobytes() for k, t in full.items() if k not in same_as_live})
+      >= len(ft.STRATEGIES) - len(same_as_live) - 3)
 check("registry: WINNER untouched", be.WINNER == w0)
-lv, sp = (ft.strategy_targets(c, inp) for c in ft.STRATEGIES if c["name"] in (ft.LIVE, "Live + ATR dip buys in spare cash"))
+lv, sp = full[ft.LIVE], full["Live + ATR dip buys in spare cash"]
 check("live + ATR dips in spare cash: exactly the live weights, plus 10% dip positions in other stocks only with spare cash",
       np.allclose(sp.where(lv > 0, 0), lv) and (sp.where(lv == 0, 0).isin([0, ft.be.live_weights(0.1)])).all().all()
       and (sp.sum(axis=1) <= 0.99 + 1e-9).all() and (sp.where(lv == 0, 0).to_numpy() > 0).any(), (lv > 0).sum(axis=1).min())
@@ -208,6 +211,16 @@ live_raw, _ = be.winner_targets(inp["scores"]["live"], inp["eligible"], inp["vol
                                 tiebreak_w=inp["scores"]["rs"], earnings=EARN)
 check("ATR stops: with no stop the day-by-day replay = be.winner_targets exactly (every day, both windows)",
       all(ft.atr_stop_targets(inp, **{**ft.STOPS[m], "k": np.inf})[0].equals(live_raw) for m in ft.STOPS))
+# mid-week variants: same as live until the first Mon/Wed check where the changed rule acts
+chk_days = be.midweek_check_days(live_raw.index, ft.MIDWEEK.get("days", ("Mon", "Wed")), inp["weekly"])
+mid = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c.get("midweek") or c.get("replay")}
+tg_live_full = full[ft.LIVE]
+first = {k: int((~np.isclose(v, tg_live_full).all(axis=1)).argmax()) for k, v in mid.items()}
+check("mid-week variants: swap below 20 / 25 = live until a Mon/Wed check, then differ there",
+      all(chk_days.iloc[first[k]] and first[k] > 0 for k in ("Live, swap below 20", "Live, swap below 25")), first)
+check("mid-week variants: exit replaced by top-3 = live on every day (the top-3 swap already replaces the worst-ranked "
+      "holdings first, so a holding worse than 30 is only sold to cash when no top-3 stock is left)",
+      np.allclose(mid["Live, exit replaced by top-3"], tg_live_full))
 # stop scenarios: each stock held over a Friday reports (after the close) 2 sessions after that Friday
 L, fridays = live_raw.to_numpy(), np.where(inp["weekly"].to_numpy(bool))[0]
 EARN2 = pd.DataFrame([{"Symbol": s_, "Earnings Date": live_raw.index[f + 2], "Time": "PM"} for j_, s_ in enumerate(live_raw.columns)
@@ -375,6 +388,8 @@ if os.path.exists(ft.SIGNAL_CSV):
                                      real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"])
     check("ATR stops on the real data: with no stop the replay = the live targets on every saved day",
           all(ft.atr_stop_targets(real_inp, **{**ft.STOPS[m], "k": np.inf})[0].equals(real_live) for m in ft.STOPS))
+    check("exit replaced by top-3 on the real data = the live targets on every saved day",
+          ft.atr_stop_targets(real_inp, k=np.inf, exit_to_top3=True)[0].equals(real_live))
     mine = ft.strategy_targets(ft.STRATEGIES[0], real_inp).loc[d0]
     mine = mine[mine > 0].sort_index()
     check("live rules recomputed from the saved files = the live Strategy_Weight of Oct 2 (apples to apples)",

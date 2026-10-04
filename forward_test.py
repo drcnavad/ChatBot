@@ -1,7 +1,7 @@
 """Forward test from backtest_engine.FORWARD_START (Fri Oct 2, 2026), counted only from that close on, never backtested:
 
   1. the real Alpaca account (read-only GET requests through alpaca_paper; no orders, ever), and
-  2. STRATEGIES: 36 paper-only strategies next to it (the live rules recomputed the same way + 35 others). They are
+  2. STRATEGIES: 39 paper-only strategies next to it (the live rules recomputed the same way + 38 others). They are
      never traded; each one is a list of target weights built from data the pipeline already saves every day
      (Reports/signal_analysis.csv, factor_history.csv, earnings_date.csv, benchmark_prices.csv) + daily volume from
      Alpaca's free market data (forward_bars(): one bar download per run, the same request the pipeline makes).
@@ -68,8 +68,10 @@ RANK_RULE = ("Ranked by median weekly return (Friday to Friday); a tie goes to t
 # keys (n, sector_cap, vol_sizing, regime, ...), "earnings" None drops the earnings skip, "calendar" is "mwf" / "weekly"
 # (Friday only) / "monthly" (last session of the month). "weights" = a rule that is not a ranking (its own weights below);
 # "reweight" = the same picks with other weights; "stop" = the live rules + an ATR stop around earnings (STOPS);
-# "spare_dips" = the live rules + ATR dip buys with the cash they leave unused.
+# "spare_dips" = the live rules + ATR dip buys with the cash they leave unused; "midweek" = other Mon/Wed swap settings;
+# "replay" = the live rules replayed day by day with a changed Mon/Wed exit (atr_stop_targets).
 PLAIN = {"max_pick_rank": None, "cap_soft": False}       # walk every rank, strict max 4 per sector
+MIDWEEK = be.WINNER.get("midweek_swap")                  # the live Mon/Wed swap settings (copied, never changed)
 EQ = {**PLAIN, "vol_sizing": False}                      # ... and an equal weight per stock
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
 STRATEGIES = [
@@ -151,6 +153,13 @@ STRATEGIES = [
          rule="The live rules; cash they leave unused (empty slots, half size when QQQ is weak) buys the not-after-earnings "
               "ATR dips at 10% each (not within 5 days before earnings either), sold after 10 trading days or when the "
               "live rules buy that stock or need the cash."),
+    dict(name="Live, swap below 20", midweek={**MIDWEEK, "exit_below": 20},
+         rule="The live rules, but the Mon/Wed top-3 swap replaces a holding ranked worse than 20 (live: 15)."),
+    dict(name="Live, swap below 25", midweek={**MIDWEEK, "exit_below": 25},
+         rule="The live rules, but the Mon/Wed top-3 swap replaces a holding ranked worse than 25 (live: 15)."),
+    dict(name="Live, exit replaced by top-3", replay={"exit_to_top3": True},
+         rule="The live rules, but on Mon/Wed a holding ranked worse than 30 is swapped for the best top-3 stock not held "
+              "(same weight, earnings rule) instead of being sold to cash; cash until Friday only if none is left."),
     dict(name="Risk parity", reweight="risk_parity",
          rule="The live picks, weighted so each stock adds the same risk (63-day volatility and correlation)."),
 ]
@@ -292,7 +301,7 @@ def earnings_events(dates, cols, earnings):
     return ev
 
 
-def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False):
+def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit_to_top3=False):
     """The live rules + an ATR trailing stop around earnings. The live rules are replayed day by day with the engine's own
     pieces, exactly as be.winner_targets does (Friday selection with the real holdings, Mon/Wed swaps and exits). Stop
     window: after = from the reaction day through `after` sessions later; arm_days = a stock kept (HOLD) at a Friday
@@ -300,7 +309,9 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False):
     a holding whose close is at or below its highest close since it was bought - k x ATR(14) is sold in full at that close
     (gap_open: on the reaction day an open already below the stop sells at the open); its weight goes to the best stock
     the live rules would buy: ranks 1-20, max 4 per sector unless none fits, no buy within 5 days of earnings, and not a
-    stock stopped out in its window. Returns (raw weights, open-sale prices)."""
+    stock stopped out in its window. exit_to_top3: on Mon/Wed a holding ranked worse than the exit rank (30) is first swapped
+    for the best non-held top-3 stock (same weight, earnings rule) and only sold to cash when none is left. Returns (raw
+    weights, open-sale prices)."""
     W, args = be.WINNER, be.winner_rank_args(inp["regime"])
     score, elig, vol, tb = inp["scores"]["live"], inp["eligible"], inp["vol"], inp["scores"]["rs"]
     dates, cols = score.index, list(score.columns)
@@ -356,6 +367,13 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False):
             skip = {j for j in order[:mw["enter_top"]] if cur[j] == 0 and not np.isnan(BB[t, j])}
             be.midweek_swap_pairs(cur, order, rank, sectors, mw["enter_top"], mw["exit_below"],
                                   10 ** 6 if args["cap_soft"] else per_sector, skip=skip)
+            if exit_to_top3:                              # exits below rank 30 -> the best non-held top-3 stock first
+                for h in sorted((j for j in np.where(cur > 0)[0] if rank.get(j, 1e6) > W.get("midweek_exit_below")),
+                                key=lambda j: -rank.get(j, 1e6)):
+                    e = next((j for j in order[:mw["enter_top"]] if cur[j] == 0 and j not in skip), None)
+                    if e is None:
+                        break
+                    cur[e], cur[h] = cur[h], 0.0
             be.midweek_exit_sells(cur, rank, W.get("midweek_exit_below"))
         peak, armed = np.where(cur > 0, peak, np.nan), np.where(cur > 0, armed, -1)   # sold by the live rules: reset
         inside = ~np.isnan(peak) & (cur > 0) & (win[t] | (armed >= t))       # held before today, inside its window
@@ -474,13 +492,14 @@ def strategy_targets(cfg, inp):
     open-sale prices in inp["open_sells"][name]."""
     if cfg.get("weights"):
         tgt = inp["weights"][cfg["weights"]]
-    elif cfg.get("stop"):
-        tgt, inp.setdefault("open_sells", {})[cfg["name"]] = atr_stop_targets(inp, **STOPS[cfg["stop"]])
+    elif cfg.get("stop") or cfg.get("replay"):          # the live rules replayed day by day + a stop / a mid-week change
+        tgt, inp.setdefault("open_sells", {})[cfg["name"]] = atr_stop_targets(
+            inp, **STOPS.get(cfg.get("stop"), {"k": np.inf}), **cfg.get("replay", {}))
     else:
         cal, tb = cfg.get("calendar", "mwf"), cfg.get("tiebreak", "rs")
         tgt, _ = be.winner_targets(inp["scores"][cfg.get("score", "live")], inp["eligible"], inp["vol"], inp["regime"],
                                    inp["weekly" if cal == "mwf" else cal], tiebreak_w=inp["scores"].get(tb),
-                                   midweek=None if cal == "mwf" else False, selection=cfg.get("select"),
+                                   midweek=cfg.get("midweek") if cal == "mwf" else False, selection=cfg.get("select"),
                                    earnings_block_days=cfg.get("earnings", "winner"), earnings=inp["earnings"])
         if cfg.get("reweight") == "risk_parity":
             tgt = risk_parity(tgt, inp["close"][tgt.columns], inp["weekly"])
