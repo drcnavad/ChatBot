@@ -1,4 +1,4 @@
-"""Dashboard tab: the single-stock price chart (strategy score, relative strength, RSI / MACD, legacy signals)."""
+"""Dashboard tab: the single-stock price chart (strategy score, relative strength, RSI / MACD)."""
 from datetime import datetime
 
 import pandas as pd
@@ -7,25 +7,24 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from dashboard.data import last_next_earnings, live_quote, load_decisions, row_for
-from dashboard.history import (RS_COLORS, daily_status, event_hover, legacy_flips, legacy_periods, performance_names,
+from dashboard.history import (RS_COLORS, daily_status, event_hover,
     relative_strength_lines, strategy_events)
-from dashboard.settings import CT, HALVED, HOLDINGS_CSV, REGIME_OFF, W_TECH
-from dashboard.style import (BAD, CAUTION, CHART_FONT, EARN_LINE, GOOD, HOLD_SHADE, MA_COLORS, MA_COLS, TEAL, esc, num,
-    show_html)
+from dashboard.settings import CT, HOLDINGS_CSV, W_TECH
+from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, HOLD_SHADE, MA_COLORS, MA_COLS, TEAL, num)
 
 
-def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_legacy):
+def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic):
     """Last 12 months: price + moving averages + buy/sell markers, optional score/rank, relative strength, RSI/MACD panels."""
     chart = tdata[tdata['Date'] >= tdata['Date'].max() - pd.Timedelta(days=365)].sort_values('Date').set_index('Date')
     x_start, x_end = chart.index[0], chart.index[-1]
     events, periods = strategy_events(tdata, load_decisions(), ticker)
     rs_lines = relative_strength_lines(chart, ticker) if show_rs else {}
 
-    panels = ["price"] + (["score"] if show_strategy else []) + (["rs"] if rs_lines else []) \
-        + (["rsi", "macd"] if show_classic else [])
+    panels = ["price"] + (["score"] if show_strategy else []) + (["rsi", "macd"] if show_classic else []) \
+        + (["rs"] if rs_lines else [])
     height_of = {"price": 0.44, "score": 0.20, "rs": 0.18, "rsi": 0.11, "macd": 0.11}
     titles = {
-        "price": "<b>Price</b> · ▲ Buy / ▼ Sold decisions · yellow shading = held",
+        "price": "<b>Price</b>",
         "score": f"<b>Strategy score</b> (teal) = {W_TECH:g} × Technical (grey) + {1 - W_TECH:g} × Strength vs sector/SPY (violet)",
         "rs": ("<b>Performance since " + f"{x_start:%b %-d, %Y}" + "</b> (% price change): " + " · ".join(
             f'<span style="color:{RS_COLORS[k]};">━ {name}</span>' for k, (name, _s) in rs_lines.items())),
@@ -45,22 +44,25 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
             + ([f"rank #{r:.0f}"] if pd.notna(r) else []) + ([f"score {s:.1f}"] if pd.notna(s) else [])
         status_txt.append(" · ".join(bits))
     fig.add_trace(go.Scatter(x=chart.index, y=chart['Close'], name='Close', line=dict(color=TEAL, width=2.5), mode='lines',
-                             customdata=status_txt, hovertemplate='<b>Close</b> $%{y:.2f}<br>%{customdata}<extra></extra>'), row=1, col=1)
+                             customdata=status_txt, hovertemplate='<b>Close</b> $%{y:.2f}<br>%{customdata}<extra></extra>',
+                             showlegend=False), row=1, col=1)
     earnings = chart[chart['is_earnings_date'] == 1]
     fig.add_trace(go.Scatter(x=earnings.index, y=earnings['Close'], name='Earnings date', mode='markers',
                              marker=dict(symbol='circle', size=9, color='#f97316'),
-                             hovertemplate='<b>Earnings</b> %{x|%b %d, %Y}<br>$%{y:.2f}<extra></extra>'), row=1, col=1)
+                             hovertemplate='<b>Earnings</b> %{x|%b %d, %Y}<br>$%{y:.2f}<extra></extra>',
+                             showlegend=False), row=1, col=1)
     for d in earnings.index:
         fig.add_vline(x=d, line=EARN_LINE, row=1, col=1)
     fig.add_trace(go.Scatter(x=[x_start], y=[None], mode="lines", name="Earnings (dotted line; next one ahead)",
-                             line=EARN_LINE, hoverinfo="skip"), row=1, col=1)
+                             line=EARN_LINE, hoverinfo="skip", showlegend=False), row=1, col=1)
     for ma, color in zip(MA_COLS, MA_COLORS):
         name = ma.upper().replace('_', ' ')
         fig.add_trace(go.Scatter(x=chart.index, y=chart[ma], name=name, line=dict(color=color, width=1), mode='lines',
                                  hovertemplate=f'<b>{name}</b> $%{{y:.2f}}<extra></extra>'), row=1, col=1)
     if periods:
         fig.add_trace(go.Scatter(x=[x_start], y=[None], mode="markers", name="Hold (shaded period)", hoverinfo="skip",
-                                 marker=dict(symbol="square", size=12, color="rgba(245,158,11,0.35)")), row=1, col=1)
+                                 marker=dict(symbol="square", size=12, color="rgba(245,158,11,0.35)"),
+                                 showlegend=False), row=1, col=1)
 
     # Entry / exit markers on the session after the decision (hollow = decided at the latest close, orders pending)
     shown = events[events['Fill'].fillna(x_end) >= x_start] if len(events) else events
@@ -74,18 +76,8 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
             x=e['Fill'].fillna(x_end), y=e['Price'], mode='markers', name=name,
             marker=dict(symbol=[marker + ("-open" if x else "") for x in pending], size=13, color=color,
                         line=dict(width=1.5, color=color if pending.any() else "#ffffff")),
-            hovertext=[event_hover(x) for x in e.itertuples()], hovertemplate="%{hovertext}<extra></extra>"), row=1, col=1)
-
-    # Market filter OFF weeks (amber diamonds above the price)
-    span = chart['Close'].max() - chart['Close'].min()
-    top_y = chart['Close'].max() + span * 0.06
-    regime_off = chart[(chart['Rebalance_Day'] == 1) & (chart['Regime_On'] == 0)]
-    if len(regime_off):
-        fig.add_trace(go.Scatter(
-            x=regime_off.index, y=[top_y] * len(regime_off), mode='markers', name=f'Market filter OFF (positions {HALVED})',
-            marker=dict(symbol='diamond', size=8, color=CAUTION),
-            hovertemplate=f'<b>Market filter OFF</b> %{{x|%b %d}}: {REGIME_OFF},<br>all positions {HALVED} that week<extra></extra>'),
-            row=1, col=1)
+            hovertext=[event_hover(x) for x in e.itertuples()], hovertemplate="%{hovertext}<extra></extra>",
+            showlegend=False), row=1, col=1)
 
     # While held: entry price dotted line
     hold = row_for(HOLDINGS_CSV, ticker) if (num(chart['Strategy_Weight'].iloc[-1]) or 0) > 0 else None
@@ -115,22 +107,10 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
             fig.add_trace(go.Scatter(
                 x=[live_day], y=[lp], name="Live", mode="markers",
                 marker=dict(symbol="circle", size=8, color=TEAL, line=dict(width=2, color="#ffffff")),
-                hovertemplate="<b>Live</b> $%{y:.2f}<br>%{x|%b %d, %Y} · intraday, display only<extra></extra>"),
+                hovertemplate="<b>Live</b> $%{y:.2f}<br>%{x|%b %d, %Y} · intraday, display only<extra></extra>",
+                showlegend=False),
                 row=1, col=1)
             x_right = max(x_right, live_day) + pd.Timedelta(days=2)
-
-    # Old rules (off by default): streak bars + BUY/SELL flip lines from final_trade
-    if show_legacy:
-        legacy_top = top_y + span * 0.04
-        buy_on, sell_on = chart['Buy Streak'] > 0, chart['Sell Streak'] > 0
-        for mask, color in ((buy_on, "#2ca02c"), (sell_on, "#d62728"), (~buy_on & ~sell_on, "#FFD700")):
-            for start, end in legacy_periods(mask):
-                fig.add_shape(type="line", x0=start, x1=end, y0=legacy_top, y1=legacy_top, line=dict(color=color, width=3),
-                              opacity=0.6, row=1, col=1)
-        flips = legacy_flips(tdata)
-        for day, trade in flips.loc[flips['Date'] >= x_start, ['Date', 'final_trade']].itertuples(index=False):
-            fig.add_vline(x=day, line=dict(color={'BUY': "#2ca02c", 'SELL': "#d62728"}[trade], width=1, dash="dot"),
-                          opacity=0.45, row=1, col=1)
 
     if "score" in row_of:  # score panel
         r = row_of["score"]
@@ -186,30 +166,14 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic, show_
 
 
 def stock_chart_inputs(ticker, tdata):
-    """Chart-option checkboxes + the built figure (displayed later, below the detail block)."""
+    """The built figure (displayed later, below the detail block). Strategy score, relative strength and RSI/MACD are
+always on; the legacy-signal toggle was removed."""
     has_strategy = bool(tdata['Strategy_Score'].notna().any())
-    show_html('<div class="sa-group-title" style="margin:0.4rem 0 0.1rem;">Chart panels</div>')
-    o = st.columns(4)
-    show_strategy = o[0].checkbox("Strategy score", value=True, key="show_strategy", disabled=not has_strategy)
-    show_rs = o[1].checkbox("Relative strength", value=True, key="show_rs")
-    show_classic = o[2].checkbox("RSI & MACD", value=True, key="show_classic")
-    show_legacy = o[3].checkbox("Legacy signals (old rules)", value=False, key="show_legacy",
-                                help="The old BUY/SELL streak bars and flip lines from final_trade (pre-v3 rules). Not the live strategy.")
-    fig = build_price_chart(ticker, tdata, show_strategy and has_strategy, show_rs, show_classic, show_legacy)
-    return fig, has_strategy
+    return build_price_chart(ticker, tdata, has_strategy, True, True)
 
 
 def render_stock_figure(fig, ticker):
     """The price chart itself, under the always-open detail block."""
-    names = performance_names(ticker)
     st.plotly_chart(fig, width="stretch", config={
         'displaylogo': False, 'scrollZoom': False, 'doubleClick': 'reset',
         'modeBarButtonsToRemove': ['pan2d', 'select2d', 'lasso2d', 'autoScale2d', 'zoomIn2d', 'zoomOut2d']})
-    vs = " and ".join(f"<b>{esc(name)}</b> ({color})" for name, color in ((names.get("market"), "grey"),
-                                                                          (names.get("sector"), "orange")) if name)
-    show_html(f'<div class="sa-note"><b>How to read the chart</b> · <b>Price</b>: <b style="color:{GOOD};">▲ Buy</b> / '
-              f'<b style="color:{BAD};">▼ Sold</b> = the strategy\'s decisions (hollow = orders pending), yellow shading = held, '
-              'orange dots and dotted orange lines = earnings dates (the line past the last bar = the next one). · <b>Strategy score</b>: above 0 and rising is good (a positive trend and stronger than '
-              'its peers); below 0 and falling is bad. · <b>Performance</b>: % price change since the chart start: '
-              f'<b>{esc(ticker)}</b> (blue) vs {vs}. {esc(ticker)} above the others = it has beaten them; a widening gap = it is '
-              'getting stronger than the market / its sector.</div>')

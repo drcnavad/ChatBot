@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import data_freshness, day_rank_change, latest_rows, load_midweek_rows, load_signals
-from dashboard.settings import CT, MIDWEEK, N_PICKS, SIGNAL_CSV
+from dashboard.settings import CT, SIGNAL_CSV
 from dashboard.short_stock import load_short_history
 from dashboard.signals import next_decision_date, rebalance_plan, signal_board
 from dashboard.style import esc, show_html
@@ -56,11 +56,16 @@ def render_top_bar(p):
     stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()
     updated = datetime.fromtimestamp(p.mtime, tz=CT).strftime("%m/%d/%Y %I:%M %p CT")
     note = f" · ⚠️ {len(stale)} stale file(s), see Details" if stale else ""
-    show_html(f"""
-        <div class="sa-topbar">
-          <div>
-            <h1>Stock Analysis</h1>
-            <p>Weekly top-{N_PICKS} ranking{" + Mon/Wed swap check" if MIDWEEK else ""} · technical + strength vs sector/SPY</p>
-          </div>
-          <div class="sa-chip{" sa-chip-warn" if stale else ""}">Updated {esc(updated + note)}</div>
-        </div>""")
+    c1, c2, c3 = st.columns([4, 3, 1], vertical_alignment="center")
+    with c1:
+        show_html("<h1 style='margin:0;font-size:1.45rem;font-weight:700;'>Stock Analysis</h1>")
+    with c2:
+        show_html(f'<div class="sa-chip{" sa-chip-warn" if stale else ""}">Updated {esc(updated + note)}</div>')
+    with c3:
+        # One-click freshness: every data cache is already keyed on the Reports/*.csv modification times,
+        # so clearing the caches and rerunning always shows the newest pipeline output + live quotes.
+        if st.button("Refresh data",
+                       help="Clear all cached data and reload the latest Reports/*.csv files and live quotes."):
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            st.rerun()

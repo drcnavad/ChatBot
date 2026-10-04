@@ -27,8 +27,12 @@ CSS = """
     .stButton > button { background: #0f766e; color: #fff; border: none; border-radius: 10px; font-weight: 600; }
     .stButton > button:hover { background: #0d9488; color: #fff; }
     [data-testid="stExpander"] { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; }
-    [data-baseweb="tab-list"] { background: #e2e8f0; border-radius: 12px; padding: 4px; gap: 4px; }
-    [data-baseweb="tab"] { border-radius: 10px; font-weight: 600; color: #64748b; }
+    [data-baseweb="tab-list"] { background: #e2e8f0; border-radius: 14px; padding: 6px; gap: 6px; }
+    [data-baseweb="tab"] { border-radius: 10px; font-weight: 700; font-size: 0.95rem; color: #475569;
+        background: #ffffff; border: 1px solid #cbd5e1; padding: 10px 28px; }
+    [data-baseweb="tab"]:hover { color: #0f766e; border-color: #0f766e; }
+    [data-baseweb="tab"][aria-selected="true"] { background: #0f766e; color: #ffffff; border-color: #0f766e;
+        box-shadow: 0 2px 8px rgba(15, 118, 110, 0.35); }
     [data-testid="stExpander"] summary p { font-weight: 600; color: #0f172a; }
     [data-testid="stDataFrame"] { border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
     [data-testid="stCaptionContainer"] { color: #64748b; line-height: 1.45; }
@@ -42,7 +46,7 @@ CSS = """
                padding: 0.35rem 0.7rem; border-radius: 999px; white-space: nowrap; }
     .sa-section { font-weight: 700; color: #0f172a; margin: 0.6rem 0 0.2rem; font-size: 1.02rem; }
     .sa-chip-warn { color: #b45309; background: #fffbeb; border-color: #fde68a; }
-    .sa-hero, .sa-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 1rem 1.25rem; margin: 0.5rem 0 0.9rem;
+    .sa-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 1rem 1.25rem; margin: 0.5rem 0 0.9rem;
                          box-shadow: 0 1px 3px rgba(15,23,42,.06); }
     .sa-card-title { font-size: 1.02rem; font-weight: 700; color: #0f172a; margin-bottom: 0.35rem; }
     .sa-card-title span { font-size: 0.8rem; font-weight: 500; color: #64748b; margin-left: 0.35rem; }
@@ -72,6 +76,8 @@ CSS = """
     .sa-stat { background: #f8fafc; border: 1px solid #eef2f7; border-radius: 10px; padding: 0.45rem 0.7rem; }
     .sa-stats .sa-stat-label { white-space: normal; }
     .sa-group { padding: 0.75rem 0 0.25rem; border-top: 1px solid #f1f5f9; }
+    .sa-section-divider { height: 1px; background: linear-gradient(to right, transparent, #e2e8f0 20%, #e2e8f0 80%, transparent);
+        margin: 1rem 0 0.25rem; }
     .sa-group-title { font-size: 0.7rem; font-weight: 700; letter-spacing: .09em; color: #64748b; text-transform: uppercase; }
     [data-testid="stMetric"] { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 0.6rem 0.85rem; }
     [data-testid="stAlert"] { border-radius: 12px; }

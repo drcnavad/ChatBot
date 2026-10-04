@@ -39,12 +39,46 @@ def render_forward_test():
                + " Saved by the 4:15 PM CT job (no orders); each strategy's rule and holdings are in the next section.")
 
 
+def _top10_stocks(board, held):
+    """'SYM (count, avg%)' for the 10 most common stocks held by the rank 1-10 strategies.
+    `board` is the raw leaderboard (numeric Rank); `held` maps strategy name -> 'SYM 14.2%, ...'.
+    Returns '–' when no strategy is ranked yet."""
+    import forward_test as ft
+    ranked = board[board["Rank"].notna() & (board["Rank"] <= 10)]
+    counts, weights = {}, {}
+    for strat in ranked["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False):
+        for part in held.get(strat, "").split(", "):
+            if " " not in part:
+                continue
+            sym, pct = part.rsplit(" ", 1)
+            try:
+                w = float(pct.rstrip("%")) / 100
+            except ValueError:
+                continue
+            counts[sym] = counts.get(sym, 0) + 1
+            weights[sym] = weights.get(sym, 0.0) + w
+    if not counts:
+        return "–"
+    top = sorted(counts, key=lambda s: (-counts[s], -weights[s] / counts[s]))[:10]
+    return ", ".join(f"{s} ({counts[s]}, {weights[s] / counts[s]:.0%})" for s in top)
+
+
 def render_forward_rules():
     """Details tab: each forward-test strategy's one-line rule and its holdings on the latest saved day."""
     import forward_test as ft
     held, h = ft.holdings(), read_report_csv(ft.HOLDINGS_CSV)
     rules = pd.DataFrame([{"Strategy": c["name"], "Rule": c["rule"], "Holdings now (target weight)": held.get(c["name"], "cash")}
                           for c in ft.STRATEGIES])
+    daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
+    top10 = "–"
+    if daily is not None and values is not None and not daily.empty and not values.empty:
+        bench = load_benchmarks()
+        board = ft.leaderboard(daily, bench.reset_index() if bench is not None else None, values)
+        top10 = _top10_stocks(board, held)
+    top_row = pd.DataFrame([{"Strategy": "Top 10",
+                             "Rule": "Most common stocks across the rank 1-10 strategies (times held, avg target weight).",
+                             "Holdings now (target weight)": top10}])
+    rules = pd.concat([top_row, rules], ignore_index=True)
     sty = toned(rules, ["Holdings now (target weight)"], fn=lambda v: MUTED if v == "cash" else INK)
     st.dataframe(live_row(sty, "Strategy", ft.LIVE), hide_index=True, width="stretch")
     if h is not None and len(h):

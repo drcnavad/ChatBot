@@ -43,6 +43,7 @@ STOP_STATE_JSON = os.environ.get("STOCK_ANALYSIS_EARNINGS_STOP_STATE") or os.pat
 PICKS_CSV = os.path.join(REPORTS, "strategy_picks.csv")
 CT, ET = ZoneInfo("America/Chicago"), ZoneInfo("America/New_York")
 RUN = "Trade audit"
+AUDIT_START = "2026-10-02"  # fresh start: the audit only covers orders/fills from Friday Oct 2, 2026 onwards
 
 DAY_LOSS_WARN, DAY_LOSS_ALERT = 0.03, 0.05     # daily loss vs the last close (alert only, nothing is stopped)
 CLOCK_DRIFT_SECS = 60
@@ -182,7 +183,10 @@ def ledger(orders):
                      "Fill_Price": fill if fill == fill else None, "Slippage_vs_Plan_%": pct, "Slippage_vs_Plan_$": usd,
                      "Order_ID": o.get("id"), "Client_Order_ID": cid})
     df = pd.DataFrame(rows, columns=LEDGER_COLS)
-    return df.sort_values("Submitted_CT", ascending=False, kind="stable").reset_index(drop=True) if len(df) else df
+    if not len(df):
+        return df
+    df = df[df["Submitted_CT"] >= pd.Timestamp(AUDIT_START)]  # fresh start: Friday Oct 2, 2026 onwards
+    return df.sort_values("Submitted_CT", ascending=False, kind="stable").reset_index(drop=True)
 
 
 def slippage_summary(led):
@@ -201,6 +205,7 @@ def round_trips(fills, orders=None):
     src = {o.get("id"): order_source(o.get("client_order_id")) for o in orders or []}
     book, out = {}, []
     rows = sorted(fills or [], key=lambda a: str(a.get("transaction_time") or ""))
+    rows = [a for a in rows if str(a.get("transaction_time") or "")[:10] >= AUDIT_START]  # fresh start: Friday Oct 2, 2026 onwards
     for a in rows:
         sym, side = str(a.get("symbol") or "").upper(), str(a.get("side") or "").lower()
         q, px, t, oid = _num(a.get("qty")), _num(a.get("price")), _ct(a.get("transaction_time")), a.get("order_id")
