@@ -22,6 +22,13 @@ Rules used (US individual, IRS Pub 550 / Form 8949 conventions):
   - Splits (SSP): open lots' shares x ratio, basis per share / ratio, dates unchanged.
   - Dividends: qualified is ESTIMATED with the 61-day holding test (more than 60 days in the 121-day window around the
     ex-date; ex-date taken = the record date, the T+1 rule since May 2024); the 1099-DIV decides.
+
+Fresh start (Chirag, Sun Oct 4, 2026): only activity on or after TAX_START (a New York trade date) counts. Older fills,
+dividends, interest and fees are ignored, and so is wash-sale matching against them. Shares held from before TAX_START
+are left out of the lots (their basis and purchase date live in the older history; Alpaca's /positions has only an
+average cost): they are worked out as Alpaca's position minus the shares bought plus the shares sold since TAX_START,
+sold first (they are the oldest shares), and listed in report["pre_open"] / report["pre_sales"] instead of the gains.
+build(..., start=None) uses the full history (the engine tests do).
 """
 import copy
 import math
@@ -33,6 +40,8 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 ET = ZoneInfo("America/New_York")
+TAX_START = date(2026, 10, 2)    # fresh start: the tax view counts only activity on/after this date (change it here)
+PRE_START = "before start"       # Lot.source of the shares held from before TAX_START (left out of the view)
 EPS = 1e-9
 WASH_DAYS = 30
 NIIT_RATE = 0.038
@@ -107,21 +116,32 @@ def _trade_time(a):
 
 
 # ----------------------------------------------------------------------------- read-only fetch (cached by the app)
-def fetch_inputs(acct, max_pages=200):
-    """Every account activity (oldest first) and {order id: client order id}. GET only (the positions come from the
-    dashboard's live holdings read)."""
+def _activity_date(a):
+    """New York date an activity counts on (fees: the trade date in their description); None if it has none."""
+    try:
+        return _fee_date(a) if a.get("activity_type") == "FEE" else _trade_time(a)[1]
+    except Exception:
+        return None
+
+
+def fetch_inputs(acct, max_pages=200, start=TAX_START):
+    """Account activities (oldest first; paging stops once it reaches dates before `start`, None = all) and
+    {order id: client order id}. GET only (the positions come from the dashboard's live holdings read)."""
+    def before(d):
+        return start is not None and d is not None and d < start
     acts, params = [], {"page_size": 100, "direction": "desc"}
     for _ in range(max_pages):
         page = acct._get("/account/activities", params)
         acts += page
-        if len(page) < 100:
+        if len(page) < 100 or (page and before(_activity_date(page[-1]))):
             break
         params = {**params, "page_token": page[-1]["id"]}
     orders, params = [], {"status": "all", "limit": 500, "direction": "desc"}
     for _ in range(40):
         page = acct._get("/orders", params)
         orders += page
-        if len(page) < 500:
+        if len(page) < 500 or (page and page[-1].get("submitted_at")
+                               and before(pd.Timestamp(page[-1]["submitted_at"]).tz_convert(ET).date())):
             break
         params = {**params, "until": page[-1]["submitted_at"]}
     return {"activities": acts[::-1], "client_ids": {o["id"]: o.get("client_order_id") or "" for o in orders}}
@@ -151,6 +171,7 @@ class _Book:
     def __init__(self, method, bot_orders):
         self.method, self.bot_orders = method, bot_orders
         self.lots, self.disp, self.washes, self.issues, self.n = {}, [], [], [], 0
+        self.pre_sales = []          # sales of shares held from before the start (left out of the gains)
 
     def issue(self, kind, text):
         self.issues.append({"Check": kind, "Detail": text})
@@ -178,9 +199,10 @@ class _Book:
         open_lots = [l for l in self.lots.get(sym, []) if l.opened and l.qty > EPS]
         key = {"FIFO": lambda l: (l.time, l.lot_id), "LIFO": lambda l: (-l.time.value, l.lot_id),
                "HIFO": lambda l: (-(l.cost_ps if l.cost_ps == l.cost_ps else -1e18), l.time)}[self.method]
+        first = lambda l: (l.source != PRE_START, key(l))         # shares from before the start go first (oldest)
         pps = (q * ev["price"] - ev["fee"]) / q if q > EPS else math.nan
         left, pieces = q, []
-        for l in sorted(open_lots, key=key):
+        for l in sorted(open_lots, key=first):
             if left <= EPS:
                 break
             m = min(left, l.qty)
@@ -195,9 +217,12 @@ class _Book:
             pieces.append({"Symbol": sym, "Lot": "?", "Shares": left, "Acquired": None, "Bought": None, "Sold": sold,
                            "Proceeds": left * pps, "Basis": math.nan, "Wash adj": 0.0, "Order": ev["order_id"], "_lot": None})
         for p in pieces:
+            lot = p.pop("_lot")
+            if lot is not None and lot.source == PRE_START:      # out of scope: no gain, no wash-sale matching
+                self.pre_sales.append({"Symbol": sym, "Shares": p["Shares"], "Sold": sold, "Proceeds": p["Proceeds"]})
+                continue
             if p["Basis"] == p["Basis"] and p["Proceeds"] - p["Basis"] < -0.005:
                 self.wash(p)
-            p.pop("_lot")
             self.disp.append(p)
 
     def wash(self, p):
@@ -243,11 +268,16 @@ def _split_ratio(a, held):
     return None
 
 
-def build(activities, positions=None, method="FIFO", bot_orders=None, today=None):
-    """Rebuild lots, sales, wash sales, income and data checks from the activities (oldest first)."""
+def build(activities, positions=None, method="FIFO", bot_orders=None, today=None, start=TAX_START):
+    """Rebuild lots, sales, wash sales, income and data checks from the activities (oldest first). start = the first
+    trade date that counts (default TAX_START; None = the full history)."""
     bot_orders = bot_orders or {}
     today = today or datetime.now(ET).date()
     b = _Book(method, bot_orders)
+    n_all = len(activities)
+    if start is not None:
+        activities = [a for a in activities if (_activity_date(a) or start) >= start]
+    dropped = n_all - len(activities)
     fills, other = [], []
     for a in activities:
         (fills if a.get("activity_type") == "FILL" else other).append(a)
@@ -293,6 +323,18 @@ def build(activities, positions=None, method="FIFO", bot_orders=None, today=None
             b.issue("Missing basis", f"{e['symbol']}: buy of {e['qty']:g} shares on {e['date']} has no price.")
         lot = Lot(e["id"], e["symbol"], e["time"], e["date"], e["qty"], cps, e["date"], e["order_id"], buy_id=e["id"])
         b.lots.setdefault(e["symbol"], []).append(lot)
+    # shares held from before the start = Alpaca's position - bought + sold since the start (left out, sold first)
+    if start is not None and positions is not None:
+        net = {}
+        for e in evs:
+            net[e["symbol"]] = net.get(e["symbol"], 0.0) + (e["qty"] if e["kind"] == "buy" else -e["qty"])
+        cur = {str(p["symbol"]).upper(): _num(p.get("qty")) for p in positions}
+        t0 = pd.Timestamp(datetime(start.year, start.month, start.day), tz=ET).tz_convert("UTC") - pd.Timedelta(microseconds=1)
+        for sym in sorted(set(net) | set(cur)):
+            x = (cur.get(sym, 0.0) if cur.get(sym, 0.0) == cur.get(sym, 0.0) else 0.0) - net.get(sym, 0.0)
+            if x > 1e-6:
+                d0 = start - timedelta(days=1)
+                b.lots.setdefault(sym, []).insert(0, Lot(f"pre-{sym}", sym, t0, d0, x, math.nan, d0, "", PRE_START, x, True))
     # non-trade events that change shares
     income, review = [], {}
     for a in other:
@@ -353,7 +395,7 @@ def build(activities, positions=None, method="FIFO", bot_orders=None, today=None
                     left -= m
                 if left > 1e-6:
                     b.issue("Unmatched transfer", f"{e['symbol']}: {left:g} shares transferred out on {e['date']} were not held.")
-    return _finish(b, positions or [], income, fee_rows, today)
+    return {**_finish(b, positions or [], income, fee_rows, today), "start": start, "dropped": dropped}
 
 
 def _segments(disp, lots):
@@ -408,12 +450,18 @@ def _finish(b, positions, income, fee_rows, today):
     else:
         disp = disp.assign(Gain=[], Term=[], Year=[])
     price = {str(p["symbol"]).upper(): _num(p.get("current_price")) for p in positions}
-    rows = []
+    pos = {str(p["symbol"]).upper(): p for p in positions}
+    rows, pre_open = [], []
     for sym, q in b.lots.items():
         for l in q:
             if l.qty < -1e-9:
                 b.issue("Negative lot", f"{sym}: lot {l.lot_id} has {l.qty:g} shares.")
             if not l.opened or l.qty <= 1e-9:
+                continue
+            if l.source == PRE_START:
+                pq, pc = _num(pos.get(sym, {}).get("qty")), _num(pos.get(sym, {}).get("cost_basis"))
+                pre_open.append({"Symbol": sym, "Shares": l.qty, "Alpaca avg cost": pc / pq * l.qty if pq > EPS else math.nan,
+                                 "Value": l.qty * price.get(sym, math.nan)})
                 continue
             px = price.get(sym, math.nan)
             lt = long_term_on(l.acq)
@@ -426,6 +474,8 @@ def _finish(b, positions, income, fee_rows, today):
                                        "Gain", "Term", "Long-term on", "Days to long-term", "Wash adj", "Note", "Source"])
     # reconcile with Alpaca's positions
     held = lots.groupby("Symbol")["Shares"].sum().to_dict() if len(lots) else {}
+    for r in pre_open:                                   # the left-out shares still count for the position check
+        held[r["Symbol"]] = held.get(r["Symbol"], 0.0) + r["Shares"]
     for p in positions:
         s, q = str(p["symbol"]).upper(), _num(p.get("qty"))
         if q < -EPS:
@@ -449,7 +499,9 @@ def _finish(b, positions, income, fee_rows, today):
                                     for r, s in zip(washes["Replacement bought"], washes["Loss sale"])]
     issues = pd.DataFrame(b.issues, columns=["Check", "Detail"]).drop_duplicates()
     return {"sales": disp, "lots": lots, "washes": washes, "income": inc, "fees": pd.DataFrame(fee_rows, columns=["Date", "Type", "Amount"]),
-            "issues": issues, "method": b.method, "today": today}
+            "issues": issues, "method": b.method, "today": today,
+            "pre_open": pd.DataFrame(pre_open, columns=["Symbol", "Shares", "Alpaca avg cost", "Value"]),
+            "pre_sales": pd.DataFrame(b.pre_sales, columns=["Symbol", "Shares", "Sold", "Proceeds"])}
 
 
 # ----------------------------------------------------------------------------- summaries

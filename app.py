@@ -6,7 +6,7 @@ Page layout, top to bottom:
   2. "Dashboard" tab: the single-stock view (clickable rank tiers, stock picker, chart). Open any stock directly with
      http://localhost:8502/?symbol=NVDA
   3. "Details" tab, each in its own expander: live Alpaca holdings, latest signals, the last decision (one view),
-     the earnings planner (earnings_planner.py), the pre-earnings stops, the tax view (tax_lots.py, an estimate),
+     the earnings planner (earnings_planner.py), the pre-earnings stops, the tax view (tax_lots.py, an estimate, counted from tax_lots.TAX_START),
      data freshness, and the strategy rules at the bottom.
 
 The app only READS the Reports/*.csv files written by `python run_all.py` for strategy data, plus the live holdings from the
@@ -1871,7 +1871,7 @@ def _harvest_view(t):
 
 def render_tax_view(p):
     """Details tab: realized / unrealized gains (short vs long term), wash sales, harvest list, estimated tax, Form 8949
-    export, from the live account's full activity history (read-only, hourly). An estimate, not tax advice."""
+    export, from the live account's activity since tax_lots.TAX_START (read-only, hourly). An estimate, not tax advice."""
     import tax_lots as tl
     show_html(f'<div class="sa-note"><b>Estimate, not tax advice.</b> {esc(tl.DISCLAIMER.split(". ", 1)[1])}</div>')
     data, err = holdings_this_run()
@@ -1888,28 +1888,49 @@ def render_tax_view(p):
         return
     y = tl.ytd(rep)
     year = y["year"]
+    start = rep.get("start")
+    scope = f"since {start:%b %-d}" if start is not None and start.year == year else str(year)     # card labels
+    when = f"since {start:%a %b %-d, %Y}" if start is not None else f"in {year}"
+    pre, pre_sales = rep.get("pre_open", pd.DataFrame()), rep.get("pre_sales", pd.DataFrame())
+    if start is not None:
+        note = (f"Fresh start: only activity on or after {start:%a %b %-d, %Y} counts (TAX_START in tax_lots.py). "
+                "Earlier account activity (trades, dividends, interest, fees, prior tax years) is not counted, and neither is "
+                "wash-sale matching against older trades.")
+        if len(pre):
+            note += (" Left out (bought before the start; Alpaca's positions have no purchase date, so they are not carried "
+                     "in): " + ", ".join(f"{r['Symbol']} {r['Shares']:.4g} sh (Alpaca cost {usd(r['Alpaca avg cost'], sign=False)})"
+                                         for _, r in pre.iterrows()) + ".")
+        if len(pre_sales):
+            note += (f" {len(pre_sales)} sale(s) {when} sold shares bought before it ({', '.join(sorted(set(pre_sales['Symbol'])))}; "
+                     f"proceeds {usd(pre_sales['Proceeds'].sum(), sign=False)}): not counted.")
+        info_text(note + " Alpaca's 1099-B uses the full history, so its numbers can differ.")
     issues = rep["issues"]
     if len(issues):
         warning_text(f"Data check: {len(issues)} issue(s) found, so some numbers below may be off. Details in the table.")
         st.dataframe(issues, hide_index=True, width="stretch", height=min(400, 35 * (len(issues) + 1) + 3))
-    stat_cards([(f"Realized {year} short-term", usd(y["realized_st"]), tone(y["realized_st"])),
-                (f"Realized {year} long-term", usd(y["realized_lt"]), tone(y["realized_lt"])),
+    stat_cards([(f"Realized {scope} short-term", usd(y["realized_st"]), tone(y["realized_st"])),
+                (f"Realized {scope} long-term", usd(y["realized_lt"]), tone(y["realized_lt"])),
                 ("Unrealized short-term", usd(y["unrealized_st"]), tone(y["unrealized_st"])),
                 ("Unrealized long-term", usd(y["unrealized_lt"]), tone(y["unrealized_lt"])),
-                (f"Wash-sale loss deferred {year}", usd(y["wash_disallowed"], sign=False), CAUTION if y["wash_disallowed"] > 0.005 else INK),
-                (f"Dividends {year} (qualified est.)", f"{usd(y['dividends'], sign=False)} ({usd(y['qualified'], sign=False)})", INK),
-                (f"Interest {year}", usd(y["interest"], sign=False), INK),
-                (f"Fees {year}", usd(y["fees"], sign=False), INK)])
+                (f"Wash-sale loss deferred {scope}", usd(y["wash_disallowed"], sign=False), CAUTION if y["wash_disallowed"] > 0.005 else INK),
+                (f"Dividends {scope} (qualified est.)", f"{usd(y['dividends'], sign=False)} ({usd(y['qualified'], sign=False)})", INK),
+                (f"Interest {scope}", usd(y["interest"], sign=False), INK),
+                (f"Fees {scope}", usd(y["fees"], sign=False), INK)])
+    counted = (f"counted from {start:%b %-d, %Y} (New York trade dates)" if start is not None
+               else f"{year} = trade dates in {year} (New York time)")
+    held_txt = f"the lots plus the {len(pre)} left-out holding(s)" if len(pre) else "the lots"
     caption_text(f"As of {inputs['as_of']:%a %b %-d %I:%M %p} CT (account history read from Alpaca hourly, read-only; prices from the "
-               f"live holdings read) · lot method FIFO (Alpaca's default) · {year} = trade dates in {year} (New York time) · "
+               f"live holdings read) · lot method FIFO (Alpaca's default) · {counted} · "
                "realized gains include the wash-sale adjustments; unrealized = open lots at the latest price."
                + ("" if len(issues) else f" Data checks passed: every sale matched to a purchase, no missing basis, no negative "
-                                         f"lots, and the lots equal Alpaca's {len(positions)} positions."))
+                                         f"lots, and {held_txt} equal Alpaca's {len(positions)} positions."))
     tabs = st.tabs(["By year", "Open lots", "Tax-loss harvest", "Wash sales", "Estimated tax", "Dividends, interest, fees",
                     "Lot method", "Form 8949 export"])
     sales = rep["sales"]
     with tabs[0]:
         by = tl.realized_by_year(sales)
+        if by.empty:
+            info_text(f"No sales of lots bought {when} yet, so nothing is realized.")
         st.dataframe(toned(by.round(2), ["Short-term gain", "Long-term gain", "Total gain"]), hide_index=True, width="stretch",
                      column_config={c: MONEY for c in by.columns if c not in ("Year", "Lot sales")} | {"Year": st.column_config.NumberColumn(format="%d")})
         caption_text(f"Realized gains by tax year, as of {inputs['as_of']:%a %b %-d, %Y}. Gain = proceeds (after REG/TAF/CAT fees) - "
@@ -1958,7 +1979,7 @@ def render_tax_view(p):
     with tabs[3]:
         summ, w = tl.wash_summary(rep["washes"], year)
         if summ.empty:
-            st.success(f"No wash sales on {year} sales.")
+            st.success(f"No wash sales on sales {when}.")
         else:
             st.dataframe(summ.round(2).assign(**{"Last loss sale": [f"{d:%b %-d, %Y}" for d in summ["Last loss sale"]]}),
                          hide_index=True, width="stretch", height=min(420, 35 * (len(summ) + 1) + 3),
@@ -2005,7 +2026,7 @@ def render_tax_view(p):
     with tabs[5]:
         inc = rep["income"]
         if inc.empty and rep["fees"].empty:
-            info_text("No dividends, interest or fees in the history.")
+            info_text(f"No dividends, interest or fees {when}.")
         else:
             by = inc.groupby(["Year", "Type"], as_index=False).agg(Amount=("Amount", "sum"), **{"Qualified (est.)": ("Qualified (est.)", "sum")})
             fees = rep["fees"].assign(Year=[d.year for d in rep["fees"]["Date"]]).groupby(["Year", "Type"], as_index=False)["Amount"].sum()
@@ -2068,7 +2089,8 @@ def render_details(p):
         render_earnings_planner()
     with st.expander("Pre-earnings stops (3× ATR, live account)", expanded=False):
         render_earnings_stops()
-    with st.expander("Tax view · live account (estimate, not tax advice)", expanded=False):
+    import tax_lots as tl
+    with st.expander(f"Tax view · live account since {tl.TAX_START:%b %-d, %Y} (estimate, not tax advice)", expanded=False):
         render_tax_view(p)
     with st.expander("Data freshness and settings", expanded=False):
         render_data_and_settings(p)

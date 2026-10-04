@@ -64,7 +64,8 @@
                          a missed scheduled decision gets one run-log warning while it waits
   test_earnings_planner.py Details tab earnings planner (fake bars / calendar): 14-day range, next 3 otherwise, stop =
                          earnings_stop formula, stop window, median gap / 5-day reaction counts; renders in the app
-  test_tax_lots.py       tax view, hand-worked cases: FIFO / HIFO / LIFO lots, partial and fractional fills, fees, wash
+  test_tax_lots.py       tax view, hand-worked cases: fresh start at TAX_START (older activity, prior years and
+                         wash matching against older trades ignored, pre-start shares left out), FIFO / HIFO / LIFO lots, partial and fractional fills, fees, wash
                          sales before / after a loss sale with partial matching, basis + holding-period carryover, cascades,
                          splits, transfers, short / long-term boundary (leap day), dividends (qualified estimate),
                          netting + $3,000 limit + carryforward, 2026 brackets, NIIT, harvest exclusions, Form 8949 rows,

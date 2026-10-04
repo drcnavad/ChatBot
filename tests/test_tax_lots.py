@@ -10,6 +10,9 @@ with a FAKE Alpaca account (GET only, no network, no keys):
   - Schedule D netting, $3,000 ($1,500 MFS) limit, carryforward, 2026 brackets, LTCG stacking, NIIT, state
   - harvest list exclusions (recent buy / bot plan), lots turning long-term within 30 / 60 days, Form 8949 rows
   - data checks: unmatched sell, missing basis, position mismatch, needs-review activity
+  - fresh start (TAX_START = Oct 2, 2026): older activity, prior years and wash matching against older trades ignored;
+    shares held from before the start left out (sold first under every lot method) and listed; paging stops at the start
+  (sections 1-14 test the engine on the full history: build(..., start=None))
 Run: python tests/run_tests.py  (or python tests/test_tax_lots.py)"""
 import math
 import os
@@ -51,9 +54,9 @@ def NTA(t, day, **kw):
     return {"activity_type": t, "id": f"n{_n[0]:05d}", "date": day, "status": "executed", **kw}
 
 
-def run(acts, positions=None, method="FIFO", bots=None):
+def run(acts, positions=None, method="FIFO", bots=None, start=None):
     acts = sorted(acts, key=lambda a: a.get("transaction_time") or a["date"] + "T00")
-    return tl.build(acts, positions, method, bots or {}, today=TODAY)
+    return tl.build(acts, positions, method, bots or {}, today=TODAY, start=start)
 
 
 def lots(r, sym="AAA"):
@@ -250,16 +253,82 @@ check("EEE (Nov 20, 2025): 48 days, within 60 days, loss -> sell before keeps it
       t.loc["EEE", "Days to long-term"] == 48 and t.loc["EEE", "Window"] == "within 60 days" and "short-term" in t.loc["EEE", "Hint"]
       and ok.set_index("Symbol").loc["EEE", "Next long-term date"] == date(2026, 11, 21))
 
-# ---------------------------------------------------------------- 15. the app renders it (fake account, GET only)
+# ---------------------------------------------------------------- 15. fresh start at TAX_START (Oct 2, 2026)
+check("TAX_START is Fri Oct 2, 2026 and build() uses it by default", tl.TAX_START == date(2026, 10, 2)
+      and tl.build.__defaults__[-1] == tl.TAX_START)
+OLD = [F("EEE", "buy", 10, 10, "2025-03-03"), F("EEE", "sell", 10, 15, "2025-04-01"),           # a 2025 gain: ignored
+       F("AAA", "buy", 10, 50, "2026-09-01"), F("AAA", "sell", 10, 40, "2026-09-20"),           # loss 18 days before the start
+       F("BBB", "buy", 5, 20, "2026-08-01"), F("CCC", "buy", 4, 30, "2026-09-10"),
+       NTA("DIV", "2026-09-15", symbol="BBB", net_amount="1", description="Cash DIV, Rec Date: 2026-09-10"),
+       NTA("INT", "2026-09-30", activity_sub_type="SWP", net_amount="0.5")]
+NEW = [F("AAA", "buy", 10, 45, "2026-10-02"),                     # would replace the Sep 20 loss under the full history
+       F("CCC", "sell", 4, 35, "2026-10-02"),                     # sells shares bought before the start
+       F("BBB", "buy", 5, 22, "2026-10-02"), F("BBB", "sell", 3, 24, "2026-10-02", hh=18),
+       F("DDD", "buy", 10, 10, "2026-10-02"), F("DDD", "sell", 4, 12, "2026-10-02", hh=18)]
+FPOS = [{"symbol": "AAA", "qty": "10", "current_price": "46", "cost_basis": "450"},
+        {"symbol": "BBB", "qty": "7", "current_price": "25", "cost_basis": "150"},
+        {"symbol": "DDD", "qty": "6", "current_price": "11", "cost_basis": "60"}]
+for m in tl.METHODS:
+    r = run(OLD + NEW, positions=FPOS, method=m, start=tl.TAX_START)
+    s, l, pre, ps = r["sales"], r["lots"], r["pre_open"], r["pre_sales"]
+    check(f"fresh start ({m}): the 8 older activities are dropped, no data issue (lots + left-out shares = positions)",
+          r["dropped"] == 8 and r["issues"].empty, (r["dropped"], r["issues"].to_dict("list")))
+    check(f"fresh start ({m}): only DDD counts as realized: 4 sh bought $10, sold $12 -> +$8 short-term, 2026 only",
+          len(s) == 1 and s["Symbol"][0] == "DDD" and close(s["Gain"][0], 8) and list(tl.realized_by_year(s)["Year"]) == [2026]
+          and close(tl.ytd(r)["realized_st"], 8), s.to_dict("list"))
+    check(f"fresh start ({m}): shares from before the start are sold first: CCC 4 sh ($140) and BBB 3 sh ($72) left out of the gains",
+          sorted(zip(ps["Symbol"], ps["Shares"])) == [("BBB", 3), ("CCC", 4)] and close(ps["Proceeds"].sum(), 212), ps.to_dict("list"))
+    check(f"fresh start ({m}): BBB 2 sh held from before the start left out (Alpaca avg cost 2 x $150/7 = $42.86); "
+          "the Oct 2 BBB lot keeps 5 sh at $22", list(pre["Symbol"]) == ["BBB"] and close(pre["Shares"][0], 2)
+          and close(pre["Alpaca avg cost"][0], 42.857) and close(l.loc[l.Symbol == "BBB", "Shares"].sum(), 5)
+          and close(l.loc[l.Symbol == "BBB", "Basis / share"].iloc[0], 22), (pre.to_dict("list"), l.to_dict("list")))
+r = run(OLD + NEW, positions=FPOS, start=tl.TAX_START)
+a = lots(r)
+check("fresh start: no wash sale against the Sep 20 loss: AAA Oct 2 lot keeps $45 basis, holding from Oct 2, 2026",
+      r["washes"].empty and close(a["Basis / share"][0], 45) and a["Holding from"][0] == date(2026, 10, 2) and close(a["Wash adj"][0], 0))
+check("fresh start: older dividend and interest ignored; unrealized = AAA $10 + BBB $15 + DDD $6 = $31",
+      r["income"].empty and close(tl.ytd(r)["unrealized_st"], 31) and close(tl.ytd(r)["dividends"], 0))
+check("fresh start: Form 8949 has the one DDD row, no 2025 rows", len(tl.form_8949(r["sales"])) == 1
+      and not tl.form_8949(r["sales"])["Date sold"].str.endswith("2025").any())
+full = run(OLD + NEW, positions=FPOS)
+check("full history (start=None) for comparison: Sep 20 loss washed into the Oct 2 AAA lot ($55), 2025 gain +$50 present",
+      close(lots(full)["Basis / share"][0], 55) and close(tl.realized_by_year(full["sales"]).set_index("Year").loc[2025, "Total gain"], 50))
+r = run(OLD + NEW, positions=None, start=tl.TAX_START)
+check("fresh start without positions: the CCC sale has no basis -> Unmatched sell check", "Unmatched sell" in set(r["issues"]["Check"]))
+
+
+class PageAcct:
+    def __init__(self, acts):
+        self.acts, self.calls = acts[::-1], []
+
+    def _get(self, path, params=None):
+        self.calls.append(path)
+        if path == "/orders":
+            return []
+        i = 0 if "page_token" not in params else [a["id"] for a in self.acts].index(params["page_token"]) + 1
+        return self.acts[i:i + params["page_size"]]
+
+
+many = [F("ZZZ", "buy", 1, 10, "2026-09-0" + str(1 + i % 9)) for i in range(250)] + [F("ZZZ", "buy", 1, 10, "2026-10-02") for _ in range(50)]
+acct = PageAcct(many)
+got = tl.fetch_inputs(acct)
+check("fetch_inputs stops paging at the start date: 1 activities page (the newest 100), not 4",
+      acct.calls.count("/account/activities") == 1 and len(got["activities"]) == 100, acct.calls)
+acct = PageAcct(many)
+check("fetch_inputs(start=None) reads the whole history (4 pages, 300 activities)",
+      len(tl.fetch_inputs(acct, start=None)["activities"]) == 300 and acct.calls.count("/account/activities") == 4)
+
+# ---------------------------------------------------------------- 16. the app renders it (fake account, GET only)
 from streamlit.testing.v1 import AppTest  # noqa: E402
 import streamlit as st  # noqa: E402
 import alpaca_paper as ap  # noqa: E402
 
 ACTS = sorted(W + [F("AAA", "buy", 5, 50, "2026-01-05"), NTA("FEE", "2026-01-06", activity_sub_type="CAT", net_amount="-0.01",
-                                                              description="CAT fee for proceed of 1 trades on 2026-01-05")],
+                                                              description="CAT fee for proceed of 1 trades on 2026-01-05"),
+                   F("AAA", "buy", 4, 50, "2026-10-02", order="new1")],     # the only purchase on/after TAX_START
               key=lambda a: a.get("transaction_time") or a["date"])
-POS = [{"symbol": "AAA", "qty": "15", "avg_entry_price": "48", "cost_basis": "720", "market_value": "780", "unrealized_pl": "60",
-        "unrealized_plpc": "0.083", "current_price": "52", "change_today": "0.01", "lastday_price": "51.5"}]
+POS = [{"symbol": "AAA", "qty": "19", "avg_entry_price": "48.42", "cost_basis": "920", "market_value": "988", "unrealized_pl": "68",
+        "unrealized_plpc": "0.074", "current_price": "52", "change_today": "0.01", "lastday_price": "51.5"}]
 
 
 class FakeAccount(ap.PaperAccount):
@@ -292,11 +361,16 @@ try:
     labels = [e.label for e in at.expander]
     check("app: no exceptions", not at.exception, [str(e) for e in at.exception])
     check("app: earnings planner + tax view sections, rules still last",
-          any(l.startswith("Earnings planner") for l in labels) and "Tax view · live account (estimate, not tax advice)" in labels
+          any(l.startswith("Earnings planner") for l in labels) and "Tax view · live account since Oct 2, 2026 (estimate, not tax advice)" in labels
           and labels[-1] == "Strategy rules", labels)
     md = " ".join(m.value for m in at.markdown)
-    check("app: 'Estimate, not tax advice' note and card numbers (realized short-term)",
-          "Estimate, not tax advice." in md and "Realized 2026 short-term" in md and "Wash-sale loss deferred" in md)
+    check("app: 'Estimate, not tax advice' note and card numbers (realized since Oct 2)",
+          "Estimate, not tax advice." in md and "Realized since Oct 2 short-term" in md and "Wash-sale loss deferred since Oct 2" in md
+          and "Realized 2026" not in md and "deferred 2025" not in md, md[:400])
+    infos = " ".join(i.value for i in at.info)
+    check("app: fresh-start note: start date, older activities ignored, AAA 15 sh from before the start left out",
+          "Fresh start: only activity on or after Fri Oct 2, 2026 counts" in infos and "AAA 15 sh" in infos
+          and "not carried in" in infos, infos[:400])
     caps = " ".join(c.value for c in at.caption)
     check("app: dated captions (As of ... CT) and the 1099-B note", "lot method FIFO" in caps and "1099-B check" in caps
           and "Wash-sale rule" in caps)
@@ -306,9 +380,14 @@ try:
           and any("Holding from" in f.columns for f in frames) and any("Adjustment code" in f.columns for f in frames)
           and any("Method" in f.columns for f in frames))
     lot_tbl = next(f for f in frames if "Holding from" in f.columns)
-    check("app: the wash-sale replacement lot shows basis $55 and its note", close(lot_tbl.loc[lot_tbl["Bought"] == "Feb 20, 2025",
-                                                                                   "Basis / share"].iloc[0], 55)
-          and lot_tbl["Note"].str.contains("wash sale").any(), lot_tbl.to_dict("list"))
+    check("app: open lots = only the Oct 2, 2026 purchase (4 sh at $50, no wash adjustment from the 2025 trades)",
+          list(lot_tbl["Bought"]) == ["Oct 2, 2026"] and close(lot_tbl["Basis / share"].iloc[0], 50)
+          and close(lot_tbl["Shares"].iloc[0], 4) and not lot_tbl["Note"].str.contains("wash sale").any(), lot_tbl.to_dict("list"))
+    by_tbl = next(f for f in frames if "Short-term gain" in f.columns)
+    check("app: by-year table and Form 8949 have no 2025 (or other prior-year) rows", by_tbl.empty
+          and all(not f.astype(str).apply(lambda c: c.str.contains("2025")).any().any() for f in frames
+                  if {"Adjustment code", "Holding from", "Method", "Disallowed loss", "Qualified (est.)"} & set(f.columns)),
+          by_tbl.to_dict("list"))
     paths = {p for p, _ in FakeAccount.calls}
     check("app: only allow-listed GET paths, incl. /orders for the bot flag", paths <= {"/positions", "/account", "/account/activities", "/orders"}
           and "/orders" in paths, paths)
