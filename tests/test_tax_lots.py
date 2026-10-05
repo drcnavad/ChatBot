@@ -360,8 +360,9 @@ try:
     at = AppTest.from_file("app.py", default_timeout=180).run()
     labels = [e.label for e in at.expander]
     check("app: no exceptions", not at.exception, [str(e) for e in at.exception])
-    check("app: earnings planner + tax view sections, rules still last",
-          any(l.startswith("Earnings planner") for l in labels) and "Tax view · live account since Oct 2, 2026 (estimate, not tax advice)" in labels
+    # Earnings planner expander was removed in the Oct 4 dashboard cleanup (3-tab layout); tax view + rules stay.
+    check("app: tax view section present, rules still last",
+          "Tax view · live account since Oct 2, 2026 (estimate, not tax advice)" in labels
           and labels[-1] == "Strategy rules", labels)
     md = " ".join(m.value for m in at.markdown)
     check("app: 'Estimate, not tax advice' note and card numbers (realized since Oct 2)",

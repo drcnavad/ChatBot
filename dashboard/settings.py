@@ -31,6 +31,7 @@ RS_LABEL = {"etf": "vs sector ETF and SPY",
             }.get(WINNER.get("rs_benchmark", "etf"), "vs sector ETF and SPY")
 MIDWEEK = WINNER.get("midweek_swap")                                 # Mon/Wed swap check (None = weekly only)
 EXIT_BELOW = WINNER.get("midweek_exit_below") if MIDWEEK else None   # mid-week exit below this rank
+EXIT_TO_TOP = WINNER.get("midweek_exit_to_top") if EXIT_BELOW else None  # replace with best top-N; else cash until Fri
 MAX_PICK = WINNER.get("max_pick_rank")                               # picks only from ranks 1..MAX_PICK
 CAP_SOFT = bool(WINNER.get("cap_soft"))                              # sector limit relaxed to fill 10 slots
 EARNINGS = WINNER.get("earnings_block_days")                         # no new buys with earnings within N days (None = off)
@@ -55,8 +56,9 @@ def rules_text():
             f"- **Score:** {W_TECH:g} × Technical + {1 - W_TECH:g} × Relative Strength {RS_LABEL}. Only stocks with a score "
             f"above {WINNER.get('min_score', 0):g} and at least {MIN_BARS} trading days of prices are ranked "
             "(newer stocks are listed as not traded yet).\n"
-            f"- **Friday picks:** the {N_PICKS} best-ranked stocks" + (f" from ranks 1–{MAX_PICK}" if MAX_PICK else "")
-            + f", max {SECTOR_MAX} per sector"
+            f"- **Friday picks:** the {N_PICKS} best-ranked stocks"
+            + (f" from ranks 1–{MAX_PICK}" if MAX_PICK else " by rank (no sector limit)")
+            + (f", max {SECTOR_MAX} per sector" if SECTOR_MAX < N_PICKS else "")
             + (f"; slots the sector limit leaves empty are filled from ranks 1–{MAX_PICK or 20} anyway" if CAP_SOFT else "")
             + "; fewer qualifying stocks = the rest in cash. Stocks that are not picked are sold.\n"
             f"- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger), scaled to {LIVE_INVESTED:.0%} invested, "
@@ -67,11 +69,14 @@ def rules_text():
                "of it; overweight holdings are trimmed so new buys get their full weight.\n" if band else "")
             + (f"- **{days} swap:** if a stock that is not held ranks in the top {MIDWEEK['enter_top']} and a held stock has "
                f"fallen below rank {MIDWEEK['exit_below']}, the worst-ranked held stock is sold and the new one bought for "
-               "the same dollar amount (repeated while both are true; "
-               + ("the sector limit does not apply" if CAP_SOFT else f"max {SECTOR_MAX} per sector still applies") + ").\n"
-               if MIDWEEK else "")
+               "the same dollar amount (repeated while both are true"
+               + ("; no sector limit" if SECTOR_MAX >= N_PICKS else
+                  ("; the sector limit does not apply" if CAP_SOFT else f"; max {SECTOR_MAX} per sector still applies"))
+               + ").\n" if MIDWEEK else "")
             + (f"- **{days} exit:** after the swaps, any holding ranked worse than {EXIT_BELOW} (or no longer ranked) is "
-               "sold; the cash waits for the Friday rebalance.\n" if EXIT_BELOW else "")
+               + (f"swapped for the best top-{EXIT_TO_TOP} stock not held (same dollars; earnings rule); the cash waits for "
+                  "Friday only if none is left.\n" if EXIT_TO_TOP else
+                  "sold; the cash waits for the Friday rebalance.\n") if EXIT_BELOW else "")
             + (f"- **Earnings:** a stock that is not held is not bought when its next earnings date is within {EARNINGS} "
                "calendar days; on Friday its slot goes to the next eligible stock (else cash), mid-week it is just not bought. "
                "A held stock is not topped up before them.\n" if EARNINGS else "")

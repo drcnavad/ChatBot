@@ -24,7 +24,7 @@ live band; trimmed to its target when the buys need the cash), and with the earn
 5 days is not bought up. The dip and threshold rules only trade the names they buy or sell. A saved day is never redone: a re-run only adds the days after the last saved one (so
 running twice never double-counts) and a missed day is caught up from the saved bars.
 
-    python forward_test.py --record   # strategies + today's account row (launchd com.stockanalysis.forwardtest, 4:15 PM CT)
+    python forward_test.py --record   # strategies + today's account row (launchd com.stockanalysis.forwardtest, 3:15 PM CT)
     python forward_test.py            # update the strategies (bars only, no account request) and print the leaderboard
 """
 import argparse
@@ -75,7 +75,7 @@ RANK_RULE = ("Ranked by median weekly return (Friday to Friday); a tie goes to t
 # "reweight" = the same picks with other weights; "stop" = the live rules + an ATR stop around earnings (STOPS);
 # "spare_dips" = the live rules + ATR dip buys with the cash they leave unused; "midweek" = other Mon/Wed swap settings;
 # "replay" = the live rules replayed day by day with a changed Mon/Wed exit (atr_stop_targets).
-PLAIN = {"max_pick_rank": None, "cap_soft": False}       # walk every rank, strict max 4 per sector
+PLAIN = {"max_pick_rank": None, "cap_soft": False, "sector_cap": 0.4}  # walk every rank, strict max 4/sector (pinned; live is now 1.0)
 MIDWEEK = be.WINNER.get("midweek_swap")                  # the live Mon/Wed swap settings (copied, never changed)
 EQ = {**PLAIN, "vol_sizing": False}                      # ... and an equal weight per stock
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
@@ -113,8 +113,8 @@ STRATEGIES = [
     dict(name="Equal weight", select={"vol_sizing": False}, rule="The live rules with an equal weight per stock."),
     dict(name="Friday only", calendar="weekly", rule="The live rules without the Mon/Wed swaps and exits."),
     dict(name="Monthly", calendar="monthly", rule="The live rules, rebalanced on the last trading day of each month only."),
-    dict(name="No sector limit", select={"sector_cap": 1.0, "cap_soft": True},
-         rule="The live rules without the max-4-per-sector rule (pure top 10)."),
+    dict(name="No sector limit", select={"sector_cap": 1.0, "cap_soft": True, "max_pick_rank": 20},
+         rule="Ranks 1-20 only, no sector cap (live is now pure top-10 with no rank-20 gate)."),
     dict(name="Dual momentum", score="dual", calendar="monthly", select={**EQ, "regime": None, "regime_scale": None},
          earnings=None, rule="Top 10 by 12-month return, only stocks that are up over the year; all cash while QQQ is "
                              "below its 200-day average; equal weight, monthly."),
@@ -162,10 +162,9 @@ STRATEGIES = [
          rule="The live rules, but the Mon/Wed top-3 swap replaces a holding ranked worse than 20 (live: 15)."),
     dict(name="Live, swap below 25", midweek={**MIDWEEK, "exit_below": 25},
          rule="The live rules, but the Mon/Wed top-3 swap replaces a holding ranked worse than 25 (live: 15)."),
-    dict(name="Live, exit replaced by top-10", replay={"exit_to_top": 10},
-         rule="The live rules, but on Mon/Wed (after the top-3 swap) a holding ranked worse than 30 is swapped for the best "
-              "top-10 stock not held (same weight, no buy within 5 days of earnings) instead of being sold to cash; the cash "
-              "waits for Friday only if none is left."),
+    dict(name="Live, exit to cash until Friday", replay={"exit_to_top": None},
+         rule="Like live, but a Mon/Wed holding ranked worse than 30 is sold to cash until Friday (no top-10 refill; "
+              "the pre-2026-10-05 exit). Live now refills from the best non-held top-10."),
     dict(name="Risk parity", reweight="risk_parity",
          rule="The live picks, weighted so each stock adds the same risk (63-day volatility and correlation)."),
 ]
@@ -310,7 +309,7 @@ def earnings_events(dates, cols, earnings):
     return ev
 
 
-def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit_to_top=None):
+def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit_to_top="winner"):
     """The live rules + an ATR trailing stop around earnings. The live rules are replayed day by day with the engine's own
     pieces, exactly as be.winner_targets does (Friday selection with the real holdings, Mon/Wed swaps and exits). Stop
     window: after = from the reaction day through `after` sessions later; arm_days = a stock kept (HOLD) at a Friday
@@ -318,11 +317,13 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit
     a holding whose close is at or below its highest close since it was bought - k x ATR(14) is sold in full at that close
     (gap_open: on the reaction day an open already below the stop sells at the open); its weight goes to the best stock
     the live rules would buy: ranks 1-20, max 4 per sector unless none fits, no buy within 5 days of earnings, and not a
-    stock stopped out in its window. exit_to_top (e.g. 10): on Mon/Wed, after the top-3 swaps, a holding ranked worse than the
-    exit rank (30) is swapped for the best non-held stock in the top `exit_to_top` (same weight, earnings rule) and only sold
-    to cash when none is left. Returns (raw
-    weights, open-sale prices)."""
+    stock stopped out in its window. exit_to_top: on Mon/Wed, after the top-3 swaps, a holding ranked worse than the exit
+    rank (30) is swapped for the best non-held stock in the top exit_to_top (same weight, earnings rule) and only sold to
+    cash when none is left. Default "winner" = live midweek_exit_to_top (be.WINNER.get); pass None for cash-until-Friday.
+    Returns (raw weights, open-sale prices)."""
     W, args = be.WINNER, be.winner_rank_args(inp["regime"])
+    if exit_to_top == "winner":
+        exit_to_top = W.get("midweek_exit_to_top")
     score, elig, vol, tb = inp["scores"]["live"], inp["eligible"], inp["vol"], inp["scores"]["rs"]
     dates, cols = score.index, list(score.columns)
     arr = lambda x: x.reindex(index=dates, columns=cols).to_numpy(float)
@@ -377,13 +378,8 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit
             skip = {j for j in order[:mw["enter_top"]] if cur[j] == 0 and not np.isnan(BB[t, j])}
             be.midweek_swap_pairs(cur, order, rank, sectors, mw["enter_top"], mw["exit_below"],
                                   10 ** 6 if args["cap_soft"] else per_sector, skip=skip)
-            if exit_to_top:                               # exits below rank 30 -> the best non-held top-N stock first
-                for h in sorted((j for j in np.where(cur > 0)[0] if rank.get(j, 1e6) > W.get("midweek_exit_below")),
-                                key=lambda j: -rank.get(j, 1e6)):
-                    e = next((j for j in order[:exit_to_top] if cur[j] == 0 and np.isnan(BB[t, j])), None)
-                    if e is None:
-                        break
-                    cur[e], cur[h] = cur[h], 0.0
+            skip_exit = {j for j in order[:exit_to_top] if cur[j] == 0 and not np.isnan(BB[t, j])} if exit_to_top else set()
+            be.midweek_exit_replacements(cur, order, rank, W.get("midweek_exit_below"), exit_to_top, skip=skip_exit)
             be.midweek_exit_sells(cur, rank, W.get("midweek_exit_below"))
         peak, armed = np.where(cur > 0, peak, np.nan), np.where(cur > 0, armed, -1)   # sold by the live rules: reset
         inside = ~np.isnan(peak) & (cur > 0) & (win[t] | (armed >= t))       # held before today, inside its window
@@ -690,13 +686,15 @@ def record(account=None, now=None, path=DAILY_CSV):
 
 # ---------------------------------------------------------------------------------------------------- leaderboard
 def _stats(v):
-    """Total return %, median weekly return % (week end to week end: the last session of each finished week, from the
-    start close), max drawdown % and finished weeks of a value series by date."""
+    """Total return %, daily return % (last day vs the day before), median weekly return % (week end to week end:
+    the last session of each finished week, from the start close), max drawdown % and finished weeks of a value series
+    by date."""
     v = v.dropna().sort_index()
     if len(v) < 1:
-        return np.nan, np.nan, np.nan, 0
+        return np.nan, np.nan, np.nan, np.nan, 0
     weekly = v[be.weekly_rebalance_days(v.index, live=True).to_numpy() | (v.index == v.index[0])].pct_change().dropna()
-    return ((v.iloc[-1] / v.iloc[0] - 1) * 100, weekly.median() * 100 if len(weekly) else np.nan,
+    daily = (v.iloc[-1] / v.iloc[-2] - 1) * 100 if len(v) >= 2 else np.nan
+    return ((v.iloc[-1] / v.iloc[0] - 1) * 100, daily, weekly.median() * 100 if len(weekly) else np.nan,
             (v / v.cummax() - 1).min() * 100, len(weekly))
 
 
@@ -721,7 +719,7 @@ def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
     if bench is not None:
         b = since(bench)
         series += [(f"{s} (comparison)", False, b[s]) for s in ("QQQ", "SPY") if s in b]
-    cols = ["Total return %", "Median weekly return %", "Max drawdown %", "Weeks"]
+    cols = ["Total return %", "Daily return %", "Median weekly return %", "Max drawdown %", "Weeks"]
     t = pd.DataFrame([{"Strategy": n, "ranked": r, **dict(zip(cols, _stats(v)))} for n, r, v in series])
     if t.empty:
         return pd.DataFrame(columns=["Rank", "Strategy"] + cols)

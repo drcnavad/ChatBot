@@ -65,7 +65,7 @@ WINNER = {
     "regime_symbol": "QQQ", # regime is on while QQQ closes above its 200-day average
     "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
     "min_score": 0.0,       # only stocks with a score above 0 can be picked
-    "sector_cap": 0.4,      # at most 40% of the picks per sector (= 4 of 10)
+    "sector_cap": 1.0,      # no sector limit: Friday = pure top-10 by rank (Chirag 2026-10-05; was 0.4 = max 4)
     "vol_sizing": True,     # weights proportional to 1 / 63-day volatility
     "max_weight": 0.20,     # no stock above 20% (after the vol weights and the regime halving); the extra stays in cash
     "buffer_rank": None,    # no rank buffer (tested, did not help)
@@ -74,9 +74,11 @@ WINNER = {
     # Mon/Wed close checks: if a stock that is not held ranks in the top 3 and a holding ranks below 15, sell the
     # worst-ranked holding and buy the new stock with the same weight. Filled at the next open.
     "midweek_swap": {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]},
-    "midweek_exit_below": 30,   # Mon/Wed: sell a holding ranked worse than 30; the cash waits for Friday
-    "max_pick_rank": 20,        # Friday picks come from ranks 1-20 only (fewer qualifying stocks -> the rest stays cash)
-    "cap_soft": True,           # if the sector cap leaves slots empty, fill them from ranks 1-20 anyway; top-3 swaps ignore the cap
+    "midweek_exit_below": 30,   # Mon/Wed: a holding ranked worse than 30 leaves (see midweek_exit_to_top)
+    "midweek_exit_to_top": 10,  # Mon/Wed: replace that slot with the best non-held top-10 (same weight, earnings rule);
+                                # cash until Friday only when no eligible refill is left (Chirag, 2026-10-05)
+    "max_pick_rank": None,      # no ranks 1-20 gate: every ranked name may be picked (Chirag 2026-10-05; was 20)
+    "cap_soft": False,          # unused while sector_cap is 1.0 (was True soft-fill under a 4-per-sector cap)
     "earnings_block_days": 5,   # no new buy (or top-up) when earnings are due within 5 days (Reports/earnings_date.csv)
     # Friday: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).
     "rebalance_band": 0.01,
@@ -101,11 +103,17 @@ def winner_label(n_stocks):
     """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'C6-U91-T20-MW30-E5'."""
     S, mw = WINNER, WINNER.get("midweek_swap")
     tag = f"C6-U{n_stocks}"
-    name = f"C6: weekly top-{S['n']} ranking, max {winner_max_per_sector()} per sector + soft QQQ regime ({n_stocks} stocks)"
+    if S.get("sector_cap", 0.4) >= 1.0 - 1e-12:
+        name = f"C6: weekly top-{S['n']} ranking, no sector limit + soft QQQ regime ({n_stocks} stocks)"
+    else:
+        name = f"C6: weekly top-{S['n']} ranking, max {winner_max_per_sector()} per sector + soft QQQ regime ({n_stocks} stocks)"
     if S.get("rs_benchmark", "etf") != "etf":
         tag += {"sector_median": "-MED", "median_all": "-MEDALL"}[S["rs_benchmark"]]
         name += f' [RS vs {S["rs_benchmark"].replace("_", " ")}]'
-    if S.get("max_pick_rank") or S.get("cap_soft"):
+    if S.get("sector_cap", 0.4) >= 1.0 - 1e-12:
+        tag += "-NS"
+        name += " [no sector limit: pure top-10 by rank]"
+    elif S.get("max_pick_rank") or S.get("cap_soft"):
         tag += (f'-T{S["max_pick_rank"]}' + ("" if S.get("cap_soft") else "H")) if S.get("max_pick_rank") else "-SC"
         name += ((f' [picks from ranks 1-{S["max_pick_rank"]} only' if S.get("max_pick_rank") else " [")
                  + ("; sector cap relaxed to fill the 10 slots; top-3 swaps ignore the cap]" if S.get("cap_soft") else "]"))
@@ -113,7 +121,13 @@ def winner_label(n_stocks):
         tag += "-MW" + (str(S["midweek_exit_below"]) if S.get("midweek_exit_below") else "")
         name += f' + mid-week swap ({"/".join(mw["days"])} close: top {mw["enter_top"]} in, below rank {mw["exit_below"]} out)'
         if S.get("midweek_exit_below"):
-            name += f' + mid-week exit (sell if worse than rank {S["midweek_exit_below"]}, cash until Friday)'
+            top = S.get("midweek_exit_to_top")
+            if top:
+                tag += f"R{top}"
+                name += (f' + mid-week exit (worse than rank {S["midweek_exit_below"]}: replace with best top-{top} not held; '
+                         'cash until Friday only if none is left)')
+            else:
+                name += f' + mid-week exit (sell if worse than rank {S["midweek_exit_below"]}, cash until Friday)'
     if S.get("earnings_block_days"):
         tag += f'-E{S["earnings_block_days"]}'
         name += f' + no new buys with earnings in the next {S["earnings_block_days"]} days'
@@ -154,7 +168,13 @@ def rules_version():
     """Rules version stored in signal_analysis.csv (older rows of the same version keep their BUY/SELL/HOLD)."""
     S = WINNER
     v = ("v4-mw30" if S.get("midweek_exit_below") else "v4-mw") if S.get("midweek_swap") else "v3"
-    return v + ("-t20" if S.get("max_pick_rank") else "") + (f"-e{S['earnings_block_days']}" if S.get("earnings_block_days") else "")
+    if S.get("midweek_exit_below") and S.get("midweek_exit_to_top"):
+        v += f"r{S['midweek_exit_to_top']}"
+    if S.get("sector_cap", 0.4) >= 1.0 - 1e-12:
+        v += "-ns"
+    elif S.get("max_pick_rank"):
+        v += "-t20"
+    return v + (f"-e{S['earnings_block_days']}" if S.get("earnings_block_days") else "")
 
 
 # ----------------------------------------------------------------------------- calendar
@@ -1390,10 +1410,29 @@ def midweek_swap_pairs(cur, order, rank, sectors, enter_top=3, exit_below=15, ca
     return swaps
 
 
+def midweek_exit_replacements(cur, order, rank, exit_all_below, exit_to_top, skip=None):
+    """After midweek_swap_pairs: each holding ranked worse than exit_all_below is swapped for the best non-held name in
+    order[:exit_to_top] (same weight). skip: column indices that may not be bought (earnings rule). Worst-ranked first;
+    stops when no refill is left (leftovers go to midweek_exit_sells -> cash until Friday). Returns
+    [(entrant, sold, weight)]. Same rule as forward_test's "Live, exit replaced by top-10"."""
+    if not exit_all_below or not exit_to_top:
+        return []
+    skip = skip or set()
+    reps = []
+    for h in sorted((j for j in np.where(cur > 0)[0] if rank.get(j, 1e6) > exit_all_below),
+                    key=lambda j: -rank.get(j, 1e6)):
+        e = next((j for j in order[:exit_to_top] if cur[j] == 0 and j not in skip), None)
+        if e is None:
+            break
+        reps.append((e, h, cur[h]))
+        cur[e], cur[h] = cur[h], 0.0
+    return reps
+
+
 def midweek_exit_sells(cur, rank, exit_all_below):
-    """The mid-week exit rule on one check day, applied AFTER midweek_swap_pairs (used by apply_midweek_swaps).
-    Every holding ranked worse than exit_all_below (or with no rank) is sold; the cash stays idle until the
-    next weekly rebalance. cur is modified in place. Returns [(sold, weight)] in column order."""
+    """The mid-week exit rule on one check day, applied AFTER midweek_swap_pairs (and midweek_exit_replacements when
+    exit_to_top is on). Every remaining holding ranked worse than exit_all_below (or with no rank) is sold; the cash
+    stays idle until the next weekly rebalance. cur is modified in place. Returns [(sold, weight)] in column order."""
     if not exit_all_below:
         return []
     sells = [(j, cur[j]) for j in np.where(cur > 0)[0] if rank.get(j, 1e6) > exit_all_below]
@@ -1404,7 +1443,7 @@ def midweek_exit_sells(cur, rank, exit_all_below):
 
 def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_days, enter_top=3, exit_below=15,
                         sector_cap=0.4, n=10, min_score=0.0, tiebreak_w=None, decision_log=None, check_log=None,
-                        exit_all_below=None, cap_soft=False, buy_block=None, reselect=None):
+                        exit_all_below=None, cap_soft=False, buy_block=None, reselect=None, exit_to_top=None):
     """Weekly targets (``base`` from rank_targets) + mid-week swaps on ``check_days``.
 
     On a check day: rank = position among qualifying names (eligible, score > min_score, valid vol), same order as
@@ -1414,15 +1453,18 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
     the held name's weight. Repeated until no pair qualifies. Weekly rebalance days reset to ``base``.
     Ties: several held names that no longer qualify (no rank) are taken in column order (= sector_mapping.tradable_symbols),
     exactly as in the tested variant D.
-    exit_all_below (mid-week exit, e.g. 30): after the swaps, every holding ranked worse than this (or unranked) is sold and
-    its weight stays in cash until the next weekly rebalance (variant S3 of Reports/sell_rule_test.csv).
+    exit_all_below (mid-week exit, e.g. 30): after the swaps, every holding ranked worse than this (or unranked) leaves.
+    exit_to_top (e.g. 10, live): each such holding is first offered to the best non-held name in the top exit_to_top
+    (same weight, earnings rule); only leftovers stay in cash until the weekly rebalance. exit_to_top None = always cash
+    (variant S3 of Reports/sell_rule_test.csv; the midweek repro pins).
     cap_soft (T20): the sector cap is ignored at mid-week swaps - a non-held top-3 stock always replaces the worst-ranked
     holding below exit_below.
     buy_block (earnings rule): days-until-earnings frame; a top-N candidate with earnings in the window is skipped.
     reselect(t, held) -> (weights, log rows): redo the weekly selection with the REAL holdings (needed when the earnings
     rule is on, because "already held" then matters); its rows replace rank_targets' rows for that date.
     decision_log: rows (like rank_targets) for check days WITH a swap or exit (hold / add / drop).
-    check_log: one dict per check day and swap (Action 'SWAP') and per exit (Action 'SELL'), or one 'NO SWAP' row with a Note.
+    check_log: one dict per check day and swap (Action 'SWAP') / exit-replace (Action 'REPLACE') / cash exit (Action 'SELL'),
+    or one 'NO SWAP' row with a Note.
     """
     dates, cols = base.index, list(base.columns)
     S = score_w.reindex(index=dates, columns=cols).to_numpy(float)
@@ -1459,18 +1501,28 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
             before = cur.copy()
             skip = {j for j in order[:enter_top] if cur[j] == 0 and not np.isnan(BB[t, j])} if BB is not None else set()
             swaps = midweek_swap_pairs(cur, order, rank, sectors, enter_top, exit_below, cap, skip=skip)
+            # Exit replacements use the full top-N earnings skip (not only enter_top), matching forward_test.
+            skip_exit = ({j for j in order[:exit_to_top] if cur[j] == 0 and not np.isnan(BB[t, j])}
+                         if BB is not None and exit_to_top else set())
+            reps = midweek_exit_replacements(cur, order, rank, exit_all_below, exit_to_top, skip=skip_exit)
             exits = midweek_exit_sells(cur, rank, exit_all_below)
             if check_log is not None:
-                if swaps or exits:
+                if swaps or reps or exits:
                     for e, h, w in swaps:
                         check_log.append({"Date": dates[t], "Action": "SWAP", "Sell": cols[h], "Sell_Rank": rank.get(h, np.nan),
                                           "Sell_Score": S[t, h], "Buy": cols[e], "Buy_Rank": rank[e], "Buy_Score": S[t, e],
                                           "Weight": w, "Sell_Sector": sectors[h], "Buy_Sector": sectors[e], "Note": ""})
+                    for e, h, w in reps:
+                        check_log.append({"Date": dates[t], "Action": "REPLACE", "Sell": cols[h], "Sell_Rank": rank.get(h, np.nan),
+                                          "Sell_Score": S[t, h], "Buy": cols[e], "Buy_Rank": rank[e], "Buy_Score": S[t, e],
+                                          "Weight": w, "Sell_Sector": sectors[h], "Buy_Sector": sectors[e],
+                                          "Note": f"worse than rank {exit_all_below}: replaced by top-{exit_to_top}"})
                     for h, w in exits:
                         check_log.append({"Date": dates[t], "Action": "SELL", "Sell": cols[h], "Sell_Rank": rank.get(h, np.nan),
                                           "Sell_Score": S[t, h], "Buy": "", "Buy_Rank": np.nan, "Buy_Score": np.nan,
                                           "Weight": w, "Sell_Sector": sectors[h], "Buy_Sector": "",
-                                          "Note": f"worse than rank {exit_all_below}: sold, cash until the weekly rebalance"})
+                                          "Note": f"worse than rank {exit_all_below}: sold, cash until the weekly rebalance"
+                                                  + (f" (no top-{exit_to_top} refill)" if exit_to_top else "")})
                 else:
                     held = np.where(before > 0)[0]
                     worst = max((rank.get(j, 1e6) for j in held), default=np.nan)
@@ -1495,23 +1547,35 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
                     check_log.append({"Date": dates[t], "Action": "NO SWAP", "Sell": "", "Sell_Rank": np.nan,
                                       "Sell_Score": np.nan, "Buy": "", "Buy_Rank": np.nan, "Buy_Score": np.nan,
                                       "Weight": np.nan, "Sell_Sector": "", "Buy_Sector": "", "Note": note})
-            if (swaps or exits) and decision_log is not None:
+            if (swaps or reps or exits) and decision_log is not None:
                 partner = {h: e for e, h, _ in swaps}
                 partner.update({e: h for e, h, _ in swaps})
+                replaced_by = {h: e for e, h, _ in reps}
+                replaced_by.update({e: h for e, h, _ in reps})
                 exited = {h for h, _ in exits}
                 for j in np.where((before > 0) | (cur > 0))[0]:
                     r = rank.get(j, np.nan)
                     rtxt = f"rank {r}" if r == r else "no longer qualifies"
                     p = partner.get(j)
-                    if cur[j] > 0 and before[j] == 0:
+                    q = replaced_by.get(j)
+                    if cur[j] > 0 and before[j] == 0 and j in replaced_by:
+                        status = "add"
+                        why = (f"mid-week exit replace in: {rtxt} is in the top {exit_to_top}; replaces {cols[q]} "
+                               f"({'rank ' + str(rank[q]) if q in rank else 'no longer qualifies'})")
+                    elif cur[j] > 0 and before[j] == 0:
                         status = "add"
                         why = (f"mid-week swap in: {rtxt} is in the top {enter_top}; replaces {cols[p]} "
                                f"({'rank ' + str(rank[p]) if p in rank else 'no longer qualifies'})")
                     elif cur[j] == 0 and j in exited:
                         status = "drop"
                         why = (f"mid-week exit: {rtxt} (worse than {exit_all_below}); sold, cash until the weekly rebalance"
+                               + (f" (no top-{exit_to_top} refill)" if exit_to_top else "")
                                if r == r else "mid-week exit: no longer qualifies (score <= 0 or no data); sold, cash until "
                                "the weekly rebalance")
+                    elif cur[j] == 0 and j in replaced_by:
+                        status = "drop"
+                        why = (f"mid-week exit: {rtxt} (worse than {exit_all_below}); replaced by {cols[q]} "
+                               f"(rank {rank[q]})")
                     elif cur[j] == 0:
                         status = "drop"
                         why = f"mid-week swap out: {rtxt} (below {exit_below}); replaced by {cols[p]} (rank {rank[p]})"
@@ -1575,18 +1639,21 @@ def _rebase_weekly_log(decision_log, date, idx, held_before, new, cols, sectors,
 
 def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_w=None, decision_log=None,
                    check_log=None, midweek=None, exit_all_below="winner", selection=None, earnings_block_days="winner",
-                   earnings=None):
+                   earnings=None, exit_to_top="winner"):
     """Live WINNER targets: weekly rank_targets + (if WINNER['midweek_swap']) mid-week swaps + (if
-    WINNER['midweek_exit_below']) mid-week exits to cash.
+    WINNER['midweek_exit_below']) mid-week exits, replaced from the top WINNER['midweek_exit_to_top'] when set.
 
     Returns (targets, check_days). check_days is all-False when the mid-week swap is off. ``midweek`` overrides
     WINNER['midweek_swap'] (pass False to force plain weekly); ``exit_all_below`` overrides WINNER['midweek_exit_below']
-    (None = no mid-week exit); ``selection`` = dict(max_pick_rank=..., cap_soft=...) overrides the T20 keys;
+    (None = no mid-week exit); ``exit_to_top`` overrides WINNER['midweek_exit_to_top'] (None = always cash until Friday);
+    ``selection`` = dict(max_pick_rank=..., cap_soft=..., sector_cap=...) overrides Friday + mid-week selection keys;
     ``earnings_block_days`` overrides WINNER['earnings_block_days'] (None = no earnings rule); ``earnings`` = earnings dates
     (default: load_earnings(), i.e. Reports/earnings_date.csv)."""
     mw = WINNER.get("midweek_swap") if midweek is None else midweek
     if exit_all_below == "winner":
         exit_all_below = WINNER.get("midweek_exit_below")
+    if exit_to_top == "winner":
+        exit_to_top = WINNER.get("midweek_exit_to_top")
     if earnings_block_days == "winner":
         earnings_block_days = WINNER.get("earnings_block_days")
     args = winner_rank_args(regime)
@@ -1609,10 +1676,10 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
         return one.iloc[0].to_numpy(float), rows or []
     checks = midweek_check_days(base.index, mw.get("days", ("Mon", "Wed")), rebalance_days)
     tgt = apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, checks, mw["enter_top"], mw["exit_below"],
-                              WINNER["sector_cap"], WINNER["n"], WINNER["min_score"], tiebreak_w=tiebreak_w,
+                              args["sector_cap"], args["n"], args["min_score"], tiebreak_w=tiebreak_w,
                               decision_log=decision_log, check_log=check_log, exit_all_below=exit_all_below,
                               cap_soft=args["cap_soft"], buy_block=block,
-                              reselect=reselect if block is not None else None)
+                              reselect=reselect if block is not None else None, exit_to_top=exit_to_top)
     return tgt, checks
 
 

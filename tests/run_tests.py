@@ -1,4 +1,5 @@
 """Run the regression tests:  python tests/run_tests.py  [--fast = skip the app / dashboard tests]
+  test_midweek_exit_replace.py  live Mon/Wed exit refill (rank>30 -> best top-10 not held; cash only if none left)
   test_midweek_repro.py  live engine reproduces the pinned backtests exactly
                          ((None,F,F) 470.31/1.4393, (30,F,F) 457.14/1.4451,
                           (30,T,F) 452.96/1.3172, (30,T,T) 387.57/1.2249)
@@ -90,7 +91,8 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
          "test_alpaca_api_names.py", "test_smart_orders.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py",
          "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py", "test_forward_test.py", "test_earnings_stop.py",
          "test_safety_guards.py", "test_earnings_planner.py", "test_tax_lots.py",
-         "test_trade_audit.py"]
+         "test_trade_audit.py",
+         "test_midweek_exit_replace.py"]
 
 
 def main():

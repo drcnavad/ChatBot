@@ -74,7 +74,7 @@ check("no plan price or fill -> nan; an exact fill is 0.0 (not -0.0)", all(math.
 ORD = [O("live-20261002-BUY-AAA-10-10000", "AAA", "buy", 10, 10, 101, limit=100.05, at="2026-10-02T20:31:00Z"),
        O("live-20261002-SELL-BBB-5-5000", "BBB", "sell", 5, 5, 49.5, limit=49.97, at="2026-10-02T20:30:00Z"),
        O("live-20261002-SELL-CCC-6-2000", "CCC", "sell", 6, 1, 20, status="expired", limit=19.99, at="2026-10-02T20:30:30Z"),
-       O("manual-1", "DDD", "buy", 2, 2, 30, kind="market", at="2026-09-03T15:00:00Z")]
+       O("manual-1", "DDD", "buy", 2, 2, 30, kind="market", at="2026-10-02T19:00:00Z")]
 led = ta.ledger(ORD)
 check("ledger: one row per order, newest first, CT times", list(led["Symbol"]) == ["AAA", "CCC", "BBB", "DDD"]
       and led["Submitted_CT"].iloc[0] == pd.Timestamp("2026-10-02 15:31:00") and list(led.columns) == ta.LEDGER_COLS)
@@ -93,15 +93,16 @@ def FL(sym, side, qty, px, t, oid="x"):
     return {"id": f"{t}-{sym}", "symbol": sym, "side": side, "qty": str(qty), "price": str(px), "transaction_time": t, "order_id": oid}
 
 
-fills = [FL("AAA", "buy", 10, 100, "2026-01-05T15:00:00Z", "b1"), FL("AAA", "buy", 5, 110, "2026-02-02T15:00:00Z", "b2"),
-         FL("AAA", "sell", 12, 120, "2026-03-02T15:00:00Z", "s1"), FL("AAA", "sell", 5, 90, "2026-03-09T15:00:00Z", "s2")]
-rt = ta.round_trips(fills, [{"id": "s1", "client_order_id": "live-20260302-SELL-AAA-12-12000"}]).sort_values(["Sold_CT", "Bought_CT"])
+# Dates on/after AUDIT_START (2026-10-02); span kept so Days_Held still 56 / etc.
+fills = [FL("AAA", "buy", 10, 100, "2026-10-02T15:00:00Z", "b1"), FL("AAA", "buy", 5, 110, "2026-10-30T15:00:00Z", "b2"),
+         FL("AAA", "sell", 12, 120, "2026-11-27T15:00:00Z", "s1"), FL("AAA", "sell", 5, 90, "2026-12-04T15:00:00Z", "s2")]
+rt = ta.round_trips(fills, [{"id": "s1", "client_order_id": "live-20261127-SELL-AAA-12-12000"}]).sort_values(["Sold_CT", "Bought_CT"])
 rows = rt.to_dict("records")
-check("FIFO: the Mar 2 sale of 12 = 10 bought $100 (+$200, +20%, 56 days) + 2 bought $110 (+$20)",
+check("FIFO: the Nov 27 sale of 12 = 10 bought $100 (+$200, +20%, 56 days) + 2 bought $110 (+$20)",
       close(rows[0]["Shares"], 10) and close(rows[0]["Buy_Price"], 100) and close(rows[0]["P/L $"], 200) and close(rows[0]["P/L %"], 20)
       and rows[0]["Days_Held"] == 56 and close(rows[1]["Shares"], 2) and close(rows[1]["P/L $"], 20)
       and rows[0]["Sell_Source"] == "bot: decision", rows)
-check("the Mar 9 sale of 5 = the 3 left at $110 (-$60) + 2 with no purchase in the history (noted, no P/L)",
+check("the Dec 4 sale of 5 = the 3 left at $110 (-$60) + 2 with no purchase in the history (noted, no P/L)",
       close(rows[2]["Shares"], 3) and close(rows[2]["P/L $"], -60) and close(rows[3]["Shares"], 2) and pd.isna(rows[3]["Buy_Price"])
       and "before the account history" in rows[3]["Note"], rows[2:])
 

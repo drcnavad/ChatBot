@@ -209,19 +209,17 @@ live_raw, _ = be.winner_targets(inp["scores"]["live"], inp["eligible"], inp["vol
                                 tiebreak_w=inp["scores"]["rs"], earnings=EARN)
 check("ATR stops: with no stop the day-by-day replay = be.winner_targets exactly (every day, both windows)",
       all(ft.atr_stop_targets(inp, **{**ft.STOPS[m], "k": np.inf})[0].equals(live_raw) for m in ft.STOPS))
-# mid-week variants: same as live until the first Mon/Wed check where the changed rule acts
+# mid-week variants: swap-threshold ones differ from live at a Mon/Wed check; cash-until-Friday differs when a
+# rank>30 exit has a top-10 refill under live (Chirag 2026-10-05: live refills; this variant still cashes out).
 chk_days = be.midweek_check_days(live_raw.index, ft.MIDWEEK.get("days", ("Mon", "Wed")), inp["weekly"])
-mid = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c.get("midweek") or c.get("replay")}
 tg_live_full = full[ft.LIVE]
-first = {k: int((~np.isclose(v, tg_live_full).all(axis=1)).argmax()) for k, v in mid.items()}
-check("mid-week variants: swap below 20 / 25 and exit replaced by top-10 = live until a Mon/Wed check, then differ there",
-      all(chk_days.iloc[first[k]] and first[k] > 0 for k in mid), first)
-t10 = first["Live, exit replaced by top-10"]
-prev10, now10, live10 = (x.iloc[i].to_numpy() for x, i in ((tg_live_full, t10 - 1), (mid["Live, exit replaced by top-10"], t10),
-                                                            (tg_live_full, t10)))
-check("exit replaced by top-10: where live sells a holding to cash, the stock that comes in takes its weight (same total)",
-      now10.sum() > live10.sum() - 1e-12 and np.isclose(now10.sum(), prev10.sum()) and set(np.where(now10 > live10)[0]).isdisjoint(np.where(prev10 > 0)[0]),
-      (prev10.sum(), live10.sum(), now10.sum()))
+mid_swap = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c.get("midweek")}
+first_swap = {k: int((~np.isclose(v, tg_live_full).all(axis=1)).argmax()) for k, v in mid_swap.items()}
+check("mid-week variants: swap below 20 / 25 = live until a Mon/Wed check, then differ there",
+      all(chk_days.iloc[first_swap[k]] and first_swap[k] > 0 for k in mid_swap), first_swap)
+cash = full["Live, exit to cash until Friday"]
+check("exit to cash until Friday: differs from live (live refills from top-10; this variant does not)",
+      not np.allclose(cash.to_numpy(), tg_live_full.to_numpy()), (float(np.abs(cash - tg_live_full).to_numpy().max()),))
 # stop scenarios: each stock held over a Friday reports (after the close) 2 sessions after that Friday
 L, fridays = live_raw.to_numpy(), np.where(inp["weekly"].to_numpy(bool))[0]
 EARN2 = pd.DataFrame([{"Symbol": s_, "Earnings Date": live_raw.index[f + 2], "Time": "PM"} for j_, s_ in enumerate(live_raw.columns)
@@ -430,17 +428,25 @@ if os.path.exists(ft.SIGNAL_CSV):
                                      real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"])
     check("ATR stops on the real data: with no stop the replay = the live targets on every saved day",
           all(ft.atr_stop_targets(real_inp, **{**ft.STOPS[m], "k": np.inf})[0].equals(real_live) for m in ft.STOPS))
-    check("exit replaced by top-N on the real data: with N = 3 the replay = the live targets on every saved day",
-          ft.atr_stop_targets(real_inp, k=np.inf, exit_to_top=3)[0].equals(real_live))
-    mine = ft.strategy_targets(ft.STRATEGIES[0], real_inp).loc[d0]
+    check("exit replaced by top-N on the real data: with N = live midweek_exit_to_top the replay = the live targets",
+          ft.atr_stop_targets(real_inp, k=np.inf, exit_to_top=be.WINNER.get("midweek_exit_to_top"))[0].equals(real_live))
+    # Oct 2 CSV was written under T20 soft-cap + cash-until-Friday. Recompute with those pins for apples-to-apples.
+    old_sel = dict(max_pick_rank=20, cap_soft=True, sector_cap=0.4)
+    mine_old, _ = be.winner_targets(real_inp["scores"]["live"], real_inp["eligible"], real_inp["vol"], real_inp["regime"],
+                                    real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"],
+                                    selection=old_sel, exit_to_top=None)
+    mine = be.live_weights(mine_old.loc[d0])  # CSV stores live (x99% floored) weights
     mine = mine[mine > 0].sort_index()
-    check("live rules recomputed from the saved files = the live Strategy_Weight of Oct 2 (apples to apples)",
+    check("Oct 2 Strategy_Weight = T20 soft-cap rules (the pins that wrote the file; live is now pure top-10)",
           list(live.index) == list(mine.index) and np.allclose(live, mine, atol=1e-9), (live.to_dict(), mine.to_dict()))
     check("no live file changed (signal_analysis, picks, run_state, pending orders, orders log); WINNER untouched",
           digest() == before and be.WINNER == w0)
 src = open(os.path.join(ROOT, "forward_test.py"), encoding="utf-8").read()
+_src_wo_get = (src.replace("be.WINNER.get(", "")
+               .replace("WINNER.get(", ""))  # allow .get; ban WINNER[ writes/reads
 check("forward_test.py has no order code and never writes the live files or WINNER",
       not any(w in src for w in ("submit_order", "cancel_order", "OrderRequest", "TradingClient", "import paper_trade",
-                                 "requests.post", "run_state", "live_pending_orders", "WINNER.update", "WINNER[")))
+                                 "requests.post", "run_state", "live_pending_orders", "WINNER.update"))
+      and "WINNER[" not in _src_wo_get)
 print(f"\n{len(FAIL)} failed" if FAIL else "\nFORWARD TEST OK")
 sys.exit(1 if FAIL else 0)

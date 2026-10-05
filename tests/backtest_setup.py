@@ -29,7 +29,9 @@ rs, _ = be.relative_strength(C, U)
 sc = 0.5 * st + 0.5 * rs
 vol = be.volatility(C[U])
 reg = be.regime_series(C, "QQQ")
-RA = be.winner_rank_args(reg)
+# Historical C6 pins (EXPECTED in test_midweek_repro) use hard max-4/sector; live WINNER is now sector_cap=1.0.
+HIST_SECTOR_CAP = 0.4
+RA = {**be.winner_rank_args(reg), "sector_cap": HIST_SECTOR_CAP}
 last = idx[-1]
 
 # decision calendars: Friday = last session of each ISO week; Mon/Wed checks = first session on/after each Mon/Wed, not a Friday
@@ -44,7 +46,7 @@ E_ = el.reindex_like(sc).astype("boolean").fillna(False).to_numpy(bool)
 V_ = vol.reindex_like(sc).to_numpy(float)
 T_ = rs.reindex_like(sc).to_numpy(float)
 SECT = np.array([sm.symbol_sector.get(s, "Other") for s in U])
-CAP = be.winner_max_per_sector()
+CAP = max(1, int(np.floor(HIST_SECTOR_CAP * be.WINNER["n"])))  # pinned 4; not live winner_max_per_sector()
 
 
 def order_at(t):

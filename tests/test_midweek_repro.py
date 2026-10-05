@@ -47,8 +47,11 @@ MW = {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]}
 
 def check(exit_all, t20=False, e5=False):
     chk = []
-    kw = {"exit_all_below": exit_all, "earnings_block_days": 5 if e5 else None,
-          "selection": dict(max_pick_rank=20, cap_soft=True) if t20 else g.PLAIN}
+    kw = {"exit_all_below": exit_all, "exit_to_top": None,  # pin the cash-until-Friday variant (live now refills)
+          "earnings_block_days": 5 if e5 else None,
+          # sector_cap must be pinned: live is now 1.0 (pure top-10); these EXPECTED numbers are the 0.4-cap era
+          "selection": (dict(max_pick_rank=20, cap_soft=True, sector_cap=0.4) if t20
+                        else dict(max_pick_rank=None, cap_soft=False, sector_cap=0.4))}
     t_live, checks = be.winner_targets(g.sc, g.el, g.vol, g.reg, g.weekly, tiebreak_w=g.rs, check_log=chk, midweek=MW, **kw)
     t_test, swaps_test, sells_test = g.buffered_midweek(3, 15, exit_all, t20=t20, block=g.block_matrix(5) if e5 else None)
     assert (checks.to_numpy(bool) == g.midweek.to_numpy(bool)).all(), "check-day calendars differ"
@@ -91,8 +94,11 @@ mw30 = check(30)
 t20 = check(30, t20=True)
 e5 = check(30, t20=True, e5=True)
 live_e5 = be.WINNER.get("earnings_block_days") == 5
-swaps_test, sells_test = {(None, False, False): plain, (30, False, False): mw30, (30, True, False): t20,
-                          (30, True, True): e5}[(live_exit, live_t20, live_e5)]
+# Historical strategy_decisions.csv was written under T20-E5 + cash-until-Friday. Live since 2026-10-05 uses
+# no sector limit + exit-replaced-by-top-10; compare the CSV only while those pins still match live.
+_live_matches_csv_pins = (live_t20 and live_e5 and not be.WINNER.get("midweek_exit_to_top")
+                          and be.WINNER.get("sector_cap", 0.4) < 1.0 - 1e-12)
+swaps_test, sells_test = e5  # always exercise the T20-E5 pin; live-history compare is gated below
 
 # --- the live pipeline output (shorter data window) agrees with the test over the overlap ---
 _dec_path = os.path.join(be.REPORTS_DIR, "strategy_decisions.csv")
@@ -102,7 +108,10 @@ _list_changed = _run_list != set(g.U)
 if _list_changed:
     print(f"SKIP live-history check: the stock list changed since the last main_signal_analysis run (added "
           f"{sorted(set(g.U) - _run_list)}, removed {sorted(_run_list - set(g.U))}) - it runs again after the next pipeline run")
-if be.WINNER.get("midweek_swap") and not _list_changed:
+if not _live_matches_csv_pins:
+    print("SKIP live-history check: live WINNER no longer matches the T20-E5 cash-exit pins that wrote "
+          "Reports/strategy_decisions.csv (no sector limit + exit-to-top); re-baseline after the next pipeline run")
+if be.WINNER.get("midweek_swap") and not _list_changed and _live_matches_csv_pins:
     dec = pd.read_csv(_dec_path, parse_dates=["Date"])
     first_live = dec.Date.min() + pd.Timedelta(days=7)          # after the first live weekly decision
     adds = dec[(dec.Status == "add") & dec.Reason.astype(str).str.startswith("mid-week swap in")]
