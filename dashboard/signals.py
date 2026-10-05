@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from dashboard.data import last_next_earnings, read_report_csv
-from dashboard.settings import (CHANGES_CSV, EARNINGS, EXIT_BELOW, MAX_PICK, MIDWEEK, N_PICKS, PICKS_CSV, SECTOR_MAX,
+from dashboard.settings import (CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, MAX_PICK, MIDWEEK, N_PICKS, PICKS_CSV, SECTOR_MAX,
     symbol_sector)
 
 
@@ -28,7 +28,15 @@ def plain_reason(signal, reason, rank=None, score=None):
         rep_m = re.search(r"replaces (\S+)", reason)
         return (f"mid-week swap: jumped into the top {MIDWEEK['enter_top'] if MIDWEEK else 3} at rank "
                 f"{m.group(1) if m else r}" + (f", replaces {rep_m.group(1)}" if rep_m else ""))
+    if reason.startswith("mid-week exit replace in"):
+        rep_m = re.search(r"replaces (\S+)", reason)
+        return (f"mid-week exit refill: into top-{EXIT_TO_TOP or 10} at rank {m.group(1) if m else r}"
+                + (f", replaces {rep_m.group(1)}" if rep_m else ""))
     if reason.startswith("mid-week exit"):
+        by = re.search(r"replaced by (\S+)", reason)
+        if by:
+            return (f"mid-week exit: {'rank ' + m.group(1) if m else 'no longer ranked'} is worse than {EXIT_BELOW or 30}; "
+                    f"replaced by {by.group(1)}")
         return (f"mid-week exit: {'rank ' + m.group(1) if m else 'no longer ranked'} is worse than {EXIT_BELOW or 30}; "
                 "sold, cash until the Friday rebalance")
     if reason.startswith("mid-week swap out"):
@@ -40,12 +48,18 @@ def plain_reason(signal, reason, rank=None, score=None):
         if "sector cap relaxed" in reason:
             return f"made the portfolio at rank {rk} (free slot filled from the top {MAX_PICK or 20}, sector limit relaxed)"
         if rk is not None and rk > N_PICKS:
-            return (f"made the portfolio at rank {rk} (higher-ranked stocks were skipped by the {SECTOR_MAX}-per-sector limit"
-                    + (" or the earnings rule)" if EARNINGS else ")"))
+            if SECTOR_MAX < N_PICKS:
+                return (f"made the portfolio at rank {rk} (higher-ranked stocks were skipped by the {SECTOR_MAX}-per-sector limit"
+                        + (" or the earnings rule)" if EARNINGS else ")"))
+            return (f"made the portfolio at rank {rk}"
+                    + (" (higher-ranked stocks skipped by the earnings rule)" if EARNINGS else ""))
         return f"made the top {N_PICKS} at rank {rk if rk is not None else r}"
     if signal == "Hold":
-        return f"in top {N_PICKS}, rank {r}" if rank is not None and pd.notna(rank) and rank <= N_PICKS else \
-            f"still selected at rank {r} (higher-ranked stocks skipped by the sector limit)"
+        if rank is not None and pd.notna(rank) and rank <= N_PICKS:
+            return f"in top {N_PICKS}, rank {r}"
+        why = ("higher-ranked stocks skipped by the sector limit" if SECTOR_MAX < N_PICKS
+               else "held through a mid-week check")
+        return f"still selected at rank {r} ({why})"
     if signal == "Sold":
         if reason.startswith("score"):
             return f"score fell below 0 ({sc})"
@@ -78,6 +92,8 @@ def decision_tag(signal, reason):
                 return tag
     if signal == "Buy" and reason.startswith("mid-week swap in"):
         return "mid-week swap"
+    if signal == "Buy" and reason.startswith("mid-week exit replace in"):
+        return "mid-week exit refill"
     return ""
 
 

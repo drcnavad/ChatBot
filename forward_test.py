@@ -68,7 +68,7 @@ RANK_RULE = ("Ranked by median weekly return (Friday to Friday); a tie goes to t
 # ---------------------------------------------------------------------------------------------------- the strategies
 # One dict per strategy. Ranked strategies go through the engine's own selection (be.winner_targets); their defaults = the
 # live rules: score "live" (0.5 x technical + 0.5 x relative strength), relative strength tiebreak, Friday rebalance +
-# Mon/Wed swaps and exits ("mwf"), top 10 from ranks 1-20, max 4 per sector (relaxed to fill the slots), 1/volatility
+# Mon/Wed swaps and exits ("mwf"); live Friday = pure top-10 by rank (no sector / no rank-20 gate), 1/volatility
 # weights, half size when QQQ is below its 200-day average, no buys 5 days before earnings. "select" changes rank_targets
 # keys (n, sector_cap, vol_sizing, regime, ...), "earnings" None drops the earnings skip, "calendar" is "mwf" / "weekly"
 # (Friday only) / "monthly" (last session of the month). "weights" = a rule that is not a ranking (its own weights below);
@@ -316,8 +316,8 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit
     rebalance with earnings within the next arm_days calendar days, from that Friday through its reaction day. Inside it
     a holding whose close is at or below its highest close since it was bought - k x ATR(14) is sold in full at that close
     (gap_open: on the reaction day an open already below the stop sells at the open); its weight goes to the best stock
-    the live rules would buy: ranks 1-20, max 4 per sector unless none fits, no buy within 5 days of earnings, and not a
-    stock stopped out in its window. exit_to_top: on Mon/Wed, after the top-3 swaps, a holding ranked worse than the exit
+    the live rules would buy (same selection as WINNER: pure top-10 when sector_cap is 1.0 / max_pick_rank None),
+    no buy within 5 days of earnings, and not a stock stopped out in its window. exit_to_top: on Mon/Wed, after the top-3 swaps, a holding ranked worse than the exit
     rank (30) is swapped for the best non-held stock in the top exit_to_top (same weight, earnings rule) and only sold to
     cash when none is left. Default "winner" = live midweek_exit_to_top (be.WINNER.get); pass None for cash-until-Friday.
     Returns (raw weights, open-sale prices)."""
@@ -386,7 +386,8 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit
         for j in np.where(inside & (C[t] <= np.fmax(peak, C[t]) - k * A[t]))[0]:
             freed.append(stop_out(t, j))
         for w in freed:                                   # refill each freed slot (its weight) like a live buy
-            cands = [j for j in ranked(t)[:args["max_pick_rank"]] if cur[j] == 0 and np.isnan(BB[t, j])]
+            _pool = ranked(t) if args.get("max_pick_rank") is None else ranked(t)[:args["max_pick_rank"]]
+            cands = [j for j in _pool if cur[j] == 0 and np.isnan(BB[t, j])]
             fits = [j for j in cands if sum(sectors[cur > 0] == sectors[j]) < per_sector] or (cands if args["cap_soft"] else [])
             if fits:
                 cur[fits[0]] = w

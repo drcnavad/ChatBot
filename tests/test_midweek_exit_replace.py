@@ -57,5 +57,29 @@ check("Fri pure top-10 (no sector / no rank-20 gate); 20% / earnings / top-3 swa
 check("exit_to_top=None still means cash-until-Friday (midweek_exit_replacements no-ops)",
       be.midweek_exit_replacements(np.array([0.1, 0.0, 0.08]), [0, 1, 2], {0: 1, 1: 2, 2: 5}, 3, None) == [])
 
+# --- paper_trade must treat REPLACE like a mid-week trade (Sell+Buy), not ignore it ---
+import tempfile
+import paper_trade as pt
+
+_csv = (
+    "As_Of,Event,Event_Date,Applies_To_Open,Action,Sell,Buy,Message,Sell_Rank,Buy_Rank,Weight_%,Is_Latest\n"
+    "2026-10-05,mid-week check,2026-10-05,2026-10-06,REPLACE,BE,U,exit refill,40,10,6.0,1\n"
+    "2026-10-05,mid-week check,2026-10-05,2026-10-06,SELL,ZZ,,cash leftover,55,,5.0,1\n"
+    "2026-10-05,mid-week check,2026-10-05,2026-10-06,NO SWAP,,,quiet,,,,1\n"
+)
+with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
+    f.write(_csv)
+    path = f.name
+rows = pt.latest_midweek_swaps(path, "2026-10-05")
+check("paper_trade.latest_midweek_swaps includes REPLACE and SELL, skips NO SWAP",
+      list(rows["Action"]) == ["REPLACE", "SELL"] and list(rows["Buy"].fillna("")) == ["U", ""],
+      rows.to_dict("list"))
+orders = pt.build_swap_orders(rows, account_size=100_000, positions={"BE": 10, "ZZ": 5},
+                              prices={"BE": 50.0, "U": 25.0, "ZZ": 40.0}, fractional=True)
+sides = orders.set_index("Symbol")["Side"].to_dict()
+check("REPLACE builds SELL BE + BUY U; SELL builds SELL ZZ only",
+      sides.get("BE") == "SELL" and sides.get("U") == "BUY" and sides.get("ZZ") == "SELL",
+      orders[["Symbol", "Side", "Shares"]].to_dict("list"))
+
 print(f"\n{len(FAIL)} failed" if FAIL else "\nMIDWEEK EXIT REPLACE OK")
 sys.exit(1 if FAIL else 0)

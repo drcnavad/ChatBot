@@ -37,13 +37,13 @@ Targets come from Reports/strategy_picks.csv (written by main_signal_analysis.ip
   - `current`     = Strategy_Weight (portfolio decided at the last weekly rebalance)
   - `provisional` = Provisional_Weight (what the rules would pick at the latest close)
   - `midweek`     = the decisions of the latest Mon/Wed mid-week check (Reports/strategy_midweek_check.csv, live rules):
-                    swap = SELL all shares of the stock that fell below rank 15 and BUY the new top-3 stock with the same dollars
-                    (without --positions the dollars = the old stock's target weight x account size); exit = SELL all shares of
-                    a stock ranked worse than 30, SELL-ONLY (the cash stays idle until the Friday rebalance). Nothing else is traded.
+                    SWAP = SELL the stock that fell below rank 15 and BUY the new top-3 stock with the same dollars;
+                    REPLACE = SELL a holding worse than rank 30 and BUY the best eligible non-held top-10 (same dollars;
+                    earnings rule); SELL = exit to cash until Friday when no top-10 refill is left. Nothing else is traded.
   - `auto` (default) = provisional on a rebalance day (the decision day itself); midweek when the latest bar is a Mon/Wed
-                    check that produced a swap or an exit; hold on a quiet mid-week day (no swap/exit at the
+                    check that produced a swap, replace, or cash exit; hold on a quiet mid-week day (no swap/exit at the
                     latest check) - every position is left unchanged, matching the backtest (no drift
-                    rebalance, and cash from a mid-week exit stays idle until Friday).
+                    rebalance, and cash from a mid-week cash-exit stays idle until Friday).
 Earnings rule (backtest_engine.WINNER["earnings_block_days"] = 5): the targets leave out stocks not held with earnings
 within 5 calendar days. The live planner adds its own check for the LIVE account: a pick with earnings within 5 days is
 not newly bought or topped up (this rule never sells; the pre-earnings stop, earnings_stop.py, may).
@@ -207,9 +207,9 @@ def check_signal_freshness(picks_csv=PICKS_CSV, changes_csv=CHANGES_CSV, decisio
 
 # ----------------------------------------------------------------------------- target weights and prices (from the Reports CSVs)
 def latest_midweek_swaps(midweek_csv=MIDWEEK_CSV, as_of=None):
-    """Swap and exit rows (Action SWAP / SELL; Sell, Sell_Rank, Buy, Buy_Rank, Weight_%, Message, Event_Date,
-    Applies_To_Open) of the latest mid-week check, only if that check was made at the latest bar (`as_of`). Exit rows
-    (Action SELL) have no Buy. Empty DataFrame otherwise."""
+    """Swap / replace / cash-exit rows (Action SWAP, REPLACE, or SELL) of the latest mid-week check, only if that check
+    was made at the latest bar (`as_of`). SWAP and REPLACE have Sell+Buy (same dollars); SELL is cash until Friday (no Buy).
+    Empty DataFrame otherwise."""
     if not os.path.exists(midweek_csv):
         return pd.DataFrame()
     m = pd.read_csv(midweek_csv)
@@ -218,7 +218,7 @@ def latest_midweek_swaps(midweek_csv=MIDWEEK_CSV, as_of=None):
     m = m[m["Event"] == "mid-week check"]
     if as_of is not None:
         m = m[m["Event_Date"].astype(str) == str(as_of)]
-    return m[m["Action"].isin(["SWAP", "SELL"])].reset_index(drop=True)
+    return m[m["Action"].isin(["SWAP", "REPLACE", "SELL"])].reset_index(drop=True)
 
 
 def load_targets(source="auto", picks_csv=PICKS_CSV, midweek_csv=MIDWEEK_CSV, decision=None):
@@ -569,8 +569,8 @@ def invested_after(orders):
 
 
 def build_swap_orders(swaps, account_size, positions=None, prices=None, fractional=False):
-    """Orders for mid-week swaps: SELL every share of `Sell`, BUY `Buy` with the same dollars (shares x latest close).
-    Exit rows (Action SELL, no Buy): SELL every share of `Sell` only - the cash stays idle until the weekly rebalance.
+    """Orders for mid-week SWAP/REPLACE: SELL every share of `Sell`, BUY `Buy` with the same dollars (shares x latest close).
+    Cash-exit rows (Action SELL, no Buy): SELL every share of `Sell` only - the cash stays idle until the weekly rebalance.
 
     If the account holds no `Sell` shares (no --positions given) the dollars = the swap's target weight x account_size.
     Whole shares (rounded down) by default; fractional=True rounds DOWN to 2 decimals.
