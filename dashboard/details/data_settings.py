@@ -1,4 +1,4 @@
-"""Details tab: data freshness and settings."""
+"""Strategy tab: data freshness and settings."""
 import streamlit as st
 
 from dashboard.style import toned

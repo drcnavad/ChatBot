@@ -14,7 +14,6 @@ with a FAKE Alpaca account (GET only, no network, no keys):
     shares held from before the start left out (sold first under every lot method) and listed; paging stops at the start
   (sections 1-14 test the engine on the full history: build(..., start=None))
 Run: python tests/run_tests.py  (or python tests/test_tax_lots.py)"""
-import math
 import os
 import sys
 from datetime import date
@@ -22,7 +21,6 @@ from datetime import date
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
-import pandas as pd
 
 import tax_lots as tl
 

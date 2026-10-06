@@ -22,7 +22,7 @@ def _fallback_reason(kind, row, n=10):
         return f"score {row.Strategy_Score:.1f} <= 0"
     if pd.notna(row.Strategy_Rank) and row.Strategy_Rank > n:
         return f"rank {row.Strategy_Rank:.0f} outside top {n}"
-    return "skipped: sector cap"
+    return "not picked"
 
 
 def strategy_events(ticker_df, decisions, symbol):
@@ -123,16 +123,3 @@ def daily_status(weight, score):
     if weight is not None and pd.notna(weight) and weight > 0:
         return "Hold"
     return "Score below 0" if score <= 0 else "Watch"
-
-
-def legacy_periods(mask):
-    """(start, end) pairs for each run of True in a date-indexed boolean Series (end = next trading day)."""
-    runs = (mask != mask.shift()).cumsum()
-    next_day = pd.Series(mask.index, index=mask.index).shift(-1).fillna(mask.index[-1] + pd.Timedelta(days=1))
-    return [(g.index[0], next_day[g.index[-1]]) for _, g in mask[mask].groupby(runs[mask])]
-
-
-def legacy_flips(frame):
-    """Rows where the old-rule final_trade flips between BUY and SELL (HOLD/EARNING days ignored)."""
-    direction = frame[frame['final_trade'].isin(['BUY', 'SELL'])].sort_values(['Symbol', 'Date'])
-    return direction[direction['final_trade'].ne(direction.groupby('Symbol')['final_trade'].shift())]

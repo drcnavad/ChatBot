@@ -1,4 +1,4 @@
-"""Details tab: the tax view (tax_lots.py, an estimate, counted from tax_lots.TAX_START)."""
+"""Trading Account tab: the tax view (tax_lots.py, an estimate, counted from tax_lots.TAX_START)."""
 from datetime import datetime
 
 import pandas as pd
@@ -36,7 +36,7 @@ def _harvest_view(t):
 
 
 def render_tax_view(p):
-    """Details tab: realized / unrealized gains (short vs long term), wash sales, harvest list, estimated tax, Form 8949
+    """Trading Account tab: realized / unrealized gains (short vs long term), wash sales, harvest list, estimated tax, Form 8949
     export, from the live account's activity since tax_lots.TAX_START (read-only, hourly). An estimate, not tax advice."""
     import tax_lots as tl
     show_html(f'<div class="sa-note"><b>Estimate, not tax advice.</b> {esc(tl.DISCLAIMER.split(". ", 1)[1])}</div>')

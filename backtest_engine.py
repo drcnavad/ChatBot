@@ -100,7 +100,7 @@ def scored_stock_count():
 
 
 def winner_label(n_stocks):
-    """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'C6-U91-T20-MW30-E5'."""
+    """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'C6-U91-NS-MW30R10-E5'."""
     S, mw = WINNER, WINNER.get("midweek_swap")
     tag = f"C6-U{n_stocks}"
     if S.get("sector_cap", 0.4) >= 1.0 - 1e-12:
@@ -1414,7 +1414,7 @@ def midweek_exit_replacements(cur, order, rank, exit_all_below, exit_to_top, ski
     """After midweek_swap_pairs: each holding ranked worse than exit_all_below is swapped for the best non-held name in
     order[:exit_to_top] (same weight). skip: column indices that may not be bought (earnings rule). Worst-ranked first;
     stops when no refill is left (leftovers go to midweek_exit_sells -> cash until Friday). Returns
-    [(entrant, sold, weight)]. Same rule as forward_test's "Live, exit replaced by top-10"."""
+    [(entrant, sold, weight)]."""
     if not exit_all_below or not exit_to_top:
         return []
     skip = skip or set()

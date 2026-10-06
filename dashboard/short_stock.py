@@ -1,4 +1,4 @@
-"""Dashboard tab: stocks too new to trade (short history; yfinance chart, display only)."""
+"""Home tab: stocks too new to trade (short history; yfinance chart, display only)."""
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st

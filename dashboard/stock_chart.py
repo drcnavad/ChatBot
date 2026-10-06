@@ -1,4 +1,4 @@
-"""Dashboard tab: the single-stock price chart (strategy score, relative strength, RSI / MACD)."""
+"""Home tab: the single-stock price chart (strategy score, relative strength, RSI / MACD)."""
 from datetime import datetime
 
 import pandas as pd
@@ -13,15 +13,15 @@ from dashboard.settings import CT, HOLDINGS_CSV, W_TECH
 from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, HOLD_SHADE, MA_COLORS, MA_COLS, TEAL, num)
 
 
-def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic):
-    """Last 12 months: price + moving averages + buy/sell markers, optional score/rank, relative strength, RSI/MACD panels."""
+def build_price_chart(ticker, tdata, show_strategy):
+    """Last 12 months: price + moving averages + buy/sell markers, the score panel (when ranked), RSI/MACD and relative
+    strength panels."""
     chart = tdata[tdata['Date'] >= tdata['Date'].max() - pd.Timedelta(days=365)].sort_values('Date').set_index('Date')
     x_start, x_end = chart.index[0], chart.index[-1]
     events, periods = strategy_events(tdata, load_decisions(), ticker)
-    rs_lines = relative_strength_lines(chart, ticker) if show_rs else {}
+    rs_lines = relative_strength_lines(chart, ticker)
 
-    panels = ["price"] + (["score"] if show_strategy else []) + (["rsi", "macd"] if show_classic else []) \
-        + (["rs"] if rs_lines else [])
+    panels = ["price"] + (["score"] if show_strategy else []) + ["rsi", "macd"] + (["rs"] if rs_lines else [])
     height_of = {"price": 0.44, "score": 0.20, "rs": 0.18, "rsi": 0.11, "macd": 0.11}
     titles = {
         "price": "<b>Price</b>",
@@ -166,10 +166,8 @@ def build_price_chart(ticker, tdata, show_strategy, show_rs, show_classic):
 
 
 def stock_chart_inputs(ticker, tdata):
-    """The built figure (displayed later, below the detail block). Strategy score, relative strength and RSI/MACD are
-always on; the legacy-signal toggle was removed."""
-    has_strategy = bool(tdata['Strategy_Score'].notna().any())
-    return build_price_chart(ticker, tdata, has_strategy, True, True)
+    """The built figure (displayed later, below the detail block); the score panel only for a ranked stock."""
+    return build_price_chart(ticker, tdata, bool(tdata['Strategy_Score'].notna().any()))
 
 
 def render_stock_figure(fig, ticker):

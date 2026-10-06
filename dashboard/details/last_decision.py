@@ -1,4 +1,4 @@
-"""Details tab: the last decision (decisions in force, every stock)."""
+"""Strategy tab: the last decision (decisions in force, every stock)."""
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -45,18 +45,18 @@ def render_last_decision(p):
     board.loc[board["Signal"] == "Sold", "Portfolio weight %"] = 0.0      # after the decision a sold stock weighs 0
     counts = board["Signal"].value_counts()
     filters = {"Portfolio & changes": ["Buy", "Hold", "Sold"],
-               "Watch list": ["Watch", "Watch (sector limit)"],
+               "Watch list": ["Watch"],
                "All stocks": SIGNALS}
     show = st.radio("Show", list(filters), horizontal=True, key="signals_filter", label_visibility="collapsed")
     part = board[board["Signal"].isin(filters[show])].reset_index(drop=True)
     st.caption(f"Buy {counts.get('Buy', 0)} · Hold {counts.get('Hold', 0)} · "
-               f"Sold {counts.get('Sold', 0)} · Watch {counts.get('Watch', 0) + counts.get('Watch (sector limit)', 0)} · "
+               f"Sold {counts.get('Sold', 0)} · Watch {counts.get('Watch', 0)} · "
                f"Score below 0 {counts.get('Score below 0', 0)}. {rank_then} = the rank the decision used; Rank today = at "
                f"the {today:%a %b %-d} close (Rank change: + = moved up since the decision day); Weight before % → Portfolio "
                f"weight % = the portfolio before and after the decision; Portfolio slot = position among the {N_PICKS} picks; "
                f"Next rebalance plan = what the {plan_when} rebalance would do at the latest close (the numbers the trade "
                "step uses). Orders for a decision go out that day at 2:30 PM CT. Click a row to open the stock on the "
-               "Dashboard tab.")
+               "Home tab.")
     shown = toned(part.round({"Score": 1, "Weight before %": 2, "Portfolio weight %": 2}),
                   ["Signal", "Next rebalance plan", "Rank change", "Earnings soon"])
     event = st.dataframe(toned(shown, ["Score"], good=SCORE_GOOD), hide_index=True,

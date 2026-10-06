@@ -64,8 +64,6 @@
                          hours), fraction to 9 AM, never twice, fails closed; dry run sends and writes nothing
   test_safety_guards.py  20% max weight per stock (extra stays cash); mocked: BUYs over 20% of equity refused (backstop);
                          a missed scheduled decision gets one run-log warning while it waits
-  test_earnings_planner.py Details tab earnings planner (fake bars / calendar): 14-day range, next 3 otherwise, stop =
-                         earnings_stop formula, stop window, median gap / 5-day reaction counts; renders in the app
   test_tax_lots.py       tax view, hand-worked cases: fresh start at TAX_START (older activity, prior years and
                          wash matching against older trades ignored, pre-start shares left out), FIFO / HIFO / LIFO lots, partial and fractional fills, fees, wash
                          sales before / after a loss sale with partial matching, basis + holding-period carryover, cascades,
@@ -91,7 +89,7 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
          "test_live_rules_audit.py", "test_catch_up.py",
          "test_alpaca_api_names.py", "test_smart_orders.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py",
          "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py", "test_forward_test.py", "test_earnings_stop.py",
-         "test_safety_guards.py", "test_earnings_planner.py", "test_tax_lots.py",
+         "test_safety_guards.py", "test_tax_lots.py",
          "test_trade_audit.py",
          "test_midweek_exit_replace.py", "test_midweek_cash_deploy.py"]
 

@@ -218,7 +218,7 @@ def check_signal_freshness(picks_csv=PICKS_CSV, changes_csv=CHANGES_CSV, decisio
 # ----------------------------------------------------------------------------- target weights and prices (from the Reports CSVs)
 def latest_midweek_swaps(midweek_csv=MIDWEEK_CSV, as_of=None):
     """Swap / replace / cash-exit rows (Action SWAP, REPLACE, or SELL) of the latest mid-week check, only if that check
-    was made at the latest bar (`as_of`). SWAP and REPLACE have Sell+Buy (same dollars); SELL is cash until Friday (no Buy).
+    was made at the latest bar (`as_of`). SWAP and REPLACE have Sell+Buy (same dollars); SELL has no Buy (its cash goes to the spare-cash step).
     Empty DataFrame otherwise."""
     if not os.path.exists(midweek_csv):
         return pd.DataFrame()
@@ -249,9 +249,7 @@ def load_targets(source="auto", picks_csv=PICKS_CSV, midweek_csv=MIDWEEK_CSV, de
     if source == "auto" and day != as_of and day < last_reb:
         raise ValueError(f"the {day} decision is older than the {last_reb} rebalance - superseded, not traded")
     if source == "auto":
-        # A quiet mid-week day (no swap/exit at the latest check) holds every position
-        # unchanged, matching the backtest: no drift rebalance, and cash from a mid-week
-        # exit stays idle until the Friday rebalance.
+        # A quiet mid-week day (no swap/exit at the latest check) holds every position unchanged (no drift rebalance).
         source = "provisional" if day == last_reb else ("midweek" if len(swaps) else "hold")
     if source == "midweek" and not len(swaps):
         raise ValueError(f"no mid-week swap or exit at the latest check ({as_of}) - nothing to trade (use target 'current')")
@@ -580,7 +578,7 @@ def invested_after(orders):
 
 def build_swap_orders(swaps, account_size, positions=None, prices=None, fractional=False):
     """Orders for mid-week SWAP/REPLACE: SELL every share of `Sell`, BUY `Buy` with the same dollars (shares x latest close).
-    Cash-exit rows (Action SELL, no Buy): SELL every share of `Sell` only - the cash stays idle until the weekly rebalance.
+    Cash-exit rows (Action SELL, no Buy): SELL every share of `Sell` only (plan_orders then invests spare cash).
 
     If the account holds no `Sell` shares (no --positions given) the dollars = the swap's target weight x account_size.
     Whole shares (rounded down) by default; fractional=True rounds DOWN to 2 decimals.
@@ -823,7 +821,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
             px.update(live_prices)
             orders = build_swap_orders(meta["swaps"], account_size, positions, px, fractional=fractional)
             orders = skip_stop_buys(orders, earnings_stop_blocked(meta["as_of"]))
-        day = meta.get("decision") or (pd.Timestamp(decision).date().isoformat() if decision is not None else meta["as_of"])
+        day = pd.Timestamp(decision).date().isoformat() if decision is not None else meta["as_of"]
         if cash is not None and (force_deploy or is_midweek_check_day(day, signal_csv)):
             ranking = latest_ranking(meta["as_of"], signal_csv)
             cand = list(ranking.loc[pd.to_numeric(ranking["Rank"], errors="coerce") <= DEPLOY_MAX_RANK, "Symbol"].astype(str))

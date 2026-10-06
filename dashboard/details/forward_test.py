@@ -1,4 +1,4 @@
-"""Details tab: the forward test (paper strategies vs the account, QQQ and SPY) and the paper strategies' rules."""
+"""Strategy tab: the forward test (paper strategies vs the account, QQQ and SPY) and the paper strategies' rules."""
 import pandas as pd
 import streamlit as st
 
@@ -6,8 +6,16 @@ from dashboard.data import load_benchmarks, read_report_csv
 from dashboard.style import INK, MUTED, PCT_COL, drawdown_tone, live_row, toned
 
 
+def _board(daily, values):
+    """(leaderboard, values) with the provisional close rows (forward_test.provisional), as shown on the dashboard."""
+    import forward_test as ft
+    bench = load_benchmarks()
+    values, bench = ft.provisional(values, bench.reset_index() if bench is not None else None)
+    return ft.leaderboard(daily, bench, values), values
+
+
 def render_forward_test():
-    """Details tab: the forward-test leaderboard from FORWARD_START (forward_test.py): every paper strategy
+    """Strategy tab: the forward-test leaderboard from FORWARD_START (forward_test.py): every paper strategy
     (forward_test.STRATEGIES, Reports/forward_strategies.csv), the real account (Reports/forward_test_daily.csv), QQQ, SPY."""
     import forward_test as ft
     from backtest_engine import FORWARD_START
@@ -16,9 +24,7 @@ def render_forward_test():
     if (daily is None or daily.empty) and (values is None or values.empty):
         st.info(f"Forward test started {start}; the first daily row is saved after the close (4:15 PM CT on trading days).")
         return
-    bench = load_benchmarks()
-    values, bench = ft.provisional(values, bench.reset_index() if bench is not None else None)
-    board = ft.leaderboard(daily, bench, values)
+    board, values = _board(daily, values)
     marked = ""
     if values is not None and "Provisional" in values and values["Provisional"].fillna(False).astype(bool).any():
         marked = (f" {pd.Timestamp(values['Date'].max()):%a %b %-d}: each strategy's holdings from the last saved day marked "
@@ -69,7 +75,7 @@ def _top10_stocks(board, held):
 
 
 def render_forward_rules():
-    """Details tab: each forward-test strategy's one-line rule and its holdings on the latest saved day."""
+    """Strategy tab: each forward-test strategy's one-line rule and its holdings on the latest saved day."""
     import forward_test as ft
     held, h = ft.holdings(), read_report_csv(ft.HOLDINGS_CSV)
     rules = pd.DataFrame([{"Strategy": c["name"], "Rule": c["rule"], "Holdings now (target weight)": held.get(c["name"], "cash")}
@@ -77,9 +83,7 @@ def render_forward_rules():
     daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
     top10 = "–"
     if daily is not None and values is not None and not daily.empty and not values.empty:
-        bench = load_benchmarks()
-        board = ft.leaderboard(daily, bench.reset_index() if bench is not None else None, values)
-        top10 = _top10_stocks(board, held)
+        top10 = _top10_stocks(_board(daily, values)[0], held)   # same ranks as the leaderboard above
     top_row = pd.DataFrame([{"Strategy": "Top 10",
                              "Rule": "Most common stocks across the rank 1-10 strategies (times held, avg target weight).",
                              "Holdings now (target weight)": top10}])

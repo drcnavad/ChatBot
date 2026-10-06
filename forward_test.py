@@ -81,8 +81,8 @@ EQ = {**PLAIN, "vol_sizing": False}                      # ... and an equal weig
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
 STRATEGIES = [
     dict(name=LIVE, rule="What the bot trades: 50% technical + 50% relative strength, top 10, Fri rebalance + Mon/Wed swaps."),
-    dict(name="Live without rank-20 limit / earnings skip", select=PLAIN, earnings=None,
-         rule="The live rules, but picks may come from any rank and earnings never block a buy."),
+    dict(name="Live without rank-20 limit / earnings skip", select=PLAIN, earnings=None,   # name kept: saved-data key
+         rule="The live rules with at most 4 per sector and no earnings skip (earnings never block a buy)."),
     dict(name="Technical score only", score="tech", rule="Live rules ranking on the technical score alone."),
     dict(name="Relative strength only", score="rs",
          rule="Live rules ranking on relative strength (vs sector ETF and SPY) alone."),
@@ -108,8 +108,8 @@ STRATEGIES = [
     dict(name="Legacy BUY/SELL signals", weights="legacy",
          rule="The Legacy folder's rule: 60% technical + 25% fundamentals + 10% sector week + 5% news; hold from BUY (above "
               "20) to SELL (below -25), an equal slice of the money per stock, checked daily."),
-    dict(name="Top 5", select={"n": 5}, rule="The live rules with 5 stocks (max 2 per sector)."),
-    dict(name="Top 20", select={"n": 20}, rule="The live rules with 20 stocks (= ranks 1-20, max 8 per sector)."),
+    dict(name="Top 5", select={"n": 5}, rule="The live rules with 5 stocks."),
+    dict(name="Top 20", select={"n": 20}, rule="The live rules with 20 stocks (= ranks 1-20)."),
     dict(name="Equal weight", select={"vol_sizing": False}, rule="The live rules with an equal weight per stock."),
     dict(name="Friday only", calendar="weekly", rule="The live rules without the Mon/Wed swaps and exits."),
     dict(name="Monthly", calendar="monthly", rule="The live rules, rebalanced on the last trading day of each month only."),
@@ -168,9 +168,9 @@ STRATEGIES = [
     dict(name="Risk parity", reweight="risk_parity",
          rule="The live picks, weighted so each stock adds the same risk (63-day volatility and correlation)."),
 ]
-for _c in STRATEGIES:                                     # the live limits the plain rankings keep (said once, here)
+for _c in STRATEGIES:                                     # the limits the plain rankings keep (said once, here)
     if (_c.get("select") is PLAIN or _c.get("select") is EQ) and not _c["rule"].startswith("The live rules"):
-        _c["rule"] += " Like live: at most 4 per sector, half size while QQQ is below its 200-day average, score above 0."
+        _c["rule"] += " At most 4 per sector; like live: half size while QQQ is below its 200-day average, score above 0."
 STOPS = {"pre": dict(k=3.5, arm_days=7, gap_open=True), "post": dict(k=3.0, after=10)}   # atr_stop_targets settings
 FWD_BARS = os.path.join(REPORTS, "cache", "forward_bars.pkl")
 FWD_BARS_START = "2026-05-01"      # ~100 sessions before the start: the 50-day volume average is full by Oct 2

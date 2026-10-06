@@ -1,4 +1,4 @@
-"""Details tab: the trade audit (trade_audit.py; read-only, hourly)."""
+"""Trading Account tab: the trade audit (trade_audit.py; read-only, hourly)."""
 from datetime import datetime
 
 import pandas as pd
@@ -24,7 +24,7 @@ AUDIT_LEDGER_COLS = ["Submitted", "Symbol", "Side", "Source", "Status", "Qty", "
 
 
 def render_trade_audit():
-    """Details tab: every order vs its plan price (slippage), each sale with its buy and sell price, reconciliation with
+    """Trading Account tab: every order vs its plan price (slippage), each sale with its buy and sell price, reconciliation with
     Alpaca and alerts (trade_audit.py; read-only, hourly)."""
     import trade_audit as ta
     data, err = holdings_this_run()

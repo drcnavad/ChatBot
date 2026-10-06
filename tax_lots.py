@@ -1,4 +1,4 @@
-"""Tax lots of the LIVE Alpaca account for the dashboard's Details tab (approved by Chirag, Sun Oct 4, 2026).
+"""Tax lots of the LIVE Alpaca account for the dashboard's Trading Account tab (approved by Chirag, Sun Oct 4, 2026).
 
 ESTIMATE, NOT TAX ADVICE. Alpaca's Form 1099-B / 1099-DIV / 1099-INT are the official record; this module only
 re-creates the lots from the account's activity history so the dashboard can show where the year stands.

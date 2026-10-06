@@ -17,7 +17,7 @@ bought back by any live run until after its reaction day (paper_trade.earnings_s
 Never twice: one sale per (stock, earnings date), kept in Reports/earnings_stop_state.json, and a fixed client order id
 (live-stop-YYYYMMDD-SYMBOL) that is looked up on the broker before sending. Any read failure skips the sale (fails closed).
 The cash stays in cash until the next scheduled run, which rebalances normally (its no-buy-before-earnings rule still
-applies). Events go to Reports/run_log.csv; the dashboard reads Reports/earnings_stops.csv (latest check).
+applies). Events go to Reports/run_log.csv; the latest check's status is in Reports/earnings_stops.csv.
 
 Usage:
   python earnings_stop.py --dry-run     # read-only: held stocks in the window, their stops and quotes; sends and writes nothing
@@ -40,7 +40,7 @@ REPORTS = os.path.join(ROOT, "Reports")
 EARNINGS_CSV = os.path.join(REPORTS, "earnings_date.csv")
 STATE_JSON = (os.environ.get("STOCK_ANALYSIS_EARNINGS_STOP_STATE")    # sales done (+ reaction day: the buy-back block
               or os.path.join(REPORTS, "earnings_stop_state.json"))     # in paper_trade) + once-a-day log notes
-STATUS_CSV = os.path.join(REPORTS, "earnings_stops.csv")           # the latest check, for the dashboard
+STATUS_CSV = os.path.join(REPORTS, "earnings_stops.csv")           # the latest check (status file)
 K_ATR, ATR_LEN, ARM_DAYS = 3.0, 14, 7     # 3x ATR since Oct 3, 2026 (was 3.5x; the forward test keeps 3.5x)
 REGULAR_MAX_AGE, EXTENDED_MAX_AGE = 60, 900                         # quote age limits (seconds)
 REGULAR_MAX_SPREAD, EXTENDED_MAX_SPREAD = 0.005, 0.02               # spread limits (share of the mid price)

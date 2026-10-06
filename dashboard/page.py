@@ -55,7 +55,7 @@ def open_symbol(table, event, key):
 def render_top_bar(p):
     stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()
     updated = datetime.fromtimestamp(p.mtime, tz=CT).strftime("%m/%d/%Y %I:%M %p CT")
-    note = f" · ⚠️ {len(stale)} stale file(s), see Details" if stale else ""
+    note = f" · ⚠️ {len(stale)} stale file(s), see Strategy > Data freshness" if stale else ""
     c1, c2, c3 = st.columns([4, 3, 1], vertical_alignment="center")
     with c1:
         show_html("<h1 style='margin:0;font-size:1.45rem;font-weight:700;'>Stock Analysis</h1>")

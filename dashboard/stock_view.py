@@ -1,4 +1,4 @@
-"""Dashboard tab: the single-stock view (rank tiers, stock picker, header, detail card)."""
+"""Home tab: the single-stock view (rank tiers, stock picker, header, detail card)."""
 from datetime import datetime
 
 import pandas as pd
@@ -174,8 +174,7 @@ def render_stock_section(p, ticker, tdata):
         </div>""")
 
 
-def _detail_group(title, stats, note=""):
+def _detail_group(title, stats):
     """One titled row of stat tiles inside the stock detail card; stats = [(label, value, color)]."""
     return (f'<div class="sa-group"><div class="sa-group-title">{esc(title)}</div><div class="sa-stats" style="margin-top:0.5rem;">'
-            + "".join(stat_html(l, "\u2014" if v is None else v, c) for l, v, c in stats) + "</div>"
-            + (f'<div class="sa-why">{esc(note)}</div>' if note else "") + "</div>")
+            + "".join(stat_html(l, "\u2014" if v is None else v, c) for l, v, c in stats) + "</div></div>")

@@ -271,8 +271,7 @@ expect(not any(e.label.startswith("Rank history") for e in at.expander), "stale 
 # the rules shown match the live config (backtest_engine.WINNER), in one place
 W, mw = be.WINNER, be.WINNER["midweek_swap"]
 rules = next((m.value for m in at.markdown if m.value.startswith("**Strategy rules")), "")
-_friday = (f"the {W['n']} best-ranked stocks from ranks 1–{W['max_pick_rank']}" if W.get("max_pick_rank")
-           else f"the {W['n']} best-ranked stocks by rank (no sector limit)")
+_friday = f"the {W['n']} best-ranked stocks by rank (no sector limit)"
 _wants = [f"Strategy rules ({W['tag']})", f"{W['w_tech']:g} × Technical", f"at least {be.MIN_BARS} trading days",
           _friday, f"scaled to {be.LIVE_INVESTED:.0%} invested", f"{W['regime_symbol']} at or below its 200-day average",
           "every weight is halved" if W["regime_scale"] == 0.5 else "every weight is multiplied",
@@ -280,8 +279,6 @@ _wants = [f"Strategy rules ({W['tag']})", f"{W['w_tech']:g} × Technical", f"at 
           f"worse than {W['midweek_exit_below']}", f"best top-{W['midweek_exit_to_top']}",
           f"within {W['earnings_block_days']} calendar days", "after-hours limit orders",
           "9 AM CT", "2-decimal shares", "never runs twice"]
-if be.winner_max_per_sector() < W["n"]:
-    _wants.append(f"max {be.winner_max_per_sector()} per sector")
 for want in _wants:
     expect(want in rules, f"rules text is missing {want!r}")
 expect("next open" not in blob, "outdated 'next open' wording (orders go out the same evening)")

@@ -1,4 +1,4 @@
-"""Details tab: latest signals (every stock at the latest close + the next-rebalance plan)."""
+"""Trading Account tab: latest signals (every stock at the latest close + the next-rebalance plan)."""
 import numpy as np
 import pandas as pd
 import streamlit as st

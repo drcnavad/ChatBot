@@ -1,5 +1,5 @@
-"""Details tab: live Alpaca holdings (read-only GETs, at most once a minute in market hours) and the
-per-run holdings read the earnings planner, tax view and trade audit reuse."""
+"""Trading Account tab: live Alpaca holdings (read-only GETs, at most once a minute in market hours) and the
+per-run holdings read the tax view and trade audit reuse."""
 import os
 from datetime import datetime
 
@@ -47,7 +47,7 @@ def new_run():
 
 
 def _run_holdings():
-    """This run's live holdings read: set by render_live_holdings, reused by the earnings planner, tax view and audit."""
+    """This run's live holdings read: set by render_live_holdings, reused by the tax view and trade audit."""
     return st.session_state.setdefault("_run_holdings", {})
 
 
@@ -61,7 +61,7 @@ def holdings_this_run():
 
 @st.fragment(run_every=60)        # reruns only this table each minute; it reads Alpaca only when the refresh key changes
 def render_live_holdings():
-    """Details tab: the real Alpaca positions with cost, value, P/L and the first purchase date, plus QQQ for comparison."""
+    """Trading Account tab: the real Alpaca positions with cost, value, P/L and the first purchase date, plus QQQ for comparison."""
     data, err = _run_holdings()["v"] = live_holdings()
     if err:
         st.info(err)

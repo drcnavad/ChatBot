@@ -39,9 +39,6 @@ CSS = """
     .js-plotly-plot { border-radius: 12px; background: #fff; border: 1px solid #e2e8f0; padding: 4px; }
     .symbol-link { color: #0f766e; text-decoration: none; font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; }
     .symbol-link:hover { color: #0d9488; text-decoration: underline; }
-    .sa-topbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 0.4rem; flex-wrap: wrap; }
-    .sa-topbar h1 { margin: 0; font-size: 1.45rem; font-weight: 700; }
-    .sa-topbar p { margin: 0.2rem 0 0; color: #64748b; font-size: 0.9rem; }
     .sa-chip { font-size: 0.75rem; font-weight: 600; color: #0f766e; background: #ccfbf1; border: 1px solid #99f6e4;
                padding: 0.35rem 0.7rem; border-radius: 999px; white-space: nowrap; }
     .sa-section { font-weight: 700; color: #0f172a; margin: 0.6rem 0 0.2rem; font-size: 1.02rem; }

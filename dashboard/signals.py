@@ -5,14 +5,12 @@ import numpy as np
 import pandas as pd
 
 from dashboard.data import last_next_earnings, read_report_csv
-from dashboard.settings import (CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, MAX_PICK, MIDWEEK, N_PICKS, PICKS_CSV, SECTOR_MAX,
-    symbol_sector)
+from dashboard.settings import CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, MIDWEEK, N_PICKS, PICKS_CSV, symbol_sector
 
 
-SIGNALS = ["Buy", "Hold", "Sold", "Score below 0", "Watch", "Watch (sector limit)", "Not ranked"]
+SIGNALS = ["Buy", "Hold", "Sold", "Score below 0", "Watch", "Not ranked"]
 SIGNAL_BADGE = {"Buy": "sa-badge-bull", "Hold": "sa-badge-hold", "Sold": "sa-badge-bear",
-                "Score below 0": "sa-badge-bear", "Watch": "sa-badge-hold", "Watch (sector limit)": "sa-badge-hold",
-                "Not ranked": "sa-badge-grey"}
+                "Score below 0": "sa-badge-bear", "Watch": "sa-badge-hold", "Not ranked": "sa-badge-grey"}
 PLAN_BADGE = {"Buy": "sa-badge-bull", "Keep": "sa-badge-hold", "Sell": "sa-badge-bear"}
 
 
@@ -38,42 +36,29 @@ def plain_reason(signal, reason, rank=None, score=None):
             return (f"mid-week exit: {'rank ' + m.group(1) if m else 'no longer ranked'} is worse than {EXIT_BELOW or 30}; "
                     f"replaced by {by.group(1)}")
         return (f"mid-week exit: {'rank ' + m.group(1) if m else 'no longer ranked'} is worse than {EXIT_BELOW or 30}; "
-                "sold, cash until the Friday rebalance")
+                f"sold (no top-{EXIT_TO_TOP or 10} stock left to refill)")
     if reason.startswith("mid-week swap out"):
         by = re.search(r"replaced by (\S+)", reason)
         return (f"mid-week swap: fell to {'rank ' + m.group(1) if m else 'no longer qualifying'} "
                 f"(below {MIDWEEK['exit_below'] if MIDWEEK else 15})" + (f", replaced by {by.group(1)}" if by else ""))
     if signal == "Buy":
         rk = int(m.group(1)) if m else (int(rank) if rank is not None and pd.notna(rank) else None)
-        if "sector cap relaxed" in reason:
-            return f"made the portfolio at rank {rk} (free slot filled from the top {MAX_PICK or 20}, sector limit relaxed)"
         if rk is not None and rk > N_PICKS:
-            if SECTOR_MAX < N_PICKS:
-                return (f"made the portfolio at rank {rk} (higher-ranked stocks were skipped by the {SECTOR_MAX}-per-sector limit"
-                        + (" or the earnings rule)" if EARNINGS else ")"))
             return (f"made the portfolio at rank {rk}"
                     + (" (higher-ranked stocks skipped by the earnings rule)" if EARNINGS else ""))
         return f"made the top {N_PICKS} at rank {rk if rk is not None else r}"
     if signal == "Hold":
         if rank is not None and pd.notna(rank) and rank <= N_PICKS:
             return f"in top {N_PICKS}, rank {r}"
-        why = ("higher-ranked stocks skipped by the sector limit" if SECTOR_MAX < N_PICKS
-               else "held through a mid-week check")
-        return f"still selected at rank {r} ({why})"
+        return f"still selected at rank {r} (held through a mid-week check)"
     if signal == "Sold":
         if reason.startswith("score"):
             return f"score fell below 0 ({sc})"
-        if "picks only from ranks" in reason:
-            return f"fell to rank {m.group(1) if m else r}, worse than {MAX_PICK} (picks only from ranks 1–{MAX_PICK})"
-        if reason.startswith("skipped"):
-            return f"skipped: already {SECTOR_MAX} stocks from this sector"
         if "outside top" in reason:
             return f"fell to rank {m.group(1) if m else r}, outside top {N_PICKS}"
         if reason.startswith("not eligible"):
             return "not enough data / not eligible"
         return reason or f"left the top {N_PICKS}"
-    if signal == "Watch (sector limit)":
-        return f"rank {r} but skipped: already {SECTOR_MAX} stocks from this sector"
     if signal == "Watch":
         return f"rank {r}, positive score but outside top {N_PICKS} — watch"
     if signal == "Score below 0":
@@ -82,12 +67,11 @@ def plain_reason(signal, reason, rank=None, score=None):
 
 
 def decision_tag(signal, reason):
-    """Short reason shown in brackets on the dated decision badge, e.g. 'Sold (sector limit)'."""
+    """Short reason shown in brackets on the dated decision badge, e.g. 'Sold (mid-week exit)'."""
     reason = "" if reason is None or (isinstance(reason, float) and pd.isna(reason)) else str(reason)
     if signal == "Sold":
-        for key, tag in (("mid-week exit", "mid-week exit"), ("mid-week swap out", "mid-week swap"), ("skipped", "sector limit"),
-                         ("picks only from ranks", f"rank worse than {MAX_PICK}"), ("outside top", f"outside top {N_PICKS}"),
-                         ("score", "score below 0"), ("not eligible", "not eligible")):
+        for key, tag in (("mid-week exit", "mid-week exit"), ("mid-week swap out", "mid-week swap"),
+                         ("outside top", f"outside top {N_PICKS}"), ("score", "score below 0"), ("not eligible", "not eligible")):
             if key in reason:
                 return tag
     if signal == "Buy" and reason.startswith("mid-week swap in"):
@@ -128,8 +112,6 @@ def signal_board(df):
             sig, weight = "Hold", d["New_Weight"]
         elif status == "drop":
             sig, weight = "Sold", d["Old_Weight"]
-        elif d is not None and str(d["Reason"]).startswith("skipped"):
-            sig, weight = "Watch (sector limit)", 0.0
         elif pd.isna(score):
             sig, weight = "Not ranked", np.nan
         else:
