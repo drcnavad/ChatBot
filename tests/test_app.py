@@ -131,20 +131,23 @@ for sym in TICKERS:
     at = at.selectbox(key="ticker_dropdown").set_value(sym).run()
     page_ok(at, sym)
     price_chart_ok(at, sym)
-    hero = next((m.value for m in at.markdown if 'class="sa-hero"' in m.value), "")
-    rk = re.search(r"Strategy rank.*?sa-stat-val[^>]*>([^<]*)<", hero)
-    sl = re.search(r"Portfolio slot.*?sa-stat-val[^>]*>([^<]*)<", hero)
+    # 4ad4ef4 simplified the stock card: score + weight tiles (no rank/slot tiles); the rank sits in the dropdown label
+    hero = next((m.value for m in at.markdown if 'class="sa-ident"' in m.value), "")
+    sc = re.search(r'Strategy score</div><div class="sa-stat-val"[^>]*>([^<]*)<', hero)
+    wt = re.search(r'Portfolio weight</div><div class="sa-stat-val"[^>]*>([^<]*)<', hero)
+    s_, w_ = latest.loc[sym, "Strategy_Score"], latest.loc[sym, "Strategy_Weight"]
+    want_sc = f"{s_:.1f}" if pd.notna(s_) else "—"
+    want_wt = f"{w_ * 100:.1f}%" if pd.notna(w_) and w_ > 0 else "—"
+    expect(sc and wt and sc.group(1) == want_sc and wt.group(1) == want_wt,
+           f"{sym}: header score/weight {sc and sc.group(1)!r}/{wt and wt.group(1)!r}, expected {want_sc!r}/{want_wt!r}")
     r = latest.loc[sym, "Strategy_Rank"]
-    want_rk = f"#{r:.0f} / {int(latest['Strategy_Rank'].notna().sum())}" if pd.notna(r) else "—"
-    want_sl = f"{exp_slot[sym]} of 10" if sym in exp_slot else "— (not picked)"
-    expect(rk and sl and rk.group(1) == want_rk and sl.group(1) == want_sl,
-           f"{sym}: header rank/slot {rk and rk.group(1)!r}/{sl and sl.group(1)!r}, expected {want_rk!r}/{want_sl!r}")
-    more = next((m.value for m in at.markdown if "More about" in m.value), "")
-    ct = re.search(r"Closed trades</div><div[^>]*>(\d+)<", more)
-    if sym in sm.tradable_symbols:      # the per-stock forward test replaced the backtest panel; empty state while 0 trades
-        expect("Per-stock forward test" in more and "Per-stock backtest" not in more and ct
-               and (("Forward test started Oct 2, 2026; no closed trades yet" in more) == (ct.group(1) == "0")),
-               f"{sym}: forward test panel / empty state ({ct and ct.group(1)!r})")
+    lab = next((o for o in at.selectbox(key="ticker_dropdown").options if o.split("  ·  ")[0] == sym), "")
+    expect((f"rank #{r:.0f}  ·" in lab) if pd.notna(r) else "rank #" not in lab, f"{sym}: dropdown label {lab!r} vs rank {r}")
+    # 4ad4ef4 folded "More about" into the stock card and dropped the per-stock forward test panel (the forward test lives
+    # in Details only); the card keeps the moving-average and fundamentals groups, never a backtest panel
+    if sym in sm.tradable_symbols:
+        expect("Moving averages" in hero and "Fundamentals &amp; news" in hero and "Per-stock backtest" not in hero,
+               f"{sym}: stock card detail groups missing")
 
 # ---------------------------------------------------------------- decision badge / rank label / plan chip / Details tables agree
 # decision in force = strategy_changes.csv (what the app reads); today's rank = latest signal_analysis; plan = strategy_picks
@@ -174,17 +177,20 @@ cases = (["FTNT"] if "FTNT" in st_.index else []) + picks_for["drop"][:1] + pick
 fmt = lambda d: f"{d:%a %b} {d.day}"
 for sym in dict.fromkeys(cases):
     at = at.selectbox(key="ticker_dropdown").set_value(sym).run()
-    hero = next((m.value for m in at.markdown if 'class="sa-hero"' in m.value), "")
+    hero = next((m.value for m in at.markdown if 'class="sa-ident"' in m.value), "")
     badges = [re.sub("<[^>]+>", "", b) for b in re.findall(r'<span class="sa-badge[^"]*"[^>]*>[^<]*</span>', hero)]
     word = WORD.get(st_.get(sym), None)
     want_badge = f"Strategy decision · {fmt(dec_day)}: " + (word or "")
     expect(bool(badges) and badges[0].startswith(want_badge), f"{sym}: badge {badges[:1]} should start {want_badge!r}")
     want_chip = f"{fmt(plan_day)} plan: {want_plan(sym)}"
     expect(want_chip in badges, f"{sym}: plan chip {badges[1:]} != {want_chip!r}")
-    rk = re.search(r"Strategy rank · ([^<ⓘ]*?)\s*ⓘ?</div><div class=\"sa-stat-val\"[^>]*>([^<]*)<", hero)
     r = latest.loc[sym, "Strategy_Rank"]
-    expect(rk and rk.group(1) == f"{fmt(SIG.Date.max())} close" and rk.group(2).startswith(f"#{r:.0f} /"),
-           f"{sym}: rank label {rk and rk.groups()} vs latest {fmt(SIG.Date.max())} rank {r}")
+    lab = next((o for o in at.selectbox(key="ticker_dropdown").options if o.split("  ·  ")[0] == sym), "")
+    tiers = next((m.value for m in at.markdown if "Stock list<span>" in m.value), "")
+    rk = re.search(r"rank #(\d+)", lab)
+    expect(rk and int(rk.group(1)) == int(r) and f"ranks at the {fmt(SIG.Date.max())} close" in tiers,
+           f"{sym}: rank label {lab!r} / stock list date vs latest {fmt(SIG.Date.max())} rank {r}")
+    rk = (fmt(SIG.Date.max()), rk and rk.group(1))
     tabs = {tuple(d.value.columns): d.value for d in at.dataframe}
     lt = next((v for c, v in tabs.items() if "Signal today" in c), None)
     ld = next((v for c, v in tabs.items() if any(x.startswith("Rank at ") for x in c)), None)
@@ -199,28 +205,29 @@ for sym in dict.fromkeys(cases):
         b = ld.loc[sym] if sym in ld.index else None          # the default filter shows the portfolio & changes only
         expect(b is None and word is None or b is not None and int(b["Rank today"]) == int(r) and b["Next rebalance plan"] == want_plan(sym) and b["Signal"] == word
                and int(b[rank_then]) == int(CH.set_index("Symbol").Rank[sym]),
-               f"{sym}: Last decision row {b.to_dict()} disagrees")
-    print(f"   {sym}: {badges} · rank {rk and rk.groups()} OK")
+               f"{sym}: Last decision row {b.to_dict() if b is not None else None} disagrees")
+    print(f"   {sym}: {badges} · rank {rk} OK")
 import forward_test as ft  # noqa: E402
-exp_titles = ["Live holdings (Alpaca account)",
+# 4ad4ef4 order: Last decision, Forward test, Strategy rules and holdings first; live holdings and latest signals further down
+exp_titles = [f"Last decision · {fmt(dec_day)}",
               f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
               "Strategy rules and holdings (paper strategies)",
-              f"Latest signals · {fmt(SIG.Date.max())} close", f"Last decision · {fmt(dec_day)}"]
+              "Live holdings (Alpaca account)", f"Latest signals · {fmt(SIG.Date.max())} close"]
 labels = [e.label for e in at.expander]
-expect(labels[:4] == exp_titles[:4] and any(l.startswith(exp_titles[4]) for l in labels),
-       f"Details expanders {labels[:5]} should start with {exp_titles}")
+expect(len(labels) >= 3 and labels[0].startswith(exp_titles[0]) and labels[1:3] == exp_titles[1:3]
+       and set(exp_titles[3:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
 expect(sum("forward test" in l.lower() for l in labels) == 1, f"the forward test is in one place only: {labels}")
 _ft = [d.value for d in at.dataframe if "Median weekly return %" in d.value.columns]
 expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Strategy"]} if _ft else
        any("Forward test started Oct 2, 2026" in i.value for i in at.info), "forward test leaderboard (QQQ + SPY rows) or empty state")
-expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Total return since Oct 2 %", "Median weekly return %",
+expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Total return since Oct 2 %", "Daily return %", "Median weekly return %",
                                             "Max drawdown %", "Weeks"]
                    and (_ft[0]["Strategy"] == ft.LIVE + ft.LIVE_MARK).sum() == 1 and (_ft[0]["Rank"] != "–").sum() in (0, len(ft.STRATEGIES))),
        f"leaderboard: columns, one marked live row, every strategy ranked: {_ft[0].to_dict('list') if _ft else None}")
 expect(not _ft or sum(ft.RANK_RULE in c.value for c in at.caption) == 1, "the ranking rule is written once in the caption")
 _rules = [d.value for d in at.dataframe if "Rule" in d.value.columns]
-expect(len(_rules) == 1 and list(_rules[0]["Strategy"]) == [c["name"] for c in ft.STRATEGIES],
-       "rules and holdings table lists every strategy once")
+expect(len(_rules) == 1 and [s for s in _rules[0]["Strategy"] if s != "Top 10"] == [c["name"] for c in ft.STRATEGIES],
+       "rules and holdings table lists every strategy once (+ the 4ad4ef4 'Top 10' summary row)")
 _rule = "Don't change the strategy until 12+ weeks of forward results (from Oct 2, 2026) compare against QQQ."
 for _rule in (_rule, "No single stock gets more than 20%; any extra stays in cash."):
     expect(sum(_rule in m.value for m in at.markdown) + sum(_rule in c.value for c in at.caption) == 1, f"shown once: {_rule}")
@@ -279,7 +286,8 @@ expect("next open" not in blob, "outdated 'next open' wording (orders go out the
 # ---------------------------------------------------------------- removed: alert banner, Summary section, Strategy Health tab
 box = [m.value for m in at.markdown if "sa-alert " in m.value]
 expect(len(box) == 0, f"the alert banner was removed from the dashboard, found {len(box)}")
-expect([t.label for t in at.tabs] == ["Dashboard", "Details"], f"tabs: {[t.label for t in at.tabs]} (Strategy Health removed)")
+expect([t.label for t in at.tabs][:3] == ["Home", "Strategy", "Trading Account"],
+       f"tabs: {[t.label for t in at.tabs]} (4ad4ef4: Home / Strategy / Trading Account; Strategy Health removed)")
 expect(not [m for m in at.markdown if '<div class="sa-section">Summary</div>' in m.value], "the Summary section was removed")
 expect(any("Live holdings are turned off here" in i.value for i in at.info), "holdings expander: off message in tests")
 
@@ -288,7 +296,7 @@ tier_md = [m.value for m in at.markdown if "Rank 1 to 20" in m.value and "?symbo
 expect(len(tier_md) == 1, f"rank tier block found: {len(tier_md)}")
 blob = tier_md[0] if tier_md else ""
 parts = re.split(r"<b>(Rank 1 to 20|Rank 21 to 50|Rank 51\+|Not traded yet \(short history, not ranked\)):</b>", blob)
-expect(len(parts) == 7 + 2 * bool(len(SHORT)), f"tier headers/bodies: {len(parts)} parts")
+expect(len(parts) == 7, f"tier headers/bodies: {len(parts)} parts")   # 4ad4ef4: short-history row has no header
 bodies = dict(zip(parts[1::2], parts[2::2]))
 def want_tier(sym):
     r = latest.loc[sym, "Strategy_Rank"]
@@ -301,9 +309,9 @@ expect(all_linked <= set(opts), f"tier links outside the dropdown: {sorted(all_l
 
 # short-history stocks: listed with their rough signal, and a click (?symbol=) opens a stock view that renders
 if len(SHORT):
-    sh_body = bodies.get("Not traded yet (short history, not ranked)", "")
+    sh_body = blob.rsplit('<div class="sa-tier">', 1)[-1]       # 4ad4ef4: last row, links only (rough signal in the dropdown)
     for _, r in SHORT.iterrows():
-        expect(f"?symbol={r.Symbol}" in sh_body and f"(rough {r.Rough_Signal}, less reliable)" in sh_body,
+        expect(f"?symbol={r.Symbol}" in sh_body and "<b>" not in sh_body,
                f"{r.Symbol} missing from the short-history row: {sh_body[:200]}")
         at2 = AppTest.from_file("app.py", default_timeout=180)
         at2.query_params["symbol"] = r.Symbol

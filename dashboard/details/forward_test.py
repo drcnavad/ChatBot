@@ -17,7 +17,12 @@ def render_forward_test():
         st.info(f"Forward test started {start}; the first daily row is saved after the close (4:15 PM CT on trading days).")
         return
     bench = load_benchmarks()
-    board = ft.leaderboard(daily, bench.reset_index() if bench is not None else None, values)
+    values, bench = ft.provisional(values, bench.reset_index() if bench is not None else None)
+    board = ft.leaderboard(daily, bench, values)
+    marked = ""
+    if values is not None and "Provisional" in values and values["Provisional"].fillna(False).astype(bool).any():
+        marked = (f" {pd.Timestamp(values['Date'].max()):%a %b %-d}: each strategy's holdings from the last saved day marked "
+                  "to that day's close (provisional, no trades yet); the 4:15 PM CT job saves that day with its trades.")
     board = board.rename(columns={"Total return %": f"Total return since {start[:-6]} %"}).assign(
         Rank=lambda b: b["Rank"].map(lambda r: "–" if pd.isna(r) else str(r)))   # – = not ranked (comparison / no full week yet)
     sty = toned(toned(board, [c for c in board.columns if "return" in c]), ["Max drawdown %"], fn=drawdown_tone)
@@ -36,7 +41,7 @@ def render_forward_test():
                "day's close, pays 0.1% per trade side, holds no stock above 20%, invests at most 99% and earns nothing on cash; each "
                f"starts at 1.0 on the {start} close. Your account = equity net of new deposits; QQQ / SPY = closes, "
                "comparison only (not ranked). Weekly = Friday to Friday; None / – = no full week yet." + acct
-               + " Saved by the 4:15 PM CT job (no orders); each strategy's rule and holdings are in the next section.")
+               + marked + " Saved by the 4:15 PM CT job (no orders); each strategy's rule and holdings are in the next section.")
 
 
 def _top10_stocks(board, held):

@@ -295,6 +295,24 @@ with tempfile.TemporaryDirectory() as tmp:
           nb == len(ft.STRATEGIES) * (sdays > pd.Timestamp("2026-10-07")).sum() and len(a_) == len(b_)
           and np.allclose(a_["Value"], b_["Value"], rtol=0, atol=1e-12) and ha[["Date", "Strategy", "Symbol"]].equals(hb[["Date", "Strategy", "Symbol"]]),
           (nb, len(a_), len(b_)))
+    # A later pipeline run rewrote the past (e.g. the 8f57015 rule change: Oct 2 BE -> MRVL). The saved holdings must stay
+    # put on a day with no decision (Tue Oct 6) instead of trading the retroactive difference.
+    rd = lambda f: pd.read_csv(f, dtype={"Date": str}, float_precision="round_trip")
+    for k in ("path", "hold_path"):
+        d_ = rd(P("a")[k]); d_[d_["Date"] <= "2026-10-05"].to_csv(P("c")[k], index=False)
+    hc = rd(P("c")["hold_path"])
+    L = (hc["Strategy"] == ft.LIVE) & (hc["Date"] == "2026-10-05") & (hc["Shares"] > 0)
+    alien = next(s for s in sorted(SIG["Symbol"].unique()) if s not in set(hc.loc[hc["Strategy"] == ft.LIVE, "Symbol"]))
+    gone = hc.loc[L, "Symbol"].iloc[0]
+    hc.loc[L & (hc["Symbol"] == gone), "Symbol"] = alien
+    hc.to_csv(P("c")["hold_path"], index=False)
+    ft.update_strategies(SIG[SIG["Date"] <= "2026-10-06"], FACTS, NO_EARN, BENCH, BARS, **P("c"))
+    h6 = rd(P("c")["hold_path"]); h6 = h6[(h6["Strategy"] == ft.LIVE) & (h6["Shares"] > 0)]
+    s5, s6 = (h6[h6["Date"] == x].set_index("Symbol")["Shares"].sort_index() for x in ("2026-10-05", "2026-10-06"))
+    ha_ = ha[(ha["Strategy"] == ft.LIVE) & (ha["Shares"] > 0)]
+    pre = set(ha_.loc[ha_["Date"] == "2026-10-05", "Symbol"]) == set(ha_.loc[ha_["Date"] == "2026-10-06", "Symbol"])
+    check("rewritten past: a saved holding the new targets no longer have is kept on a day without a decision (no trade)",
+          pre and alien in s6.index and gone not in s6.index and s5.equals(s6), (alien, gone, list(s6.index)))
     hv = ft.holdings(P("a")["hold_path"])
     check("holdings: each strategy's latest holdings for the dashboard", set(hv) <= {c["name"] for c in ft.STRATEGIES} and len(hv) >= 15, list(hv))
 
@@ -437,10 +455,43 @@ if os.path.exists(ft.SIGNAL_CSV):
                                     selection=old_sel, exit_to_top=None)
     mine = be.live_weights(mine_old.loc[d0])  # CSV stores live (x99% floored) weights
     mine = mine[mine > 0].sort_index()
-    check("Oct 2 Strategy_Weight = T20 soft-cap rules (the pins that wrote the file; live is now pure top-10)",
-          list(live.index) == list(mine.index) and np.allclose(live, mine, atol=1e-9), (live.to_dict(), mine.to_dict()))
+    # Every pipeline run after 8f57015 rewrites the whole history with the current WINNER (pure top-10), so the file
+    # holds either the T20 pins (written before that) or the current rules (written after); both must match exactly.
+    cur = be.live_weights(real_live.loc[d0])
+    cur = cur[cur > 0].sort_index()
+    same = lambda x: list(live.index) == list(x.index) and np.allclose(live, x, atol=1e-9)
+    check("Oct 2 Strategy_Weight = the rules that wrote the file (T20 soft-cap pins, or the current pure top-10)",
+          same(mine) or same(cur), (live.to_dict(), mine.to_dict(), cur.to_dict()))
     check("no live file changed (signal_analysis, picks, run_state, pending orders, orders log); WINNER untouched",
           digest() == before and be.WINNER == w0)
+# provisional marks (display only): Tue / Thu have no signal rows until the next decision run
+with tempfile.TemporaryDirectory() as pt:
+    PN = ft.STRATEGIES[1]["name"]                                   # "P" = a real strategy name (the board lists those)
+    pv = pd.DataFrame({"Date": ["2026-10-02", "2026-10-05", "2026-10-02", "2026-10-05"], "Strategy": [PN, PN, "Q", "Q"],
+                       "Value": [1.0, 1.02, 1.0, 0.99], "Cash": [0.01, 0.01, 0.5, 0.5]})
+    ph = pd.DataFrame({"Date": ["2026-10-05"] * 3, "Strategy": [PN, PN, "Q"], "Symbol": ["AAA", "BBB", "AAA"],
+                       "Weight": [0.5, 0.49, 0.49], "Shares": [0.005, 0.01, 0.004], "Price": [102.0, 50.0, 122.5]})
+    ph.to_csv(os.path.join(pt, "h.csv"), index=False)
+    pb = pd.DataFrame([{"Date": pd.Timestamp(d), "Symbol": s, "Open": px, "High": px, "Low": px, "Close": px, "Volume": 1e6}
+                       for d, s, px in (("2026-10-05", "AAA", 102.0), ("2026-10-06", "AAA", 110.0),
+                                        ("2026-10-05", "QQQ", 600.0), ("2026-10-06", "QQQ", 606.0))])   # no BBB bar Oct 6
+    pb.to_pickle(os.path.join(pt, "b.pkl"))
+    before_pv = pv.copy()
+    pvals, pbench = ft.provisional(pv, pd.DataFrame({"Date": ["2026-10-02", "2026-10-05"], "QQQ": [590.0, 600.0]}),
+                                   hold_path=os.path.join(pt, "h.csv"), bars_path=os.path.join(pt, "b.pkl"))
+    p6 = pvals[pvals["Date"] == "2026-10-06"].set_index("Strategy")
+    check("provisional: a day with bars but no saved row = saved shares + cash at that close (no trades), not saved",
+          len(p6) == 2 and abs(p6.at[PN, "Value"] - (0.01 + 0.005 * 110 + 0.01 * 50)) < 1e-12
+          and abs(p6.at["Q", "Value"] - (0.5 + 0.004 * 110)) < 1e-12 and p6["Provisional"].all()
+          and not pvals.loc[pvals["Date"] <= "2026-10-05", "Provisional"].astype(bool).any() and pv.equals(before_pv)
+          and list(pbench["QQQ"]) == [590.0, 600.0, 606.0], (p6.to_dict(), pbench.to_dict()))
+    lbp = ft.leaderboard(pd.DataFrame(), pbench, pvals).set_index("Strategy")
+    check("provisional: the board moves with the marked day (P +2% -> +6%, QQQ to Oct 6)",
+          abs(lbp.at[PN, "Total return %"] - 6.0) < 1e-9 and abs(lbp.at[PN, "Daily return %"] - (106 / 102 - 1) * 100) < 1e-9
+          and abs(lbp.at["QQQ (comparison)", "Total return %"] - (606 / 590 - 1) * 100) < 1e-9, lbp.head(3).to_dict())
+    check("provisional: nothing after the last saved day -> unchanged",
+          ft.provisional(pv[pv["Date"] <= "2026-10-05"], None, hold_path=os.path.join(pt, "h.csv"),
+                         bars_path=os.path.join(pt, "nope.pkl"))[0].equals(pv))
 src = open(os.path.join(ROOT, "forward_test.py"), encoding="utf-8").read()
 _src_wo_get = (src.replace("be.WINNER.get(", "")
                .replace("WINNER.get(", ""))  # allow .get; ban WINNER[ writes/reads

@@ -224,7 +224,16 @@ def audit_midweek(D, enter_top=3, exit_below=15, exit_all=None):
         e, h = pair
         held[e] = held.pop(h)
         swaps.append((h, rank.get(h), e, rank[e], round(held[e], 4)))
-    exits = []
+    exits, refills = [], []
+    top_n = be.WINNER.get("midweek_exit_to_top")
+    if exit_all and top_n:                         # rank-exit refill (8f57015): worst first -> best free top-N stock, same weight
+        for s in sorted([s for s in held if rank.get(s, 10 ** 9) > exit_all], key=lambda s: -rank.get(s, 10 ** 9)):
+            e = next((x for x in list(q.index[:top_n]) if x not in held and not blocked(x, D)), None)
+            if e is None:
+                break
+            exits.append((s, rank.get(s)))
+            held[e] = held.pop(s)
+            refills.append(e)
     if exit_all:                                   # rank-exit: every remaining holding worse than exit_all (or unranked) -> cash
         for s in [s for s in held if rank.get(s, 10 ** 9) > exit_all]:
             exits.append((s, rank.get(s)))
@@ -234,7 +243,7 @@ def audit_midweek(D, enter_top=3, exit_below=15, exit_all=None):
     dec = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
     dd = dec[dec.Date == D]
     logged = (sorted(dd.loc[dd.Status == "drop", "Symbol"]), sorted(dd.loc[dd.Status == "add", "Symbol"]))
-    mine = (sorted([h for h, *_ in swaps] + [x for x, _ in exits]), sorted(e for _, _, e, _, _ in swaps))
+    mine = (sorted([h for h, *_ in swaps] + [x for x, _ in exits]), sorted([e for _, _, e, _, _ in swaps] + refills))
     print(f"(m) held before (at {pd.Timestamp(P).date()} close): {sorted(before)}")
     print(f"    independent swaps (sell, sell rank, buy, buy rank, weight): {swaps if swaps else 'none'}"
           + (f"; rank-{exit_all} exits (sell, rank): {exits if exits else 'none'}" if exit_all else ""))

@@ -24,7 +24,7 @@ live band; trimmed to its target when the buys need the cash), and with the earn
 5 days is not bought up. The dip and threshold rules only trade the names they buy or sell. A saved day is never redone: a re-run only adds the days after the last saved one (so
 running twice never double-counts) and a missed day is caught up from the saved bars.
 
-    python forward_test.py --record   # strategies + today's account row (launchd com.stockanalysis.forwardtest, 3:15 PM CT)
+    python forward_test.py --record   # strategies + today's account row (launchd com.stockanalysis.forwardtest, 4:15 PM CT)
     python forward_test.py            # update the strategies (bars only, no account request) and print the leaderboard
 """
 import argparse
@@ -196,7 +196,8 @@ def forward_bars(fetch=True):
     download fails) + the backtest bar cache (Reports/cache/bars_daily_long.pkl, read only) for the older days."""
     if fetch:
         try:
-            new, _ = be.drop_partial_last_bar(be.fetch_daily_bars(be.TRADABLE, start=FWD_BARS_START))
+            syms = list(be.TRADABLE) + [s for s in be.BENCHMARKS if s not in be.TRADABLE]   # + QQQ / SPY (provisional)
+            new, _ = be.drop_partial_last_bar(be.fetch_daily_bars(syms, start=FWD_BARS_START))
             new.to_pickle(FWD_BARS + ".tmp")
             os.replace(FWD_BARS + ".tmp", FWD_BARS)
         except Exception as e:
@@ -562,6 +563,14 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
         w = strategy_targets(cfg, inp).reindex(columns=cols).fillna(0.0)
         opens = inp.get("open_sells", {}).get(name, pd.DataFrame()).reindex(index=todo, columns=cols)
         full = rebalance_days(cfg, inp)
+        if last is not None and last in w.index:
+            # Trade only on a NEW decision: compare today's target with the target recomputed for the last saved day, not
+            # with the saved one. A later pipeline run can rewrite past scores/weights (a live rule change, a data fix);
+            # that must not make a strategy trade on a day with no decision of its own - the saved holdings stay until a
+            # target really changes or the next rebalance (like the live account). Rules with no calendar (dip /
+            # threshold) sell a saved holding they no longer target, since no rebalance would ever clear it.
+            stale = (shares > 0) & (w.loc[last] <= 0) if full is None else pd.Series(False, index=cols)
+            prev = w.loc[last].where(~stale, np.nan)
         full = pd.Series(False, index=todo) if full is None else full.reindex(todo).fillna(False).astype(bool)
         soon = inp.get("soon") if not cfg.get("weights") and cfg.get("earnings", "winner") is not None else None
         soon = (pd.DataFrame(False, index=todo, columns=cols) if soon is None else
@@ -744,6 +753,40 @@ def verdict(board):
     return f"After {weeks} weeks no winner: {top} ranks first but does not beat both {LIVE} and QQQ. Keep the live rules."
 
 
+def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
+    """Display only, never saved. A trading day is saved by the 4:15 PM CT job once it has signal rows (the 2:30 PM
+    decision run on Mon/Wed/Fri, the 3:45 PM refresh on Tue/Thu); until then, or when a run failed, the board would show
+    the previous day's numbers again. This marks each strategy's saved holdings (shares + cash of its last saved day, no trades) to the close of every later
+    day the saved daily bars cover (complete days only: the 4:15 PM CT job drops an unfinished bar), and QQQ / SPY to
+    the same closes. Returns (values, bench) with those rows added; values rows carry Provisional = True."""
+    if values is None or values.empty or not os.path.exists(bars_path):
+        return values, bench
+    v = values.assign(Date=pd.to_datetime(values["Date"]))
+    last = v["Date"].max()
+    b = be.apply_history_start(pd.read_pickle(bars_path))
+    b = be.keep_decision_bars(b.sort_values(["Symbol", "Date"]).reset_index(drop=True), now=_NO_SAVE)
+    close = b.pivot_table(index="Date", columns="Symbol", values="Close")
+    close = close[close.index > last]
+    h = _read(hold_path, parse_dates=["Date"])
+    if close.empty or h is None:
+        return values, bench
+    h, rows = h[h["Date"] == last], []
+    for name, g in v[v["Date"] == last].groupby("Strategy", sort=False):
+        mine, cash = h[h["Strategy"] == name].set_index("Symbol"), float(g["Cash"].iloc[0])
+        for d, px in close.iterrows():
+            p = px.reindex(mine.index).fillna(mine["Price"])     # no bar that day: its last saved price
+            rows.append({"Date": d, "Strategy": name, "Value": cash + float((mine["Shares"] * p).sum()), "Cash": cash,
+                         "Provisional": True})
+    out = pd.concat([v.assign(Provisional=False), pd.DataFrame(rows)], ignore_index=True) if rows else v
+    if bench is not None and len(bench):
+        bb = bench.assign(Date=pd.to_datetime(bench["Date"]))
+        extra = close[[s for s in ("QQQ", "SPY") if s in close]]
+        extra = extra[extra.index > bb["Date"].max()]
+        if len(extra.columns) and len(extra):
+            bench = pd.concat([bb, extra.rename_axis("Date").reset_index()], ignore_index=True)
+    return out, bench
+
+
 def holdings(path=HOLDINGS_CSV):
     """Strategy -> 'NVDA 14.2%, ...' of its latest saved day (target weights, largest first)."""
     h = _read(path, parse_dates=["Date"])
@@ -787,7 +830,10 @@ def main(argv=None):
         if row:
             print("saved", {k: row[k] for k in ("Date", "Time_CT", "Positions", "Closed_Picks")}, "->",
                   os.path.relpath(DAILY_CSV, ROOT))
-    board = leaderboard()
+    values, bench = provisional(_read(STRATEGIES_CSV, parse_dates=["Date"]), _read(BENCH_CSV, parse_dates=["Date"]))
+    board = leaderboard(bench=bench, values=values)
+    if values is not None and "Provisional" in values and values["Provisional"].fillna(False).astype(bool).any():
+        print(f"latest day {values['Date'].max():%a %b %-d}: saved holdings marked to the close (provisional, not saved)")
     print(board.round(2).to_string(index=False))
     print(verdict(board))
     return rc
