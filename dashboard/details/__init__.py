@@ -20,7 +20,7 @@ def render_strategy_tab(p):
                      expanded=True):
         render_forward_test()
     with st.expander("Strategy rules and holdings (paper strategies)", expanded=False):
-        render_forward_rules()
+        render_forward_rules(p)
     with st.expander("Data freshness and settings", expanded=False):
         render_data_and_settings(p)
 

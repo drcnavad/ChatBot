@@ -492,6 +492,25 @@ with tempfile.TemporaryDirectory() as pt:
     check("provisional: nothing after the last saved day -> unchanged",
           ft.provisional(pv[pv["Date"] <= "2026-10-05"], None, hold_path=os.path.join(pt, "h.csv"),
                          bars_path=os.path.join(pt, "nope.pkl"))[0].equals(pv))
+# --- Top 10 consensus (display only): best strategies in board order, twins once, most-held stocks
+_N = [c["name"] for c in ft.STRATEGIES]
+_bd = pd.DataFrame({"Rank": pd.array([pd.NA] * 6, dtype="Int64"), "Strategy": [_N[0] + ft.LIVE_MARK, _N[1], _N[2], _N[3], "QQQ (comparison)", _N[4]],
+                    "Total return %": [1.0, 3.0, 2.0, 2.5, 9.0, 0.5], "Max drawdown %": [0.0] * 6})
+_hd = pd.DataFrame([("2026-10-05", _N[1], "OLD", 0.5),                                   # an older day: not used
+                    ("2026-10-06", _N[1], "AAA", 0.3), ("2026-10-06", _N[1], "BBB", 0.2),
+                    ("2026-10-06", _N[3], "AAA", 0.3), ("2026-10-06", _N[3], "BBB", 0.2),  # twin of _N[1] (same weights)
+                    ("2026-10-06", _N[2], "BBB", 0.1), ("2026-10-06", _N[2], "CCC", 0.4), ("2026-10-06", _N[2], "ZZZ", 0.0),
+                    ("2026-10-06", _N[0], "AAA", 0.2), ("2026-10-06", _N[0], "DDD", 0.2),
+                    ("2026-10-06", _N[4], "EEE", 0.5)], columns=["Date", "Strategy", "Symbol", "Weight"])
+_c = ft.consensus(_bd, _hd, {"AAA": 5, "BBB": 1, "CCC": 2, "DDD": 3}, n_strategies=3)
+check("Top 10: no full week -> by total return; benchmarks out; twins once (better-placed kept); n best only",
+      _c["by_return"] and [n for n, _ in _c["strategies"]] == [_N[1], _N[2], _N[0]] and _c["strategies"][0][1] == [_N[3]],
+      _c["strategies"])
+check("Top 10: stocks by count, then summed weight, then latest rank; weight 0 and older days ignored",
+      list(_c["stocks"]["Symbol"]) == ["AAA", "BBB", "CCC", "DDD"] and list(_c["stocks"]["Count"]) == [2, 2, 1, 1],
+      _c["stocks"].to_dict("list"))
+_c2 = ft.consensus(_bd.assign(Rank=pd.array([2, 1, 3, pd.NA, pd.NA, 4], dtype="Int64")), _hd, None, n_strategies=2)
+check("Top 10: once ranked -> leaderboard rank order", [n for n, _ in _c2["strategies"]] == [_N[1], _N[0]], _c2["strategies"])
 src = open(os.path.join(ROOT, "forward_test.py"), encoding="utf-8").read()
 _src_wo_get = (src.replace("be.WINNER.get(", "")
                .replace("WINNER.get(", ""))  # allow .get; ban WINNER[ writes/reads

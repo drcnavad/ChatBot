@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import load_benchmarks, read_report_csv
-from dashboard.style import INK, MUTED, PCT_COL, drawdown_tone, live_row, toned
+from dashboard.style import INK, MUTED, PCT_COL, drawdown_tone, esc, live_row, show_html, symbol_link, toned
 
 
 def _board(daily, values):
@@ -50,44 +50,50 @@ def render_forward_test():
                + marked + " Saved by the 4:15 PM CT job (no orders); each strategy's rule and holdings are in the next section.")
 
 
-def _top10_stocks(board, held):
-    """'SYM (count, avg%)' for the 10 most common stocks held by the rank 1-10 strategies.
-    `board` is the raw leaderboard (numeric Rank); `held` maps strategy name -> 'SYM 14.2%, ...'.
-    Returns '–' when no strategy is ranked yet."""
-    import forward_test as ft
-    ranked = board[board["Rank"].notna() & (board["Rank"] <= 10)]
-    counts, weights = {}, {}
-    for strat in ranked["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False):
-        for part in held.get(strat, "").split(", "):
-            if " " not in part:
-                continue
-            sym, pct = part.rsplit(" ", 1)
-            try:
-                w = float(pct.rstrip("%")) / 100
-            except ValueError:
-                continue
-            counts[sym] = counts.get(sym, 0) + 1
-            weights[sym] = weights.get(sym, 0.0) + w
-    if not counts:
-        return "–"
-    top = sorted(counts, key=lambda s: (-counts[s], -weights[s] / counts[s]))[:10]
-    return ", ".join(f"{s} ({counts[s]}, {weights[s] / counts[s]:.0%})" for s in top)
+CONSENSUS_GOOD, CONSENSUS_WARN, EXIT_RANK = 6, 3, 30   # chip colors: held by 6+ / 3-5 of the 10; ranked worse than 30
 
 
-def render_forward_rules():
-    """Strategy tab: each forward-test strategy's one-line rule and its holdings on the latest saved day."""
+def render_top10(ranks=None):
+    """The Top 10 card (display only, nothing saved or traded): the 10 stocks most held by the 10 best forward-test
+    strategies, from forward_test.consensus on the same leaderboard as the table above (provisional close included)."""
     import forward_test as ft
+    daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
+    c = None
+    if values is not None and not values.empty:
+        c = ft.consensus(_board(daily, values)[0], read_report_csv(ft.HOLDINGS_CSV), ranks)
+    if c is None or c["stocks"].empty:
+        show_html('<div class="sa-card"><div class="sa-card-title">Top 10<span>no saved strategy holdings yet</span></div></div>')
+        return
+    n = len(c["strategies"])
+
+    def chip(r):
+        cls = ("t-bad" if pd.isna(r.Rank) or r.Rank > EXIT_RANK else
+               "t-good" if r.Count >= CONSENSUS_GOOD else "t-warn" if r.Count >= CONSENSUS_WARN else "")
+        rk = f"rank #{r.Rank:.0f}" if pd.notna(r.Rank) else "not ranked"
+        return (f'<span title="{esc(f"summed target weight {r.Weight:.0%} · {rk} at the latest close")}">'
+                f'{symbol_link(r.Symbol, cls)} {r.Count}/{n} strategies</span>')
+    strats = " ".join(f'<span>{i}. {esc(nm)}' + (f' <i title="{esc(", ".join(tw))}">(+{len(tw)} same holdings)</i>' if tw else "")
+                      + "</span>" for i, (nm, tw) in enumerate(c["strategies"], 1))
+    order = "total return since Oct 2" if c["by_return"] else "leaderboard rank"
+    show_html(f'<div class="sa-card"><div class="sa-card-title">Top 10<span>the {len(c["stocks"])} stocks most held by the '
+              f'{n} best strategies ({order}) · holdings at the {c["day"]:%a %b %-d} close</span></div>'
+              f'<div class="sa-tier"><b>Stocks</b><div class="sa-tier-syms">{" ".join(chip(r) for r in c["stocks"].itertuples())}</div></div>'
+              f'<div class="sa-tier"><b>Strategies</b><div class="sa-tier-syms">{strats}</div></div></div>')
+    st.caption(("No strategy has a full week yet, so the 10 strategies are the best by total return since Oct 2; from the "
+                "first full week they follow the leaderboard rank. " if c["by_return"] else "")
+               + "Strategies with the same stocks at the same weights count once (the better-placed one). Order: most "
+               "strategies, then summed weight, then latest rank. Green = held by 6+ of them, yellow = 3-5, red = ranked "
+               f"worse than {EXIT_RANK} at the latest close. Display only: updated with the leaderboard, never traded.")
+
+
+def render_forward_rules(p=None):
+    """Strategy tab: the Top 10 card, then each forward-test strategy's one-line rule and its holdings on the latest saved day."""
+    import forward_test as ft
+    ranks = p.by_symbol["Strategy_Rank"].to_dict() if p is not None and "Strategy_Rank" in p.by_symbol else None
+    render_top10(ranks)
     held, h = ft.holdings(), read_report_csv(ft.HOLDINGS_CSV)
     rules = pd.DataFrame([{"Strategy": c["name"], "Rule": c["rule"], "Holdings now (target weight)": held.get(c["name"], "cash")}
                           for c in ft.STRATEGIES])
-    daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
-    top10 = "–"
-    if daily is not None and values is not None and not daily.empty and not values.empty:
-        top10 = _top10_stocks(_board(daily, values)[0], held)   # same ranks as the leaderboard above
-    top_row = pd.DataFrame([{"Strategy": "Top 10",
-                             "Rule": "Most common stocks across the rank 1-10 strategies (times held, avg target weight).",
-                             "Holdings now (target weight)": top10}])
-    rules = pd.concat([top_row, rules], ignore_index=True)
     sty = toned(rules, ["Holdings now (target weight)"], fn=lambda v: MUTED if v == "cash" else INK)
     st.dataframe(live_row(sty, "Strategy", ft.LIVE), hide_index=True, width="stretch")
     if h is not None and len(h):

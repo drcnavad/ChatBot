@@ -797,6 +797,58 @@ def holdings(path=HOLDINGS_CSV):
     return {s: ", ".join(f"{r.Symbol} {r.Weight:.1%}" for r in g.itertuples()) for s, g in h.groupby("Strategy")}
 
 
+def consensus(board, hold, ranks=None, n_strategies=10, n_stocks=10):
+    """Display only (never saved, never traded): the stocks most held by the best forward-test strategies.
+
+    board = leaderboard() as the dashboard shows it (incl. provisional rows); hold = saved holdings rows (Date, Strategy,
+    Symbol, Weight); ranks = {symbol: latest Strategy_Rank} (tie-break). The strategies are taken in leaderboard order
+    (RANK_RULE); while no strategy has a rank yet (no full week) they are ordered by total return since the start
+    (a tie: smaller drawdown). Twins (same stocks at the same target weights on the holdings day) count once: the
+    better-placed one stays. Each strategy's holdings = its latest saved day (what the board's values come from; a
+    provisional close keeps them, so nothing past the shown day is used). Stocks: held (target weight > 0) by the most of those strategies; ties -> larger summed weight, then the
+    better latest rank. Returns dict(day, by_return, strategies=[(name, [twins])], stocks=DataFrame(Symbol, Count, Weight,
+    Rank)); None when there is nothing to show."""
+    if board is None or board.empty or hold is None or hold.empty:
+        return None
+    names = {c["name"] for c in STRATEGIES}
+    b = board.assign(Strategy=board["Strategy"].str.replace(LIVE_MARK, "", regex=False))
+    b = b[b["Strategy"].isin(names)]
+    by_return = not b["Rank"].notna().any()
+    if by_return:
+        b = b.sort_values(["Total return %", "Max drawdown %"], ascending=False, na_position="last", kind="stable")
+    else:
+        b = b.assign(_r=b["Rank"].astype(float)).sort_values("_r", na_position="last", kind="stable")
+    h = hold.assign(Date=pd.to_datetime(hold["Date"]))
+    h = h[h["Strategy"].isin(names)]
+    if h.empty:
+        return None
+    h = h[h["Date"] == h.groupby("Strategy")["Date"].transform("max")]
+    day = h["Date"].max()
+    pos = {s: g.loc[g["Weight"] > 0].set_index("Symbol")["Weight"] for s, g in h.groupby("Strategy")}
+    picked, seen = [], {}
+    for name in b["Strategy"]:
+        w = pos.get(name, pd.Series(dtype=float))
+        key = tuple(sorted((s, round(float(x), 4)) for s, x in w.items()))
+        if key in seen:                                   # a twin of a better-placed strategy
+            seen[key][1].append(name)
+            continue
+        if len(picked) == n_strategies:
+            continue
+        seen[key] = [name, []]
+        picked.append(seen[key])
+    rows = {}
+    for name, _ in picked:
+        for s, x in pos.get(name, pd.Series(dtype=float)).items():
+            c, sw = rows.get(s, (0, 0.0))
+            rows[s] = (c + 1, sw + float(x))
+    ranks = ranks or {}
+    st = pd.DataFrame([{"Symbol": s, "Count": c, "Weight": sw, "Rank": ranks.get(s, np.nan)} for s, (c, sw) in rows.items()],
+                      columns=["Symbol", "Count", "Weight", "Rank"])
+    st = st.assign(_r=st["Rank"].fillna(1e9)).sort_values(["Count", "Weight", "_r", "Symbol"], ascending=[False, False, True, True])
+    return {"day": day, "by_return": by_return, "strategies": [(nm, tw) for nm, tw in picked],
+            "stocks": st.drop(columns="_r").head(n_stocks).reset_index(drop=True)}
+
+
 def _log_problem(message, error):
     """A failed forward-test update -> one Reports/run_log.csv row (the dashboard's run log), so it is not only in the
     launchd log. Never raises."""
