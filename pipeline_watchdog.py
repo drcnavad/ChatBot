@@ -303,7 +303,7 @@ def write_diagnosis_report(step, phase, diagnosis, log_tail, snapshot):
                 f.write(f"**Resume from:** {diagnosis.get('resume_step') or step}  "
                         f"|  **Confidence:** {diagnosis.get('confidence', 'n/a')}\n\n")
                 f.write("> Diagnose-only: nothing was changed. Review the fix, apply it yourself\n"
-                        "> (or ask Muse), then resume with:\n>\n"
+                        "> (or ask Grok Bot), then resume with:\n>\n"
                         f"> `python run_all.py --from {diagnosis.get('resume_step') or step}`\n\n")
             else:
                 f.write("**Diagnosis:** LLM unavailable (no GEMINI_API_KEY / GROQ_API_KEY / ANTHROPIC_API_KEY) - raw log excerpt below.\n\n")
