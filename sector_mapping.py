@@ -18,7 +18,8 @@ stock_symbols = [
     'ZS', 'UMAC', 'NOC', 'LMT', 'U', 'CRCL', 'TWLO', 'ACHR', 'ALAB', 'APLD', 'ARM', 'ASTS',
     'CIFR', 'CVNA', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RDDT', 'RKLB', 'SHOP', 'SMCI', 'SOUN', 'TEM',
     'TTWO', 'SPCX', 'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'COF', 'C', 'BE', 'BA', 'URI',
-    'PH', 'FCX', 'LYB', 'CRDO', 'NBIS', 'LITE', 'CLS', 'RBRK', 'QQQ',
+    'PH', 'FCX', 'LYB', 'CRDO', 'NBIS', 'LITE', 'CLS', 'RBRK', 'CORZ', 'HIMX', 'LUNR', 'NU',
+    'QQQ',
 ]
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
@@ -106,6 +107,7 @@ symbol_sector = {
     'AXP': 'Financials', 'BE': 'Industrials', 'BA': 'Industrials',
     'URI': 'Industrials', 'PH': 'Industrials', 'TDG': 'Industrials',
     'LYB': 'Materials', 'MOS': 'Materials', 'SW': 'Materials',
+    'CORZ': 'Technology', 'HIMX': 'Technology', 'LUNR': 'Industrials',
 }
 
 # Company names (dashboard and news search).
@@ -224,6 +226,7 @@ symbol_name = {
     'URI': 'United Rentals, Inc.', 'PH': 'Parker-Hannifin Corporation',
     'TDG': 'TransDigm Group Incorporated', 'LYB': 'LyondellBasell Industries N.V.',
     'MOS': 'The Mosaic Company', 'SW': 'Smurfit Westrock plc',
+    'CORZ': 'Core Scientific, Inc.', 'HIMX': 'Himax Technologies, Inc.', 'LUNR': 'Intuitive Machines, Inc.',
 }
 
 # First usable bar date per symbol (earlier vendor bars belong to a different business or a trading halt).
@@ -240,7 +243,7 @@ tradable_symbols = [s for s in stock_symbols if s not in BENCHMARK_SYMBOLS]
 fundamentals_extra = [
     'ABNB', 'ASML', 'AXON', 'BAC', 'BBAI', 'CDW', 'CELH', 'CRSP', 'CRWD', 'CVX', 'DDOG', 'DUOL',
     'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'IT', 'KLAC', 'KVYO', 'LIN', 'LLY', 'MA',
-    'MELI', 'MNDY', 'NEE', 'NEM', 'NET', 'NKE', 'NU', 'NUE', 'NVO', 'PATH', 'PAYX', 'PCTY',
+    'MELI', 'MNDY', 'NEE', 'NEM', 'NET', 'NKE', 'NUE', 'NVO', 'PATH', 'PAYX', 'PCTY',
     'PLTR', 'POOL', 'RTX', 'SYM', 'TMO', 'TOST', 'TTD', 'WDAY', 'XOM', 'ZBRA', 'ZENA',
 ]
 fundamentals_symbols = sorted(set(tradable_symbols) | set(fundamentals_extra))

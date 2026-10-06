@@ -56,7 +56,12 @@ sa = pd.read_csv("Reports/signal_analysis.csv", parse_dates=["Date"])
 bars = pd.read_pickle("Reports/cache/bars_daily_long.pkl")
 close = bars.pivot(index="Date", columns="Symbol", values="Close").sort_index()
 _missing = sorted(set(sm.tradable_symbols) - set(bars["Symbol"]))
+# the universe the saved file was computed on: a stock added to the list joins on the next pipeline run
 tradable = be.scored_symbols(bars, list(sm.tradable_symbols))   # short-history stocks (< 200 bars) are not scored, as live
+PENDING = [s for s in tradable if s not in set(sa.Symbol)]
+if PENDING:
+    print(f"NOTE: {PENDING} are in the stock list but not in signal_analysis.csv yet (added after the last pipeline run)")
+    tradable = [s for s in tradable if s not in PENDING]
 if _missing:   # stop here with a clear message (the audit below needs every stock's bars)
     sys.exit(f"FAIL backtest bar cache has no bars for {_missing} (new in sector_mapping.py): the next pipeline run fetches "
              f"them (be.ensure_long_cache in main_signal_analysis.ipynb), or run python -c \"import backtest_engine as be; "

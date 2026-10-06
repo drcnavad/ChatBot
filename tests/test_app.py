@@ -124,7 +124,10 @@ at = AppTest.from_file("app.py", default_timeout=180).run()
 page_ok(at, "initial")
 opts = [o.split("  ·  ")[0] for o in at.selectbox(key="ticker_dropdown").options]  # labels are "SYM · rank · score"; compare raw symbols
 _short_now = set(SHORT["Symbol"]) & set(sm.tradable_symbols)
-expect(len(opts) == len(sm.tradable_symbols) + 1, f"dropdown has {len(opts)} options")   # ranked stocks + QQQ + short-history ones
+_pending = [s for s in sm.tradable_symbols if s not in set(SIG.Symbol) | set(SHORT["Symbol"])]   # added after the last pipeline run
+if _pending:
+    print(f"   note: {_pending} join the dropdown on the next pipeline run (not in signal_analysis.csv yet)")
+expect(len(opts) == len(sm.tradable_symbols) + 1 - len(_pending), f"dropdown has {len(opts)} options")   # ranked + QQQ + short-history
 expect(opts[-len(SHORT):] == SHORT["Symbol"].tolist() if len(SHORT) else True, "short-history stocks should close the dropdown")
 expect(not (_short_now & set(SIG.Symbol)), f"short-history stocks must never be scored/ranked: {_short_now & set(SIG.Symbol)}")
 for sym in TICKERS:
