@@ -93,7 +93,7 @@ def render_positions(table, data):
 
 def render_benchmarks(data):
     """The account vs QQQ / SPY / IWM / DIA since the forward-test start, the same deposits on the same days
-    (alpaca_paper.benchmark_table); the daily account rows come from Reports/forward_test_daily.csv (4:15 PM CT job)."""
+    (alpaca_paper.benchmark_table); the daily account rows come from Reports/forward_test_daily.csv (3:00 PM CT job)."""
     import alpaca_paper as ap
     daily = read_report_csv(os.path.join(REPORTS, "forward_test_daily.csv"))
     if daily is None or daily.empty:

@@ -2,9 +2,11 @@
 # Install (or refresh after editing) the Stock Analysis launchd jobs:  bash launchd/install_schedule.sh
 #   com.stockanalysis.evening         Mon-Fri 2:30 PM CT, at login, on wake, every 30 min: pipeline_watchdog.py --trade --scheduled
 #   com.stockanalysis.morning         Mon-Fri 9:00 AM CT, at login, on wake, every 30 min: pipeline_watchdog.py --fill-check --scheduled
-#   com.stockanalysis.refresh         Mon-Fri 3:45 PM CT, on wake: run_all.py --quick --scheduled (dashboard refresh on
-#                                     non-decision trading days, normally Tue/Thu; no paid APIs, never orders)
-#   com.stockanalysis.forwardtest     Mon-Fri 4:15 PM CT, on wake: forward_test.py --record (one row per trading day in
+#   com.stockanalysis.refresh         Mon-Fri 3:00 PM CT, on wake: run_all.py --quick --scheduled (dashboard refresh on
+#                                     non-decision trading days, normally Tue/Thu, with the day's final bar from 3:05 PM
+#                                     CT - it waits for it; Mon/Wed/Fri idle: the 2:30 run refreshes; no paid APIs, never orders)
+#   com.stockanalysis.forwardtest     Mon-Fri 3:00 PM CT, on wake: forward_test.py --record --wait (waits for the final bar
+#                                     at 3:05 PM CT and until the refresh / decision run finishes, then one row per trading day in
 #                                     Reports/forward_test_daily.csv; read-only GETs, never orders; + the paper
 #                                     strategies' days in Reports/forward_strategies*.csv from saved data + free daily bars)
 #   com.stockanalysis.earningsstop    every 5 min + at login: earnings_stop.py --loop (LIVE earnings-day 5% drop stop;

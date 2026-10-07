@@ -24,12 +24,16 @@ live band; trimmed to its target when the buys need the cash), and with the earn
 5 days is not bought up. The dip and threshold rules only trade the names they buy or sell. A saved day is never redone: a re-run only adds the days after the last saved one (so
 running twice never double-counts) and a missed day is caught up from the saved bars.
 
-    python forward_test.py --record   # strategies + today's account row (launchd com.stockanalysis.forwardtest, 4:15 PM CT)
+    python forward_test.py --record --wait   # launchd com.stockanalysis.forwardtest, Mon-Fri 3:00 PM CT: waits for the
+                                             # final bar (3:05 PM CT) and for any run_all.py (the Tue/Thu 3:00 PM
+                                             # refresh, a slow 2:30 PM decision run), then strategies + account row
     python forward_test.py            # update the strategies (bars only, no account request) and print the leaderboard
 """
 import argparse
 import os
+import subprocess
 import sys
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -202,7 +206,8 @@ def forward_bars(fetch=True):
     if fetch:
         try:
             syms = list(be.TRADABLE) + [s for s in be.BENCHMARKS if s not in be.TRADABLE]   # + QQQ / SPY (provisional)
-            new, _ = be.drop_partial_last_bar(be.fetch_daily_bars(syms, start=FWD_BARS_START))
+            new, _ = be.drop_partial_last_bar(be.fetch_daily_bars(syms, start=FWD_BARS_START),
+                                              close_buffer_min=be.AFTER_CLOSE_BAR_MIN)   # today's bar from 3:05 PM CT
             new.to_pickle(FWD_BARS + ".tmp")
             os.replace(FWD_BARS + ".tmp", FWD_BARS)
         except Exception as e:
@@ -765,10 +770,10 @@ def verdict(board):
 
 
 def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
-    """Display only, never saved. A trading day is saved by the 4:15 PM CT job once it has signal rows (the 2:30 PM
-    decision run on Mon/Wed/Fri, the 3:45 PM refresh on Tue/Thu); until then, or when a run failed, the board would show
+    """Display only, never saved. A trading day is saved by the 3:00 PM CT job once it has signal rows (the 2:30 PM
+    decision run on Mon/Wed/Fri, the 3:00 PM refresh on Tue/Thu, which the job waits for); until then, or when a run failed, the board would show
     the previous day's numbers again. This marks each strategy's saved holdings (shares + cash of its last saved day, no trades) to the close of every later
-    day the saved daily bars cover (complete days only: the 4:15 PM CT job drops an unfinished bar), and QQQ / SPY to
+    day the saved daily bars cover (complete days only: the 3:00 PM CT job drops a bar before 3:05 PM CT), and QQQ / SPY to
     the same closes. Returns (values, bench) with those rows added; values rows carry Provisional = True."""
     if values is None or values.empty or not os.path.exists(bars_path):
         return values, bench
@@ -871,12 +876,56 @@ def _log_problem(message, error):
         print(f"run log not written ({e})")
 
 
+MAX_PIPELINE_WAIT_MIN = 50   # --wait gives a running run_all.py (refresh / decision run) this long, then goes ahead
+
+
+def wait_seconds_for_bar(now=None):
+    """Seconds until today's bar is final for this job (4 PM ET + be.AFTER_CLOSE_BAR_MIN = 3:05 PM CT) when the
+    job starts at most 15 min before that on a weekday, else 0 (a late or wake-up start runs at once)."""
+    et = (now or datetime.now(be.EASTERN)).astimezone(be.EASTERN)
+    ready = et.replace(hour=16, minute=be.AFTER_CLOSE_BAR_MIN, second=0, microsecond=0)
+    wait = (ready - et).total_seconds()
+    return wait if 0 < wait <= 15 * 60 and et.weekday() < 5 else 0
+
+
+def pipeline_running():
+    """True while a run_all.py process runs (the Tue/Thu 3:00 PM dashboard refresh, the 2:30 PM decision run, a fill
+    check): the forward test reads what they write, so it starts after them. Read-only process list (pgrep)."""
+    try:
+        out = subprocess.run(["pgrep", "-f", "run_all\\.py"], capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return False
+    return any(pid.strip() and int(pid) != os.getpid() for pid in out.split())
+
+
+def wait_for_inputs(sleep=time.sleep, running=pipeline_running, now=None):
+    """The --wait guard: sleep until the bar is final (3:05 PM CT), then while run_all.py runs (polls every 30 s, at most
+    MAX_PIPELINE_WAIT_MIN). Returns the seconds waited for the pipeline."""
+    w = wait_seconds_for_bar(now)
+    if w:
+        print(f"waiting {w / 60:.0f} min for today's final daily bar (3:05 PM CT) ...", flush=True)
+        sleep(w)
+    waited = 0
+    while running() and waited < MAX_PIPELINE_WAIT_MIN * 60:
+        if waited == 0:
+            print("waiting for the running pipeline (run_all.py: refresh / decision run) to finish ...", flush=True)
+        sleep(30)
+        waited += 30
+    if waited:
+        print(f"pipeline finished after ~{waited / 60:.1f} min" if not running() else
+              f"pipeline still running after {MAX_PIPELINE_WAIT_MIN} min; going ahead with the saved files", flush=True)
+    return waited
+
+
 def main(argv=None):
     """Update the paper strategies (and with --record save today's account row), then print the leaderboard. Returns the
     exit code: 1 when a part failed (each failure is one run-log row; a saved day is never redone or lost)."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--record", action="store_true", help="also save today's account row (reads the live account, GET only)")
+    p.add_argument("--wait", action="store_true", help="first wait for the final bar (3:05 PM CT) and any running run_all.py")
     a = p.parse_args(argv)
+    if a.wait:
+        wait_for_inputs()
     rc = 0
     try:
         print(f"strategies: {update_strategies()} new row(s) -> {os.path.relpath(STRATEGIES_CSV, ROOT)}")

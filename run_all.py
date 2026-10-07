@@ -95,6 +95,9 @@ FULL_AFTER = (14, 30)                  # 2:30 PM CT - the scheduled pipeline/tra
 SLOT_TEXT = f"{FULL_AFTER[0] - 12}:{FULL_AFTER[1]:02d} PM CT"
 NEWS_MIN_GAP_H = 24                    # NewsAPI free tier: 100 requests/day, one run = len(stock_symbols) (N_CALLS)
 BAR_FINAL_ET = (16, 30)                # the pipeline treats the daily bar as final after 4:30 PM ET (3:30 PM CT)
+REFRESH_BAR_ET = (16, 5)               # the 3:00 PM CT Tue/Thu refresh takes it at 4:05 PM ET (3:05 PM CT), see
+                                       # backtest_engine.AFTER_CLOSE_BAR_MIN
+REFRESH_MAX_WAIT_MIN = 15              # a refresh started up to 15 min early waits for that time instead of idling
 NB_TIMEOUT = 3600
 KEEP_LOGS = 30
 
@@ -616,14 +619,25 @@ def fill_check_allowed(now_ct, pending_path=None):
 def refresh_idle(now_ct):
     """Why the weekday dashboard refresh (launchd refresh job: --quick --scheduled, never --trade) does nothing now, else
     None. It refreshes only a trading day that is not a decision day (the 2:30 PM decision run refreshes those) and only
-    once the day's bar is final (after 4:30 PM ET), so it never overlaps a decision run."""
+    once the day's bar is final for it (after 4:05 PM ET = 3:05 PM CT), so it never overlaps a decision run."""
     if not is_trading_day(now_ct.date()):
         return "market closed today (weekend or holiday) - nothing to refresh"
     if decision_day(now_ct.date()):
         return "decision day - the 2:30 PM CT decision run refreshes the dashboard"
-    if (now_ct.astimezone(ET).hour, now_ct.astimezone(ET).minute) < BAR_FINAL_ET:
-        return "today's daily bar is not final yet (after 4:30 PM ET = 3:30 PM CT)"
+    if (now_ct.astimezone(ET).hour, now_ct.astimezone(ET).minute) < REFRESH_BAR_ET:
+        return "today's daily bar is not final yet (after 4:05 PM ET = 3:05 PM CT)"
     return None
+
+
+def refresh_wait_seconds(now_ct):
+    """Seconds a refresh started now should sleep before running: until 4:05 PM ET when that is at most
+    REFRESH_MAX_WAIT_MIN away on a trading day that is not a decision day (the launchd job starts at 3:00 PM CT), else 0."""
+    et = now_ct.astimezone(ET)
+    ready = et.replace(hour=REFRESH_BAR_ET[0], minute=REFRESH_BAR_ET[1], second=0, microsecond=0)
+    wait = (ready - et).total_seconds()
+    if wait <= 0 or wait > REFRESH_MAX_WAIT_MIN * 60 or not is_trading_day(now_ct.date()) or decision_day(now_ct.date()):
+        return 0
+    return wait
 
 
 def fill_check_idle(now_ct):
@@ -887,7 +901,17 @@ def main(argv=None):
             print(f"idle: {now:%a %b %d %I:%M %p} CT - {gate_why}", flush=True)   # launchd wake/interval run: no log
             return 0
     if a.scheduled and not a.trade and not a.fill_check:       # the weekday dashboard refresh: no orders, ever
+        wait = refresh_wait_seconds(now)
+        if wait and a.now is None and not a.dry_run:          # started at 3:00 PM CT: sleep until the bar is final
+            print(f"waiting {wait / 60:.0f} min for today's final daily bar (3:05 PM CT) ...", flush=True)
+            time.sleep(wait)
+            now = datetime.now(CT)
+        elif wait:                                             # tests / dry runs: plan as of the ready time
+            now = now + timedelta(seconds=wait)
         idle = refresh_idle(now)
+        if idle is None:                                       # the notebook takes today's bar from 4:05 PM ET
+            import backtest_engine as be
+            os.environ[be.BAR_FINAL_ENV] = str(be.AFTER_CLOSE_BAR_MIN)
         if idle is None and _ckpt_on and not a.dry_run:        # a trade run holds the lock: never run beside it
             free, held_by = acquire_trade_lock()
             if free:

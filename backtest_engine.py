@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -47,6 +48,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 REPORTS_DIR = PROJECT_ROOT / "Reports"
 CACHE_DIR = REPORTS_DIR / "cache"
 EASTERN = ZoneInfo("America/New_York")
+# The daily bar counts as final 30 min after the 4 PM ET close (4:30 PM ET = 3:30 PM CT) for every job by default. The two
+# after-close jobs that run at 3:00 PM CT (the Tue/Thu dashboard refresh and the forward test) take it 5 min after the
+# close instead (4:05 PM ET = 3:05 PM CT: the closing auction has printed): run_all.py sets BAR_FINAL_ENV for the
+# refresh's notebook, forward_test.py passes AFTER_CLOSE_BAR_MIN. Decision days keep their 2:30 PM bar either way.
+BAR_FINAL_MIN = 30
+AFTER_CLOSE_BAR_MIN = 5
+BAR_FINAL_ENV = "STOCK_ANALYSIS_BAR_FINAL_MIN"
 
 COST = 0.001                 # per side
 MIN_BARS = 200               # a stock is eligible once it has a full ma_200 (handles late IPOs consistently)
@@ -297,9 +305,20 @@ def apply_history_start(bars):
     return bars[first.isna() | (bars["Date"] >= first)].reset_index(drop=True)
 
 
-def drop_partial_last_bar(bars, now=None, close_buffer_min=30):
-    """Drop today's bar if the US session (16:00 ET + buffer) has not finished yet - except on a decision day from its
-    decision slot (2:30 PM CT) on: that decision is made on today's bar as of then (the price ~30 min before the close)."""
+def bar_final_min():
+    """Minutes after the 4 PM ET close from which today's bar counts as final: BAR_FINAL_MIN, or BAR_FINAL_ENV when a job
+    sets it (the 3:00 PM CT dashboard refresh sets AFTER_CLOSE_BAR_MIN)."""
+    try:
+        return int(os.environ.get(BAR_FINAL_ENV, BAR_FINAL_MIN))
+    except ValueError:
+        return BAR_FINAL_MIN
+
+
+def drop_partial_last_bar(bars, now=None, close_buffer_min=None):
+    """Drop today's bar if the US session (16:00 ET + buffer, default bar_final_min()) has not finished yet - except on a
+    decision day from its decision slot (2:30 PM CT) on: that decision is made on today's bar as of then (the price ~30
+    min before the close)."""
+    close_buffer_min = bar_final_min() if close_buffer_min is None else close_buffer_min
     now = now or datetime.now(EASTERN)
     now = now.astimezone(EASTERN) if now.tzinfo else now   # an aware time in another zone (CT) is read in ET
     today = pd.Timestamp(now.date())
