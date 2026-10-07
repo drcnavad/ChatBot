@@ -137,8 +137,8 @@ class FakeAccount:
     def fills(self, after=None):
         return FILLS
 
-    def net_deposits(self):
-        return 57000.0
+    def cash_flows(self):
+        return [{"date": "2026-09-30", "time": "2026-09-30T21:15:00Z", "amount": 57000.0}]
 
     def position_dicts(self):
         return [{"symbol": "CCC"}]
@@ -159,6 +159,18 @@ with tempfile.TemporaryDirectory() as tmp:
     check("record: one row per trading day, a re-run replaces it", list(saved["Date"]) == ["2026-10-05", "2026-10-06"]
           and saved["Time_CT"].iloc[0] == "16:40" and list(saved.columns) == ft.DAILY_COLS, saved)
     check("record: picks, winners and positions saved", r1["Closed_Picks"] == 2 and r1["Winning_Picks"] == 1 and r1["Positions"] == 1, r1)
+
+    class LateDeposit(FakeAccount):            # a $3,000 deposit booked Oct 6, 4:15 PM CT, already in the balance
+        def account_summary(self):
+            return {"Equity": 61000.0, "Cash": 4200.0}
+
+        def cash_flows(self):
+            return super().cash_flows() + [{"date": "2026-10-06", "time": "2026-10-06T21:15:22Z", "amount": 3000.0},
+                                           {"date": "2099-01-02", "time": "2099-01-02T21:15:00Z", "amount": 9.0}]
+    r2 = ft.record(LateDeposit(), at("2026-10-06 16:21"), path)
+    check("record after the 4:15 PM deposit booking: the row leaves that day's deposit out of equity, cash and net "
+          "deposits (it counts from the next session); a deposit booked after the balance read is not counted",
+          (r2["Equity"], r2["Cash"], r2["Net_Deposits"]) == (58000.0, 1200.0, 57000.0), r2)
 # ---------------------------------------------------------------- 3) paper strategies (forward_test.STRATEGIES, no orders)
 import numpy as np  # noqa: E402
 import sector_mapping  # noqa: E402

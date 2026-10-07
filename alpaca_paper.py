@@ -48,7 +48,8 @@ LIVE_BASE_URL = "https://api.alpaca.markets/v2"       # the ONLY accepted endpoi
 KEY_ENV, SECRET_ENV = "ALPACA_LIVE_KEY_ID", "ALPACA_LIVE_SECRET_KEY"
 # Also accepted, in this order, if the names above are empty: Alpaca's standard key names.
 FALLBACK_NAMES = [("ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY")]
-ALLOWED_PATHS = ("/account", "/positions", "/orders", "/clock", "/account/activities")   # read-only endpoints (GET only, live host only)
+ALLOWED_PATHS = ("/account", "/positions", "/orders", "/clock", "/account/activities",   # read-only endpoints
+                 "/account/portfolio/history")                                       # (GET only, live host only)
 _LOCAL_TEST_URL = re.compile(r"http://(127\.0\.0\.1|localhost):\d{2,5}/v2")   # tests only (mock server on this machine)
 CT = ZoneInfo("America/Chicago")
 
@@ -181,6 +182,27 @@ class PaperAccount:
         """Lifetime deposits minus withdrawals (cash_flows), so the strategy's P&L can leave them out."""
         return sum(f["amount"] for f in self.cash_flows())
 
+    def snapshot(self):
+        """{"equity", "flows", "at"}: the equity now and only the deposits already in it. The balance is read first, then
+        the deposits, and a deposit booked after the balance read (Alpaca books them around 4:15 PM CT) is left out until
+        the next read, so the equity and the deposits always describe the same moment."""
+        equity = self.account_summary()["Equity"]
+        at = pd.Timestamp.now(tz="UTC")
+        return {"equity": equity, "flows": [f for f in self.cash_flows() if _flow_time(f) <= at], "at": at.tz_convert(CT)}
+
+    def daily_history(self, start):
+        """Alpaca's daily account history from `start` (GET /account/portfolio/history, 1D): a DataFrame of Date (the
+        trading day), Equity (end of day, that day's deposits included) and Cashflow (that day's deposits - withdrawals)."""
+        h = self._get("/account/portfolio/history", {"timeframe": "1D", "start": str(start)[:10], "pnl_reset": "no_reset",
+                                                     "cashflow_types": "CSD,CSW,JNLC"})
+        ts, n = h.get("timestamp") or [], len(h.get("timestamp") or [])
+        cash = [sum(float((v or [])[i] or 0) if i < len(v or []) else 0.0 for v in (h.get("cashflow") or {}).values())
+                for i in range(n)]
+        days = pd.to_datetime(ts, unit="s", utc=True).tz_convert("America/New_York").tz_localize(None).normalize()
+        out = pd.DataFrame({"Date": days, "Equity": pd.to_numeric(pd.Series(h.get("equity") or [None] * n, dtype=object),
+                                                                  errors="coerce").to_numpy(), "Cashflow": cash})
+        return out.dropna(subset=["Equity"]).reset_index(drop=True)
+
     def position_dicts(self):
         """Open positions as Alpaca returns them (GET /positions), for the dashboard's holdings table."""
         return self._get("/positions")
@@ -281,24 +303,14 @@ BENCHMARK_ETFS = {"QQQ": "Nasdaq 100", "SPY": "S&P 500", "IWM": "Russell 2000", 
 
 def account_twr_index(daily):
     """Time-weighted growth of the account (1.0 on the first row) from daily rows (Date, Equity, Net_Deposits; e.g.
-    Reports/forward_test_daily.csv): each row's growth = Equity / (previous Equity + the net deposit since the previous
-    row), so deposits and withdrawals are never returns and a big deposit does not change the % already earned. A deposit
-    counts from the start of the period after it (they arrive after the close, ready for the next session), the same
-    day the ETFs in benchmark_table buy it (at its date's close)."""
+    Reports/forward_test_daily.csv, where each row is the account after the close, before that evening's deposit): each
+    row's growth = Equity / (previous Equity + the net deposit since the previous row), so deposits and withdrawals are
+    never returns. A deposit counts from the session after it arrives (Alpaca books them around 4:15 PM CT, after the
+    close), the same day the ETFs in account_vs_etfs buy it (at its date's close)."""
     d = daily.assign(Date=pd.to_datetime(daily["Date"])).sort_values("Date")
     eq, nd = d["Equity"].astype(float), d["Net_Deposits"].astype(float)
     growth = eq / (eq.shift(1) + nd.diff())
     return pd.Series(growth.fillna(1.0).cumprod().to_numpy(), index=d["Date"].to_numpy())
-
-
-def account_twr(daily, equity_now, net_deposits_now):
-    """Time-weighted return (fraction) from the first daily row to now: account_twr_index chained with one live step
-    (equity_now; net_deposits_now - the last row's Net_Deposits = deposits since that row)."""
-    d = daily.assign(Date=pd.to_datetime(daily["Date"])).sort_values("Date")
-    last_eq, last_nd = float(d["Equity"].iloc[-1]), float(d["Net_Deposits"].iloc[-1])
-    base = last_eq + net_deposits_now - last_nd
-    step = equity_now / base if base > 0 else float("nan")
-    return float(account_twr_index(d).iloc[-1]) * step - 1.0
 
 
 def _close_on(closes, day, price_now):
@@ -314,21 +326,31 @@ def _flow_time(f):
     return pd.Timestamp(f"{f['date']} 23:59", tz=CT) if pd.isna(t) else (t.tz_localize("UTC") if t.tz is None else t).tz_convert(CT)
 
 
-def benchmark_table(daily, equity_now, flows, closes, prices_now):
-    """The account vs each BENCHMARK_ETFS fund, the same money on the same days. Start = the first daily row (its Equity,
-    deposits until that row's time are in it). Each ETF buys that amount at the start day's close, and every later
-    deposit (withdrawal) buys (sells) it at the close of the deposit's date. Value = units x the latest price.
-    Return % = time-weighted, so deposits are not gains: for an ETF that is its price change since the start close; for
-    the account account_twr. Gain $ = value - (start equity + later deposits), the same for every row's money.
-    daily: Date, Time_CT, Equity, Net_Deposits rows; flows: every cash_flows() dict (lifetime); closes: DataFrame of
-    daily closes by date (one column per ETF); prices_now: {ETF: latest price}. Returns (table, start date, money put in)."""
-    d = daily.assign(Date=pd.to_datetime(daily["Date"])).sort_values("Date").reset_index(drop=True)
-    start, start_eq = d["Date"].iloc[0], float(d["Equity"].iloc[0])
-    flows = flows or []
-    start_at = pd.Timestamp(f"{start:%Y-%m-%d} {d['Time_CT'].iloc[0]}", tz=CT)       # deposits before it are in start_eq
-    later = [f for f in flows if _flow_time(f) > start_at]
-    put_in = start_eq + sum(f["amount"] for f in later)
-    acct_ret = account_twr(d, equity_now, sum(f["amount"] for f in flows))           # lifetime net deposits now
+def account_vs_etfs(history, snap, closes, prices_now, start):
+    """The account vs each BENCHMARK_ETFS fund since the `start` close, from one source: Alpaca's daily history
+    (PaperAccount.daily_history) plus one live read (PaperAccount.snapshot). Deposits book after the close, so each day's
+    account growth = (that day's end equity - that day's deposits) / the previous day's end equity; today's step uses the
+    live equity less the deposits already in it that came after the last daily bar (a bar for today, if any, is left out:
+    the live read replaces it). Each ETF buys the start balance at the start close and every later deposit (withdrawal)
+    at the close of its date (the latest price when that close does not exist yet), valued at the latest price.
+    Return % is time-weighted (for an ETF its price change since the start close); Gain $ = value - money put in.
+    Returns (table, start date, money put in), or None when the history does not reach back to `start`."""
+    start = pd.Timestamp(start).normalize()
+    today = pd.Timestamp(snap["at"]).tz_convert(CT).tz_localize(None).normalize()
+    h = history.assign(Date=pd.to_datetime(history["Date"]).dt.normalize()).sort_values("Date")
+    h = h[(h["Date"] >= start) & (h["Date"] < today)].reset_index(drop=True)
+    if h.empty or h["Date"].iloc[0] != start:
+        return None
+    eq, cash = h["Equity"].astype(float), h["Cashflow"].astype(float)
+    last = h["Date"].iloc[-1]
+    since = [f for f in snap["flows"] if pd.Timestamp(f["date"]).normalize() > last]
+    before_today = sum(f["amount"] for f in since if pd.Timestamp(f["date"]).normalize() < today)   # in today's session
+    today_in = sum(f["amount"] for f in since if pd.Timestamp(f["date"]).normalize() >= today)      # booked after it
+    equity_now = float(snap["equity"])
+    growth = ((eq - cash) / eq.shift(1)).iloc[1:].prod() * (equity_now - today_in) / (eq.iloc[-1] + before_today)
+    acct_ret = growth - 1.0
+    deposits = [(d, c) for d, c in zip(h["Date"].iloc[1:], cash.iloc[1:]) if c] + [(f["date"], f["amount"]) for f in since]
+    put_in = float(eq.iloc[0]) + sum(c for _, c in deposits)
     rows = [{"Compared with": "Your account", "Return %": acct_ret * 100, "Value now": equity_now, "Gain $": equity_now - put_in,
              "Account ahead by (pts)": float("nan")}]
     for sym, name in BENCHMARK_ETFS.items():
@@ -338,7 +360,7 @@ def benchmark_table(daily, equity_now, flows, closes, prices_now):
             continue
         col = col.set_axis(pd.to_datetime(col.index).normalize())
         p0 = _close_on(col, start, px_now)
-        units = start_eq / p0 + sum(f["amount"] / _close_on(col, f["date"], px_now) for f in later)
+        units = float(eq.iloc[0]) / p0 + sum(c / _close_on(col, d, px_now) for d, c in deposits)
         ret = (px_now / p0 - 1) * 100
         rows.append({"Compared with": f"{sym} ({name})", "Return %": ret, "Value now": units * px_now,
                      "Gain $": units * px_now - put_in, "Account ahead by (pts)": acct_ret * 100 - ret})
@@ -374,9 +396,12 @@ def sync_paper_account(account=None, positions_csv=None, snapshot_csv=None, hist
     account = account or PaperAccount()
     positions_csv, snapshot_csv = positions_csv or POSITIONS_CSV, snapshot_csv or SNAPSHOT_CSV
     history_csv = history_csv or HISTORY_CSV
-    summary, positions = account.account_summary(), account.positions()
+    summary = account.account_summary()
+    at = pd.Timestamp.now(tz="UTC")                       # deposits booked after the balance read are not in it yet
+    positions = account.positions()
     write_positions_csv(positions, positions_csv)
-    write_snapshot(summary, positions, snapshot_csv, history_csv, net_deposits=account.net_deposits())
+    net = sum(f["amount"] for f in account.cash_flows() if _flow_time(f) <= at)
+    write_snapshot(summary, positions, snapshot_csv, history_csv, net_deposits=net)
     return {**summary, "Positions": int((positions["Qty"] != 0).sum()), "positions_csv": positions_csv}
 
 

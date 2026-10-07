@@ -238,6 +238,8 @@ class AppFake(Fake):
                     "long_market_value": "1010"}
         if path == "/orders":
             return ORD[:1]
+        if path == "/account/portfolio/history":                # no daily history yet: the ETF comparison is left out
+            return {"timestamp": [], "equity": [], "cashflow": {}}
         if path == "/clock":                                    # in sync with this Mac (no next open: no calendar check)
             return {"is_open": False, "timestamp": datetime.now(timezone.utc).isoformat()}
         items = [FL("AAA", "buy", 10, 101, "2026-10-02T20:31:05Z", "id-live-20261002-BUY-AAA-10-10000")][::-1]

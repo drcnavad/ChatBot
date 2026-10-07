@@ -344,6 +344,8 @@ class FakeAccount(ap.PaperAccount):
             return {"equity": "1000", "cash": "220", "buying_power": "220", "long_market_value": "780", "last_equity": "990"}
         if path == "/orders":
             return [{"id": "rep1", "client_order_id": "live-fri-20250220-AAA", "submitted_at": "2025-02-20T15:00:00Z"}]
+        if path == "/account/portfolio/history":                # no daily history yet: the ETF comparison is left out
+            return {"timestamp": [], "equity": [], "cashflow": {}}
         items = [a for a in ACTS if params.get("activity_types") != "FILL" or a["activity_type"] == "FILL"][::-1]
         start = 0 if "page_token" not in params else [a["id"] for a in items].index(params["page_token"]) + 1
         return items[start:start + params["page_size"]]
@@ -388,7 +390,7 @@ try:
                   if {"Adjustment code", "Holding from", "Method", "Disallowed loss", "Qualified (est.)"} & set(f.columns)),
           by_tbl.to_dict("list"))
     paths = {p for p, _ in FakeAccount.calls}
-    check("app: only allow-listed GET paths, incl. /orders for the bot flag", paths <= {"/positions", "/account", "/account/activities", "/orders", "/clock"}
+    check("app: only allow-listed GET paths, incl. /orders for the bot flag", paths <= {"/positions", "/account", "/account/activities", "/orders", "/clock", "/account/portfolio/history"}
           and "/orders" in paths, paths)
     n_hist = sum(1 for p, q in FakeAccount.calls if p == "/account/activities" and q.get("activity_types") is None)
     at.run()

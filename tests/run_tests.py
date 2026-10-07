@@ -18,8 +18,9 @@
   test_paper_account.py  alpaca_paper.py + run_all --sync-live against a local MOCK server
   test_live_holdings.py  Details tab live holdings: fake Alpaca client, FIFO first-buy dates, totals, the ETF
                          comparison table, 60 s cache, failure message (no network to Alpaca)
-  test_benchmark_compare.py the account vs QQQ / SPY / IWM / DIA: same deposits on the same days at their closes,
-                         time-weighted returns (a mid-period deposit changes no return), deposits from Alpaca (paged)
+  test_benchmark_compare.py the account vs QQQ / SPY / IWM / DIA from Alpaca's daily history + one live snapshot: same
+                         deposits on the same days at their closes, time-weighted returns (a deposit changes no return;
+                         after-close deposits count from the next session), deposits from Alpaca (paged, snapshot rule)
   test_dashboard_http.py the app on test port 8599 answers 200 for / and /?symbol=NVDA (never touches 8502, the running app)
   test_paper_trade_live_safety.py  mocked (zero broker calls) regression tests for the LIVE paper_trade.py:
                          live- / live-fill- order id namespace, paper=False LIVE client from LIVE keys,

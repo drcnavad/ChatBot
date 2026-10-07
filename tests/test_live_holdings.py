@@ -66,6 +66,9 @@ class FakeAccount(ap.PaperAccount):
             return POS
         if path == "/orders":                                   # the tax view's order list (client ids)
             return []
+        if path == "/account/portfolio/history":                # daily account history (end of day, deposits in)
+            ts = [int(pd.Timestamp(d, tz="UTC").timestamp()) for d in ("2026-10-03", "2026-10-06", "2026-10-07")]
+            return {"timestamp": ts, "equity": [880.0, 980.0, 990.0], "cashflow": {"CSD": [0.0, 100.0, 0.0]}}
         if path == "/account":
             return {"equity": "1000", "cash": "249", "buying_power": "249", "long_market_value": "751", "last_equity": "990"}
         if params.get("activity_types") != "FILL":                # deposits / withdrawals (cash_flows)
@@ -139,10 +142,7 @@ check("the table reruns by itself (st.fragment run_every=60), not the whole page
 # ---------------------------------------------------------------- the dashboard renders it (fake client, no Alpaca)
 import dashboard.details.live_holdings as lh  # noqa: E402
 real, real_key = ap.PaperAccount, ap.holdings_refresh_key
-real_lh = lh.read_report_csv, lh.etf_prices
-DAILY = pd.DataFrame({"Date": ["2026-10-02", "2026-10-06"], "Time_CT": ["16:15", "16:15"], "Equity": [880.0, 990.0],
-                      "Net_Deposits": [0.0, 100.0]})
-lh.read_report_csv = lambda path: DAILY if path.endswith("forward_test_daily.csv") else real_lh[0](path)
+real_lh = lh.etf_prices
 lh.etf_prices = lambda symbols, start: (pd.DataFrame({s: [100.0, 105.0] for s in symbols},       # no yfinance call
                                                      index=pd.to_datetime(["2026-10-02", "2026-10-05"])), dict.fromkeys(symbols, 110.0))
 ap.PaperAccount = FakeAccount
@@ -161,13 +161,13 @@ try:
     check("app: the account vs QQQ / SPY / IWM / DIA table, each ETF +10% (110 vs the Oct 2 close 100)",
           len(bm) == 1 and list(bm[0]["Compared with"]) == ["Your account"] + [f"{s} ({n})" for s, n in ap.BENCHMARK_ETFS.items()]
           and all(math.isclose(r, 10) for r in bm[0]["Return %"].iloc[1:]), bm)
-    check("app: the account's return nets out the $100 deposit (990 on 880 + 100 = +0%, then 1000 / 990)",
+    check("app: the account's return nets out the $100 Oct 5 deposit ((980 - 100) / 880 = +0%, then 990 / 980, 1000 / 990)",
           len(bm) == 1 and math.isclose(bm[0]["Return %"].iloc[0], (990 / 980 * 1000 / 990 - 1) * 100), bm)
     check("app: the comparison caption explains the same deposits and time-weighting",
           any("each deposit or withdrawal bought or sold at the close of its date" in c.value and "time-weighted" in c.value
               for c in at.caption))
     check("app: as-of time and how-to-read note", any(c.value.startswith("As of ") and "every hour otherwise" in c.value for c in at.caption))
-    check("app: only read-only GET paths used", FakeAccount.calls and all(p in ("/positions", "/account", "/account/activities", "/orders", "/clock")
+    check("app: only read-only GET paths used", FakeAccount.calls and all(p in ("/positions", "/account", "/account/activities", "/orders", "/clock", "/account/portfolio/history")
                                                                           for p, _ in FakeAccount.calls), FakeAccount.calls)
     at.run()
     check("app: same refresh key -> cached, no new Alpaca reads", reads() == 1, reads())
@@ -187,7 +187,7 @@ try:
           reads() == 4 and any("First bought" in d.value.columns for d in at.dataframe), reads())
 finally:
     ap.PaperAccount, ap.holdings_refresh_key, FakeAccount.fail = real, real_key, None
-    lh.read_report_csv, lh.etf_prices = real_lh
+    lh.etf_prices = real_lh
     st.cache_data.clear()
     st.cache_resource.clear()
 

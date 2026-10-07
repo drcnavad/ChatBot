@@ -5,8 +5,8 @@ from datetime import datetime
 
 import streamlit as st
 
-from dashboard.data import etf_prices, read_report_csv
-from dashboard.settings import CT, REPORTS
+from dashboard.data import etf_prices
+from dashboard.settings import CT
 from dashboard.style import live_row, section, toned
 
 
@@ -19,13 +19,15 @@ def _fill_history():
 
 @st.cache_data(ttl=3600, max_entries=4, show_spinner=False)
 def _read_holdings(refresh_key):
-    """One read of the Alpaca LIVE account (GET only: positions, account, fills, deposits/withdrawals) per refresh_key
-    (alpaca_paper.holdings_refresh_key: a new key each minute in market hours, each hour otherwise). A failure raises,
-    and Streamlit never caches a raise, so the next minute tries again."""
+    """One read of the Alpaca LIVE account (GET only: positions, fills, account + deposits/withdrawals as one snapshot,
+    daily account history) per refresh_key (alpaca_paper.holdings_refresh_key: a new key each minute in market hours,
+    each hour otherwise). A failure raises, and Streamlit never caches a raise, so the next minute tries again."""
     import alpaca_paper as ap
+    import backtest_engine as be
     acct = ap.PaperAccount()
-    return {"positions": acct.position_dicts(), "fills": _fill_history().update(acct), "equity": acct.account_summary()["Equity"],
-            "flows": acct.cash_flows(), "as_of": datetime.now(CT)}
+    positions, fills, snap = acct.position_dicts(), _fill_history().update(acct), acct.snapshot()
+    return {"positions": positions, "fills": fills, "equity": snap["equity"], "snapshot": snap,
+            "history": acct.daily_history(be.FORWARD_START), "as_of": datetime.now(CT)}
 
 
 def live_holdings():
@@ -92,23 +94,25 @@ def render_positions(table, data):
 
 
 def render_benchmarks(data):
-    """The account vs QQQ / SPY / IWM / DIA since the forward-test start, the same deposits on the same days
-    (alpaca_paper.benchmark_table); the daily account rows come from Reports/forward_test_daily.csv (3:00 PM CT job)."""
+    """The account vs QQQ / SPY / IWM / DIA since the forward-test start close, the same deposits on the same days, all
+    from Alpaca (alpaca_paper.account_vs_etfs: daily account history + this read's balance and deposits)."""
     import alpaca_paper as ap
-    daily = read_report_csv(os.path.join(REPORTS, "forward_test_daily.csv"))
-    if daily is None or daily.empty:
+    import backtest_engine as be
+    closes, now = etf_prices(tuple(ap.BENCHMARK_ETFS), str(be.FORWARD_START))
+    out = ap.account_vs_etfs(data["history"], data["snapshot"], closes, now, be.FORWARD_START)
+    if out is None:
         return
-    closes, now = etf_prices(tuple(ap.BENCHMARK_ETFS), str(daily["Date"].min()))
-    table, start, put_in = ap.benchmark_table(daily, data["equity"], data["flows"], closes, now)
+    table, start, put_in = out
     section(f"Your account vs index ETFs since {start:%a %b %-d, %Y}")
     pct, money = st.column_config.NumberColumn(format="%+.2f%%"), st.column_config.NumberColumn(format="dollar")
     sty = live_row(toned(table, ["Return %", "Gain $", "Account ahead by (pts)"]), "Compared with", "Your account")
     st.dataframe(sty, hide_index=True, width="stretch", height=35 * (len(table) + 1) + 3,
                  column_config={"Return %": pct, "Value now": money, "Gain $": money,
                                 "Account ahead by (pts)": st.column_config.NumberColumn(format="%+.2f")})
-    st.caption(f"The same money in each ETF instead: your {start:%b %-d} close balance plus every later deposit "
+    st.caption(f"The same money in each ETF instead: your {start:%b %-d} closing balance plus every later deposit "
                f"(\\${put_in:,.2f} in total), each deposit or withdrawal bought or sold at the close of its date, valued at "
                "the latest price (ETF closes adjusted for dividends, from yfinance; display only). Return % is "
                "time-weighted, so deposits never count as gains: for an ETF it is its price change; for your account each "
-               "day's growth net of that day's deposits. Gain \\$ = value now - money put in. Account ahead by: green = "
-               "your account beats that ETF, red = it trails.")
+               "day's growth from Alpaca's daily account history, with a deposit counted from the session after it arrives "
+               "(Alpaca books deposits around 4:15 PM CT, after the close). Gain \\$ = value now - money put in. Account "
+               "ahead by: green = your account beats that ETF, red = it trails.")

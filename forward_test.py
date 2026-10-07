@@ -7,7 +7,8 @@
      Alpaca's free market data (forward_bars(): one bar download per run, the same request the pipeline makes).
 
   Reports/forward_test_daily.csv           one row per trading day (re-recording a day replaces it): account equity, cash,
-                                           lifetime net deposits, positions, closed picks / winners, $ traded and its cost
+                                           lifetime net deposits (after the close: a deposit booked that evening, about
+                                           4:15 PM CT, counts from the next row), positions, closed picks / winners, $ traded and its cost
                                            vs the decision price (the stock's close in signal_analysis.csv on the order's
                                            As_Of day, which on a decision day is the 2:30 PM bar the strategy decided on)
   Reports/forward_strategies.csv           one row per strategy and trading day: Value (1.0 at the Oct 2 close) and Cash
@@ -682,16 +683,22 @@ def record(account=None, now=None, path=DAILY_CSV):
     if not be.is_session(now.date()) or now.date() < pd.Timestamp(be.FORWARD_START).date():
         print(f"idle: {now:%a %b %-d} is not a trading day on/after the forward-test start")
         return None
-    if account is None:
-        import alpaca_paper as ap
-        account = ap.PaperAccount()
-    s, fills = account.account_summary(), account.fills()
+    import alpaca_paper as ap
+    account = account or ap.PaperAccount()
+    s = account.account_summary()
+    at = pd.Timestamp.now(tz="UTC")             # deposits booked after this balance read are not in it yet
+    fills = account.fills()
+    flows = [f for f in account.cash_flows() if ap._flow_time(f) <= at]
+    # A deposit booked today (Alpaca: about 4:15 PM CT, after the close) counts from the next session, so a late run's row
+    # is the account after the close, before that deposit (the row's equity and net deposits both leave it out).
+    late = sum(f["amount"] for f in flows if str(f["date"])[:10] == f"{now:%Y-%m-%d}")
     sig = _read(SIGNAL_CSV, usecols=["Date", "Symbol", "Close"], parse_dates=["Date"])
     closes = {} if sig is None else dict(zip(zip(sig["Date"], sig["Symbol"]), sig["Close"]))
     pk = picks(fills)
     traded, cost = trade_cost(fills, _read(ORDERS_CSV), closes)
-    row = {"Date": f"{now:%Y-%m-%d}", "Time_CT": f"{now:%H:%M}", "Equity": s["Equity"], "Cash": s["Cash"],
-           "Net_Deposits": account.net_deposits(), "Positions": len(account.position_dicts()),
+    row = {"Date": f"{now:%Y-%m-%d}", "Time_CT": f"{now:%H:%M}", "Equity": round(s["Equity"] - late, 2),
+           "Cash": round(s["Cash"] - late, 2), "Net_Deposits": round(sum(f["amount"] for f in flows) - late, 2),
+           "Positions": len(account.position_dicts()),
            "Closed_Picks": len(pk), "Winning_Picks": int((pk["P/L $"] > 0).sum()), "Traded_USD": round(traded, 2),
            "Cost_USD": round(cost, 2)}
     old = _read(path, dtype={"Date": str})
