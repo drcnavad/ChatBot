@@ -148,6 +148,9 @@ check("2:30 run: DAY limit orders, no extended hours, 2-decimal shares",
       all(x.time_in_force == TimeInForce.DAY and not x.extended_hours for x in s) and s[1].qty == 3.58, [x.qty for x in s])
 check("2:30 run: sell at 99.85, buy at 100.05", (s[0].limit_price, s[1].limit_price) == (99.85, 100.05))
 check("2:30 run: done, nothing kept", not os.path.exists(p) and "COMPLETED via limit" in status_of(res, "BBB"))
+check("2:30 run: a never-sent row reads 'sent now', not 'staged, filled 0/x'",
+      status_of(res, "BBB").endswith("(sent now, nothing was sent before)") and "staged" not in status_of(res, "BBB"),
+      status_of(res, "BBB"))
 lg = pd.read_csv(log)
 need = ["Bid", "Ask", "Spread_%", "Limit", "Fill_Price", "Slippage_%"]
 check("order log: price columns added, the old row kept", all(c in lg.columns for c in need) and lg.Symbol.iloc[0] == "OLD",

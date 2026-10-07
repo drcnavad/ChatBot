@@ -40,9 +40,9 @@ SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else N
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
 MAX_WEIGHT = WINNER.get("max_weight")                                # no stock above this weight; the extra stays cash
 try:                                                                 # Mon/Wed spare-cash rule (live account)
-    from paper_trade import DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD
+    from paper_trade import DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, TOPUP_RANKS
 except Exception:
-    DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD = 20, 0.01, 100.0
+    DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, TOPUP_RANKS = 10, 0.01, 100.0, 3
 
 
 def rules_text():
@@ -73,13 +73,14 @@ def rules_text():
                   "is sold and the cash goes to the spare-cash rule below.\n" if EXIT_TO_TOP else
                   "sold; the cash goes to the spare-cash rule below.\n") if EXIT_BELOW else "")
             + (f"- **{days} spare cash:** after the swaps and exits, the account's cash above {1 - LIVE_INVESTED:.0%} of equity "
-               "(e.g. a deposit, an exit or a pre-earnings stop sale) buys the best-ranked stocks the account does not hold, "
-               f"in rank order (top {N_PICKS} first, then down to rank {DEPLOY_MAX_RANK}), each at its current rule weight (a "
-               f"typical top-{N_PICKS} weight below rank {N_PICKS})"
-               + (f", max {MAX_WEIGHT:.0%} each" if MAX_WEIGHT else "")
-               + ("; earnings rule" if EARNINGS else "") + ", no buy back after a pre-earnings stop sale. A rest under "
-               f"${DEPLOY_MIN_USD:,.0f} or {DEPLOY_MIN_PCT:.0%} of equity (whichever is larger) stays in cash. Held stocks are "
-               "not topped up or trimmed; Friday rebalances everything as usual.\n" if MIDWEEK else "")
+               f"(e.g. a deposit, an exit or a pre-earnings stop sale) buys the top-{DEPLOY_MAX_RANK} stocks the account does "
+               "not hold, in rank order, each at its current rule weight; what is left tops up ranks "
+               f"1-{TOPUP_RANKS} (held or not): rank 1 first, up to the cap, then rank 2, then rank 3"
+               + (f" (max {MAX_WEIGHT * LIVE_INVESTED:.1%} of equity per stock)" if MAX_WEIGHT else "")
+               + ("; earnings rule" if EARNINGS else "") + ", no buy back after a pre-earnings stop sale. Cash no stock can "
+               f"take, and any order under ${DEPLOY_MIN_USD:,.0f} or {DEPLOY_MIN_PCT:.0%} of equity (whichever is larger), "
+               f"stays in cash. Other held stocks are not topped up or trimmed; Friday rebalances everything as usual.\n"
+               if MIDWEEK else "")
             + (f"- **Earnings:** a stock that is not held is not bought when its next earnings date is within {EARNINGS} "
                "calendar days; on Friday its slot goes to the next eligible stock (else cash), mid-week it is just not bought. "
                "A held stock is not topped up before them.\n" if EARNINGS else "")

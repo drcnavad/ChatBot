@@ -43,11 +43,12 @@ Targets come from Reports/strategy_picks.csv (written by main_signal_analysis.ip
   - `auto` (default) = provisional on a rebalance day (the decision day itself); midweek when the latest bar is a Mon/Wed
                     check that produced a swap, replace, or cash exit; hold on a quiet mid-week day (no swap/exit at the
                     latest check) - every position is left unchanged (no drift rebalance).
-Mon/Wed spare cash (live only, approved 2026-10-06): after the swaps/exits, the account's actual cash above 1% of equity
-(e.g. a deposit, a cash exit) buys the best-ranked stocks the account does NOT hold in the latest ranking (score > 0, rank
-order, up to rank 20; earnings rule, pre-earnings stop no-buy-back, 20% max weight), each at its latest rule weight. Held
-stocks get no top-up or trim; Friday's rebalance is unchanged. See build_cash_deploy_orders(). Dry run with the real
-account (read only): python paper_trade.py --from-account [--midweek-preview]
+Mon/Wed spare cash (live only, approved 2026-10-06, leftover rule 2026-10-07): after the swaps/exits, the account's actual
+cash above 1% of equity (e.g. a deposit, a cash exit) buys the top-10 stocks the account does NOT hold in the latest ranking
+(score > 0, rank order), each at its latest rule weight; what is left tops up ranks 1-3 (held or not), rank 1 to the 19.8%
+cap first, then 2, then 3; the rest stays cash (earnings rule, pre-earnings stop no-buy-back and the cap apply throughout).
+Other held stocks get no top-up or trim; Friday's rebalance is unchanged. See build_cash_deploy_orders(). Dry run with the
+real account (read only): python paper_trade.py --from-account [--midweek-preview]
 Earnings rule (backtest_engine.WINNER["earnings_block_days"] = 5): the targets leave out stocks not held with earnings
 within 5 calendar days. The live planner adds its own check for the LIVE account: a pick with earnings within 5 days is
 not newly bought or topped up (this rule never sells; the pre-earnings stop, earnings_stop.py, may).
@@ -81,10 +82,12 @@ MAX_ORDER_PCT = 0.20   # backstop: a BUY worth more than 20% of equity is refuse
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
 INVESTED_CAP = 0.99   # trim fix: a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED, tests check)
 CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills a bit above the estimate still fit.
-# Mon/Wed spare-cash rule (Chirag, 2026-10-06): after the mid-week swaps / exit refills, the cash above 1% of equity buys the
-# best-ranked stocks the account does NOT hold (latest ranking, pure rank), each at its latest rule weight (Provisional_Weight;
-# ranks without one get the median top-10 weight), in rank order down to rank DEPLOY_MAX_RANK. Held stocks are never traded by it.
-DEPLOY_MAX_RANK = 20     # look no further than rank 20 for spare-cash buys
+# Mon/Wed spare-cash rule (Chirag, 2026-10-06; leftover rule 2026-10-07): after the mid-week swaps / exit refills, the cash
+# above 1% of equity buys the top-10 stocks the account does NOT hold (latest ranking, pure rank), each at its latest rule
+# weight (Provisional_Weight), and what is left tops up ranks 1-3 (held or not): rank 1 up to the 19.8% cap first, then 2,
+# then 3. Ranks 11-20 are not bought; cash no stock can take stays cash. Other held stocks are never traded by it.
+DEPLOY_MAX_RANK = 10     # spare-cash buys of stocks not held: top 10 only
+TOPUP_RANKS = 3          # the leftover tops up ranks 1-3, in rank order, each to the per-stock cap
 DEPLOY_MIN_PCT = 0.01    # a spare-cash buy must be worth at least 1% of equity (a smaller rest stays in cash) ...
 DEPLOY_MIN_USD = 100.0   # ... and at least $100
                        # A cap, not a second scale-down: weights already sum to <= 99% (backtest_engine.LIVE_INVESTED),
@@ -662,7 +665,7 @@ def build_hold_orders(positions, prices=None):
 
     The backtest holds positions unchanged on mid-week days with no swap/exit (no drift
     rebalance) - live matches it with HOLD rows (nothing submitted for them). Live then
-    invests the account's spare cash in stocks it does not hold (build_cash_deploy_orders).
+    invests the account's spare cash (build_cash_deploy_orders: top-10 stocks not held, then ranks 1-3).
     """
     positions = _clean_positions(positions)
     prices = prices or {}
@@ -706,35 +709,39 @@ def is_midweek_check_day(day, signal_csv=SIGNAL_CSV):
 
 
 def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=None, fractional=False, prices=None,
-                             max_rank=DEPLOY_MAX_RANK, min_pct=DEPLOY_MIN_PCT, min_usd=DEPLOY_MIN_USD):
+                             max_rank=DEPLOY_MAX_RANK, topup_ranks=TOPUP_RANKS, min_pct=DEPLOY_MIN_PCT, min_usd=DEPLOY_MIN_USD):
     """Mon/Wed spare-cash rule, run AFTER the mid-week swaps/exits (`orders`): returns (orders + new rows, info).
 
     Spare cash = Alpaca cash + the planned sells - the planned buys - (1 - invested level) x equity, where the invested level
     is LIVE_INVESTED (99%), halved like the Friday weights while QQQ is at/below its 200-day average (Regime_On 0 in the
-    latest ranking). It buys stocks the account does NOT hold after the swaps (actual Alpaca positions, not the
-    pipeline's view), from the latest ranking (`ranking`, see latest_ranking: score above 0), best rank first, up to
-    rank `max_rank`; names sold by today's swaps/exits and names in `blocked` (earnings within 5 days, pre-earnings stop
-    sale) are skipped. Each gets its latest rule weight x equity (Provisional_Weight; a rank without one gets the median
-    positive Provisional_Weight, i.e. a typical top-10 slot), capped at WINNER['max_weight'] x 99% of equity, until the
-    spare cash is used; if cash is still left after every candidate, the new buys are topped up pro rata to that cap. A
-    buy below max(min_pct x equity, min_usd) is not made (the rest stays in cash). Held stocks get no order (no top-up,
-    no trim). Shares are rounded DOWN (2 decimals when fractional, else whole shares)."""
+    latest ranking). From the latest ranking (`ranking`, see latest_ranking: score above 0), best rank first:
+      1. Stocks the account does NOT hold after the swaps (actual Alpaca positions, not the pipeline's view) ranked
+         1-`max_rank` (the top 10) are bought, each at its latest rule weight x equity (Provisional_Weight; none -> the
+         median positive Provisional_Weight, a typical top-10 slot), until the spare cash is used.
+      2. What is left tops up ranks 1-`topup_ranks` (1-3), held or not: rank 1 is filled up to the cap first, then rank 2,
+         then rank 3 (a held stock counts at shares after today's orders x price). Ranks 11-20 are never bought.
+    Cap: WINNER['max_weight'] x 99% of equity (19.8%) per stock, including what is already held. Names sold by today's
+    swaps/exits and names in `blocked` (earnings within 5 days, pre-earnings stop sale) are skipped. An order below
+    max(min_pct x equity, min_usd) is not made; whatever no stock can take stays in cash. Stocks outside ranks 1-3 that
+    are held get no order (no top-up, no trim). Shares are rounded DOWN (2 decimals when fractional, else whole shares).
+    A top-up of a stock with a HOLD row (or today's swap BUY row) changes that row, so each symbol has one order."""
     import backtest_engine as be
     blocked, prices = blocked or {}, prices or {}
     positions = _clean_positions(positions)
-    side = orders["Side"].astype(str) if len(orders) else pd.Series(dtype=str)
-    sells = float(pd.to_numeric(orders.loc[side == "SELL", "Est_Value"], errors="coerce").fillna(0).sum()) if len(orders) else 0.0
-    buys = float(pd.to_numeric(orders.loc[side == "BUY", "Est_Value"], errors="coerce").fillna(0).sum()) if len(orders) else 0.0
-    sym_col = orders["Symbol"].astype(str).str.upper() if len(orders) else pd.Series(dtype=str)
-    tgt = pd.to_numeric(orders["Target_Shares"], errors="coerce").fillna(0) if len(orders) else pd.Series(dtype=float)
-    sold = set(sym_col[side.str.startswith("SELL") & (tgt <= 0)]) if len(orders) else set()   # fully sold today
-    bought = set(sym_col[side == "BUY"]) if len(orders) else set()
-    held = (set(positions) - sold) | bought
+    orders = orders.copy() if len(orders) else pd.DataFrame(columns=ORDER_COLUMNS)
+    orders = orders.reset_index(drop=True)
+    side = orders["Side"].astype(str)
+    sells = float(pd.to_numeric(orders.loc[side == "SELL", "Est_Value"], errors="coerce").fillna(0).sum())
+    buys = float(pd.to_numeric(orders.loc[side == "BUY", "Est_Value"], errors="coerce").fillna(0).sum())
+    sym_col = orders["Symbol"].astype(str).str.upper()
+    tgt = pd.to_numeric(orders["Target_Shares"], errors="coerce").fillna(0)
+    sold = set(sym_col[side.str.startswith("SELL") & (tgt <= 0)])           # fully sold today
+    held = (set(positions) - sold) | set(sym_col[side == "BUY"])
     regime_on = bool(int(_safe_number(ranking["Regime_On"].iloc[0], 1))) if len(ranking) else True
     level = be.LIVE_INVESTED * (1.0 if regime_on else float(be.WINNER.get("regime_scale") or 1.0))
     equity, cash = _safe_number(equity, 0.0), _safe_number(cash, float("nan"))
     info = {"cash": cash, "equity": equity, "invested_level": level, "regime_on": regime_on, "spare": 0.0,
-            "spent": 0.0, "buys": [], "skipped": []}
+            "spent": 0.0, "buys": [], "topups": [], "skipped": []}
     if not (equity > 0) or not math.isfinite(cash):
         info["skipped"].append(("-", "no usable equity / cash number: nothing bought"))
         return orders, info
@@ -743,57 +750,83 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
     floor_usd = max(min_pct * equity, min_usd)
     if spare < floor_usd:
         return orders, info
-    cap_w = float(be.WINNER.get("max_weight") or 1.0) * be.LIVE_INVESTED
+    cap = float(be.WINNER.get("max_weight") or 1.0) * be.LIVE_INVESTED * equity
     pw = pd.to_numeric(ranking["Provisional_Weight"], errors="coerce").fillna(0.0)
     typical = float(pw[pw > 0].median()) if (pw > 0).any() else level / max(int(be.WINNER.get("n", 10)), 1)
-    picks = []                                      # [symbol, rank, price, dollars, cap dollars]
-    left = spare
-    for r in ranking[pd.to_numeric(ranking["Rank"], errors="coerce") <= max_rank].itertuples():
+    rank = pd.to_numeric(ranking["Rank"], errors="coerce")
+
+    def usable(r):
+        """(symbol, price) of an eligible ranking row, else (symbol, None) with the reason noted once."""
         sym = str(r.Symbol).upper()
-        if sym in held or sym in sold:          # held: no top-up; sold today by a swap/exit: no buy back
+        why = (f"rank {int(r.Rank)}: sold today" if sym in sold else f"rank {int(r.Rank)}: {blocked[sym]}" if sym in blocked
+               else None)
+        px = None if why else (_safe_number(prices.get(sym), default=None) or _safe_number(r.Close, default=None))
+        if not why and not (px and px > 0):
+            why = f"rank {int(r.Rank)}: no price"
+        if why and all(s != sym for s, _ in info["skipped"]):
+            info["skipped"].append((sym, why))
+        return sym, (None if why else px)
+
+    new = {}                                        # symbol -> [rank, price, dollars] bought or added today
+    left = spare
+    for r in ranking[rank <= max_rank].itertuples():                       # 1. unheld top-10 names at their weights
+        if str(r.Symbol).upper() in held or left < floor_usd:
             continue
-        if sym in blocked:
-            info["skipped"].append((sym, f"rank {int(r.Rank)}: {blocked[sym]}"))
-            continue
-        px = _safe_number(prices.get(sym), default=None) or _safe_number(r.Close, default=None)
-        if not px or px <= 0:
-            info["skipped"].append((sym, f"rank {int(r.Rank)}: no price"))
-            continue
+        sym, px = usable(r)
+        w = float(r.Provisional_Weight) if _safe_number(r.Provisional_Weight) > 0 else typical
+        d = min(w * equity, cap, left)
+        if px and d >= floor_usd:
+            new[sym] = [int(r.Rank), px, d]
+            left -= d
+    for r in ranking[rank <= topup_ranks].itertuples():                    # 2. the rest: rank 1, then 2, then 3
         if left < floor_usd:
             break
-        w = float(r.Provisional_Weight) if _safe_number(r.Provisional_Weight) > 0 else typical
-        d = min(w * equity, cap_w * equity, left)
-        if d < floor_usd:
+        sym, px = usable(r)
+        if not px:
             continue
-        picks.append([sym, int(r.Rank), px, d, cap_w * equity])
-        left -= d
-    room = sum(c - d for _, _, _, d, c in picks)
-    if picks and left >= floor_usd and room > 0:    # every candidate got its weight and cash is left: top up pro rata
-        f = min(1.0, left / room)
-        for pk in picks:
-            add = (pk[4] - pk[3]) * f
-            pk[3] += add
-            left -= add
+        row = orders.index[sym_col == sym]
+        if len(row) and str(orders.at[row[0], "Side"]) not in ("BUY", "HOLD"):
+            continue                                # e.g. a swap trimmed it to its weight: no top-up today
+        shares = _safe_number(orders.at[row[0], "Target_Shares"], 0.0) if len(row) else positions.get(sym, 0.0)
+        have = shares * px + (new[sym][2] if sym in new else 0.0)
+        add = min(cap - have, left)
+        if add < floor_usd:
+            continue
+        new.setdefault(sym, [int(r.Rank), px, 0.0])[2] += add
+        left -= add
     rows = []
-    for sym, rank, px, d, _ in picks:
+    for sym, (rk, px, d) in sorted(new.items(), key=lambda kv: kv[1][0]):
         q = _floor2(d / px) if fractional else math.floor(d / px)
         if q <= 0 or q * px < floor_usd:
-            info["skipped"].append((sym, f"rank {rank}: under the minimum order"))
+            info["skipped"].append((sym, f"rank {rk}: under the minimum order"))
             continue
-        rows.append({"Symbol": sym, "Side": "BUY", "Shares": q, "Price": float(px), "Est_Value": round(q * px, 2),
-                     "Current_Shares": 0.0, "Target_Shares": q, "Target_Weight_%": round(d / equity * 100, 2),
-                     "Target_Value": round(d, 2)})
-        info["buys"].append((sym, rank, q, round(q * px, 2)))
+        row = orders.index[sym_col == sym]
+        if len(row):                                # a held stock's HOLD row (or today's swap BUY) becomes / grows the BUY
+            i = row[0]
+            num = ["Shares", "Price", "Est_Value", "Target_Shares", "Target_Weight_%", "Target_Value"]
+            orders[num] = orders[num].apply(pd.to_numeric, errors="coerce").astype(float)
+            add_q = q if str(orders.at[i, "Side"]) == "HOLD" else _safe_number(orders.at[i, "Shares"], 0.0) + q
+            base = _safe_number(orders.at[i, "Target_Shares"], 0.0)
+            orders.loc[i, ["Side", "Shares", "Price", "Est_Value", "Target_Shares", "Target_Weight_%", "Target_Value"]] = [
+                "BUY", add_q, float(px), round(add_q * px, 2), base + q, round((base + q) * px / equity * 100, 2),
+                round((base + q) * px, 2)]
+            info["topups"].append((sym, rk, q, round(q * px, 2)))
+        else:
+            cur = positions.get(sym, 0.0)
+            rows.append({"Symbol": sym, "Side": "BUY", "Shares": q, "Price": float(px), "Est_Value": round(q * px, 2),
+                         "Current_Shares": cur, "Target_Shares": cur + q,
+                         "Target_Weight_%": round((cur + q) * px / equity * 100, 2), "Target_Value": round((cur + q) * px, 2)})
+            info["topups" if cur else "buys"].append((sym, rk, q, round(q * px, 2)))
         info["spent"] += q * px
     if rows:
-        new = pd.DataFrame(rows, columns=ORDER_COLUMNS)
+        add = pd.DataFrame(rows, columns=ORDER_COLUMNS)
         if len(orders):
             import warnings
             with warnings.catch_warnings():         # HOLD rows have an all-NaN Target_Weight_% column (harmless)
                 warnings.simplefilter("ignore", FutureWarning)
-                orders = pd.concat([orders, new], ignore_index=True)
+                orders = pd.concat([orders, add], ignore_index=True)
         else:
-            orders = new
+            orders = add
     return orders, info
 
 
@@ -802,7 +835,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     """(orders, meta, targets) for any target source; used by the CLI and the live trade step. No broker calls.
     decision: see load_targets. live_prices {symbol: price}: size with these (a daytime catch-up) instead of the closes.
     cash (the account's actual cash): on a Mon/Wed check (source hold / midweek) the spare cash is then invested in
-    stocks the account does not hold (build_cash_deploy_orders); meta['source'] becomes 'hold+cash' / 'midweek+cash'
+    top-10 stocks the account does not hold, the rest in ranks 1-3 (build_cash_deploy_orders); meta['source'] becomes 'hold+cash' / 'midweek+cash'
     when it buys something. None = no spare-cash step. force_deploy: run it even if the data's day is not a Mon/Wed
     check (dry-run preview only)."""
     targets, meta = load_targets(source, picks_csv, midweek_csv, decision=decision)
@@ -829,7 +862,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
             orders, info = build_cash_deploy_orders(orders, positions, account_size, cash, ranking, blocked=blocked,
                                                     fractional=fractional, prices=live_prices)
             meta["cash_deploy"] = info
-            if info["buys"]:
+            if info["buys"] or info["topups"]:
                 meta["source"] += "+cash"
                 meta["invested"] = None
         return orders, meta, targets
@@ -2124,8 +2157,9 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             placed.append({"row": o, "sym": sym, "side": side, "qty": to_order, "id": str(m.id), "cid": cid, "q": q,
                            "exit": side == "SELL" and is_exit, "i": len(results)})
             px[len(results)] = _price_cols(q, side)
-            results.append((sym, side, to_order, str(m.id),
-                            f"COMPLETED via limit ${q['limit']:g} ({status}, filled {filled:g}/{qty}){partial}"))
+            how = ("sent now, nothing was sent before" if status == "staged" and not filled
+                   else f"{status}, filled {filled:g}/{qty} before")     # a never-sent row vs the rest of an earlier order
+            results.append((sym, side, to_order, str(m.id), f"COMPLETED via limit ${q['limit']:g} ({how}){partial}"))
         except Exception as e:                      # e.g. Alpaca rejected the order, or the network dropped
             _retry(o, sym, side, remaining, oid, str(e))
     try:
@@ -2330,8 +2364,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
       its target is not traded. A pick the account does not own with earnings within 5 days is not
       bought (earnings rule). Non-target stocks are sold entirely (the exact shares held).
       Mon/Wed (auto -> 'midweek' or 'hold') trade the strategy's swaps/exits, then invest the spare cash
-      (cash above 1% of equity) in the best-ranked stocks NOT held (build_cash_deploy_orders); held
-      stocks are not topped up or trimmed. Friday is unchanged.
+      (cash above 1% of equity) in the top-10 stocks NOT held, the rest topping up ranks 1-3 to the 19.8% cap
+      (build_cash_deploy_orders); other held stocks are not topped up or trimmed. Friday is unchanged.
     - Caps total BUY spending at Alpaca's BUYING POWER less a 1% cushion via
       apply_buying_power_guard(): buys are scaled down to the part that fits instead of being
       rejected by the broker. Margin is disabled on this account, so buying power equals cash.
@@ -2408,7 +2442,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
     dep = meta.get("cash_deploy")
     if dep:
         print(f"  Mon/Wed spare cash: ${dep['spare']:,.2f} above {1 - dep['invested_level']:.1%} of equity -> "
-              + (", ".join(f"{s} rank {r} ${v:,.0f}" for s, r, _, v in dep["buys"]) or "no buy")
+              + (", ".join(f"{s} rank {r} ${v:,.0f}" for s, r, _, v in dep["buys"]) or "no new stock")
+              + (f"; top-up: {', '.join(f'{s} rank {r} +${v:,.0f}' for s, r, _, v in dep['topups'])}" if dep["topups"] else "")
               + (f"; skipped: {', '.join(f'{s} ({w})' for s, w in dep['skipped'])}" if dep["skipped"] else ""))
     meta.update(decision=pd.Timestamp(decision).date().isoformat() if decision is not None else None, session=session)
     n_buy = int((orders["Side"] == "BUY").sum())
@@ -2586,7 +2621,9 @@ def main(argv=None):
     if dep:
         print(f"MON/WED SPARE CASH: cash ${dep['cash']:,.2f}, spare ${dep['spare']:,.2f} (keeps {1 - dep['invested_level']:.1%} "
               f"of equity in cash{'' if dep['regime_on'] else ', QQQ below its 200-day: half invested'}) -> "
-              + (", ".join(f"{s_} (rank {r}) {_fmt_shares(q)} sh ${v:,.2f}" for s_, r, q, v in dep["buys"]) or "no buy"))
+              + (", ".join(f"{s_} (rank {r}) {_fmt_shares(q)} sh ${v:,.2f}" for s_, r, q, v in dep["buys"]) or "no new stock")
+              + (f"; top-up: {', '.join(f'{s_} (rank {r}) +{_fmt_shares(q)} sh ${v:,.2f}' for s_, r, q, v in dep['topups'])}"
+                 if dep["topups"] else ""))
         for s_, why in dep["skipped"]:
             print(f"  not bought: {s_} - {why}")
         if not positions and (meta["swaps"]["Action"] == "SWAP").any():

@@ -407,16 +407,18 @@ pos_mon = dict(broker.pos)
 orders, meta, results, broker2, _ = run_day("2026-10-05", "2026-10-02", pos_mon, broker.cash)
 check("Mon 10/5 quiet check: source = hold, no order sent", meta["source"] == "hold" and not broker2.submitted, (meta["source"], len(broker2.submitted)))
 
-# Mon 10/5: a cash exit (no top-10 refill) -> the exited name is sold, then the Mon/Wed spare-cash rule (2026-10-06) puts
-# the cash in the best-ranked stock NOT held (AAPL, rank 11; the 10 held names are ranks 1-10); held names get no order
+# Mon 10/5: a cash exit (no top-10 refill) -> the exited name is sold, then the Mon/Wed spare-cash rule (2026-10-06; leftover
+# rule 2026-10-07): no top-10 stock is left unheld (the exited AMZN is not bought back), so the cash tops up rank 1 (FTNT)
+# to the 19.8% cap, then rank 2 (SNOW); AAPL (rank 11) is not bought; the other held names get no order
 victim = names[0]
 exit_row = [{"As_Of": "2026-10-05", "Event": "mid-week check", "Event_Date": "2026-10-05", "Action": "SELL", "Sell": victim,
              "Buy": None, "Message": f"exit {victim}", "Sell_Rank": 35, "Buy_Rank": None, "Weight_%": round(end_pct[victim], 2)}]
 orders, meta, results, broker3, eq3 = run_day("2026-10-05", "2026-10-02", pos_mon, broker.cash, midweek_rows=exit_row)
 sent = [(r.symbol, "SELL" if r.side == OrderSide.SELL else "BUY") for r in broker3.submitted]
-check("Mon 10/5 exit: the exited name is sold first, then only non-held AAPL (rank 11) is bought; no held name traded",
-      sent and sent[0] == (victim, "SELL") and {x for x in sent[1:]} == {("AAPL", "BUY")} and meta["source"] == "midweek+cash",
-      (sent, meta["source"]))
+ftnt = broker3.pos.get("FTNT", 0) * PX["FTNT"] / eq3 * 100
+check("Mon 10/5 exit: the exited name is sold first, then only ranks 1-2 (FTNT, SNOW) are topped up; AAPL (rank 11) not "
+      "bought; FTNT ends at the 19.8% cap", sent and sent[0] == (victim, "SELL") and {x for x in sent[1:]} == {("FTNT", "BUY"),
+      ("SNOW", "BUY")} and meta["source"] == "midweek+cash" and 19.0 <= ftnt <= 19.8 + 1e-6, (sent, meta["source"], ftnt))
 inv3 = sum(q * PX[s] for s, q in broker3.pos.items()) / eq3 * 100
 check("Mon 10/5 exit: the account ends ~99% invested (<= 99%, >= 97%; the fractional rest goes at 9 AM)",
       97.0 <= inv3 <= 99.0 + 1e-6 and broker3.cash >= 0, (inv3, broker3.cash))

@@ -235,6 +235,19 @@ moved, m = run_all.finished_text("Fri rebalance", datetime(2026, 10, 2, 14, 46, 
 check("2:30 PM run: sent in regular hours (not called a catch-up), money moved", moved == "yes"
       and m.startswith("Fri rebalance done 2:46 PM.")
       and "Orders sent as limit orders at the live bid/ask (sells first): 1 sell, 1 buy - money moves as they fill; any rest goes out at 9 AM CT." in m, m)
+now = table(("SNOW", "SELL", 23, None, "STAGED for regular-hours limit orders now"),
+            ("GTLB", "BUY", 147.49, None, "STAGED for regular-hours limit orders now"))
+line = run_all.trade_summary(now, table(("SNOW", "SELL", 23, "m1", "COMPLETED via limit $333.29 (sent now, nothing was sent before)"),
+                                        ("GTLB", "BUY", 147.49, "m2", "COMPLETED via limit $52.04 (sent now, nothing was sent before)")))
+check("summary, 2:30 PM run: orders sent at once are not called 'STAGED for the 9 AM fill check'",
+      line == "Trade: 2 sent at once as regular-hours limit orders (2 completed), 0 skipped/failed "
+              "(see Reports/live_orders_log.csv)" and "9 AM" not in line, line)
+line = run_all.trade_summary(table(("ENPH", "SELL", 4, "1", "submitted (accepted)"),
+                                   ("TEM", "BUY", 0.8, None, "STAGED for morning market (<1 whole share after hours)"),
+                                   ("BAD", "BUY", 1, None, "FAILED: bad quote")))
+check("summary, after hours: submitted, queued for 9 AM and failed counted apart",
+      line == "Trade: 1 submitted after hours, 1 queued for the 9 AM fill check, 1 skipped/failed "
+              "(see Reports/live_orders_log.csv)", line)
 moved, m = run_all.finished_text("Data refresh", end, [("main", True, 1), ("validate", True, 1)], [], False, None, None)
 check("refresh only: no trades, no money moved", moved == "no" and "Data refresh only - no trades, no money moved." in m, m)
 moved, m = run_all.finished_text("Wed check", end, ran7[:6] + [("sentiment", False, 1.0)], ["sentiment"], True,

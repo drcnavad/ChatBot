@@ -1219,10 +1219,7 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
     if live_synced:
         logging.info("  Alpaca LIVE account: 3 read-only GET calls (my_positions.csv refreshed)")
     if trade_results is not None and not trade_results.empty:
-        st_ = trade_results["Status"].astype(str)
-        logging.info("  Trade: %d submitted to LIVE, %d STAGED for the 9 AM fill check, %d skipped/failed "
-                     "(see Reports/live_orders_log.csv)", int(st_.str.startswith("submitted").sum()),
-                     int(st_.str.startswith("STAGED").sum()), int(st_.str.startswith(("SKIP", "FAILED")).sum()))
+        logging.info("  %s", trade_summary(trade_results, (trade_meta or {}).get("sent_now")))
     if info["data_date"]:
         logging.info("  Data through %s  |  rules %s", info["data_date"], info["rules"])
         for line in info["decisions"][-3:]:
@@ -1248,6 +1245,21 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
         ckpt_clear()            # in the run log above in plain words; the scheduled job decides any retry
         return EXIT_REPORTED
     return 1 if crit else 0
+
+
+def trade_summary(trades, sent_now=None):
+    """The SUMMARY's trade line: what was sent after hours, sent at once in regular hours (2:30 PM run / catch-up: staged,
+    then sent by complete_unfilled_orders right away), queued for the 9 AM fill check, and skipped/failed. Pure."""
+    st_ = [str(x) for x in trades["Status"]]
+    sent = [str(x) for x in sent_now["Status"]] if sent_now is not None and not sent_now.empty else []
+    now = sum(x.startswith("STAGED") and "limit orders now" in x for x in st_)
+    n = {"after": sum(x.startswith("submitted") for x in st_), "later": sum(x.startswith("STAGED") for x in st_) - now,
+         "bad": sum(x.startswith(("SKIP", "FAILED")) for x in st_)}
+    parts = [f"{n['after']} submitted after hours" if n["after"] else "",
+             f"{now} sent at once as regular-hours limit orders "
+             f"({sum(bool(re.search('COMPLETED|FILLED', x)) for x in sent)} completed)" if now else "",
+             f"{n['later']} queued for the 9 AM fill check" if n["later"] else "", f"{n['bad']} skipped/failed"]
+    return "Trade: " + ", ".join(x for x in parts if x) + " (see Reports/live_orders_log.csv)"
 
 
 def _hm(t):
