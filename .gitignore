@@ -1,82 +1,31 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-.venv
-
-# Streamlit
-.streamlit/secrets.toml
-
-# Jupyter Notebook (notebooks ARE tracked; outputs are stripped on commit by nbstripout - see .gitattributes)
-.ipynb_checkpoints
-
-# Environment variables / secrets (all API keys live here)
+# Secrets: API keys live only in .env (never committed)
 .env
-.env.local
 .env.*
 !.env.example
+.streamlit/secrets.toml
 
-# IDE / agent tooling
+# Python / Jupyter (notebooks are tracked; nbstripout strips outputs on commit, see .gitattributes)
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# IDE / agent tooling / OS
 .vscode/
 .idea/
 .cursor/
 *.swp
-*.swo
-
-# OS
 .DS_Store
-Thumbs.db
 
-# Data files: everything the pipeline (re)writes stays local - it is regenerated on every run.
-# Tracked seeds: the backtest reference results (written only by a manual backtest.ipynb run;
-# the app and run_all.py's output check read them).
-Reports/cache/
-Reports/*.csv
-Reports/*.xlsx
-Reports/*.pkl
-!Reports/backtest_summary.csv
-!Reports/backtest_per_stock.csv
-
-# Backup/duplicate app files
-app2.py
-app_original.py
-
-# Logs
+# Everything the pipeline writes is regenerated or is account data: kept local, never committed
+Reports/
+my_positions.csv
 *.log
-Reports/logs/
 
-# Documentation (don't push)
+# Local notes and backups
 docs/
 *.md
-!Archive/README.md
-
-# personal holdings for the dashboard alert / paper_trade (never commit)
-my_positions.csv
-
-# run_all.py state and per-run API call counts
-Reports/run_state.json
-Reports/logs/api_calls_*
-
-# dated safety backups (e.g. *.bak-2026-09-25-pre-mw30) stay local
+!README.md
 *.bak-20*
-
-# whole-folder backups and paper-account outputs (personal data)
-Stock Analysis Backup*/
-*Backup 20*/
-Reports/paper_*.csv
-
-# lock files of the running jobs
-Reports/.*.lock
-
-# live order state + watchdog resume point (account data, never commit)
-Reports/live_pending_orders.json*
-Reports/.pipeline_checkpoint.json
-
-# pre-earnings stop state (account data: the stop sales, never commit)
-Reports/earnings_stop_state.json*
-Reports/trade_audit_state.json*
+*Backup*/
