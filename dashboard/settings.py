@@ -41,9 +41,9 @@ SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else N
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
 MAX_WEIGHT = WINNER.get("max_weight")                                # no stock above this weight; the extra stays cash
 try:                                                                 # Mon/Wed spare-cash rule (live account)
-    from paper_trade import DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, TOPUP_RANKS
+    from paper_trade import DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK, TOPUP_RANKS
 except Exception:
-    DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, TOPUP_RANKS = 10, 0.01, 100.0, 3
+    DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK, TOPUP_RANKS = 10, 0.01, 100.0, 20, 3
 
 
 def rules_text():
@@ -86,8 +86,13 @@ def rules_text():
                f"stays in cash. Other held stocks are not topped up or trimmed; Friday rebalances everything as usual.\n"
                if MIDWEEK else "")
             + (f"- **Earnings:** a stock that is not held is not bought when its next earnings date is within {EARNINGS} "
-               "calendar days; on Friday its slot goes to the next eligible stock (else cash), mid-week it is just not bought. "
+               "calendar days; on Friday its slot goes to the next eligible stock, mid-week it is just not bought. "
                "A held stock is not topped up before them.\n" if EARNINGS else "")
+            + (f"- **Friday replacement:** a new pick the account does not hold that is blocked (earnings within {EARNINGS} days, "
+               "or no buy back after a pre-earnings stop sale) gets no cash slot: the next best-ranked eligible stock that is not "
+               f"already a pick (score above 0, not blocked, down to rank {FRIDAY_SUB_MAX_RANK}) is bought at the blocked "
+               f"pick's weight{f' (max {MAX_WEIGHT * LIVE_INVESTED:.1%})' if MAX_WEIGHT else ''}, so the account still ends "
+               f"with {N_PICKS} stocks; only if none is left does that weight stay in cash.\n" if EARNINGS else "")
             + "- **Pre-earnings stop:** a held stock with earnings within 7 calendar days is sold if its price falls to its "
             "highest close since bought - 3 × ATR(14), from 7 days before the report through the reaction day (checked "
             "every 10 minutes in the pre-market, regular and after-hours sessions; in regular hours every share at once, "
