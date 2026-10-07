@@ -109,6 +109,11 @@ check("leaderboard: ranked by median weekly return, a tie goes to the smaller dr
       and sorted(lb["Rank"].dropna()) == list(range(1, len(ft.STRATEGIES) + 1)), lb.head(4).to_dict("records"))
 check("leaderboard: the live row is marked", (lb["Strategy"] == ft.LIVE + ft.LIVE_MARK).sum() == 1, list(lb["Strategy"]))
 check("leaderboard: no rank before the first full week", ft.leaderboard(daily.iloc[:1], bench, vals[vals["Date"] == "2026-10-02"])["Rank"].isna().all())
+_early = ft.leaderboard(daily.iloc[:1], bench, vals[vals["Date"] == "2026-10-02"])
+_early = _early[_early["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False).isin([c["name"] for c in ft.STRATEGIES])]
+check("leaderboard: before the first full week, order is total return (tie: smaller drawdown)",
+      list(_early["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False))
+      == list(_early.sort_values(["Total return %", "Max drawdown %"], ascending=False, kind="stable")["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)))
 check("verdict: too early before 12 weeks", ft.verdict(lb) == "Week 2 of 12: too early to name a winner.", ft.verdict(lb))
 long_days = pd.bdate_range("2026-10-02", periods=70)
 lv = pd.DataFrame([{"Date": d, "Strategy": c["name"], "Value": 1.0 + i * (0.002 if c["name"] == "Top 5" else 0.0)}

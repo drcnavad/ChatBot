@@ -733,7 +733,11 @@ def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
     t = pd.DataFrame([{"Strategy": n, "ranked": r, **dict(zip(cols, _stats(v)))} for n, r, v in series])
     if t.empty:
         return pd.DataFrame(columns=["Rank", "Strategy"] + cols)
-    t = t.sort_values(["Median weekly return %", "Max drawdown %"], ascending=False, na_position="last", kind="stable")
+    # RANK_RULE once any strategy has a full week; until then: total return since the start (tie: smaller max drawdown),
+    # same fallback as Top 5 consensus, so the table / rules / card stay in one order.
+    keys = (["Median weekly return %", "Max drawdown %"] if (t["ranked"] & (t["Weeks"] > 0)).any()
+            else ["Total return %", "Max drawdown %"])
+    t = t.sort_values(keys, ascending=False, na_position="last", kind="stable")
     t["Rank"] = t["ranked"].cumsum().where(t["ranked"] & (t["Weeks"] > 0)).astype("Int64")   # no rank before a full week
     return t[["Rank", "Strategy"] + cols].reset_index(drop=True)
 

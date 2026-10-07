@@ -82,20 +82,28 @@ def render_top10(ranks=None):
     st.caption(("No strategy has a full week yet, so the 5 strategies are the best by total return since Oct 2; from the "
                 "first full week they follow the leaderboard rank. " if c["by_return"] else "")
                + "Strategies with the same stocks at the same weights count once (the better-placed one). Order: most "
-               "strategies, then summed weight, then latest rank. Green = held by 6+ of them, yellow = 3-5, red = ranked "
+               "strategies, then summed weight, then latest rank. Green = held by 3+ of them, yellow = 2, red = ranked "
                f"worse than {EXIT_RANK} at the latest close. Display only: updated with the leaderboard, never traded.")
 
 
 def render_forward_rules(p=None):
-    """Strategy tab: the Top 5 consensus card, then each forward-test strategy's one-line rule and its holdings on the latest saved day."""
+    """Strategy tab: the Top 5 consensus card, then each forward-test strategy's one-line rule and its holdings,
+    ordered like the leaderboard above (rank, or total return since Oct 2 until the first full week)."""
     import forward_test as ft
     ranks = p.by_symbol["Strategy_Rank"].to_dict() if p is not None and "Strategy_Rank" in p.by_symbol else None
     render_top10(ranks)
     held, h = ft.holdings(), read_report_csv(ft.HOLDINGS_CSV)
-    rules = pd.DataFrame([{"Strategy": c["name"], "Rule": c["rule"], "Holdings now (target weight)": held.get(c["name"], "cash")}
-                          for c in ft.STRATEGIES])
+    by_name = {c["name"]: c for c in ft.STRATEGIES}
+    daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
+    order = [c["name"] for c in ft.STRATEGIES]
+    if values is not None and not values.empty:
+        board = _board(daily, values)[0]
+        names = board["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)
+        order = [n for n in names if n in by_name] + [n for n in order if n not in set(names)]
+    rules = pd.DataFrame([{"Strategy": n, "Rule": by_name[n]["rule"],
+                           "Holdings now (target weight)": held.get(n, "cash")} for n in order])
     sty = toned(rules, ["Holdings now (target weight)"], fn=lambda v: MUTED if v == "cash" else INK)
     st.dataframe(live_row(sty, "Strategy", ft.LIVE), hide_index=True, width="stretch")
     if h is not None and len(h):
         st.caption(f"Holdings as of the {pd.Timestamp(h['Date'].max()):%a %b %-d} close (Reports/forward_strategies_holdings.csv "
-                   "has every day). Paper only: none of these is traded.")
+                   "has every day). Ordered like the leaderboard above. Paper only: none of these is traded.")

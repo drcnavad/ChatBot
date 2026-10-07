@@ -49,7 +49,9 @@ CSS = """
     .sa-card-title span { font-size: 0.8rem; font-weight: 500; color: #64748b; margin-left: 0.35rem; }
     .sa-tier { display: flex; gap: 0.75rem; align-items: baseline; padding: 0.45rem 0; border-top: 1px solid #f1f5f9; }
     .sa-tier > b { flex: 0 0 8.5rem; font-size: 0.7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #64748b; }
-    .sa-tier-syms { display: flex; flex-wrap: wrap; gap: 0.3rem; font-size: 0.8rem; color: #64748b; align-items: center; }
+    .sa-tier-syms { display: flex; flex-wrap: nowrap; gap: 0.3rem; font-size: 0.8rem; color: #64748b; align-items: center;
+        overflow-x: auto; flex: 1; min-width: 0; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+    .sa-tier-syms > * { flex-shrink: 0; }   /* chips / strategy labels stay full width; the row scrolls */
     .sa-tier-syms .symbol-link { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 7px; padding: 1px 7px; font-size: 0.8rem; color: #334155; }
     .sa-tier-syms .symbol-link.t-good { color: #15803d; background: #f0fdf4; border-color: #bbf7d0; }
     .sa-tier-syms .symbol-link.t-warn { color: #b45309; background: #fffbeb; border-color: #fde68a; }

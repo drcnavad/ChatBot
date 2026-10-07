@@ -229,14 +229,18 @@ expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Total return si
        f"leaderboard: columns, one marked live row, every strategy ranked: {_ft[0].to_dict('list') if _ft else None}")
 expect(not _ft or sum(ft.RANK_RULE in c.value for c in at.caption) == 1, "the ranking rule is written once in the caption")
 _rules = [d.value for d in at.dataframe if "Rule" in d.value.columns]
-expect(len(_rules) == 1 and list(_rules[0]["Strategy"]) == [c["name"] for c in ft.STRATEGIES],
-       "rules and holdings table lists every strategy once (Top 5 consensus is its own card)")
+_board_names = [s.replace(ft.LIVE_MARK, "") for s in _ft[0]["Strategy"] if s.replace(ft.LIVE_MARK, "") in {c["name"] for c in ft.STRATEGIES}] if _ft else [c["name"] for c in ft.STRATEGIES]
+expect(len(_rules) == 1 and set(_rules[0]["Strategy"]) == {c["name"] for c in ft.STRATEGIES}
+       and list(_rules[0]["Strategy"]) == _board_names,
+       f"rules table: every strategy once, same order as the leaderboard: {_rules[0]['Strategy'][:5] if _rules else None}")
 _top = [m.value for m in at.markdown if 'sa-card-title">Top 5 consensus<' in m.value]
 _top_syms = re.findall(r'\?symbol=([A-Z0-9.]+)"[^>]*>[^<]*</a> (\d+)/(\d+) strategies', _top[0]) if _top else []
 expect(len(_top) == 1 and len(_top_syms) == 10 and len({s for s, _, _ in _top_syms}) == 10
        and [int(c) for _, c, _ in _top_syms] == sorted((int(c) for _, c, _ in _top_syms), reverse=True)
        and all(int(c) <= int(n) == 5 for _, c, n in _top_syms),
        f"Top 5 consensus: 10 linked stocks from 5 strategies, most held first: {_top_syms}")
+expect(any("overflow-x: auto" in m.value and "sa-tier-syms" in m.value for m in at.markdown),
+       "stock-list rows (sa-tier-syms) must scroll horizontally on overflow")
 _rule = "Don't change the strategy until 12+ weeks of forward results (from Oct 2, 2026) compare against QQQ."
 for _rule in (_rule, "No single stock gets more than 20%; any extra stays in cash."):
     expect(sum(_rule in m.value for m in at.markdown) + sum(_rule in c.value for c in at.caption) == 1, f"shown once: {_rule}")
