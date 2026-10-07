@@ -285,12 +285,15 @@ _friday = f"the {W['n']} best-ranked stocks by rank (no sector limit)"
 _wants = [f"Strategy rules ({W['tag']})", f"{W['w_tech']:g} × Technical", f"at least {be.MIN_BARS} trading days",
           _friday, f"scaled to {be.LIVE_INVESTED:.0%} invested", f"{W['regime_symbol']} at or below its 200-day average",
           "every weight is halved" if W["regime_scale"] == 0.5 else "every weight is multiplied",
-          f"within {W['rebalance_band'] * 100:g} percentage point", f"top {mw['enter_top']}", f"below rank {mw['exit_below']}",
-          f"worse than {W['midweek_exit_below']}", f"best top-{W['midweek_exit_to_top']}",
+          f"within {W['rebalance_band'] * 100:g} percentage point", "sell rule:",
+          f"any holding ranked worse than {W['midweek_exit_below']}", "is always sold",
+          f"replaced 1-for-1 by the best-ranked top-{W['midweek_exit_to_top']} stock not held",
           f"within {W['earnings_block_days']} calendar days", "after-hours limit orders",
           "9 AM CT", "2-decimal shares", "never runs twice"]
 for want in _wants:
     expect(want in rules, f"rules text is missing {want!r}")
+expect(mw["enter_top"] is not None or ("swap:" not in rules and "None" not in rules),
+       "rules text still shows the top-3 swap (off live since 2026-10-07)")
 expect("next open" not in blob, "outdated 'next open' wording (orders go out the same evening)")
 
 # ---------------------------------------------------------------- removed: alert banner, Summary section, Strategy Health tab

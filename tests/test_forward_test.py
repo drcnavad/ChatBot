@@ -208,12 +208,28 @@ check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%
 check("registry: the strategies are not copies of each other (distinct weights over the fake history)",
       len({t.round(4).to_numpy().tobytes() for t in full.values()}) >= len(ft.STRATEGIES) - 3)
 check("registry: WINNER untouched", be.WINNER == w0)
+# Forward-test safety (t187u): the strategies keep their own Mon/Wed rules (ft.MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, the Oct 2
+# rules); a change of the live WINNER Mon/Wed keys must not move any of them.
+FT_PINS = dict(midweek=ft.MIDWEEK, exit_all_below=ft.EXIT_BELOW, exit_to_top=ft.EXIT_TO_TOP)
+check("forward-test pins = the Oct 2 Mon/Wed rules (top-3 swap below 15, exit below 30, refill from the top 10)",
+      ft.MIDWEEK == {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]} and (ft.EXIT_BELOW, ft.EXIT_TO_TOP) == (30, 10))
+_keys = ("midweek_swap", "midweek_exit_below", "midweek_exit_to_top")
+_saved = {k: be.WINNER.get(k) for k in _keys}
+try:
+    be.WINNER.update(midweek_swap={"enter_top": 5, "exit_below": 12, "days": ["Mon", "Wed"]}, midweek_exit_below=40,
+                     midweek_exit_to_top=None)
+    full_alt = {c["name"]: ft.strategy_targets(c, inp) for c in ft.STRATEGIES}
+finally:
+    be.WINNER.update(_saved)
+check("forward-test safety: other WINNER Mon/Wed settings change no strategy (every strategy, every day)",
+      all(full_alt[k].equals(full[k]) for k in full) and be.WINNER == w0,
+      [k for k in full if not full_alt[k].equals(full[k])])
 lv, sp = full[ft.LIVE], full["Live + ATR dip buys in spare cash"]
 check("live + ATR dips in spare cash: exactly the live weights, plus 10% dip positions in other stocks only with spare cash",
       np.allclose(sp.where(lv > 0, 0), lv) and (sp.where(lv == 0, 0).isin([0, ft.be.live_weights(0.1)])).all().all()
       and (sp.sum(axis=1) <= 0.99 + 1e-9).all() and (sp.where(lv == 0, 0).to_numpy() > 0).any(), (lv > 0).sum(axis=1).min())
 live_raw, _ = be.winner_targets(inp["scores"]["live"], inp["eligible"], inp["vol"], inp["regime"], inp["weekly"],
-                                tiebreak_w=inp["scores"]["rs"], earnings=EARN)
+                                tiebreak_w=inp["scores"]["rs"], earnings=EARN, **FT_PINS)
 check("ATR stops: with no stop the day-by-day replay = be.winner_targets exactly (every day, both windows)",
       all(ft.atr_stop_targets(inp, **{**ft.STOPS[m], "k": np.inf})[0].equals(live_raw) for m in ft.STOPS))
 # mid-week variants: swap-threshold ones differ from live at a Mon/Wed check; cash-until-Friday differs when a
@@ -233,7 +249,7 @@ EARN2 = pd.DataFrame([{"Symbol": s_, "Earnings Date": live_raw.index[f + 2], "Ti
                       for f in fridays[(fridays > 0) & (fridays < len(L) - 6)] if L[f - 1, j_] > 0 and (L[f:f + 6, j_] > 0).all()])
 inp2 = dict(inp, earnings=EARN2)
 live_raw, _ = be.winner_targets(inp2["scores"]["live"], inp2["eligible"], inp2["vol"], inp2["regime"], inp2["weekly"],
-                                tiebreak_w=inp2["scores"]["rs"], earnings=EARN2)
+                                tiebreak_w=inp2["scores"]["rs"], earnings=EARN2, **FT_PINS)
 cols_ = list(live_raw.columns)
 ev = ft.earnings_events(live_raw.index, cols_, EARN2)
 react = np.zeros(live_raw.shape, bool)
@@ -450,16 +466,17 @@ if os.path.exists(ft.SIGNAL_CSV):
     d0 = pd.Timestamp(be.FORWARD_START)
     live = real[(real["Date"] == d0) & (real["Strategy_Weight"] > 0)].set_index("Symbol")["Strategy_Weight"].sort_index()
     real_live, _ = be.winner_targets(real_inp["scores"]["live"], real_inp["eligible"], real_inp["vol"], real_inp["regime"],
-                                     real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"])
-    check("ATR stops on the real data: with no stop the replay = the live targets on every saved day",
+                                     real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"],
+                                     **FT_PINS)
+    check("ATR stops on the real data: with no stop the replay = the (pinned Oct 2) live targets on every saved day",
           all(ft.atr_stop_targets(real_inp, **{**ft.STOPS[m], "k": np.inf})[0].equals(real_live) for m in ft.STOPS))
-    check("exit replaced by top-N on the real data: with N = live midweek_exit_to_top the replay = the live targets",
-          ft.atr_stop_targets(real_inp, k=np.inf, exit_to_top=be.WINNER.get("midweek_exit_to_top"))[0].equals(real_live))
+    check("exit replaced by top-N on the real data: with N = the pinned EXIT_TO_TOP the replay = the pinned live targets",
+          ft.atr_stop_targets(real_inp, k=np.inf, exit_to_top=ft.EXIT_TO_TOP)[0].equals(real_live))
     # Oct 2 CSV was written under T20 soft-cap + cash-until-Friday. Recompute with those pins for apples-to-apples.
     old_sel = dict(max_pick_rank=20, cap_soft=True, sector_cap=0.4)
     mine_old, _ = be.winner_targets(real_inp["scores"]["live"], real_inp["eligible"], real_inp["vol"], real_inp["regime"],
                                     real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"],
-                                    selection=old_sel, exit_to_top=None)
+                                    selection=old_sel, midweek=ft.MIDWEEK, exit_all_below=ft.EXIT_BELOW, exit_to_top=None)
     mine = be.live_weights(mine_old.loc[d0])  # CSV stores live (x99% floored) weights
     mine = mine[mine > 0].sort_index()
     # Every pipeline run after 8f57015 rewrites the whole history with the current WINNER (pure top-10), so the file

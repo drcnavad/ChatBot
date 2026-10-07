@@ -24,7 +24,7 @@ def plain_reason(signal, reason, rank=None, score=None):
         return f"rank {r}, not bought: {reason.split(': not bought')[0]} (no new buys within {EARNINGS or 5} days of earnings)"
     if reason.startswith("mid-week swap in"):
         rep_m = re.search(r"replaces (\S+)", reason)
-        return (f"mid-week swap: jumped into the top {MIDWEEK['enter_top'] if MIDWEEK else 3} at rank "
+        return (f"mid-week swap: jumped into the top {(MIDWEEK or {}).get('enter_top') or 3} at rank "
                 f"{m.group(1) if m else r}" + (f", replaces {rep_m.group(1)}" if rep_m else ""))
     if reason.startswith("mid-week exit replace in"):
         rep_m = re.search(r"replaces (\S+)", reason)
@@ -40,7 +40,7 @@ def plain_reason(signal, reason, rank=None, score=None):
     if reason.startswith("mid-week swap out"):
         by = re.search(r"replaced by (\S+)", reason)
         return (f"mid-week swap: fell to {'rank ' + m.group(1) if m else 'no longer qualifying'} "
-                f"(below {MIDWEEK['exit_below'] if MIDWEEK else 15})" + (f", replaced by {by.group(1)}" if by else ""))
+                f"(below {(MIDWEEK or {}).get('exit_below') or 15})" + (f", replaced by {by.group(1)}" if by else ""))
     if signal == "Buy":
         rk = int(m.group(1)) if m else (int(rank) if rank is not None and pd.notna(rank) else None)
         if rk is not None and rk > N_PICKS:

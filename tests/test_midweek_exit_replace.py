@@ -1,5 +1,5 @@
-"""Live Mon/Wed exit refill (WINNER['midweek_exit_to_top']=10): a holding worse than rank 30 is swapped for the best
-non-held top-10 name (same weight); cash only when nothing qualifies. Matches forward_test's former
+"""Live Mon/Wed sell rule (since 2026-10-07, t187u): no top-3 swap; a holding worse than rank 20 is always sold and
+replaced 1-for-1 by the best non-held top-10 name (same weight); cash only when nothing qualifies (was rank 30 + swap). Matches forward_test's former
 "Live, exit replaced by top-10" rule. Hand-worked cases; no network, no orders.
 Run: python tests/run_tests.py  (or python tests/test_midweek_exit_replace.py)"""
 import os
@@ -46,16 +46,58 @@ exits = be.midweek_exit_sells(cur, rank, 3)
 check("no refill -> cash exit of the rank>3 holding", exits == [(4, 0.07)] and cur[4] == 0.0, exits)
 
 # live defaults
-check("live WINNER: midweek_exit_below=30 and midweek_exit_to_top=10",
-      be.WINNER.get("midweek_exit_below") == 30 and be.WINNER.get("midweek_exit_to_top") == 10)
-check("live tag names the refill (MW30R10)", "MW30R10" in be.WINNER["tag"] and "replace with best top-10" in be.WINNER["name"])
-check("Fri pure top-10 (no sector / no rank-20 gate); 20% / earnings / top-3 swap kept",
+check("live WINNER: midweek_exit_below=20 and midweek_exit_to_top=10",
+      be.WINNER.get("midweek_exit_below") == 20 and be.WINNER.get("midweek_exit_to_top") == 10)
+check("live tag / name / rules version: exit-only (X20R10), no swap",
+      "-X20R10-" in be.WINNER["tag"] and "MW" not in be.WINNER["tag"] and "worse than rank 20" in be.WINNER["name"]
+      and "replace with best top-10" in be.WINNER["name"] and "swap" not in be.WINNER["name"]
+      and be.rules_version() == "v5-x20r10-ns-e5", (be.WINNER["tag"], be.rules_version()))
+check("Fri pure top-10 (no sector / no rank-20 gate); 20% / earnings kept; Mon/Wed checks kept, top-3 swap off",
       be.WINNER["max_weight"] == 0.2 and be.WINNER["earnings_block_days"] == 5
-      and be.WINNER["midweek_swap"] == {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]}
+      and be.WINNER["midweek_swap"] == {"enter_top": None, "exit_below": None, "days": ["Mon", "Wed"]}
       and be.WINNER.get("max_pick_rank") is None and be.WINNER["sector_cap"] >= 1.0 - 1e-12
       and "NS" in be.WINNER["tag"] and "no sector limit" in be.WINNER["name"])
 check("exit_to_top=None still means cash-until-Friday (midweek_exit_replacements no-ops)",
       be.midweek_exit_replacements(np.array([0.1, 0.0, 0.08]), [0, 1, 2], {0: 1, 1: 2, 2: 5}, 3, None) == [])
+
+# --- the live Mon/Wed rule through the engine (apply_midweek_swaps with the WINNER settings): 25 names, S00 = rank 1 ...
+import pandas as pd
+
+_cols = [f"S{i:02d}" for i in range(25)]
+_dates = pd.to_datetime(["2026-10-02", "2026-10-05"])                 # Fri rebalance, Mon check
+_score = pd.DataFrame([[100.0 - i for i in range(25)]] * 2, index=_dates, columns=_cols)
+_ok = pd.DataFrame(True, index=_dates, columns=_cols)
+
+
+def mw_run(held, rules):
+    """Holdings (column numbers, 9% each) after the Monday check; and the check-log actions."""
+    base = pd.DataFrame(0.0, index=_dates, columns=_cols)
+    base.loc[:, [_cols[i] for i in held]] = 0.09
+    log = []
+    t = be.apply_midweek_swaps(base, _score, _ok, _ok * 0.2, pd.Series([True, False], index=_dates),
+                               pd.Series([False, True], index=_dates), sector_cap=1.0, n=10, cap_soft=True, check_log=log,
+                               **rules)
+    return sorted(int(c[1:]) for c in t.columns[t.iloc[1] > 0]), [(r["Action"], r["Sell"], r["Buy"]) for r in log]
+
+
+_mw = be.WINNER["midweek_swap"]
+LIVE = dict(enter_top=_mw["enter_top"], exit_below=_mw["exit_below"], exit_all_below=be.WINNER["midweek_exit_below"],
+            exit_to_top=be.WINNER["midweek_exit_to_top"])
+OLD = dict(enter_top=3, exit_below=15, exit_all_below=30, exit_to_top=10)          # the rules until 2026-10-07
+A = [1, 3, 4, 5, 6, 7, 8, 9, 10, 16, 24]                                           # ranks 2,4-11, 17, 25; S00 / S02 not held
+check("live: rank 25 is sold and replaced by the best top-10 not held (rank 1); rank 17 stays (no top-3 swap)",
+      mw_run(A, LIVE) == ([0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 16], [("REPLACE", "S24", "S00")]), mw_run(A, LIVE))
+check("old rules (forward test pins) on the same day: two top-3 swaps, rank 17 out",
+      mw_run(A, OLD)[1] == [("SWAP", "S24", "S00"), ("SWAP", "S16", "S02")], mw_run(A, OLD))
+B = [2, 3, 4, 5, 6, 7, 8, 9, 21, 24]                                               # ranks 22, 25; S00 / S01 not held
+check("live: several worse than 20 -> worst first, best top-10 first, 1-for-1",
+      mw_run(B, LIVE)[1] == [("REPLACE", "S24", "S00"), ("REPLACE", "S21", "S01")], mw_run(B, LIVE))
+C = [1, 2, 3, 4, 5, 6, 7, 8, 9, 21, 24]                                            # only S00 left in the top 10
+check("live: refills run out -> the next worse-than-20 holding is sold to cash",
+      mw_run(C, LIVE)[1] == [("REPLACE", "S24", "S00"), ("SELL", "S21", "")], mw_run(C, LIVE))
+D = list(range(10)) + [19]                                                         # rank 20 = not worse than 20
+check("live: rank 20 is kept; nothing to do -> one NO SWAP row ('no holding is worse than rank 20')",
+      mw_run(D, LIVE)[1] == [("NO SWAP", "", "")] and 19 in mw_run(D, LIVE)[0], mw_run(D, LIVE))
 
 # --- paper_trade must treat REPLACE like a mid-week trade (Sell+Buy), not ignore it ---
 import tempfile

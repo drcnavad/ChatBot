@@ -28,7 +28,8 @@ RS_LABEL = {"etf": "vs sector ETF and SPY",
             "sector_median": "vs the median of its sector peers, and sector ETF vs SPY",
             "median_all": "vs the median of its sector peers, and sector median vs the universe median",
             }.get(WINNER.get("rs_benchmark", "etf"), "vs sector ETF and SPY")
-MIDWEEK = WINNER.get("midweek_swap")                                 # Mon/Wed swap check (None = weekly only)
+MIDWEEK = WINNER.get("midweek_swap")                                 # Mon/Wed checks (None = weekly only)
+SWAP_TOP = MIDWEEK.get("enter_top") if MIDWEEK else None             # top-3 swap (off since 2026-10-07: None)
 EXIT_BELOW = WINNER.get("midweek_exit_below") if MIDWEEK else None   # mid-week exit below this rank
 EXIT_TO_TOP = WINNER.get("midweek_exit_to_top") if EXIT_BELOW else None  # refill an exit from the best non-held top-N
 EARNINGS = WINNER.get("earnings_block_days")                         # no new buys with earnings within N days (None = off)
@@ -65,14 +66,15 @@ def rules_text():
             + (f"- **Max per stock:** No single stock gets more than {MAX_WEIGHT:.0%}; any extra stays in cash.\n" if MAX_WEIGHT else "")
             + (f"- **Rebalance:** every pick is brought back to its weight unless it is within {band * 100:g} percentage point "
                "of it; overweight holdings are trimmed so new buys get their full weight.\n" if band else "")
-            + (f"- **{days} swap:** if a stock that is not held ranks in the top {MIDWEEK['enter_top']} and a held stock has "
+            + (f"- **{days} swap:** if a stock that is not held ranks in the top {SWAP_TOP} and a held stock has "
                f"fallen below rank {MIDWEEK['exit_below']}, the worst-ranked held stock is sold and the new one bought for "
-               "the same dollar amount (repeated while both are true; no sector limit).\n" if MIDWEEK else "")
-            + (f"- **{days} exit:** after the swaps, any holding ranked worse than {EXIT_BELOW} (or no longer ranked) is "
-               + (f"swapped for the best top-{EXIT_TO_TOP} stock not held (same dollars; earnings rule); if none is left it "
-                  "is sold and the cash goes to the spare-cash rule below.\n" if EXIT_TO_TOP else
-                  "sold; the cash goes to the spare-cash rule below.\n") if EXIT_BELOW else "")
-            + (f"- **{days} spare cash:** after the swaps and exits, the account's cash above {1 - LIVE_INVESTED:.0%} of equity "
+               "the same dollar amount (repeated while both are true; no sector limit).\n" if SWAP_TOP else "")
+            + (f"- **{days} sell rule:** {'after the swaps, ' if SWAP_TOP else ''}any holding ranked worse than {EXIT_BELOW} "
+               "(or no longer ranked) is always sold, worst rank first, "
+               + (f"and replaced 1-for-1 by the best-ranked top-{EXIT_TO_TOP} stock not held (same dollars; earnings rule); "
+                  "if none is left the cash goes to the spare-cash rule below.\n" if EXIT_TO_TOP else
+                  "and the cash goes to the spare-cash rule below.\n") if EXIT_BELOW else "")
+            + (f"- **{days} spare cash:** after the {'swaps and ' if SWAP_TOP else ''}sells, the account's cash above {1 - LIVE_INVESTED:.0%} of equity "
                f"(e.g. a deposit, an exit or a pre-earnings stop sale) buys the top-{DEPLOY_MAX_RANK} stocks the account does "
                "not hold, in rank order, each at its current rule weight; what is left tops up ranks "
                f"1-{TOPUP_RANKS} (held or not): rank 1 first, up to the cap, then rank 2, then rank 3"

@@ -37,13 +37,14 @@ Targets come from Reports/strategy_picks.csv (written by main_signal_analysis.ip
   - `current`     = Strategy_Weight (portfolio decided at the last weekly rebalance)
   - `provisional` = Provisional_Weight (what the rules would pick at the latest close)
   - `midweek`     = the decisions of the latest Mon/Wed mid-week check (Reports/strategy_midweek_check.csv, live rules):
-                    SWAP = SELL the stock that fell below rank 15 and BUY the new top-3 stock with the same dollars;
-                    REPLACE = SELL a holding worse than rank 30 and BUY the best eligible non-held top-10 (same dollars;
-                    earnings rule); SELL = exit (no top-10 refill left). The strategy's holdings are not otherwise traded.
+                    REPLACE = SELL a holding worse than rank 20 (always) and BUY the best eligible non-held top-10
+                    (same dollars; earnings rule); SELL = exit (no top-10 refill left). SWAP (old top-3 swap: below
+                    rank 15 out, new top-3 in) is off live since 2026-10-07 and no longer produced; its handling here is
+                    kept until that code is removed. The strategy's holdings are not otherwise traded.
   - `auto` (default) = provisional on a rebalance day (the decision day itself); midweek when the latest bar is a Mon/Wed
                     check that produced a swap, replace, or cash exit; hold on a quiet mid-week day (no swap/exit at the
                     latest check) - every position is left unchanged (no drift rebalance).
-Mon/Wed spare cash (live only, approved 2026-10-06, leftover rule 2026-10-07): after the swaps/exits, the account's actual
+Mon/Wed spare cash (live only, approved 2026-10-06, leftover rule 2026-10-07): after the sells/replacements, the account's actual
 cash above 1% of equity (e.g. a deposit, a cash exit) buys the top-10 stocks the account does NOT hold in the latest ranking
 (score > 0, rank order), each at its latest rule weight; what is left tops up ranks 1-3 (held or not), rank 1 to the 19.8%
 cap first, then 2, then 3; the rest stays cash (earnings rule, pre-earnings stop no-buy-back and the cap apply throughout).

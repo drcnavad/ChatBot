@@ -19,7 +19,7 @@ def render_last_decision(p):
         last_day = mw["Event_Date"].iloc[-1]
         acts = set(mw.loc[mw["Event_Date"] == last_day, "Action"])
         mw_val = (f"{pd.Timestamp(last_day):%a %b %-d} · "
-                  + (" + ".join(x for x, k in (("swap", "SWAP"), ("exit", "SELL")) if k in acts) or "no trade"))
+                  + (" + ".join(x for x, k in (("swap", {"SWAP"}), ("exit", {"REPLACE", "SELL"})) if k & acts) or "no trade"))
     else:
         mw_val = "none yet this week" if MIDWEEK else "off"
     c = st.columns(3)

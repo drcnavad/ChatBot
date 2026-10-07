@@ -206,7 +206,7 @@ def audit(D, compare_col):
     return picked
 
 
-def audit_midweek(D, enter_top=3, exit_below=15, exit_all=None):
+def audit_midweek(D, enter_top=3, exit_below=15, exit_all=None, top_n=None):
     """Independent re-derivation of a Mon/Wed mid-week check at D from the saved scores and the holdings of the previous session."""
     day, t = check_scores(D, "MID-WEEK CHECK ")
     sess = sorted(sa.Date.unique())
@@ -220,6 +220,8 @@ def audit_midweek(D, enter_top=3, exit_below=15, exit_all=None):
     sector = lambda s: sm.symbol_sector.get(s, "Other")
     while True:                                   # best entrant first; for it, the worst-ranked holding whose removal fits the cap
         # worst rank first; several holdings that no longer qualify (no rank) -> order of sector_mapping.tradable_symbols
+        if not enter_top:                         # no top-3 swap (live since 2026-10-07): only the rank exits below
+            break
         weak = sorted([s for s in held if rank.get(s, 10 ** 9) > exit_below], key=lambda s: (-rank.get(s, 10 ** 9), tradable.index(s)))
         ent = [s for s in list(q.index[:enter_top]) if s not in held and not blocked(s, D)]
         pair = next(((e, h) for e in ent for h in weak
@@ -230,7 +232,6 @@ def audit_midweek(D, enter_top=3, exit_below=15, exit_all=None):
         held[e] = held.pop(h)
         swaps.append((h, rank.get(h), e, rank[e], round(held[e], 4)))
     exits, refills = [], []
-    top_n = be.WINNER.get("midweek_exit_to_top")
     if exit_all and top_n:                         # rank-exit refill (8f57015): worst first -> best free top-N stock, same weight
         for s in sorted([s for s in held if rank.get(s, 10 ** 9) > exit_all], key=lambda s: -rank.get(s, 10 ** 9)):
             e = next((x for x in list(q.index[:top_n]) if x not in held and not blocked(x, D)), None)
@@ -288,9 +289,21 @@ if n_reb_audited == 0:
 
 # --- Mid-week checks: the last 3 historical swap days, the last 3 historical rank-exit days (if the exit rule is on) and this
 #     week's Mon/Wed checks ---
-if be.WINNER.get("midweek_swap"):
-    mw = be.WINNER["midweek_swap"]
-    exit_all = be.WINNER.get("midweek_exit_below")
+# The Mon/Wed rules that wrote the CSV (its rules_version): the current WINNER, or the rules until 2026-10-07 (top-3 swap
+# below 15 + exit below 30 refilled from the top 10) while the file is still from before the t187u change.
+CSV_VER = str(sa["rules_version"].dropna().iloc[-1]) if "rules_version" in sa.columns else be.rules_version()
+if CSV_VER == be.rules_version():
+    MW_RULES = ((be.WINNER.get("midweek_swap") or {}).get("enter_top"), (be.WINNER.get("midweek_swap") or {}).get("exit_below"),
+                be.WINNER.get("midweek_exit_below"), be.WINNER.get("midweek_exit_to_top")) if be.WINNER.get("midweek_swap") else None
+elif CSV_VER == "v4-mw30r10-ns-e5":
+    MW_RULES = (3, 15, 30, 10)
+    print(f"\nMid-week audit uses the rules that wrote the CSV ({CSV_VER}); the next pipeline run rewrites it "
+          f"({be.rules_version()})")
+else:
+    MW_RULES = None
+    print(f"\nskip mid-week audit: CSV rules {CSV_VER} != {be.rules_version()} (next pipeline run rewrites the file)")
+if MW_RULES:
+    enter_top, swap_below, exit_all, top_n = MW_RULES
     dec = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
     swap_days = sorted(dec.loc[dec.Reason.astype(str).str.startswith("mid-week swap"), "Date"].unique())
     exit_days = sorted(dec.loc[dec.Reason.astype(str).str.startswith("mid-week exit"), "Date"].unique())
@@ -306,7 +319,7 @@ if be.WINNER.get("midweek_swap"):
         if not auditable(D, "mid-week"):
             mw_skipped += 1
             continue
-        _, ex, ok = audit_midweek(D, mw["enter_top"], mw["exit_below"], exit_all)
+        _, ex, ok = audit_midweek(D, enter_top, swap_below, exit_all, top_n)
         results.append(ok); n_exit += len(ex)
     print(f"\nMID-WEEK AUDIT: {sum(results)}/{len(results)} check days reproduced independently"
           + (f" (incl. {n_exit} rank-{exit_all} sells)" if exit_all else "")
