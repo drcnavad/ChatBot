@@ -50,19 +50,19 @@ def render_forward_test():
                + marked + " Saved by the 4:15 PM CT job (no orders); each strategy's rule and holdings are in the next section.")
 
 
-CONSENSUS_GOOD, CONSENSUS_WARN, EXIT_RANK = 6, 3, 30   # chip colors: held by 6+ / 3-5 of the 10; ranked worse than 30
+CONSENSUS_GOOD, CONSENSUS_WARN, EXIT_RANK = 3, 2, 30   # chip colors: held by 3+ / 2 of the 5; ranked worse than 30
 
 
 def render_top10(ranks=None):
-    """The Top 10 card (display only, nothing saved or traded): the 10 stocks most held by the 10 best forward-test
-    strategies, from forward_test.consensus on the same leaderboard as the table above (provisional close included)."""
+    """Top 5 consensus card (display only): the 10 stocks most held by the 5 best forward-test strategies
+    (forward_test.consensus), same leaderboard as the table above (provisional close included)."""
     import forward_test as ft
     daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
     c = None
     if values is not None and not values.empty:
         c = ft.consensus(_board(daily, values)[0], read_report_csv(ft.HOLDINGS_CSV), ranks)
     if c is None or c["stocks"].empty:
-        show_html('<div class="sa-card"><div class="sa-card-title">Top 10<span>no saved strategy holdings yet</span></div></div>')
+        show_html('<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>no saved strategy holdings yet</span></div></div>')
         return
     n = len(c["strategies"])
 
@@ -75,11 +75,11 @@ def render_top10(ranks=None):
     strats = " ".join(f'<span>{i}. {esc(nm)}' + (f' <i title="{esc(", ".join(tw))}">(+{len(tw)} same holdings)</i>' if tw else "")
                       + "</span>" for i, (nm, tw) in enumerate(c["strategies"], 1))
     order = "total return since Oct 2" if c["by_return"] else "leaderboard rank"
-    show_html(f'<div class="sa-card"><div class="sa-card-title">Top 10<span>the {len(c["stocks"])} stocks most held by the '
+    show_html(f'<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>the {len(c["stocks"])} stocks most held by the '
               f'{n} best strategies ({order}) · holdings at the {c["day"]:%a %b %-d} close</span></div>'
               f'<div class="sa-tier"><b>Stocks</b><div class="sa-tier-syms">{" ".join(chip(r) for r in c["stocks"].itertuples())}</div></div>'
               f'<div class="sa-tier"><b>Strategies</b><div class="sa-tier-syms">{strats}</div></div></div>')
-    st.caption(("No strategy has a full week yet, so the 10 strategies are the best by total return since Oct 2; from the "
+    st.caption(("No strategy has a full week yet, so the 5 strategies are the best by total return since Oct 2; from the "
                 "first full week they follow the leaderboard rank. " if c["by_return"] else "")
                + "Strategies with the same stocks at the same weights count once (the better-placed one). Order: most "
                "strategies, then summed weight, then latest rank. Green = held by 6+ of them, yellow = 3-5, red = ranked "
@@ -87,7 +87,7 @@ def render_top10(ranks=None):
 
 
 def render_forward_rules(p=None):
-    """Strategy tab: the Top 10 card, then each forward-test strategy's one-line rule and its holdings on the latest saved day."""
+    """Strategy tab: the Top 5 consensus card, then each forward-test strategy's one-line rule and its holdings on the latest saved day."""
     import forward_test as ft
     ranks = p.by_symbol["Strategy_Rank"].to_dict() if p is not None and "Strategy_Rank" in p.by_symbol else None
     render_top10(ranks)

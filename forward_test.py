@@ -797,7 +797,7 @@ def holdings(path=HOLDINGS_CSV):
     return {s: ", ".join(f"{r.Symbol} {r.Weight:.1%}" for r in g.itertuples()) for s, g in h.groupby("Strategy")}
 
 
-def consensus(board, hold, ranks=None, n_strategies=10, n_stocks=10):
+def consensus(board, hold, ranks=None, n_strategies=5, n_stocks=10):
     """Display only (never saved, never traded): the stocks most held by the best forward-test strategies.
 
     board = leaderboard() as the dashboard shows it (incl. provisional rows); hold = saved holdings rows (Date, Strategy,
