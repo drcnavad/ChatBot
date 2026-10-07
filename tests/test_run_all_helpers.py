@@ -16,12 +16,10 @@ import run_all as r
 
 FAIL = []
 
-
 def check(ok, what):
     print(("PASS " if ok else "FAIL ") + what)
     if not ok:
         FAIL.append(what)
-
 
 def test_notebook_error_summary_traceback():
     out = ("[NbConvertApp] Converting notebook main_signal_analysis.ipynb to notebook\n"
@@ -34,13 +32,11 @@ def test_notebook_error_summary_traceback():
     check("cell 12, line 5" in s and "KeyError: 'bad'" in s,
           f"error summary extracts cell/line/error (got {s!r})")
 
-
 def test_notebook_error_summary_nbconvert_error():
     out = "[NbConvertApp] ERROR | Notebook JSON is invalid: blah\n"
     s = r._notebook_error_summary(out, "x.ipynb")
     check("unknown location" in s and "Notebook JSON is invalid" in s,
           f"error summary falls back to the nbconvert ERROR line (got {s!r})")
-
 
 def test_notebook_error_summary_empty():
     s = r._notebook_error_summary("", "x.ipynb")
@@ -48,14 +44,12 @@ def test_notebook_error_summary_empty():
     check("see the run log" in r._notebook_error_summary(None, "x.ipynb"),
           "error summary handles None output")
 
-
 def test_run_cmd_returns_rc_and_output():
     env = dict(os.environ)
     rc, out = r.run_cmd([sys.executable, "-c", "print('hello-nb')"], env)
     check(rc == 0 and "hello-nb" in out, "run_cmd returns (0, output) on success")
     rc, out = r.run_cmd([sys.executable, "-c", "import sys; print('bye'); sys.exit(3)"], env)
     check(rc == 3 and "bye" in out, "run_cmd returns (nonzero, output) on failure")
-
 
 if __name__ == "__main__":
     test_notebook_error_summary_traceback()

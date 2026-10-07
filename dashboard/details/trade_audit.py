@@ -9,7 +9,6 @@ from dashboard.settings import CT
 from dashboard.style import (BAD, CAUTION, GOOD, INK, MONEY, caption_text, info_text, stat_cards, tone, toned, usd,
     warning_text)
 
-
 # ---------------------------------------------------------------------------- trade audit (read-only)
 @st.cache_data(ttl=3600, max_entries=2, show_spinner=False)
 def _read_audit(hour_key, positions):
@@ -18,10 +17,8 @@ def _read_audit(hour_key, positions):
     import trade_audit as ta
     return ta.report(ta.fetch(ap.PaperAccount(), positions=list(positions)))
 
-
 AUDIT_LEDGER_COLS = ["Submitted", "Symbol", "Side", "Source", "Status", "Qty", "Filled_Qty", "Plan_Price", "Limit", "Fill_Price",
                      "Slippage_vs_Plan_%", "Slippage_vs_Plan_$"]
-
 
 def render_trade_audit():
     """Trading Account tab: every order vs its plan price (slippage), each sale with its buy and sell price, reconciliation with

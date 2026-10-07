@@ -15,11 +15,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 PASS, FAIL = [], []
 
-
 def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
     print(("PASS " if cond else "FAIL ") + name + (f" ({detail})" if detail and not cond else ""))
-
 
 def sources():
     """(file, python source) for every .py file (also the dashboard/ package) and every notebook code cell."""
@@ -29,7 +27,6 @@ def sources():
         for c in json.load(open(f))["cells"]:
             if c["cell_type"] == "code":
                 yield f, "\n".join(l for l in "".join(c["source"]).splitlines() if not l.lstrip().startswith(("%", "!")))
-
 
 imported = {}                                              # name -> real object
 for f, src in sources():

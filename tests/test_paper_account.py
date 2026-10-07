@@ -42,14 +42,12 @@ FIXTURES = {
         {"id": "a3", "activity_type": "CSD", "net_amount": "5000", "status": "canceled"}],
 }
 
-
 def expect(ok, what):
     if not ok:
         FAIL.append(what)
         print("   !! FAIL:", what)
     else:
         print("   ok:", what)
-
 
 class Mock(BaseHTTPRequestHandler):
     def _record(self):
@@ -73,17 +71,14 @@ class Mock(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-
 server = HTTPServer(("127.0.0.1", 0), Mock)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 MOCK = f"http://127.0.0.1:{server.server_port}/v2"
 tmp = tempfile.mkdtemp(prefix="live_test_")
 
-
 def real_positions_state():
     p = os.path.join(ROOT, "my_positions.csv")
     return os.path.getmtime(p) if os.path.exists(p) else None
-
 
 REAL_BEFORE = real_positions_state()
 try:

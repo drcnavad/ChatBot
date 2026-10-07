@@ -1,28 +1,11 @@
-"""Read-only view of your Alpaca LIVE account: account summary, positions, orders, market clock and equity history.
+"""Read-only view of the Alpaca LIVE account (the Paper* names are historical: paper trading was retired 2026-09-28).
+Safety: only https://api.alpaca.markets/v2 and only GET requests to ALLOWED_PATHS (account, positions, orders, clock,
+activities, daily portfolio history); nothing here places, changes or cancels orders. Keys come from .env
+(ALPACA_LIVE_KEY_ID, ALPACA_LIVE_SECRET_KEY), go only into request headers and are never printed or saved.
 
-NOTE (2026-09-28): this module used to read the Alpaca PAPER account. Paper trading is retired from this
-pipeline, so the module now reads the LIVE account. The filename and the class/function names
-(PaperAccount, paper_keys(), sync_paper_account(), ...) are kept unchanged so that pipeline_watchdog.py,
-run_all.py and the dashboard keep working without edits.
-
-Safety rules built into this module:
-  * Only the live endpoint https://api.alpaca.markets/v2 is accepted; any other URL (the paper
-    paper-api.alpaca.markets host, plain http, another version or host) raises PaperAccountError
-    before a request is made.
-  * Only HTTP GET requests to /account, /positions, /orders, /clock and /account/activities (deposits/withdrawals, fills)
-    are possible.
-    There is no code here that places, changes or cancels orders.
-  * The keys come from .env (ALPACA_LIVE_KEY_ID, ALPACA_LIVE_SECRET_KEY). They are sent only in the request headers
-    and are never printed, logged or written to a file.
-
-Outputs of sync_paper_account():
-  my_positions.csv                        Symbol,Shares of the live positions (paper_trade.py --positions reads it)
-  Reports/live_portfolio_snapshot.csv    positions + cash/equity rows at the time of the sync
-  Reports/live_account_history.csv       one row per sync (equity, cash, buying power, number of positions,
-                                         lifetime net deposits)
-
-    python alpaca_paper.py            # print the summary, positions and recent orders (no files written)
-    python alpaca_paper.py --sync     # ... and write the three files above
+    python alpaca_paper.py          # print the summary, positions and recent orders (writes nothing)
+    python alpaca_paper.py --sync   # ... and write my_positions.csv, Reports/live_portfolio_snapshot.csv and
+                                    #     Reports/live_account_history.csv (also run_all.py --sync-live)
 """
 import argparse
 import json
@@ -53,10 +36,8 @@ ALLOWED_PATHS = ("/account", "/positions", "/orders", "/clock", "/account/activi
 _LOCAL_TEST_URL = re.compile(r"http://(127\.0\.0\.1|localhost):\d{2,5}/v2")   # tests only (mock server on this machine)
 CT = ZoneInfo("America/Chicago")
 
-
 class PaperAccountError(Exception):
     """Refused URL, missing keys or a failed request (the message never contains the keys)."""
-
 
 def check_base_url(url, allow_local_test=False):
     """Return the URL if it is the Alpaca live endpoint (or, in tests only, a localhost mock); otherwise raise."""
@@ -67,7 +48,6 @@ def check_base_url(url, allow_local_test=False):
         return url
     raise PaperAccountError(f"refused base URL {url!r}: only {LIVE_BASE_URL} (Alpaca LIVE) is allowed")
 
-
 def paper_keys():
     """(key_id, secret, source names) of the Alpaca LIVE keys from .env; ("", "", note) if none. Values are never printed."""
     load_dotenv(os.path.join(ROOT, ".env"))
@@ -76,7 +56,6 @@ def paper_keys():
         if key and secret:
             return key, secret, f"{key_name} / {secret_name}"
     return "", "", f"{KEY_ENV} / {SECRET_ENV} are missing or empty in .env"
-
 
 class PaperAccount:
     """Read-only client for the Alpaca LIVE trading API."""
@@ -219,7 +198,6 @@ class PaperAccount:
             params = {**params, "page_token": page[-1]["id"]}
         return out[::-1]
 
-
 class FillHistory:
     """The fill history kept between the dashboard's reads, so the request count does not grow with the history: the
     first read of each day (CT) pages through every fill; later reads ask only for fills after the newest one kept (one
@@ -241,11 +219,9 @@ class FillHistory:
                 self.fills, self.day = account.fills(), today
             return list(self.fills)
 
-
 # --- the dashboard's live holdings table (pure: no requests here) -------------------------------------------------------
 HOLDING_COLS = ["Stock", "Shares", "Avg price", "First bought", "Cost basis", "Market value", "P/L $", "P/L %",
                 "Price", "Today %", "Weight %"]
-
 
 def holdings_refresh_key(now=None):
     """Cache key for the dashboard's live holdings: a new key every minute in regular market hours (8:30 AM-3:00 PM CT,
@@ -256,7 +232,6 @@ def holdings_refresh_key(now=None):
     if be.is_session(now.date()) and (8, 30) <= (now.hour, now.minute) < close:
         return f"{now:%Y-%m-%d %H:%M}"
     return f"{now:%Y-%m-%d %H}h"
-
 
 def first_buy_dates(fills):
     """Symbol -> date (CT) of the earliest buy fill still part of the current position. Sells use up the oldest shares
@@ -274,7 +249,6 @@ def first_buy_dates(fills):
             if q[0][1] <= 1e-9:
                 q.pop(0)
     return {s: q[0][0] for s, q in lots.items() if q}
-
 
 def holdings_table(positions, fills, equity):
     """One row per held stock and a Total row. positions: GET /positions dicts; fills: GET /account/activities FILL dicts;
@@ -296,10 +270,8 @@ def holdings_table(positions, fills, equity):
              "Today %": (t["Market value"].sum() - prev) / prev * 100 if prev else float("nan")}
     return pd.concat([t.drop(columns="_prev"), pd.DataFrame([total])], ignore_index=True)[HOLDING_COLS]
 
-
 # --- the account vs index ETFs, deposits handled fairly (pure: no requests here) ----------------------------------------
 BENCHMARK_ETFS = {"QQQ": "Nasdaq 100", "SPY": "S&P 500", "IWM": "Russell 2000", "DIA": "Dow Jones"}
-
 
 def account_twr_index(daily):
     """Time-weighted growth of the account (1.0 on the first row) from daily rows (Date, Equity, Net_Deposits; e.g.
@@ -312,19 +284,16 @@ def account_twr_index(daily):
     growth = eq / (eq.shift(1) + nd.diff())
     return pd.Series(growth.fillna(1.0).cumprod().to_numpy(), index=d["Date"].to_numpy())
 
-
 def _close_on(closes, day, price_now):
     """The close of `day`, or of the next session with a close; price_now when there is none yet (today, open market)."""
     c = closes.dropna()
     c = c[c.index >= pd.Timestamp(day).normalize()]
     return float(c.iloc[0]) if len(c) else float(price_now)
 
-
 def _flow_time(f):
     """When a cash_flows() entry happened, in CT (end of its date when Alpaca gave no time)."""
     t = pd.Timestamp(f["time"]) if f.get("time") else pd.NaT
     return pd.Timestamp(f"{f['date']} 23:59", tz=CT) if pd.isna(t) else (t.tz_localize("UTC") if t.tz is None else t).tz_convert(CT)
-
 
 def account_vs_etfs(history, snap, closes, prices_now, start):
     """The account vs each BENCHMARK_ETFS fund since the `start` close, from one source: Alpaca's daily history
@@ -366,14 +335,12 @@ def account_vs_etfs(history, snap, closes, prices_now, start):
                      "Gain $": units * px_now - put_in, "Account ahead by (pts)": acct_ret * 100 - ret})
     return pd.DataFrame(rows), start, put_in
 
-
 # --- files for the rest of the pipeline --------------------------------------------------------------------------------
 def write_positions_csv(positions, path=POSITIONS_CSV):
     """my_positions.csv (Symbol,Shares) in the format paper_trade.py reads."""
     out = positions.loc[positions["Qty"] != 0, ["Symbol", "Qty"]].rename(columns={"Qty": "Shares"})
     out.to_csv(path, index=False)
     return path
-
 
 def write_snapshot(summary, positions, snapshot_csv=SNAPSHOT_CSV, history_csv=HISTORY_CSV, now=None, net_deposits=0.0):
     """Positions + cash/equity rows (overwritten each sync) and one appended history row."""
@@ -389,7 +356,6 @@ def write_snapshot(summary, positions, snapshot_csv=SNAPSHOT_CSV, history_csv=HI
     row.to_csv(history_csv, mode="a", header=not os.path.exists(history_csv), index=False)
     return snapshot_csv, history_csv
 
-
 def sync_paper_account(account=None, positions_csv=None, snapshot_csv=None, history_csv=None):
     """Read the LIVE account (3 GET calls) and write my_positions.csv + the snapshot files. Returns the summary dict.
     Paths default to the module settings (POSITIONS_CSV, SNAPSHOT_CSV, HISTORY_CSV), looked up at call time."""
@@ -403,7 +369,6 @@ def sync_paper_account(account=None, positions_csv=None, snapshot_csv=None, hist
     net = sum(f["amount"] for f in account.cash_flows() if _flow_time(f) <= at)
     write_snapshot(summary, positions, snapshot_csv, history_csv, net_deposits=net)
     return {**summary, "Positions": int((positions["Qty"] != 0).sum()), "positions_csv": positions_csv}
-
 
 def main(argv=None):
     """Command line: print the live account (read-only); --sync also writes the files."""
@@ -421,7 +386,6 @@ def main(argv=None):
     if a.sync:
         r = sync_paper_account(acct)
         print(f"wrote {os.path.relpath(r['positions_csv'], ROOT)} ({r['Positions']} positions) and the Reports snapshot files")
-
 
 if __name__ == "__main__":
     main()

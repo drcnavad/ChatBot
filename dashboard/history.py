@@ -8,9 +8,7 @@ from dashboard.data import load_benchmarks
 from dashboard.settings import HALVED, REGIME_OFF, sector_etf_for, symbol_sector
 from dashboard.signals import plain_reason
 
-
 EVENT_COLS = ["Kind", "Decision", "Fill", "Price", "Reason", "Rank", "Score", "Weight", "Regime_On"]
-
 
 def _fallback_reason(kind, row, n=10):
     """Reason when the decision log is unavailable (derived from the saved rank/score columns)."""
@@ -23,7 +21,6 @@ def _fallback_reason(kind, row, n=10):
     if pd.notna(row.Strategy_Rank) and row.Strategy_Rank > n:
         return f"rank {row.Strategy_Rank:.0f} outside top {n}"
     return "not picked"
-
 
 def strategy_events(ticker_df, decisions, symbol):
     """Entries/exits and held periods of the live strategy for one ticker.
@@ -70,7 +67,6 @@ def strategy_events(ticker_df, decisions, symbol):
         periods.append((start, t["Date"].iloc[-1]))
     return events, periods
 
-
 def event_hover(e):
     """Hover text for an entry/exit marker on the price chart."""
     sig = "Buy" if e.Kind == "entry" else "Sold"
@@ -85,9 +81,7 @@ def event_hover(e):
         text += f"<br>Market filter OFF that week ({REGIME_OFF}): positions {HALVED}"
     return text
 
-
 RS_COLORS = {"stock": "#1d4ed8", "market": "#64748b", "sector": "#d97706"}   # stock blue, SPY grey, sector ETF orange
-
 
 def performance_names(symbol):
     """Display names of the comparison lines: {'stock': 'FTNT', 'market': 'SPY (market)', 'sector': 'XLK (Technology sector)'}."""
@@ -96,7 +90,6 @@ def performance_names(symbol):
     if etf and etf != symbol:
         names["sector"] = f"{etf} ({sector} sector)" if sector else f"{etf} (sector ETF)"
     return names
-
 
 def relative_strength_lines(chart, symbol):
     """% price change since the start of the chart window: the stock, SPY and its sector ETF -> {key: (name, series)}."""
@@ -114,7 +107,6 @@ def relative_strength_lines(chart, symbol):
         if first is not None and px.loc[first]:
             lines[key] = (name, (px / px.loc[first] - 1) * 100)
     return lines if len(lines) > 1 else {}
-
 
 def daily_status(weight, score):
     """Status on an ordinary day (between decisions) for the chart hover text."""

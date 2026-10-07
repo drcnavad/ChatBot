@@ -38,12 +38,10 @@ _SH = "Reports/short_history_reference.csv"     # stocks in the list with < 200 
 SHORT = pd.read_csv(_SH) if os.path.exists(_SH) else pd.DataFrame(columns=["Symbol", "As_Of"])
 DEC = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
 
-
 def expect(ok, what):
     if not ok:
         FAIL.append(what)
         print("   !! FAIL:", what)
-
 
 class Balance(HTMLParser):
     def __init__(self):
@@ -63,7 +61,6 @@ class Balance(HTMLParser):
         else:
             self.stack.pop()
 
-
 def html_problems(src):
     if "<" not in src or not re.search(r"<(div|span|table|tr|td|a|p|h1|style)\b", src):
         return []
@@ -81,7 +78,6 @@ def html_problems(src):
             probs.append(f"unbalanced tags {b.errors[:2]} open={b.stack[:3]}")
     return probs
 
-
 def page_ok(at, label):
     exc = [str(e.value)[:300] for e in at.exception]
     bad = [(p, m.value[:80]) for m in list(at.markdown) + list(at.caption) for p in html_problems(m.value)]
@@ -90,17 +86,14 @@ def page_ok(at, label):
         print("   ", x)
     expect(not exc and not bad, f"{label}: exceptions/HTML problems")
 
-
 def _arr(v):
     if isinstance(v, dict) and "bdata" in v:
         return np.frombuffer(base64.b64decode(v["bdata"]), dtype=np.dtype(v["dtype"])).astype(float)
     return np.array([np.nan if x is None else x for x in (v or [])], dtype=object)
 
-
 def _finite(v):
     a = _arr(v)
     return int(sum(1 for x in a if x is not None and not (isinstance(x, float) and np.isnan(x))))
-
 
 def price_chart_ok(at, sym):
     specs = [json.loads(c.proto.spec) for c in at.get("plotly_chart")]
@@ -113,7 +106,6 @@ def price_chart_ok(at, sym):
     if f["layout"].get("xaxis", {}).get("type") != "date":
         probs.append("x-axis not a date axis")
     expect(not probs, f"{sym}: price chart problems {probs}")
-
 
 # ---------------------------------------------------------------- page, tickers, charts, displayed rank / slot
 latest = SIG[SIG.Date == SIG.Date.max()].set_index("Symbol")

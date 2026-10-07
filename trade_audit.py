@@ -33,6 +33,8 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from tax_lots import _num   # float or nan (one helper for both account views)
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
 LEDGER_CSV = os.path.join(REPORTS, "live_trade_ledger.csv")
@@ -59,22 +61,12 @@ TRIP_COLS = ["Symbol", "Shares", "Bought_CT", "Buy_Price", "Sold_CT", "Sell_Pric
              "Buy_Source", "Sell_Source", "Note"]
 _CID = re.compile(r"^live-(?:(fill|rest)-)?(\d{8})-(BUY|SELL)-([A-Z0-9]+)-(\d+)-(\d+)(?:-r\d+)?(-c)?$")
 
-
-def _num(x):
-    try:
-        v = float(x)
-        return v if math.isfinite(v) else math.nan
-    except (TypeError, ValueError):
-        return math.nan
-
-
 def _ct(ts):
     """ISO / Timestamp -> naive CT Timestamp (NaT when missing)."""
     if ts is None or ts == "":
         return pd.NaT
     t = pd.Timestamp(ts)
     return (t.tz_localize("UTC") if t.tzinfo is None else t).tz_convert(CT).tz_localize(None)
-
 
 # ----------------------------------------------------------------------------- client order ids (pure)
 def order_source(cid):
@@ -92,7 +84,6 @@ def order_source(cid):
         return "bot: rest that did not fit"
     return "bot: decision"
 
-
 def plan_price(cid):
     """The plan (intended) price in the bot's client order id (live-...-<cents>), or None. Ids cut at Alpaca's 48
     characters are not trusted (the cents may be cut)."""
@@ -103,7 +94,6 @@ def plan_price(cid):
     cents = int(m.group(6))
     return cents / 100 if cents > 0 else None
 
-
 def slippage(side, plan, fill, qty):
     """(% , $) of a fill vs its plan price; + = it cost money (a buy above / a sell below the plan). (nan, nan) when
     either price is missing."""
@@ -113,7 +103,6 @@ def slippage(side, plan, fill, qty):
     sign = 1 if str(side).lower() == "buy" else -1
     return (round(sign * (fill - plan) / plan * 100, 3) + 0.0,                  # + 0.0: no "-0.0"
             round(sign * (fill - plan) * (qty if qty == qty else 0.0), 2) + 0.0)
-
 
 # ----------------------------------------------------------------------------- read (GET only)
 def _orders(acct, max_pages=40):
@@ -127,7 +116,6 @@ def _orders(acct, max_pages=40):
             break
         params = {**params, "until": page[-1]["submitted_at"]}
     return out
-
 
 def fetch(acct=None, positions=None):
     """Everything the audit reads, each part on its own (a part that fails is None and named in 'errors').
@@ -158,14 +146,12 @@ def fetch(acct=None, positions=None):
     data["errors"], data["as_of"] = errors, datetime.now(CT)
     return data
 
-
 def _read_json(path):
     try:
         with open(path) as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}
-
 
 # ----------------------------------------------------------------------------- 1. order ledger
 def ledger(orders):
@@ -188,7 +174,6 @@ def ledger(orders):
     df = df[df["Submitted_CT"] >= pd.Timestamp(AUDIT_START)]  # fresh start: Friday Oct 2, 2026 onwards
     return df.sort_values("Submitted_CT", ascending=False, kind="stable").reset_index(drop=True)
 
-
 def slippage_summary(led):
     """{orders, filled, traded $, cost vs plan $, cost %} over the bot's filled orders that carry a plan price."""
     f = led[(led["Filled_Qty"] > 0) & led["Plan_Price"].notna() & led["Fill_Price"].notna()] if len(led) else led
@@ -197,7 +182,6 @@ def slippage_summary(led):
     return {"orders": int(len(led)), "filled_with_plan": int(len(f)), "traded": traded, "cost": cost,
             "cost_pct": cost / traded * 100 if traded else 0.0,
             "worst": f.sort_values("Slippage_vs_Plan_%", ascending=False).head(1) if len(f) else f}
-
 
 # ----------------------------------------------------------------------------- 2. round trips (FIFO)
 def round_trips(fills, orders=None):
@@ -234,11 +218,9 @@ def round_trips(fills, orders=None):
     df = pd.DataFrame(out, columns=TRIP_COLS)
     return df.sort_values("Sold_CT", ascending=False, kind="stable").reset_index(drop=True) if len(df) else df
 
-
 # ----------------------------------------------------------------------------- 3. reconciliation
 def _finding(level, key, text):
     return {"Level": level, "Key": key, "Check": text}
-
 
 def reconcile(data, pending=None, stop_state=None, picks=None):
     """Findings (Level ok / info / warning / failed, Key, Check) comparing Alpaca with the bot's own records."""
@@ -303,7 +285,6 @@ def reconcile(data, pending=None, stop_state=None, picks=None):
             out.append(_finding("ok", "holdings", f"{len(held)} holdings: every one is in the strategy or has a sale queued."))
     return out
 
-
 # ----------------------------------------------------------------------------- 4. alerts
 def alerts(data, led=None, now=None):
     """Alert findings (warning / failed) from the account, the clock, the calendar and the recent orders."""
@@ -349,7 +330,6 @@ def alerts(data, led=None, now=None):
                                 f"{r['Filled_Qty']:g} sh)."))
     return out
 
-
 def _calendar_check(clock, be, now):
     """Alpaca's next open / close vs backtest_engine's NYSE calendar (holidays, early closes)."""
     out = []
@@ -375,7 +355,6 @@ def _calendar_check(clock, be, now):
                             f"at {nclose:%I:%M %p} ET, the bot's calendar expects {'1:00 PM' if early else '4:00 PM'} ET."))
     return out
 
-
 # ----------------------------------------------------------------------------- report + run-log rows
 def report(data=None, now=None, pending=None, stop_state=None, picks=None):
     """The whole audit as a dict (ledger, round_trips, summary, findings, alerts). Reads only."""
@@ -391,7 +370,6 @@ def report(data=None, now=None, pending=None, stop_state=None, picks=None):
     return {"ledger": led, "round_trips": round_trips(data.get("fills"), data.get("orders")), "summary": slippage_summary(led),
             "findings": reconcile(data, pending, stop_state, picks), "alerts": alerts(data, led, now), "as_of": data.get("as_of"),
             "errors": data.get("errors", [])}
-
 
 def new_alerts(items, now=None, state_path=None):
     """The warning / failed items not reported before (state file: key -> first reported date; kept 60 days)."""
@@ -410,7 +388,6 @@ def new_alerts(items, now=None, state_path=None):
     os.replace(tmp, state_path)
     return fresh
 
-
 def log_alerts(items, now=None, state_path=None):
     """One run-log row per new alert (run_all.log_event; never raises)."""
     from run_all import log_event
@@ -419,14 +396,12 @@ def log_alerts(items, now=None, state_path=None):
         log_event(RUN, a["Level"], "no", a["Check"] + " (alert only, no order sent)", details=a["Key"])
     return fresh
 
-
 def write_files(rep, ledger_csv=None, trips_csv=None):
     ledger_csv, trips_csv = ledger_csv or LEDGER_CSV, trips_csv or ROUND_TRIPS_CSV
     for df, path in ((rep["ledger"], ledger_csv), (rep["round_trips"], trips_csv)):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         df.to_csv(path + ".tmp", index=False)
         os.replace(path + ".tmp", path)
-
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -451,7 +426,6 @@ def main(argv=None):
         fresh = log_alerts([f for f in rep["findings"] + rep["alerts"]])
         print(f"  Run log: {len(fresh)} new alert row(s)")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

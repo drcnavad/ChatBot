@@ -16,7 +16,6 @@ sys.path.insert(0, ROOT)
 import run_all
 import pipeline_watchdog as wd
 
-
 class TestClassify(unittest.TestCase):
     def test_transient_samples(self):
         for sample in [
@@ -53,7 +52,6 @@ class TestClassify(unittest.TestCase):
         self.assertEqual(wd.classify_failure(""), ("unknown", None))
         self.assertEqual(wd.classify_failure(None), ("unknown", None))
 
-
 class TestResume(unittest.TestCase):
     def test_failed_step_wins(self):
         cp = {"phase": "steps", "failed_step": "sentiment", "steps_done": ["fundamentals"]}
@@ -74,7 +72,6 @@ class TestResume(unittest.TestCase):
         self.assertEqual(wd.build_resume_argv(["--only", "main"], "processing"), ["--only", "main"])
         self.assertEqual(wd.build_resume_argv(["--trade"], None), ["--trade"])
 
-
 class TestCheckpointRoundtrip(unittest.TestCase):
     def test_write_read_clear(self):
         with tempfile.TemporaryDirectory() as d:
@@ -94,7 +91,6 @@ class TestCheckpointRoundtrip(unittest.TestCase):
             with open(p, "w") as f:
                 f.write("not json{{{")
             self.assertEqual(run_all.read_checkpoint(path=p), {})
-
 
 class TestMainFlow(unittest.TestCase):
     CP = {"run_id": "r1", "argv": ["--trade"], "mode": "full", "phase": "steps",
@@ -185,7 +181,6 @@ class TestMainFlow(unittest.TestCase):
         self.assertEqual(calls[1], ["--trade", "--from", "sentiment"])   # one upstream resume...
         self.assertEqual(len(calls), 2)                                  # ...then give up + diagnose
 
-
 class TestDiagnoseLLM(unittest.TestCase):
     def test_no_key_returns_none(self):
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -210,7 +205,6 @@ class TestDiagnoseLLM(unittest.TestCase):
         with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}, clear=True), \
              mock.patch("urllib.request.urlopen", side_effect=Exception("nope")):
             self.assertIsNone(wd.diagnose_with_llm("main", "steps", "boom", {}))
-
 
 class TestLLMProviders(unittest.TestCase):
     """Gemini / Groq provider selection and request shapes (all HTTP stubbed)."""
@@ -285,7 +279,6 @@ class TestLLMProviders(unittest.TestCase):
              mock.patch("urllib.request.urlopen", return_value=self._FakeResp(payload)):
             d = wd.diagnose_with_llm("main", "steps", "boom", {})
         self.assertEqual(d, {"diagnosis": "plain words, no json"})
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

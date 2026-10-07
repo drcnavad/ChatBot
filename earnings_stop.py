@@ -61,7 +61,6 @@ STATUS_COLS = ["Checked_At_CT", "Symbol", "Shares", "Earnings_Date", "Report_Tim
                "Prev_Close", "Prev_Close_Date", "Trigger", "Price", "Vs_Prev_%", "Status"]
 RUN = "Earnings stop"
 
-
 # ----------------------------------------------------------------------------- the rule (pure)
 def session_now(now):
     """'pre' / 'regular' / 'after' when `now` is in that Alpaca session of an NYSE trading day, else None."""
@@ -78,7 +77,6 @@ def session_now(now):
         return "after"
     return None
 
-
 def watch_days(e_date, report_time):
     """[(trading day, sessions)] watched for one report (see the module docstring)."""
     e = pd.Timestamp(e_date).normalize()
@@ -87,7 +85,6 @@ def watch_days(e_date, report_time):
     if str(report_time).strip().upper() == "AM":
         return [(e, ALL)]
     return [(e, ALL), (be.next_sessions(e, 1)[0], MORNING)]
-
 
 def active_event(sym, earnings, day, session=None):
     """(earnings date, time, watch day, sessions, last watch day) when `day` is an earnings day of `sym` (and `session`,
@@ -102,7 +99,6 @@ def active_event(sym, earnings, day, session=None):
                 return r["Earnings Date"], t, d, sess, days[-1][0]
     return None
 
-
 def prev_close(bars, day, with_date=False):
     """Regular close of the last completed daily bar before `day` (one stock's bars: Date, Close), else None.
     with_date: (close, bar date) or (None, None)."""
@@ -113,11 +109,9 @@ def prev_close(bars, day, with_date=False):
         return (c, pd.Timestamp(b["Date"].iloc[-1]).normalize()) if ok else (None, None)
     return c if ok else None
 
-
 def prev_session(day):
     """The trading day before `day` (whose close is the reference)."""
     return (pd.Timestamp(day).normalize() - be.NYSE_SESSION).normalize()
-
 
 def quote_check(q, session, now):
     """(mid, skip reason) for a (bid, ask, time, feed) quote."""
@@ -133,27 +127,22 @@ def quote_check(q, session, now):
         return mid, f"spread {(ask - bid) / mid:.2%} too wide"
     return mid, None
 
-
 def stop_cid(sym, e_date, attempt=1):
     """Fixed client order id of the stop sale for one report (a retry after a broker rejection adds -rN)."""
     return f"live-stop-{pd.Timestamp(e_date):%Y%m%d}-{sym}" + (f"-r{attempt}" if attempt > 1 else "")
-
 
 # ----------------------------------------------------------------------------- inputs (tests replace these)
 def account():
     import alpaca_paper as ap
     return ap.PaperAccount()
 
-
 def trading_client():
     import paper_trade as pt
     return pt.paper_trading_client()
 
-
 def latest_quote(sym):
     import paper_trade as pt
     return pt._latest_quote(sym)
-
 
 def daily_bars(symbols, now):
     """Completed daily bars (today's bar only after 4:30 PM ET, when the pipeline treats it as final)."""
@@ -165,11 +154,9 @@ def daily_bars(symbols, now):
         bars = bars[bars["Date"] < pd.Timestamp(et.date())]
     return bars
 
-
 def log_event(status, money, message, details=""):
     import run_all
     run_all.log_event(RUN, status, money, message, details)
-
 
 # ----------------------------------------------------------------------------- state
 def _load_state(path=None):
@@ -182,7 +169,6 @@ def _load_state(path=None):
         s.setdefault(k, {})
     return s
 
-
 def _save_state(s, path=None):
     path = path or STATE_JSON
     today = datetime.now(be.CENTRAL).date()
@@ -193,13 +179,11 @@ def _save_state(s, path=None):
         json.dump(s, f, indent=2)
     os.replace(tmp, path)
 
-
 def _once(state, key, today, status, money, message, details=""):
     """Log an event once per day per key (a failing check every 30 seconds writes one row)."""
     if state["notes"].get(key) != str(today):
         state["notes"][key] = str(today)
         log_event(status, money, message, details)
-
 
 def _lock_busy(path):
     """True when a live process holds the lock at `path` (a stale or missing lock is not busy)."""
@@ -210,7 +194,6 @@ def _lock_busy(path):
         return pid > 0
     except (OSError, ValueError, TypeError):
         return False
-
 
 def _append_pending(row, path):
     """Add the stop sale to the morning fill check's pending file (the file's own dates and other rows are kept). A new
@@ -231,7 +214,6 @@ def _append_pending(row, path):
     with open(tmp, "w") as f:
         json.dump(pend, f, indent=2)
     os.replace(tmp, path)
-
 
 # ----------------------------------------------------------------------------- one check
 def candidates(now, session, acct=None, earnings=None, quick=True, stand_in=False):
@@ -265,7 +247,6 @@ def candidates(now, session, acct=None, earnings=None, quick=True, stand_in=Fals
                     "last": last, "prev": ref, "prev_date": ref_day, "stand_in": ref_day != want,
                     "trigger": ref * (1 - DROP)})
     return out, bad, held
-
 
 def _sell(c, q, session, now, state, pending_path):
     """Send the stop sale for one candidate (all checks first). Returns a status text."""
@@ -352,7 +333,6 @@ def _sell(c, q, session, now, state, pending_path):
     finally:
         run_all.release_trade_lock(run_all.FILL_LOCK)
 
-
 def _sell_safe(c, q, session, now, state, pending_path):
     """_sell; an unexpected error (e.g. no trading client) is logged once a day and retried at the next check."""
     import paper_trade as pt
@@ -362,7 +342,6 @@ def _sell_safe(c, q, session, now, state, pending_path):
         _once(state, f"error|{c['symbol']}", now.astimezone(be.CENTRAL).date(), "failed", "unknown",
               f"The {c['symbol']} earnings-day stop check failed ({str(err)[:150]}). Check Alpaca; next check in 30 seconds.")
         return "at trigger - error, retrying"
-
 
 def run_check(now=None, dry_run=False, pending_path=None):
     """One check. Dry run: prints the watched stocks, sends and writes nothing, never makes a trading client.
@@ -432,11 +411,9 @@ def run_check(now=None, dry_run=False, pending_path=None):
                   for r in rows))
     return rows
 
-
 def watching(rows):
     """True while some checked stock is still watched (not sold, still held): the loop keeps going."""
     return any(not str(r["Status"]).startswith(("sold", "no longer held", "SELL sent")) for r in rows)
-
 
 def loop(interval=INTERVAL_S, now_fn=None, sleep_fn=time.sleep, max_checks=None):
     """The launchd job: one loop at a time (pid lock); a check every `interval` seconds while a held stock is in an
@@ -461,7 +438,6 @@ def loop(interval=INTERVAL_S, now_fn=None, sleep_fn=time.sleep, max_checks=None)
             pass
     return n
 
-
 def _print_dry(now, session, table, held):
     print(f"DRY RUN {now.astimezone(be.CENTRAL):%a %b %-d %Y %H:%M} CT - nothing is sent or written. Session now: {session or 'closed'}.")
     print(f"Rule: on a held stock's earnings day (AM report: that day; PM/unknown: that day + the next pre-market and regular "
@@ -482,7 +458,6 @@ def _print_dry(now, session, table, held):
     for sym in sorted(set(held) - set(nxt["Symbol"])):
         print(f"  {sym:<6} no upcoming earnings date on file")
 
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group(required=True)
@@ -498,7 +473,6 @@ def main(argv=None):
         loop()
     else:
         run_check(now=now, dry_run=a.dry_run)
-
 
 if __name__ == "__main__":
     sys.exit(main())

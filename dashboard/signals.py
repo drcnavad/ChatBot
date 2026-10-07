@@ -7,12 +7,10 @@ import pandas as pd
 from dashboard.data import last_next_earnings, read_report_csv
 from dashboard.settings import CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, N_PICKS, PICKS_CSV, symbol_sector
 
-
 SIGNALS = ["Buy", "Hold", "Sold", "Score below 0", "Watch", "Not ranked"]
 SIGNAL_BADGE = {"Buy": "sa-badge-bull", "Hold": "sa-badge-hold", "Sold": "sa-badge-bear",
                 "Score below 0": "sa-badge-bear", "Watch": "sa-badge-hold", "Not ranked": "sa-badge-grey"}
 PLAN_BADGE = {"Buy": "sa-badge-bull", "Keep": "sa-badge-hold", "Sell": "sa-badge-bear"}
-
 
 def plain_reason(signal, reason, rank=None, score=None):
     """Engine reason string -> short plain-English explanation for the given display signal."""
@@ -57,7 +55,6 @@ def plain_reason(signal, reason, rank=None, score=None):
         return f"score below 0 ({sc})"
     return "benchmark / not enough history to rank"
 
-
 def decision_tag(signal, reason):
     """Short reason shown in brackets on the dated decision badge, e.g. 'Sold (mid-week exit)'."""
     reason = "" if reason is None or (isinstance(reason, float) and pd.isna(reason)) else str(reason)
@@ -68,7 +65,6 @@ def decision_tag(signal, reason):
     if signal == "Buy" and reason.startswith("mid-week exit replace in"):
         return "mid-week exit refill"
     return ""
-
 
 def signal_board(df):
     """Every symbol's signal for the decisions in force (the last rebalance / mid-week check).
@@ -124,7 +120,6 @@ def signal_board(df):
     board.loc[picked, "Portfolio slot"] = [str(i) for i in range(1, int(picked.sum()) + 1)]
     return board, date
 
-
 def next_full_rebalance(day):
     """Date of the first full (Friday) rebalance after `day` (backtest_engine's decision calendar), or None."""
     try:
@@ -136,7 +131,6 @@ def next_full_rebalance(day):
     except Exception:
         pass
     return None
-
 
 def rebalance_plan(df):
     """(rebalance date, as-of date, {SYMBOL: (action, weight %)}) for the next full rebalance.
@@ -157,12 +151,10 @@ def rebalance_plan(df):
     plan.update({s: ("Sell", 0.0) for s in held if s not in plan})
     return day, as_of, plan
 
-
 def plan_text(plan, sym):
     """'Buy 14.23%' / 'Keep 9.14%' / 'Sell' / 'not picked'."""
     action, w = plan.get(sym, (None, 0.0))
     return f"{action} {w:.2f}%" if action in ("Buy", "Keep") else (action or "not picked")
-
 
 def next_decision_date(latest_day):
     """(date, kind) of the next decision close: 'full rebalance' or 'mid-week check' (from backtest_engine)."""

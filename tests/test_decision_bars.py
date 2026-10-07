@@ -22,15 +22,12 @@ import backtest_engine as be
 FAIL = []
 CT = ZoneInfo("America/Chicago")
 
-
 def check(name, ok, info=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({info})" if info and not ok else ""))
     if not ok:
         FAIL.append(name)
 
-
 DAYS = pd.to_datetime(["2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-05"])   # Mon 10/5 = mid-week check
-
 
 def bars(mon_close, scale=1.0):
     """Two stocks; Monday's bar closes at mon_close (AAA) / mon_close / 2 (BBB). scale = a later split (0.5 = 2-for-1)."""
@@ -41,7 +38,6 @@ def bars(mon_close, scale=1.0):
             rows.append({"Symbol": sym, "Date": d, "Open": (c - 1) * scale, "High": (c + 2) * scale, "Low": (c - 2) * scale,
                          "Close": c * scale, "Volume": (1000.0 + i) / scale})
     return pd.DataFrame(rows)
-
 
 tmp = tempfile.mkdtemp()
 P, S = os.path.join(tmp, "decision_bars.csv"), os.path.join(tmp, "run_state.json")

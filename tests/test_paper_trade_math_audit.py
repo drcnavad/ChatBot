@@ -31,43 +31,34 @@ import types
 
 from enum import Enum as _Enum
 
-
 class OrderSide(_Enum):
     BUY = "buy"
     SELL = "sell"
 
-
 class TimeInForce(_Enum):
     DAY = "day"
-
 
 class QueryOrderStatus(_Enum):
     ALL = "all"
     OPEN = "open"
     CLOSED = "closed"
 
-
 class Sort(_Enum):             # alpaca.common.enums.Sort
     DESC = "desc"
     ASC = "asc"
-
 
 class _Req:
     def __init__(self, **kw):
         self.__dict__.update(kw)
 
-
 class MarketOrderRequest(_Req):
     pass
-
 
 class LimitOrderRequest(_Req):
     pass
 
-
 class GetOrdersRequest(_Req):
     pass
-
 
 _alpaca = types.ModuleType("alpaca")
 _trading = types.ModuleType("alpaca.trading")
@@ -98,12 +89,10 @@ fake_quotes.install(paper_trade, default=(99.90, 99.95))   # buy limit 99.95 + 0
 
 FAIL = []
 
-
 def check(ok, what):
     print(("PASS " if ok else "FAIL ") + what)
     if not ok:
         FAIL.append(what)
-
 
 # --- fakes --------------------------------------------------------------------
 class FakePosition:
@@ -111,13 +100,11 @@ class FakePosition:
         self.symbol = symbol
         self.qty = qty
 
-
 class FakeAccount:
     def __init__(self, buying_power, cash=None):
         self.buying_power = buying_power
         # cash defaults to buying_power when not given (ample for tests)
         self.cash = buying_power if cash is None else cash
-
 
 class FakeOrder:
     def __init__(self, id, symbol="", side="BUY", qty=0, status="new", filled_qty=0,
@@ -130,7 +117,6 @@ class FakeOrder:
         self.filled_qty = filled_qty
         self.client_order_id = client_order_id
         self.limit_price = limit_price
-
 
 class FakeClient:
     """Stand-in for alpaca TradingClient. Records everything; never touches the network."""
@@ -178,12 +164,10 @@ class FakeClient:
             raise ConnectionError("broker unreachable")
         return list(self.all_orders)
 
-
 def _use_fake(fake):
     orig = paper_trade.paper_trading_client
     paper_trade.paper_trading_client = lambda: fake
     return orig
-
 
 def _orders_frame():
     cols = paper_trade.ORDER_COLUMNS
@@ -197,7 +181,6 @@ def _orders_frame():
     ]
     return pd.DataFrame(rows, columns=cols)
 
-
 def _write_pending(path, orders):
     payload = {"evening_date": paper_trade._today_ct().date().isoformat(),
                "submitted_at_ct": "2026-09-25 18:00:00",
@@ -205,7 +188,6 @@ def _write_pending(path, orders):
                "orders": orders}
     with open(path, "w") as f:
         json.dump(payload, f)
-
 
 def test_build_orders_rejects_inf_price():
     # +inf price: `inf > 0` is True, so a naive positivity check would let it
@@ -222,7 +204,6 @@ def test_build_orders_rejects_inf_price():
     check(orders[orders["Symbol"] == "BBB"].iloc[0]["Side"] == "BUY",
           "finite-price symbol still buys")
 
-
 def test_build_orders_duplicate_symbols_raise():
     targets = pd.DataFrame([
         {"Symbol": "AAA", "Price": 100.0, "Weight": 0.10},
@@ -234,7 +215,6 @@ def test_build_orders_duplicate_symbols_raise():
     except ValueError:
         check(True, "duplicate symbols raise ValueError")
 
-
 def test_build_orders_total_weight_over_100_raises():
     targets = pd.DataFrame([
         {"Symbol": "AAA", "Price": 100.0, "Weight": 0.70},
@@ -245,7 +225,6 @@ def test_build_orders_total_weight_over_100_raises():
         check(False, "weights summing to 130% should raise ValueError")
     except ValueError:
         check(True, "weights summing to >100% raise ValueError")
-
 
 def test_build_orders_single_weight_over_100_skip():
     targets = pd.DataFrame([
@@ -259,7 +238,6 @@ def test_build_orders_single_weight_over_100_skip():
     check(by["AAA"] == "SKIP (bad weight)", f"weight 150% -> SKIP (bad weight), got {by['AAA']}")
     check(by["BBB"] == "SKIP (bad weight)", f"weight -60% -> SKIP (bad weight), got {by['BBB']}")
     check(by["CCC"] == "BUY", f"valid weight still buys, got {by['CCC']}")
-
 
 def test_buying_power_guard_recomputes_cost_not_est_value():
     # Est_Value understated (stale): the guard must recompute shares x price instead
@@ -276,7 +254,6 @@ def test_buying_power_guard_recomputes_cost_not_est_value():
     check((aaa["Est_Value"], bbb["Est_Value"]) == (400.0, 200.0),
           "guard recomputes Est_Value from shares x price")
 
-
 def test_buying_power_guard_invalid_row_skipped_upfront():
     df = _orders_frame()
     df.loc[0, "Price"] = float("inf")
@@ -285,12 +262,10 @@ def test_buying_power_guard_invalid_row_skipped_upfront():
     check(out[out["Symbol"] == "AAA"]["Side"].iloc[0] == "SKIP (no buying power)",
           "+inf-price buy with tiny Est_Value becomes SKIP (no buying power), never submitted")
 
-
 def test_client_order_id_inf_price_no_crash():
     cid = paper_trade._client_order_id("AAA", "BUY", 10, float("inf"), "20260926", kind="fill")
     check(cid == "live-fill-20260926-BUY-AAA-10-0",
           f"+inf price -> price-cents fall back to 0, no OverflowError ({cid})")
-
 
 def test_check_signal_freshness_rejects_stale_changes():
     from datetime import date, timedelta
@@ -310,7 +285,6 @@ def test_check_signal_freshness_rejects_stale_changes():
         check(paper_trade.check_signal_freshness(pk, ch) == today,
               "fresh picks + fresh changes pass the freshness check")
 
-
 def test_morning_buy_no_price_dropped_not_retried():
     # A morning BUY whose price cannot be verified must NOT be submitted blind
     # (the old code skipped the cash check entirely when limit_price was missing).
@@ -327,7 +301,6 @@ def test_morning_buy_no_price_dropped_not_retried():
         check(not res.empty and "FAILED: no usable price" in res["Status"].iloc[0],
               "morning: BUY with no price is FAILED/dropped loudly")
         check(not os.path.exists(pp), "morning: unpriceable row dropped, not kept for retry")
-
 
 def test_morning_sells_complete_before_buys():
     # The BUY is listed first in the pending file: SELLs must still complete first,
@@ -356,7 +329,6 @@ def test_morning_sells_complete_before_buys():
         check(wait_calls[:1] == [["fake-1"]] and len(wait_calls) == 2,
               f"morning: this run's SELL is waited on before the BUY (then the BUY's own fill wait) (got {wait_calls})")
 
-
 def test_morning_buy_cumulative_cash_reserved():
     # Two BUYs each fit in cash alone but not together: the second buys only the part that
     # still fits after the first (1% cushion), never more than the cash.
@@ -381,7 +353,6 @@ def test_morning_buy_cumulative_cash_reserved():
         check([(o["symbol"], o["qty"], o["order_id"]) for o in left] == [("BBB", 21.0, None)],
               f"morning: the part that did not fit (21) waits for the next fill check (got {left})")
 
-
 def test_morning_malformed_row_dropped():
     with tempfile.TemporaryDirectory() as td:
         pp = os.path.join(td, "pending.json")
@@ -404,7 +375,6 @@ def test_morning_malformed_row_dropped():
               "morning: only the valid row is submitted")
         check(not os.path.exists(pp), "morning: malformed row dropped, pending file cleaned up")
 
-
 def test_reconcile_hold_returns_ok_empty():
     # On a hold day nothing was ordered: reconciliation must return OK with an empty
     # report, not flag every held position as DRIFT against a 0% target.
@@ -421,7 +391,6 @@ def test_reconcile_hold_returns_ok_empty():
         paper_trade.get_live_positions_and_equity = orig_live
     check(ok is True, "reconcile on a hold day returns ok=True")
     check(report.empty, "reconcile on a hold day returns an empty report (no false DRIFT)")
-
 
 if __name__ == "__main__":
     test_build_orders_rejects_inf_price()

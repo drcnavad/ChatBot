@@ -31,23 +31,19 @@ import trade_audit as ta  # noqa: E402
 CT = ZoneInfo("America/Chicago")
 FAIL = []
 
-
 def check(name, ok, info=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({info})" if info and not ok else ""))
     if not ok:
         FAIL.append(name)
 
-
 def close(a, b, tol=0.005):
     return a is not None and b is not None and a == a and abs(float(a) - float(b)) <= tol
-
 
 def O(cid, sym, side, qty, filled, fill_px, status="filled", at="2026-10-02T20:31:10Z", limit=None, oid=None, kind="limit"):
     return {"id": oid or f"id-{cid}", "client_order_id": cid, "symbol": sym, "side": side, "qty": str(qty), "filled_qty": str(filled),
             "filled_avg_price": None if fill_px is None else str(fill_px), "status": status, "submitted_at": at,
             "filled_at": at if filled else None, "type": kind, "time_in_force": "day", "extended_hours": True,
             "limit_price": None if limit is None else str(limit)}
-
 
 # ---------------------------------------------------------------- 1. client order ids
 check("source: decision / fill check / rest / replacement / stop / manual",
@@ -91,7 +87,6 @@ check("summary: 3 bot fills with a plan price, traded $1,010 + $247.50 + $20 = $
 def FL(sym, side, qty, px, t, oid="x"):
     return {"id": f"{t}-{sym}", "symbol": sym, "side": side, "qty": str(qty), "price": str(px), "transaction_time": t, "order_id": oid}
 
-
 # Dates on/after AUDIT_START (2026-10-02); span kept so Days_Held still 56 / etc.
 fills = [FL("AAA", "buy", 10, 100, "2026-10-02T15:00:00Z", "b1"), FL("AAA", "buy", 5, 110, "2026-10-30T15:00:00Z", "b2"),
          FL("AAA", "sell", 12, 120, "2026-11-27T15:00:00Z", "s1"), FL("AAA", "sell", 5, 90, "2026-12-04T15:00:00Z", "s2")]
@@ -134,11 +129,9 @@ check("trading suspended -> failed; AAA 60% vs 50% -> drift info; no open orders
 # ---------------------------------------------------------------- 5. alerts
 NOW = datetime(2026, 10, 3, 12, 0, tzinfo=CT)          # Saturday
 
-
 def A(acct=None, clock=None, local=None, led_=None, errors=(), now=NOW):
     return {x["Key"].split("|")[0]: x for x in ta.alerts({"account": acct, "clock": clock, "clock_local": local, "errors": list(errors)},
                                                          led_, now)}
-
 
 SAT_CLOCK = {"is_open": False, "timestamp": "2026-10-03T13:00:00-04:00", "next_open": "2026-10-05T09:30:00-04:00",
              "next_close": "2026-10-05T16:00:00-04:00"}
@@ -194,7 +187,6 @@ check("report + CSVs: ledger 4 rows, round trips 4 rows, no .tmp left", len(pd.r
 # ---------------------------------------------------------------- 7. fetch: GET paths only, parts fail on their own
 import alpaca_paper as ap  # noqa: E402
 
-
 class Fake(ap.PaperAccount):
     calls, fail = [], set()
 
@@ -207,7 +199,6 @@ class Fake(ap.PaperAccount):
         if path in Fake.fail:
             raise ap.PaperAccountError(f"GET {path} failed: HTTP 500")
         return {"/account": {"status": "ACTIVE"}, "/positions": pos, "/orders": ORD, "/clock": SAT_CLOCK}.get(path, fills[::-1])
-
 
 d = ta.fetch(Fake())
 check("fetch: account, positions, orders, fills, clock; nothing failed", d["errors"] == [] and len(d["orders"]) == 4 and len(d["fills"]) == 4
@@ -226,7 +217,6 @@ import streamlit as st  # noqa: E402
 APOS = [{"symbol": "AAA", "qty": "10", "avg_entry_price": "100", "cost_basis": "1000", "market_value": "1010", "unrealized_pl": "10",
          "unrealized_plpc": "0.01", "current_price": "101", "change_today": "0", "lastday_price": "101"}]
 
-
 class AppFake(Fake):
     def _get(self, path, params=None):
         assert path in ap.ALLOWED_PATHS, path
@@ -244,7 +234,6 @@ class AppFake(Fake):
             return {"is_open": False, "timestamp": datetime.now(timezone.utc).isoformat()}
         items = [FL("AAA", "buy", 10, 101, "2026-10-02T20:31:05Z", "id-live-20261002-BUY-AAA-10-10000")][::-1]
         return [] if params.get("page_token") else items
-
 
 real, real_key = ap.PaperAccount, ap.holdings_refresh_key
 ap.PaperAccount, ap.holdings_refresh_key = AppFake, (lambda now=None: "k1")

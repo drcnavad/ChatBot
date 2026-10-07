@@ -1,54 +1,11 @@
-"""Self-healing wrapper around run_all.py: retry transient failures and resume the pipeline.
-
-Usage (drop-in replacement for run_all.py - every argument is passed straight through):
-
-    python pipeline_watchdog.py --trade          # decision run (2:30 PM CT, or a missed decision's catch-up;
-                                                 #  launchd adds --scheduled and runs it every 30 min, idle unless due)
-    python pipeline_watchdog.py --fill-check     # fill check (from 9:00 AM CT in regular hours; launchd: --scheduled)
-
-What it does on a failed run (exit code != 0):
-  * Reads Reports/.pipeline_checkpoint.json (written by run_all.py after every step) to find
-    where the pipeline stopped.
-  * TRANSIENT errors (API rate limits, timeouts, connection drops, HTTP 5xx): waits with
-    backoff (60s, 300s, 900s) and re-runs run_all.py --from <failed step>, up to 3 attempts.
-  * MISSING upstream files (e.g. main fails because weighted_sentiment.csv is gone): re-runs
-    once from the step that produces that file, then resumes.
-  * ANYTHING ELSE (code errors, strategy bugs, ...): does NOT touch the code. It optionally
-    asks an LLM for a diagnosis + proposed fix (see below), writes
-    Reports/pipeline_diagnosis_<timestamp>.md, writes a row to Reports/run_log.csv, and stops.
-    A human (Chirag) reviews the diagnosis and applies the fix.
-
-What it NEVER does (diagnose-only contract):
-  * Never edits paper_trade.py, any notebook, or any other pipeline code.
-  * Never places, cancels, or retries orders itself. Failures in the --trade or --fill-check
-    phases are never auto-retried: they go straight to diagnosis + a run-log row, because
-    order submission is handled by the existing idempotent guards in paper_trade.py and a
-    human should decide the next step.
-  * Never invents pipeline steps or arguments; a resume is always `run_all.py --from <step>`
-    with the original arguments.
-
-The LLM diagnosis layer is optional and needs ONE free API key - put it in the
-project's .env file (loaded automatically) or the environment:
-
-    GEMINI_API_KEY=...      # Google AI Studio (aistudio.google.com) - recommended free tier
-    GROQ_API_KEY=...        # console.groq.com - free tier, serves Llama 3.3 70B
-    ANTHROPIC_API_KEY=...   # console.anthropic.com - paid
-
-  The first key found wins (Gemini > Groq > Anthropic). Without any key the watchdog
-  still retries transient failures; it just skips the LLM diagnosis and writes the run-log row
-  and a report with the raw log excerpt instead. Model: LLM_PROVIDERS below (config, no key needed to change it)
-  or the PIPELINE_LLM_MODEL environment variable. Gemini uses Google's "gemini-flash-latest"
-  alias (it moves to the newest Flash model, so a model shutdown can't break it again - the
-  old gemini-2.0-flash was shut down on 2026-06-01 and returned HTTP 404); on a 404 the next
-  name in GEMINI_FALLBACK_MODELS is tried.
-
-  Diagnose-only contract: the LLM explains the failure and proposes a fix for human
-  review. It is never applied automatically.
-
-The trade and fill-check launchd jobs (launchd/com.stockanalysis.evening / .morning) run pipeline_watchdog.py, so it
-rides along with each scheduled run - between runs the pipeline is idle and there is nothing to watch. The daily run's
-after-close step (run_all.daily_step: signal refresh + forward test) starts its own child processes and reports its own
-problems in the run log; it sends no orders.
+"""Self-healing wrapper around run_all.py (same arguments), run by the launchd evening (--trade) and morning (--fill-check)
+jobs. On a failed run it reads Reports/.pipeline_checkpoint.json and:
+  * transient errors (rate limits, timeouts, HTTP 5xx): re-runs `run_all.py --from <step>` after 60/300/900 s (3 tries);
+  * a missing upstream file: re-runs once from the step that writes it;
+  * anything else: writes Reports/pipeline_diagnosis_<time>.md (optional LLM diagnosis) + a run-log row, and stops.
+It never edits code and never places, cancels or retries orders: --trade / --fill-check failures go straight to diagnosis.
+LLM key (optional, .env, first found wins): GEMINI_API_KEY > GROQ_API_KEY > ANTHROPIC_API_KEY; model: LLM_PROVIDERS or
+PIPELINE_LLM_MODEL (Gemini "gemini-flash-latest", then GEMINI_FALLBACK_MODELS on a 404). Advice only, never applied.
 """
 import collections
 import json
@@ -74,7 +31,6 @@ RETRY_BACKOFF_S = [60, 300, 900]    # wait between transient retries
 LOG_TAIL_LINES = 4000               # bounded buffer kept for error classification
 LLM_TIMEOUT_S = 120
 
-
 def _load_env():
     """Load the project's .env so scheduled (launchd) runs see the LLM/API keys."""
     try:
@@ -82,7 +38,6 @@ def _load_env():
         load_dotenv(os.path.join(ROOT, ".env"))
     except Exception:
         pass                                            # dotenv missing: env vars still work
-
 
 _load_env()
 
@@ -94,7 +49,6 @@ LLM_PROVIDERS = (
     ("ANTHROPIC_API_KEY", "claude-haiku-4-5", "anthropic"),
 )
 GEMINI_FALLBACK_MODELS = ("gemini-2.5-flash",)   # tried in order when the model above answers HTTP 404
-
 
 def _llm_provider():
     """(provider id, model, key) for the first configured provider, else (None, None, None)."""
@@ -131,11 +85,9 @@ _MISSING_FILE_RES = [
     r"No such file[^\n]*?([\w\-]+\.csv)",
 ]
 
-
 def log(msg, *args):
     """Watchdog's own log line (goes to stdout -> the launchd log)."""
     print(f"[watchdog {datetime.now(CT):%H:%M:%S}] " + (msg % args if args else msg), flush=True)
-
 
 def classify_failure(text):
     """('transient', None) | ('missing_upstream', step) | ('unknown', None) for the log tail.
@@ -153,7 +105,6 @@ def classify_failure(text):
         return "transient", None
     return "unknown", None
 
-
 def resume_step(checkpoint):
     """The STEPS name to resume from: the failed step, else the step after the last completed one."""
     if not checkpoint:
@@ -168,13 +119,11 @@ def resume_step(checkpoint):
             return names[i + 1] if i + 1 < len(names) else None
     return names[0] if names else None
 
-
 def build_resume_argv(argv, step):
     """Original argv + '--from <step>', unless the caller already scoped the run."""
     if step is None or "--from" in argv or "--only" in argv:
         return list(argv)
     return list(argv) + ["--from", step]
-
 
 def run_pipeline(argv):
     """Run run_all.py with argv; stream its output live and keep a bounded tail.
@@ -187,7 +136,6 @@ def run_pipeline(argv):
         buf.append(line)
         print(line, end="", flush=True)
     return proc.wait(), "".join(buf)
-
 
 def alpaca_snapshot():
     """Best-effort read-only Alpaca context for a diagnosis (never raises, never leaks keys)."""
@@ -210,7 +158,6 @@ def alpaca_snapshot():
     except Exception as e:
         snap["error"] = f"{type(e).__name__}: {e}"
     return snap
-
 
 def _llm_complete(provider, model, key, prompt):
     """One completion call. Returns the raw reply text. Raises on any failure.
@@ -246,7 +193,6 @@ def _llm_complete(provider, model, key, prompt):
         return payload["choices"][0]["message"]["content"]
     return "".join(b.get("text", "") for b in payload.get("content", [])
                    if b.get("type") == "text")
-
 
 def diagnose_with_llm(step, phase, log_tail, snapshot):
     """Ask the LLM for a diagnosis + proposed fix. Returns a dict, or None when unavailable.
@@ -288,7 +234,6 @@ def diagnose_with_llm(step, phase, log_tail, snapshot):
     except ValueError:
         return {"diagnosis": text.strip()[:2000]}
 
-
 def write_diagnosis_report(step, phase, diagnosis, log_tail, snapshot):
     """Write the human-review report. Returns the path. Never raises."""
     os.makedirs(REPORTS, exist_ok=True)
@@ -318,7 +263,6 @@ def write_diagnosis_report(step, phase, diagnosis, log_tail, snapshot):
         log("could not write diagnosis report: %s", e)
         return ""
     return path
-
 
 def handle_failure(tail, checkpoint):
     """A run failed: retry what is safe, diagnose the rest. Returns the process exit code."""
@@ -353,7 +297,6 @@ def handle_failure(tail, checkpoint):
                       f"{(diagnosis or {}).get('diagnosis', 'see the run log')[:220]}"
                       + (f" - report: {os.path.basename(report)}" if report else ""))
     return 1
-
 
 def main(argv=None):
     """Entry point: run the pipeline, heal what is safe to heal, diagnose the rest."""
@@ -405,7 +348,6 @@ def main(argv=None):
                           f"Step '{target}' still failing after the retries - look at the run log"
                           + (f" - report: {os.path.basename(report)}" if report else ""))
         return 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

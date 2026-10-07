@@ -9,28 +9,23 @@ import streamlit as st
 from dashboard.settings import (APP_FILES, BENCH_CSV, COMPANY_XLSX, CT, DECISIONS_CSV, EARNINGS_CSV, FRESHNESS,
     MIDWEEK_CSV, NEWS_CSV, REPORTS, SIGNAL_CSV)
 
-
 @st.cache_data(ttl=3600)
 def _read_csv_cached(path, mtime):
     return pd.read_csv(path)
 
-
 def read_report_csv(path):
     """Cached CSV read; None when the file is missing."""
     return _read_csv_cached(path, os.path.getmtime(path)) if os.path.exists(path) else None
-
 
 @st.cache_data(ttl=3600)
 def load_signals(mtime: float):
     """Reports/signal_analysis.csv: one row per symbol and day (prices, indicators, strategy columns)."""
     return pd.read_csv(SIGNAL_CSV, parse_dates=['Date'])
 
-
 @st.cache_data(ttl=3600)
 def latest_rows(_df, mtime: float):
     """Most recent row per symbol (the leading underscore stops Streamlit hashing the whole frame)."""
     return _df.sort_values('Date', ascending=False).drop_duplicates(subset='Symbol', keep='first')
-
 
 def load_decisions():
     """Reports/strategy_decisions.csv: the engine's log of every weekly / mid-week decision (with reasons)."""
@@ -41,7 +36,6 @@ def load_decisions():
     d["Date"] = pd.to_datetime(d["Date"])
     return d
 
-
 def load_benchmarks():
     b = read_report_csv(BENCH_CSV)
     if b is None:
@@ -50,12 +44,10 @@ def load_benchmarks():
     b["Date"] = pd.to_datetime(b["Date"])
     return b.set_index("Date")
 
-
 def load_midweek_rows():
     """Reports/strategy_midweek_check.csv (this week's Friday rebalance + Mon/Wed checks) or None."""
     m = read_report_csv(MIDWEEK_CSV)
     return None if m is None or m.empty or "Message" not in m.columns else m
-
 
 def row_for(path, symbol):
     """First row of a Reports CSV for one symbol, or None."""
@@ -64,7 +56,6 @@ def row_for(path, symbol):
         return None
     row = t[t["Symbol"] == symbol]
     return None if row.empty else row.iloc[0]
-
 
 def data_freshness(latest_bar):
     """One row per Reports file: last update (CT), age and a stale flag."""
@@ -88,13 +79,11 @@ def data_freshness(latest_bar):
                      "Status": "✅ fresh" if age_d <= max_days else f"⚠️ stale (> {max_days} d)"})
     return pd.DataFrame(rows)
 
-
 # --- Decision-day ranks (Fri rebalance + Mon/Wed checks, holiday-shifted): rank change compares the last two decision days, not calendar days ---
 def _decision_days(df):
     """Sorted decision dates (Rebalance_Day or Midweek_Check) present in the signal data."""
     mask = (df["Rebalance_Day"] == 1) | (df["Midweek_Check"] == 1)
     return sorted(df.loc[mask, "Date"].unique())
-
 
 def _day_ranks(df, day):
     """Symbol -> rank (1 = best) for one date: the pipeline's Strategy_Rank when present, else by combined_signal.
@@ -104,7 +93,6 @@ def _day_ranks(df, day):
            .sort_values([key], ascending=(key == "Strategy_Rank"))
            .drop_duplicates(subset=["Symbol"]))
     return pd.Series(range(1, len(sub) + 1), index=sub["Symbol"].values)
-
 
 @st.cache_data(ttl=3600)
 def day_rank_change(_df, mtime: float):
@@ -119,7 +107,6 @@ def day_rank_change(_df, mtime: float):
     common = t.index.intersection(y.index)
     return {s: (int(y[s]) - int(t[s]), int(t[s])) for s in common}
 
-
 @st.cache_data(ttl=3600)
 def _load_earnings(mtime: float):
     ed = pd.read_csv(EARNINGS_CSV)
@@ -127,12 +114,10 @@ def _load_earnings(mtime: float):
     ed['Earnings Date'] = pd.to_datetime(ed['Earnings Date'], errors='coerce')
     return ed.dropna(subset=['Earnings Date'])
 
-
 def load_earnings():
     if not os.path.exists(EARNINGS_CSV):
         return pd.DataFrame(columns=["Symbol", "Earnings Date", "Time"])
     return _load_earnings(os.path.getmtime(EARNINGS_CSV))
-
 
 def last_next_earnings(symbols):
     """Per symbol: most recent past and nearest upcoming earnings date (YYYY-MM-DD or '')."""
@@ -146,18 +131,15 @@ def last_next_earnings(symbols):
                      'Next ED': nxt.strftime('%Y-%m-%d') if pd.notna(nxt) else ''})
     return pd.DataFrame(rows, columns=['Symbol', 'Last ED', 'Next ED'])
 
-
 @st.cache_data(ttl=3600)
 def _load_company(mtime: float):
     return pd.read_excel(COMPANY_XLSX, sheet_name="2_Latest_Quarter_Complete", engine="openpyxl")
-
 
 def load_company():
     """Latest-quarter fundamentals workbook; empty frame when missing."""
     if not os.path.exists(COMPANY_XLSX):
         return pd.DataFrame(columns=["Symbol"])
     return _load_company(os.path.getmtime(COMPANY_XLSX))
-
 
 def company_metrics(ticker, company_df):
     """Fair value and key ratios for one ticker ({} if none on file)."""
@@ -170,18 +152,15 @@ def company_metrics(ticker, company_df):
             ('Debt_to_Equity', 'debt_to_equity')]
     return {key: float(r[col]) for col, key in cols if pd.notna(r[col])}
 
-
 def load_news():
     news = read_report_csv(NEWS_CSV)
     return news if news is not None else pd.DataFrame(columns=["symbol", "date", "headline", "summary", "source", "sentiment_label"])
-
 
 try:
     import yfinance as _yf
     _YF_OK = True
 except ImportError:  # graceful degradation: dashboard works without live quotes
     _yf, _YF_OK = None, False
-
 
 @st.cache_data(ttl=120)
 def live_quote(ticker: str):
@@ -209,12 +188,10 @@ def live_quote(ticker: str):
     except Exception:
         return None
 
-
 def _closes(df):
     """The Close column(s) of a yfinance download as a DataFrame with one column per ticker."""
     c = df["Close"]
     return c if isinstance(c, pd.DataFrame) else c.to_frame()
-
 
 @st.cache_data(ttl=120, show_spinner=False)
 def etf_prices(symbols: tuple, start: str):

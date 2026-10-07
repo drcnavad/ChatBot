@@ -7,12 +7,10 @@ from dashboard.data import _YF_OK, _yf, read_report_csv
 from dashboard.settings import SHORT_HISTORY_CSV
 from dashboard.style import CHART_FONT, MA_COLORS, TEAL, md_tone, section, tone
 
-
 def load_short_history():
     """Reports/short_history_reference.csv (stocks in the list with < 200 days of prices); None when missing or empty."""
     d = read_report_csv(SHORT_HISTORY_CSV)
     return None if d is None or d.empty else d
-
 
 @st.cache_data(ttl=3600)
 def short_history_closes(symbol, start):
@@ -26,7 +24,6 @@ def short_history_closes(symbol, start):
         return closes if len(closes) else None
     except Exception:
         return None
-
 
 def render_short_stock(sym, r):
     """Stock view for a stock in the list with fewer than 200 trading days: never scored, ranked or traded.

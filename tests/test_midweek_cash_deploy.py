@@ -18,29 +18,24 @@ import paper_trade as pt
 
 FAIL = []
 
-
 def check(name, ok, info=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({info})" if info and not ok else ""))
     if not ok:
         FAIL.append(name)
-
 
 def ranking(rows, regime=1):
     """rows: (symbol, rank, provisional weight, close)."""
     return pd.DataFrame([{"Symbol": s, "Rank": r, "Score": 80 - r, "Provisional_Weight": w, "Close": c,
                           "Regime_On": regime, "Midweek_Check": 1} for s, r, w, c in rows])
 
-
 EMPTY = pd.DataFrame(columns=pt.ORDER_COLUMNS)
 EQ = 100_000.0
 R = ranking([("AAA", 1, 0.10, 100.0), ("BBB", 2, 0.10, 50.0), ("CCC", 3, 0.12, 20.0), ("DDD", 4, 0.08, 10.0),
              ("EEE", 11, 0.0, 25.0), ("FFF", 12, 0.0, 40.0), ("GGG", 25, 0.0, 10.0)])
 
-
 def buys(orders):
     b = orders[orders["Side"] == "BUY"]
     return dict(zip(b["Symbol"], b["Est_Value"]))
-
 
 # 1) unheld top-10 names in rank order at their weights; the leftover tops up rank 1 (held) - never rank 11+
 o, info = pt.build_cash_deploy_orders(pt.build_hold_orders({"AAA": 100, "BBB": 200}, {"AAA": 100.0, "BBB": 50.0}),

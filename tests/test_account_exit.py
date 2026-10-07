@@ -18,22 +18,18 @@ import paper_trade as pt
 
 FAIL = []
 
-
 def check(name, ok, info=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({info})" if info and not ok else ""))
     if not ok:
         FAIL.append(name)
-
 
 def ranking(rows):
     """rows: (symbol, rank, close)."""
     return pd.DataFrame([{"Symbol": s, "Rank": r, "Score": 80 - r, "Provisional_Weight": 0.1 if r <= 10 else 0.0,
                           "Close": c, "Regime_On": 1, "Midweek_Check": 1} for s, r, c in rows])
 
-
 def side(o, sym):
     return o.loc[o["Symbol"] == sym, "Side"].tolist()
-
 
 EQ = 100_000.0
 R = ranking([(f"S{i:02d}", i, 100.0) for i in range(1, 26)])          # S01 = rank 1 ... S25 = rank 25, all $100

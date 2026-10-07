@@ -18,20 +18,16 @@ import alpaca_paper as ap
 
 FAIL = []
 
-
 def check(name, ok, info=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({info})" if info and not ok else ""))
     if not ok:
         FAIL.append(name)
 
-
 def flow(day, utc_time, amount):
     return {"date": day, "time": f"{day}T{utc_time}Z", "amount": amount}
 
-
 def snap(equity, flows, at="2026-10-07 16:30"):
     return {"equity": equity, "flows": flows, "at": pd.Timestamp(at, tz=ap.CT)}
-
 
 # Alpaca's daily bars (end of day, that day's deposit included): Oct 1 (before the start), Oct 2 start $1,000 incl. its
 # $300 deposit, Oct 5 $1,600 incl. a $500 deposit (so $1,100 before it), Oct 6 $1,650.
@@ -101,7 +97,6 @@ flat_rows = pd.DataFrame({"Date": ["2026-10-02", "2026-10-05", "2026-10-06"], "E
 check("account TWR index (forward-test rows): 1.0 at the start, a deposit day is flat",
       list(ap.account_twr_index(flat_rows)) == [1.0, 1.0, 1.0])
 
-
 class FakeAccount(ap.PaperAccount):
     """No network: 150 deposit / withdrawal activities over two pages (one canceled)."""
     def __init__(self):
@@ -122,7 +117,6 @@ class FakeAccount(ap.PaperAccount):
         self.calls.append(dict(params))
         i = 0 if "page_token" not in params else [a["id"] for a in self.acts].index(params["page_token"]) + 1
         return self.acts[i:i + params["page_size"]]
-
 
 fa = FakeAccount()
 cf = fa.cash_flows()

@@ -25,12 +25,10 @@ import sector_mapping as sm  # noqa: E402
 
 FAIL = []
 
-
 def check(name, ok, detail=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({detail})" if detail and not ok else ""))
     if not ok:
         FAIL.append(name)
-
 
 REMOVED_2026_10_01 = {"ADBE", "AFRM", "MU", "SOFI", "MDB", "MSTR"}       # must not reappear as a hidden list either
 TICKERS = set(sm.tradable_symbols) | set(sm.fundamentals_symbols) | REMOVED_2026_10_01
@@ -40,7 +38,6 @@ ALLOWED_NAMES = {
     ("sentiment_analysis.ipynb", "ALIASES"),               # curated news search names; fallback = sector_mapping.symbol_name
 }
 SKIP_FILES = {"sector_mapping.py", os.path.join("tests", "test_single_universe.py")}
-
 
 def sources():
     """(relative path, python source, is_production) for every .py file and notebook in the project (no docs/, no hidden)."""
@@ -61,7 +58,6 @@ def sources():
                         src = "\n".join("" if ln.lstrip().startswith(("%", "!")) else ln for ln in src.splitlines())
                         yield f"{rel}#cell{i}", src, prod
 
-
 def docstring_ids(tree):
     ids = set()
     for node in ast.walk(tree):
@@ -70,7 +66,6 @@ def docstring_ids(tree):
             if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
                 ids.add(id(first.value))
     return ids
-
 
 def assigned_name(tree):
     """{id(value node): target name} for simple assignments."""
@@ -81,7 +76,6 @@ def assigned_name(tree):
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             out[id(node.value)] = node.target.id
     return out
-
 
 lists, maps, tags, counts, unparsable, n_files = [], [], [], [], [], 0
 COUNT_RE = re.compile(r"\b(\d{2,3})[- ]stocks?\b", re.I)

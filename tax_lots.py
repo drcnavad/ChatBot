@@ -77,7 +77,6 @@ NIIT_THRESHOLD = {"single": 200000, "mfj": 250000, "mfs": 125000, "hoh": 200000}
 LOSS_LIMIT = {"single": 3000, "mfj": 3000, "mfs": 1500, "hoh": 3000}
 FILING = {"single": "Single", "mfj": "Married filing jointly", "mfs": "Married filing separately", "hoh": "Head of household"}
 
-
 # ----------------------------------------------------------------------------- dates
 def one_year_after(d):
     try:
@@ -85,16 +84,13 @@ def one_year_after(d):
     except ValueError:                       # Feb 29 -> Feb 28
         return d.replace(year=d.year + 1, day=28)
 
-
 def is_long_term(acquired, sold):
     """Held more than one year: sold after the one-year anniversary of the acquisition."""
     return sold > one_year_after(acquired)
 
-
 def long_term_on(acquired):
     """First sale date that counts as long-term."""
     return one_year_after(acquired) + timedelta(days=1)
-
 
 def _num(x):
     try:
@@ -102,7 +98,6 @@ def _num(x):
         return v if math.isfinite(v) else math.nan
     except (TypeError, ValueError):
         return math.nan
-
 
 def _trade_time(a):
     """(UTC timestamp, New York date) of an activity: fills have transaction_time, the others a date."""
@@ -114,7 +109,6 @@ def _trade_time(a):
     d = pd.Timestamp(str(a.get("date"))[:10]).date()
     return pd.Timestamp(datetime(d.year, d.month, d.day), tz=ET).tz_convert("UTC"), d
 
-
 # ----------------------------------------------------------------------------- read-only fetch (cached by the app)
 def _activity_date(a):
     """New York date an activity counts on (fees: the trade date in their description); None if it has none."""
@@ -122,7 +116,6 @@ def _activity_date(a):
         return _fee_date(a) if a.get("activity_type") == "FEE" else _trade_time(a)[1]
     except Exception:
         return None
-
 
 def fetch_inputs(acct, max_pages=200, start=TAX_START):
     """Account activities (oldest first; paging stops once it reaches dates before `start`, None = all) and
@@ -146,7 +139,6 @@ def fetch_inputs(acct, max_pages=200, start=TAX_START):
         params = {**params, "until": page[-1]["submitted_at"]}
     return {"activities": acts[::-1], "client_ids": {o["id"]: o.get("client_order_id") or "" for o in orders}}
 
-
 # ----------------------------------------------------------------------------- lots
 @dataclass
 class Lot:
@@ -165,7 +157,6 @@ class Lot:
     wash_adj_ps: float = 0.0
     wash_note: str = ""
     buy_id: str = ""            # the fill that bought it (pieces split off for wash sales share it)
-
 
 class _Book:
     def __init__(self, method, bot_orders):
@@ -251,11 +242,9 @@ class _Book:
             need -= m
         p["Wash adj"] = (n - need) * loss_ps
 
-
 def _fee_date(a):
     m = re.search(r"on (\d{4}-\d{2}-\d{2})", str(a.get("description", "")))
     return pd.Timestamp(m.group(1)).date() if m else pd.Timestamp(str(a.get("date"))[:10]).date()
-
 
 def _split_ratio(a, held):
     desc = str(a.get("description", ""))
@@ -266,7 +255,6 @@ def _split_ratio(a, held):
     if q == q and held > EPS and held + q > EPS:
         return (held + q) / held                  # qty = shares added (negative: reverse split)
     return None
-
 
 def build(activities, positions=None, method="FIFO", bot_orders=None, today=None, start=TAX_START):
     """Rebuild lots, sales, wash sales, income and data checks from the activities (oldest first). start = the first
@@ -397,12 +385,10 @@ def build(activities, positions=None, method="FIFO", bot_orders=None, today=None
                     b.issue("Unmatched transfer", f"{e['symbol']}: {left:g} shares transferred out on {e['date']} were not held.")
     return {**_finish(b, positions or [], income, fee_rows, today), "start": start, "dropped": dropped}
 
-
 def _segments(disp, lots):
     """(symbol, shares, bought, sold or None) for every share the history saw (dividend holding test)."""
     seg = [(d["Symbol"], d["Shares"], d["Bought"], d["Sold"]) for d in disp if d["Bought"] is not None]
     return seg + [(l.symbol, l.qty, l.trade_date, None) for q in lots.values() for l in q if l.opened and l.qty > EPS]
-
 
 def _income(income, segs, today):
     rows = []
@@ -437,7 +423,6 @@ def _income(income, segs, today):
         rows.append({"Date": d, "Year": d.year, "Type": kind, "Symbol": sym, "Amount": amt, "Qualified (est.)": qual,
                      "Note": note})
     return pd.DataFrame(rows, columns=["Date", "Year", "Type", "Symbol", "Amount", "Qualified (est.)", "Note"])
-
 
 def _finish(b, positions, income, fee_rows, today):
     disp = pd.DataFrame(b.disp, columns=["Symbol", "Lot", "Shares", "Acquired", "Bought", "Sold", "Proceeds", "Basis",
@@ -503,7 +488,6 @@ def _finish(b, positions, income, fee_rows, today):
             "pre_open": pd.DataFrame(pre_open, columns=["Symbol", "Shares", "Alpaca avg cost", "Value"]),
             "pre_sales": pd.DataFrame(b.pre_sales, columns=["Symbol", "Shares", "Sold", "Proceeds"])}
 
-
 # ----------------------------------------------------------------------------- summaries
 def realized_by_year(sales):
     """Per tax year: short-term and long-term gain (after wash adjustments), disallowed losses, proceeds, basis."""
@@ -517,7 +501,6 @@ def realized_by_year(sales):
                         "Basis": g["Basis"].sum(min_count=1), "Lot sales": g.size()}).reset_index()
     out["Total gain"] = out["Short-term gain"] + out["Long-term gain"]
     return out[cols].sort_values("Year", ascending=False).reset_index(drop=True)
-
 
 def ytd(report, year=None):
     """Card numbers for the tax year."""
@@ -539,7 +522,6 @@ def ytd(report, year=None):
             "interest": float(interest["Amount"].sum()),
             "margin_interest": float(-iy.loc[iy["Type"] == "Margin interest paid", "Amount"].sum()),
             "fees": float(fy["Amount"].sum()) if len(fy) else 0.0, "sales": int(len(sy))}
-
 
 def harvest(report, planned_buys=(), today=None):
     """(candidates, excluded) for selling at a loss now. Excluded: a purchase of the stock in the last 30 days (it would
@@ -574,7 +556,6 @@ def harvest(report, planned_buys=(), today=None):
     mk = lambda r: pd.DataFrame(r, columns=cols).sort_values("Loss").reset_index(drop=True)
     return mk(rows_ok), mk(rows_ex)
 
-
 def turning_long_term(report, days=60):
     """Open lots that turn long-term within `days` days."""
     l = report["lots"]
@@ -585,7 +566,6 @@ def turning_long_term(report, days=60):
     t["Hint"] = ["gain: waiting makes it long-term (lower rate)" if g > 0 else
                  "loss: selling before then keeps it short-term" for g in t["Gain"]]
     return t.sort_values("Days to long-term").reset_index(drop=True)
-
 
 def form_8949(sales, year=None):
     """Form 8949-style rows: description, acquired, sold, proceeds, basis, adjustment code W + amount, gain, term, box."""
@@ -603,7 +583,6 @@ def form_8949(sales, year=None):
     return pd.DataFrame(rows, columns=["Description", "Date acquired", "Date sold", "Proceeds", "Cost basis", "Adjustment code",
                                        "Adjustment amount", "Gain or loss", "Term", "Box"])
 
-
 # ----------------------------------------------------------------------------- estimated tax
 def bracket_tax(income, table):
     tax, lo = 0.0, 0.0
@@ -612,7 +591,6 @@ def bracket_tax(income, table):
             tax += (min(income, hi) - lo) * rate
         lo = hi
     return tax
-
 
 def _ltcg_tax(ordinary, pref, table):
     """Tax on `pref` (long-term gains + qualified dividends) stacked on top of `ordinary` taxable income."""
@@ -623,7 +601,6 @@ def _ltcg_tax(ordinary, pref, table):
             tax += (b - a) * rate
         lo = hi
     return tax
-
 
 def net_capital(st, lt, carry_st=0.0, carry_lt=0.0, filing="single"):
     """Schedule D netting: (net short, net long, deductible loss, carryforward short, carryforward long)."""
@@ -639,7 +616,6 @@ def net_capital(st, lt, carry_st=0.0, carry_lt=0.0, filing="single"):
     use_st = min(ded, st_loss)
     use_lt = ded - use_st
     return st, lt, ded, st_loss - use_st, lt_loss - use_lt
-
 
 def estimate_tax(st, lt, qualified_div=0.0, ordinary_div=0.0, interest=0.0, filing="single", other_agi=150000.0,
                  deduction=None, state_rate=0.0495, carry_st=0.0, carry_lt=0.0):
@@ -663,7 +639,6 @@ def estimate_tax(st, lt, qualified_div=0.0, ordinary_div=0.0, interest=0.0, fili
             "net_short": nst, "net_long": nlt, "loss_deducted": ded, "carry_short": cf_st, "carry_long": cf_lt,
             "magi": magi, "niit_threshold": NIIT_THRESHOLD[filing], "deduction": deduction}
 
-
 # ----------------------------------------------------------------------------- display helpers
 def open_lots_view(lots):
     """Open lots for display: pieces of the same purchase with the same basis and holding period merged."""
@@ -677,7 +652,6 @@ def open_lots_view(lots):
                                                        Gain=("Gain", "sum"), Price=("Price", "first")).reset_index()
     g["Basis / share"] = g["Basis"] / g["Shares"]
     return g[cols].sort_values(["Symbol", "Bought"]).reset_index(drop=True)
-
 
 def wash_summary(washes, year):
     """Wash sales of loss sales in `year`, per stock: loss sales matched, shares, disallowed loss, bot rebuys."""

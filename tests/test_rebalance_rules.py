@@ -20,11 +20,9 @@ sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 os.environ.setdefault("STOCK_ANALYSIS_RUN_LOG", os.path.join(tempfile.gettempdir(), "sa_test_run_log.csv"))  # never the real run log
 
-
 class OrderSide(Enum):
     BUY = "buy"
     SELL = "sell"
-
 
 class _E(Enum):
     ALL = "all"
@@ -32,15 +30,12 @@ class _E(Enum):
     DESC = "desc"
     DAY = "day"
 
-
 class _Req:
     def __init__(self, **kw):
         self.__dict__.update(kw)
 
-
 class MarketOrderRequest(_Req): pass
 class LimitOrderRequest(_Req): pass
-
 
 mods = {n: types.ModuleType(n) for n in ("alpaca", "alpaca.trading", "alpaca.trading.client",
                                           "alpaca.trading.enums", "alpaca.trading.requests", "alpaca.common",
@@ -59,11 +54,9 @@ import run_all
 
 PASS, FAIL = [], []
 
-
 def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
     print(("PASS " if cond else "FAIL ") + name + (f" ({detail})" if not cond else ""))
-
 
 def plan(weight, held, price=100.0, status="hold", account=10000, blocked=None):
     t = pd.DataFrame({"Symbol": ["AMD"], "Weight": [weight], "Price": [price]})
@@ -71,7 +64,6 @@ def plan(weight, held, price=100.0, status="hold", account=10000, blocked=None):
                         statuses={"AMD": status}, blocked=blocked)
     r = o.iloc[0]
     return r.Side, float(r.Shares)
-
 
 # ------------------------------------------------------------------ no-trade band, trim, top-up
 check("band: 9.5% held vs 10% target -> no trade", plan(0.10, 9.5)[0] == "HOLD")
@@ -108,12 +100,10 @@ out = pt.apply_buying_power_guard(g, 505.0, fractional=True)
 check("guard: $505 free -> buys what fits after the 1% cushion (505/1.01/100 = 5.00)", out.iloc[0].Shares == 5.0,
       out.iloc[0].Shares)
 
-
 class Order:
     def __init__(self, id, symbol, side, qty, status, filled_qty=0, client_order_id=""):
         self.id, self.symbol, self.side, self.qty = id, symbol, side, qty
         self.status, self.filled_qty, self.client_order_id = status, filled_qty, client_order_id
-
 
 class Broker:
     """Fake Alpaca: market BUYs fill 1% ABOVE the planned price and cost real buying power; a buy that does not fit
@@ -146,23 +136,19 @@ class Broker:
         self.positions[req.symbol] = self.positions.get(req.symbol, 0) + (req.qty if buy else -req.qty)
         return o
 
-
 PRICES = {"AAA": 100.0, "BBB": 50.0, "CCC": 20.0, "DDD": 10.0}
 import fake_quotes  # noqa: E402
 fake_quotes.install(pt, prices=PRICES)   # the ask at the planned price; limits fill at ask + 0.05%
-
 
 def pending(rows, evening_date="2026-10-02"):
     p = os.path.join(tempfile.mkdtemp(), "live_pending_orders.json")
     json.dump({"evening_date": evening_date, "target_source": "auto", "as_of": evening_date, "orders": rows}, open(p, "w"))
     return p
 
-
 def morning(b, p):
     pt.paper_trading_client = lambda: b
     pt.reconcile_positions = lambda *a, **k: (pd.DataFrame(), True)
     return pt.complete_unfilled_orders(pending_path=p, log_csv=None)
-
 
 rows = [{"symbol": s, "side": "BUY", "qty": q, "limit_price": PRICES[s], "order_id": None}
         for s, q in (("AAA", 20), ("BBB", 30), ("CCC", 40), ("DDD", 100))]           # wants ~$5,300, only $4,000 free

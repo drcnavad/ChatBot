@@ -18,12 +18,10 @@ import paper_trade as pt
 
 FAIL = []
 
-
 def check(name, ok, info=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({info})" if info and not ok else ""))
     if not ok:
         FAIL.append(name)
-
 
 EQ = 100_000.0
 SYMS = [f"S{i:02d}" for i in range(1, 26)]                            # S01 = rank 1 ... S25 = rank 25, all $100
@@ -32,14 +30,11 @@ R = pd.DataFrame({"Symbol": SYMS, "Rank": range(1, 26), "Score": [80 - i for i i
 T = pd.DataFrame({"Symbol": SYMS[:10], "Weight": [0.087] * 9 + [0.12], "Price": 100.0})   # the 10 Friday picks
 HELD8 = {s: 99 for s in SYMS[:8]}                                     # S09, S10 are new picks
 
-
 def kept(t):
     return sorted(t.loc[pd.to_numeric(t["Weight"]) > 0, "Symbol"])
 
-
 def plan(t, st, bl, pos=HELD8):
     return pt.build_orders(t, EQ, pos, {s: 100.0 for s in SYMS}, fractional=True, statuses=st, blocked=bl)
-
 
 check("floor: replacements only down to rank 20", pt.FRIDAY_SUB_MAX_RANK == 20)
 ST = {s: "hold" if s in HELD8 else "add" for s in SYMS[:10]}

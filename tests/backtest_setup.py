@@ -48,23 +48,19 @@ T_ = rs.reindex_like(sc).to_numpy(float)
 SECT = np.array([sm.symbol_sector.get(s, "Other") for s in U])
 CAP = max(1, int(np.floor(HIST_SECTOR_CAP * be.WINNER["n"])))  # pinned 4; not live winner_max_per_sector()
 
-
 def order_at(t):
     """Qualifying names at session t, best first (score at 6 decimals, then RS, then A-Z) - independent of the engine."""
     ok = E_[t] & ~np.isnan(S_[t]) & ~np.isnan(V_[t]) & (V_[t] > 0) & (S_[t] > 0)
     s, tb = np.round(S_[t], 6), np.round(T_[t], 6)
     return sorted(np.where(ok)[0], key=lambda k: (-s[k], -tb[k] if tb[k] == tb[k] else np.inf, U[k]))
 
-
 MAX_W = 0.20    # no stock above 20% after the vol weights and the regime halving (WINNER["max_weight"]); the extra stays cash
 PLAIN = dict(max_pick_rank=None, cap_soft=False)    # the tested C6 selection (walk all ranks, hard max-4 cap)
 REG_ = reg.reindex(idx).astype("boolean").fillna(False).to_numpy(bool)
 
-
 def targets(reb):
     """Engine weekly targets with the tested C6 selection (T20 off)."""
     return be.rank_targets(sc, el, vol, rebalance_days=reb, tiebreak_w=rs, **{**RA, **PLAIN})
-
 
 def targets_t20(reb, max_rank=20, n=10):
     """INDEPENDENT weekly selection of the T20 rule (no engine selection code): walk ranks 1..max_rank with max CAP per sector,
@@ -92,7 +88,6 @@ def targets_t20(reb, max_rank=20, n=10):
         out[t] = cur
     return pd.DataFrame(out, index=idx, columns=U), pd.DataFrame(relaxed)
 
-
 def block_matrix(days=5, path=None):
     """INDEPENDENT earnings block (no engine earnings code): True at (session t, stock j) when an earnings date E of j in
     Reports/earnings_date.csv satisfies t < E <= t + days (calendar days)."""
@@ -107,7 +102,6 @@ def block_matrix(days=5, path=None):
         for d in dates.get(sym, ()):
             B[:, j] |= (days_idx < d) & (days_idx >= d - pd.Timedelta(days=days))
     return B
-
 
 def select_t20(t, held, block, max_rank=20, n=10):
     """INDEPENDENT T20 selection at session t with the earnings rule: names not held (held[j] == 0) and blocked at t are
@@ -128,7 +122,6 @@ def select_t20(t, held, block, max_rank=20, n=10):
             cur *= 0.5
         cur = np.minimum(cur, MAX_W)
     return cur
-
 
 def buffered_midweek(N=3, M=15, exit_all=None, t20=False, block=None):
     """Friday full selection; at Mon/Wed checks: while a non-held name is in the top N and a held name ranks worse than M
@@ -166,10 +159,8 @@ def buffered_midweek(N=3, M=15, exit_all=None, t20=False, block=None):
         out[t] = cur
     return pd.DataFrame(out, index=idx, columns=U), pd.DataFrame(log), pd.DataFrame(sells)
 
-
 def full(t):
     return t.reindex(index=idx, columns=C.columns).fillna(0.0)
-
 
 def em(eq):
     """Metrics of a plain equity curve."""

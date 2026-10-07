@@ -12,16 +12,13 @@ import run_all as r
 CT = r.CT
 FAIL = []
 
-
 def t(s):
     return datetime.fromisoformat(s).replace(tzinfo=CT)
-
 
 def expect(ok, what):
     print(("ok    " if ok else "FAIL  ") + what)
     if not ok:
         FAIL.append(what)
-
 
 cases = [("2026-09-28 15:40", {}, "full"),        # Monday after 2:30 PM CT
          ("2026-09-28 14:20", {}, "quick"),       # Monday before 2:30 PM CT

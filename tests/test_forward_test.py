@@ -16,12 +16,10 @@ import forward_test as ft
 
 FAIL = []
 
-
 def check(what, ok, got=""):
     print(("ok   " if ok else "FAIL ") + what + ("" if ok else f"  got {got!r}"))
     if not ok:
         FAIL.append(what)
-
 
 check("one start-date constant: 2026-10-02", be.FORWARD_START == "2026-10-02", be.FORWARD_START)
 d = pd.bdate_range("2026-09-21", "2026-10-16")
@@ -56,7 +54,6 @@ check("no bars after the start: everything None / 0",
 # ---------------------------------------------------------------- 2) forward_test.py (account level)
 def fill(t, sym, side, qty, px):
     return {"transaction_time": t, "symbol": sym, "side": side, "qty": str(qty), "price": str(px), "id": f"{sym}{t}{side}"}
-
 
 FILLS = [fill("2026-09-03T19:00:00Z", "OLD", "buy", 10, 50),          # held before the start: never a pick
          fill("2026-10-02T19:31:00Z", "OLD", "sell", 10, 55),
@@ -126,7 +123,6 @@ check("verdict: after 12 weeks the top strategy wins only if it beats live and Q
       "the winner is Top 5" in ft.verdict(lbq(100.0)) and "no winner" in ft.verdict(lbq(200.0)),
       (ft.verdict(lbq(100.0)), ft.verdict(lbq(200.0))))
 
-
 class FakeAccount:
     calls = 0
 
@@ -142,7 +138,6 @@ class FakeAccount:
 
     def position_dicts(self):
         return [{"symbol": "CCC"}]
-
 
 import tempfile  # noqa: E402
 from datetime import datetime  # noqa: E402
@@ -179,7 +174,6 @@ rng = np.random.default_rng(7)
 SYMS = list(sector_mapping.tradable_symbols)[:30]
 sdays = pd.DatetimeIndex([d for d in pd.bdate_range("2025-07-01", "2026-10-16") if be.is_session(d)])
 
-
 def fake_sig(days):
     """signal_analysis.csv-like rows: random-walk closes and every column the strategies read."""
     out = []
@@ -194,7 +188,6 @@ def fake_sig(days):
         out.append(f)
     s = pd.concat(out, ignore_index=True)
     return s.assign(Strategy_Score=0.5 * s["Technical_Score"] + 0.5 * s["RS_Score"])[ft.SIG_COLS]
-
 
 SIG = fake_sig(sdays)
 FACTS = pd.DataFrame({"as_of": "2026-09-01 15:31", "bar_date": "2026-09-01", "Symbol": SYMS,
@@ -268,7 +261,6 @@ react = np.zeros(live_raw.shape, bool)
 for j, _, r in ev:
     react[r, j] = True
 
-
 def in_window(m, t, j):
     """Stop window of column j on row t: post = reaction day .. +10 sessions; pre = earnings within 7 days of the last
     Friday rebalance, through its reaction day (and the stock was held before that Friday)."""
@@ -277,7 +269,6 @@ def in_window(m, t, j):
     f = fridays[fridays <= t].max()
     return any(jj == j and live_raw.index[f] < day <= live_raw.index[f] + pd.Timedelta(days=7) and r >= t
                for jj, day, r in ev)
-
 
 stops = {}
 for m, kk in (("pre", 0.5), ("post", 1.0)):           # small k: the fake random walks rarely fall 3.5 ATR in a few days
@@ -464,11 +455,9 @@ check("Quant Score VWAP part: close / 20-day VWAP of the typical price", abs(vf[
 LIVE_FILES = [os.path.join(ROOT, "Reports", f) for f in ("signal_analysis.csv", "strategy_picks.csv", "run_state.json",
                                                          "live_pending_orders.json", "live_orders_log.csv", "factor_history.csv")]
 
-
 def digest():
     import hashlib
     return {f: hashlib.sha256(open(f, "rb").read()).hexdigest() for f in LIVE_FILES if os.path.exists(f)}
-
 
 if os.path.exists(ft.SIGNAL_CSV):
     before = digest()

@@ -1,33 +1,17 @@
-"""Forward test from backtest_engine.FORWARD_START (Fri Oct 2, 2026), counted only from that close on, never backtested:
+"""Forward test from backtest_engine.FORWARD_START (Fri Oct 2, 2026), counted only from that close on:
+  1. the real Alpaca account (read-only GETs through alpaca_paper, never orders) -> Reports/forward_test_daily.csv, one
+     row per trading day: equity, cash, net deposits (a deposit booked after the close, ~4:15 PM CT, counts from the next
+     row), positions, closed / winning picks, $ traded and its cost vs the decision price;
+  2. STRATEGIES: 39 paper-only strategies (the live rules recomputed + 38 others, never traded), built from the saved
+     Reports files (signal_analysis, factor_history, earnings_date, benchmark_prices) + Alpaca daily volume
+     (forward_bars) -> Reports/forward_strategies.csv (Value, 1.0 at the start; Cash) + forward_strategies_holdings.csv.
+leaderboard(): every strategy + the account + QQQ / SPY, ranked by RANK_RULE (fixed before any result).
+Same accounting for all: decide at the day's close (the 2:30 PM bar on decision days), trade only names whose target
+changed (all back to target on the strategy's rebalance day, 1-point band, earnings rule), be.COST per side, max 20% per
+stock, 99% invested, cash earns 0. Saved days are never redone; missed days are caught up from the saved bars.
 
-  1. the real Alpaca account (read-only GET requests through alpaca_paper; no orders, ever), and
-  2. STRATEGIES: 39 paper-only strategies next to it (the live rules recomputed the same way + 38 others). They are
-     never traded; each one is a list of target weights built from data the pipeline already saves every day
-     (Reports/signal_analysis.csv, factor_history.csv, earnings_date.csv, benchmark_prices.csv) + daily volume from
-     Alpaca's free market data (forward_bars(): one bar download per run, the same request the pipeline makes).
-
-  Reports/forward_test_daily.csv           one row per trading day (re-recording a day replaces it): account equity, cash,
-                                           lifetime net deposits (after the close: a deposit booked that evening, about
-                                           4:15 PM CT, counts from the next row), positions, closed picks / winners, $ traded and its cost
-                                           vs the decision price (the stock's close in signal_analysis.csv on the order's
-                                           As_Of day, which on a decision day is the 2:30 PM bar the strategy decided on)
-  Reports/forward_strategies.csv           one row per strategy and trading day: Value (1.0 at the Oct 2 close) and Cash
-  Reports/forward_strategies_holdings.csv  each strategy's holdings every trading day: Symbol, target Weight, Shares, Price
-  leaderboard()                            every strategy + the account + QQQ / SPY: total return, median weekly return,
-                                           max drawdown, weeks; ranked by RANK_RULE (chosen before any result)
-
-Same accounting for every strategy: decision at that day's close (the 2:30 PM bar on decision days, as saved), trades at
-that price whenever its target changes (an ATR stop on a gap-down reaction day sells at the open), be.COST (0.1%) per
-side, no stock above 20%, the live 99% invested convention (be.live_weights), cash earns 0. Like the live orders, only
-the names whose target changed are traded, except on the strategy's rebalance day (Friday, or the month end for the
-monthly ones), when every holding is brought back to its target; a holding within 1 point of it is left alone (the
-live band; trimmed to its target when the buys need the cash), and with the earnings rule a holding with earnings within
-5 days is not bought up. The dip and threshold rules only trade the names they buy or sell. A saved day is never redone: a re-run only adds the days after the last saved one (so
-running twice never double-counts) and a missed day is caught up from the saved bars.
-
-    python forward_test.py --record   # the daily run's after-close step (run_all.daily_step, Mon-Fri from 3:05 PM CT,
-                                      # after the signal refresh): strategies + today's account row
-    python forward_test.py            # update the strategies (bars only, no account request) and print the leaderboard
+    python forward_test.py --record   # run_all.daily_step (Mon-Fri from 3:05 PM CT): strategies + today's account row
+    python forward_test.py            # strategies only (no account request) + the leaderboard
 """
 import argparse
 import os
@@ -65,7 +49,6 @@ RANK_RULE = ("Ranked by median weekly return (Friday to Friday); a tie goes to t
              f"2026, before any result. After {WEEKS_TO_WIN} full weeks the top strategy is the winner only if its total "
              f"return also beats {LIVE} and QQQ; otherwise the live rules stay. Nothing switches on its own: the live "
              "rules change only when you ask.")
-
 
 # ---------------------------------------------------------------------------------------------------- the strategies
 # One dict per strategy. Ranked strategies go through the engine's own selection (be.winner_targets); their defaults = the
@@ -183,19 +166,15 @@ FWD_BARS = os.path.join(REPORTS, "cache", "forward_bars.pkl")
 FWD_BARS_START = "2026-05-01"      # ~100 sessions before the start: the 50-day volume average is full by Oct 2
 _NO_SAVE = datetime(2000, 1, 1, tzinfo=be.EASTERN)   # be.keep_decision_bars(now=this) only reads Reports/decision_bars.csv
 
-
 def _wide(df, col, index="Date"):
     return df.pivot(index=index, columns="Symbol", values=col).sort_index()
-
 
 def _pct(w):
     return w.rank(axis=1, pct=True)
 
-
 def _carry(w, days):
     """Weights that only change on `days` (carried in between)."""
     return w[days.to_numpy(bool)].reindex(w.index).ffill().fillna(0.0)
-
 
 def forward_bars(fetch=True):
     """Daily bars with volume for the VWAP / volume rules: a fresh download from FWD_BARS_START (Alpaca free market data
@@ -211,7 +190,6 @@ def forward_bars(fetch=True):
         except Exception as e:
             print(f"bars not refreshed ({type(e).__name__}: {e}); using the saved copy")
     return [be.apply_history_start(pd.read_pickle(p)) for p in (FWD_BARS, be.CACHE_DIR / be.LONG_CACHE) if os.path.exists(p)]
-
 
 def bar_features(sources, dates, cols):
     """Close / 20-day VWAP (the copy's daily-bar VWAP: typical price x volume), the volume jump (5-day / 50-day average
@@ -232,7 +210,6 @@ def bar_features(sources, dates, cols):
             out[k] = out[k].combine_first(new[k].reindex(index=dates, columns=cols))
     return out
 
-
 def quant_score(f, vwap_ratio):
     """The copy folder's Quant_Score (Stock Analysis Test Strategy/backtest_engine.quant_score), 0-100, from the saved
     signal_analysis.csv columns + the bars' VWAP: the average of price above its 5 moving averages, the moving-average
@@ -248,7 +225,6 @@ def quant_score(f, vwap_ratio):
              ((c - (mid - 2 * sd)) / (4 * sd).replace(0, np.nan)).clip(0, 1) * 100,
              (50 + 1250 * (ma[200] / ma[200].shift(20) - 1)).clip(0, 100)]
     return sum(p.fillna(50.0) for p in parts) / len(parts)
-
 
 def dip_weights(c, ma50, eligible, depth=0.08, max_hold=30, n=10):
     """test_buy_high_sell_low.ipynb as a portfolio: buy at the close 8% or more below the 50-day average, sell at the close
@@ -269,7 +245,6 @@ def dip_weights(c, ma50, eligible, depth=0.08, max_hold=30, n=10):
         out[t, list(held)] = 1 / n
     return pd.DataFrame(out, index=c.index, columns=c.columns)
 
-
 def earnings_drift(c, spy, earnings, hold=60):
     """Excess return vs SPY (%) of each stock's last earnings reaction day (the report day for AM reports, else the next
     session), kept for `hold` sessions from that close; NaN otherwise."""
@@ -282,7 +257,6 @@ def earnings_drift(c, spy, earnings, hold=60):
             j = pos[sym]
             out[k:k + hold, j] = (c.iat[k, j] / c.iat[k - 1, j] - spy.iat[k] / spy.iat[k - 1]) * 100
     return pd.DataFrame(out, index=idx, columns=c.columns)
-
 
 def risk_parity(tgt, close, days, window=63):
     """Same picks and total weight, re-split for equal risk contributions (63-day covariance; cyclical coordinate descent),
@@ -305,7 +279,6 @@ def risk_parity(tgt, close, days, window=63):
         out[t] = cur
     return pd.DataFrame(out, index=tgt.index, columns=tgt.columns)
 
-
 def earnings_events(dates, cols, earnings):
     """[(column, report day, reaction-day row)] per report in `dates`: the reaction day is the report day for AM reports,
     else the next session (after-close reports)."""
@@ -316,7 +289,6 @@ def earnings_events(dates, cols, earnings):
         if r < len(dates):
             ev.append((pos[sym], day, r))
     return ev
-
 
 def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit_to_top="winner"):
     """The Oct 2 live rules (Mon/Wed rules pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP) + an ATR trailing stop around earnings. They are replayed day by day with the engine's own
@@ -404,7 +376,6 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit
         out[t] = cur
     return pd.DataFrame(out, index=dates, columns=cols), pd.DataFrame(opens, index=dates, columns=cols)
 
-
 def atr_dip_weights(signal, priority, hold=10, n=10, room=None, taken=None, sell=None):
     """ATR dip buys: buy at the close of a signal day (1/n each, best priority first, at most `room` positions that day,
     default n), sell at the close `hold` sessions later (None = no fixed hold) or on a `sell` day. taken = stocks it may
@@ -426,7 +397,6 @@ def atr_dip_weights(signal, priority, hold=10, n=10, room=None, taken=None, sell
             held[j] = 0
         out[t, list(held)] = 1 / n
     return pd.DataFrame(out, index=signal.index, columns=signal.columns)
-
 
 def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     """Everything the strategies rank on, as Date x Symbol frames, from saved data only: `sig` = signal_analysis.csv rows
@@ -502,7 +472,6 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
             "monthly": pd.Series([be.next_sessions(d, 1)[0].month != d.month for d in dates], index=dates),
             "through": have[have].index.max() if have.any() else pd.Timestamp(0)}
 
-
 def strategy_targets(cfg, inp):
     """Daily live target weights of one STRATEGIES entry (Date x Symbol). Ranked ones go through the engine's own selection
     code (be.winner_targets): only overrides are passed, WINNER itself is never changed. A "stop" strategy also leaves its
@@ -526,7 +495,6 @@ def strategy_targets(cfg, inp):
                                         room=np.floor((1 - tgt.sum(axis=1)).to_numpy() * 10 + 1e-9).astype(int))
     return be.live_weights(tgt.clip(upper=MAX_WEIGHT)).reindex(columns=inp["close"].columns).fillna(0.0)
 
-
 def rebalance_days(cfg, inp):
     """Days on which every holding is brought back to its target (unless within 1 point of it), like the live Friday
     rebalance: the strategy's calendar (Fridays / month ends); the trend rule on Fridays; the dip and threshold rules
@@ -534,7 +502,6 @@ def rebalance_days(cfg, inp):
     key = {"trend": "weekly"}.get(cfg["weights"]) if cfg.get("weights") else \
         {"mwf": "weekly"}.get(cfg.get("calendar", "mwf"), cfg.get("calendar"))
     return inp.get(key) if key else None
-
 
 def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None, path=STRATEGIES_CSV,
                       hold_path=HOLDINGS_CSV, start=be.FORWARD_START):
@@ -620,7 +587,6 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
             out.assign(Date=out["Date"].dt.strftime("%Y-%m-%d")).to_csv(p, index=False)
     return len(rows)
 
-
 # ---------------------------------------------------------------------------------------------------- the live account
 def _fill_rows(fills):
     """GET /account/activities FILL dicts -> DataFrame (Time in CT, naive), oldest first."""
@@ -629,7 +595,6 @@ def _fill_rows(fills):
                      columns=["Time", "Symbol", "Side", "Qty", "Price"])
     f["Time"] = pd.to_datetime(f["Time"], utc=True).dt.tz_convert(CT).dt.tz_localize(None)
     return f.sort_values("Time", kind="stable").reset_index(drop=True)
-
 
 def picks(fills, start=be.FORWARD_START):
     """Closed picks: a pick opens with a buy into a flat position on/after `start` and closes when the position is back to
@@ -648,7 +613,6 @@ def picks(fills, start=be.FORWARD_START):
                             "Return %": (b["sell"] / b["buy"] - 1) * 100 if b["buy"] else np.nan})
             b.update(qty=0.0, counted=False)
     return pd.DataFrame(out, columns=["Symbol", "Entry", "Exit", "P/L $", "Return %"])
-
 
 def trade_cost(fills, orders, closes, start=be.FORWARD_START):
     """($ traded, $ cost) of the fills on/after `start` vs the decision price: buys (fill - decision price) x qty, sells
@@ -670,12 +634,10 @@ def trade_cost(fills, orders, closes, start=be.FORWARD_START):
         cost += (r.Price - ref) * r.Qty * (1 if r.Side == "buy" else -1)
     return traded, cost
 
-
 def _read(path, **kw):
     """A saved CSV (None if missing). round_trip parsing: a rewrite keeps every saved number exactly (the default parser
     can change the last digit, so re-saving would alter old rows)."""
     return pd.read_csv(path, float_precision="round_trip", **kw) if os.path.exists(path) else None
-
 
 def record(account=None, now=None, path=DAILY_CSV):
     """Save today's row (only on an NYSE session; replaces a row already saved today). Returns the row, or None."""
@@ -708,7 +670,6 @@ def record(account=None, now=None, path=DAILY_CSV):
     new[DAILY_COLS].to_csv(path, index=False)
     return row
 
-
 # ---------------------------------------------------------------------------------------------------- leaderboard
 def _stats(v):
     """Total return %, daily return % (last day vs the day before), median weekly return % (week end to week end:
@@ -721,7 +682,6 @@ def _stats(v):
     daily = (v.iloc[-1] / v.iloc[-2] - 1) * 100 if len(v) >= 2 else np.nan
     return ((v.iloc[-1] / v.iloc[0] - 1) * 100, daily, weekly.median() * 100 if len(weekly) else np.nan,
             (v / v.cummax() - 1).min() * 100, len(weekly))
-
 
 def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
     """One row per strategy (STRATEGIES order) + the real account (time-weighted, alpaca_paper.account_twr_index:
@@ -757,7 +717,6 @@ def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
     t["Rank"] = t["ranked"].cumsum().where(t["ranked"] & (t["Weeks"] > 0)).astype("Int64")   # no rank before a full week
     return t[["Rank", "Strategy"] + cols].reset_index(drop=True)
 
-
 def verdict(board):
     """One plain line: too early / the winner / no winner (RANK_RULE)."""
     by = board.set_index(board["Strategy"].str.replace(LIVE_MARK, "", regex=False))
@@ -771,7 +730,6 @@ def verdict(board):
     if by.at[top, "Total return %"] > bar:
         return f"After {weeks} weeks the winner is {top}: it ranks first and beats {LIVE} and QQQ."
     return f"After {weeks} weeks no winner: {top} ranks first but does not beat both {LIVE} and QQQ. Keep the live rules."
-
 
 def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
     """Display only, never saved. A trading day is saved by the daily run's after-close step (from 3:05 PM CT) once it
@@ -807,7 +765,6 @@ def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
             bench = pd.concat([bb, extra.rename_axis("Date").reset_index()], ignore_index=True)
     return out, bench
 
-
 def holdings(path=HOLDINGS_CSV):
     """Strategy -> 'NVDA 14.2%, ...' of its latest saved day (target weights, largest first)."""
     h = _read(path, parse_dates=["Date"])
@@ -816,7 +773,6 @@ def holdings(path=HOLDINGS_CSV):
     h = h[h["Date"] == h.groupby("Strategy")["Date"].transform("max")]
     h = h[h["Weight"] > 0].sort_values(["Strategy", "Weight"], ascending=[True, False])
     return {s: ", ".join(f"{r.Symbol} {r.Weight:.1%}" for r in g.itertuples()) for s, g in h.groupby("Strategy")}
-
 
 def consensus(board, hold, ranks=None, n_strategies=5, n_stocks=10):
     """Display only (never saved, never traded): the stocks most held by the best forward-test strategies.
@@ -869,7 +825,6 @@ def consensus(board, hold, ranks=None, n_strategies=5, n_stocks=10):
     return {"day": day, "by_return": by_return, "strategies": [(nm, tw) for nm, tw in picked],
             "stocks": st.drop(columns="_r").head(n_stocks).reset_index(drop=True)}
 
-
 def _log_problem(message, error):
     """A failed forward-test update -> one Reports/run_log.csv row (the dashboard's run log), so it is not only in the
     launchd log. Never raises."""
@@ -879,7 +834,6 @@ def _log_problem(message, error):
         run_all.log_event("Forward test", "failed", "no", message, f"{type(error).__name__}: {error}")
     except Exception as e:
         print(f"run log not written ({e})")
-
 
 def main(argv=None):
     """Update the paper strategies (and with --record save today's account row), then print the leaderboard. Returns the
@@ -910,7 +864,6 @@ def main(argv=None):
     print(board.round(2).to_string(index=False))
     print(verdict(board))
     return rc
-
 
 if __name__ == "__main__":
     sys.exit(main())

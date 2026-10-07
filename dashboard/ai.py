@@ -7,9 +7,7 @@ import streamlit as st
 from dashboard.data import load_news
 from dashboard.style import MA_COLS
 
-
 LLM_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-
 
 @st.cache_resource(show_spinner=False)
 def hf_token():
@@ -18,7 +16,6 @@ def hf_token():
         return st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN", "")
     except Exception:
         return os.getenv("HF_TOKEN", "")
-
 
 def llm_chat(messages, max_tokens):
     """Run a Llama chat completion and strip trailing prompt artifacts."""
@@ -29,7 +26,6 @@ def llm_chat(messages, max_tokens):
         return re.split(r'\[/?USER\]|Can you|Could you', response.choices[0].message.content.strip())[0].strip()
     except Exception as e:
         return f"Error generating summary: {e}"
-
 
 def trend_deltas_text(ticker_df, windows=(14, 50, 200)):
     """Compact multi-window trend text for the LLM prompt."""
@@ -46,7 +42,6 @@ def trend_deltas_text(ticker_df, windows=(14, 50, 200)):
                  f"Price vs MA200 {(latest['Close'] / latest['ma_200'] - 1) * 100:.2f}%, "
                  f"Above MA200 {(tail['Close'] > tail['ma_200']).mean() * 100:.2f}% of days\n")
     return text
-
 
 def ai_stock_summary(ticker, ticker_df, signal, why):
     """AI summary + recommendation for one ticker."""
@@ -80,7 +75,6 @@ def ai_stock_summary(ticker, ticker_df, signal, why):
             f"\n\n{context}")
     return llm_chat([{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=400)
 
-
 def ai_news_summary(news, sentiment_type, symbol, max_articles=20):
     """AI bullet summary of the positive or negative news for a symbol."""
     news = news.sort_values('date', ascending=False).head(max_articles)
@@ -95,7 +89,6 @@ def ai_news_summary(news, sentiment_type, symbol, max_articles=20):
             "Ensure that the text is clean and readable. Do not use LaTeX formatting or special fonts for numbers (e.g. use '100' not '$100$'). "
             "Make sure words are not broken up and sentences are complete.")
     return llm_chat([{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=500)
-
 
 @st.dialog("AI Analysis", width="large")
 def ai_analysis_dialog(ticker, ticker_df, signal, why):

@@ -22,35 +22,28 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
-
 class OrderSide(Enum):
     BUY = "buy"
     SELL = "sell"
 
-
 class TimeInForce(Enum):
     DAY = "day"
-
 
 class QueryOrderStatus(Enum):
     ALL = "all"
     OPEN = "open"
 
-
 class Sort(Enum):              # alpaca.common.enums.Sort
     ASC = "asc"
     DESC = "desc"
-
 
 class _Req:
     def __init__(self, **kw):
         self.__dict__.update(kw)
 
-
 class MarketOrderRequest(_Req): pass
 class LimitOrderRequest(_Req): pass
 class GetOrdersRequest(_Req): pass
-
 
 mods = {n: types.ModuleType(n) for n in ("alpaca", "alpaca.trading", "alpaca.trading.client",
                                           "alpaca.trading.enums", "alpaca.trading.requests", "alpaca.common",
@@ -74,21 +67,17 @@ NOTES = []  # every run-log row (status, message), checked at the end
 pt.log_event = lambda run, status, moved, message, details="": NOTES.append((status, message))
 PASS, FAIL = [], []
 
-
 def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
     print(("PASS " if cond else "FAIL ") + name + (f" ({detail})" if detail and not cond else ""))
 
-
 class Crash(BaseException):
     """Simulates the process dying (not caught by the code's `except Exception`)."""
-
 
 class Order:
     def __init__(self, id, symbol, side, qty, status, filled_qty=0, client_order_id=""):
         self.id, self.symbol, self.side, self.qty = id, symbol, side, qty
         self.status, self.filled_qty, self.client_order_id = status, filled_qty, client_order_id
-
 
 class Broker:
     """Fake Alpaca client. crash = None | ("before", n) | ("after", n): die on the n-th submit
@@ -133,22 +122,18 @@ class Broker:
             raise Crash()
         return o
 
-
 def write_pending(rows, evening_date="2026-10-02"):
     path = os.path.join(tempfile.mkdtemp(), "live_pending_orders.json")
     json.dump({"evening_date": evening_date, "submitted_at_ct": "x", "target_source": "auto",
                "as_of": evening_date, "orders": rows}, open(path, "w"))
     return path
 
-
 def run(broker, path):
     pt.paper_trading_client = lambda: broker
     return pt.complete_unfilled_orders(pending_path=path, log_csv=None)
 
-
 def status_of(res, sym):
     return " | ".join(res.loc[res["Symbol"] == sym, "Status"].astype(str))
-
 
 # ------------------------------------------------------------------ sizing
 check("floor2: 500/139.66 -> 3.58", pt._floor2(500 / 139.66) == 3.58, pt._floor2(500 / 139.66))
@@ -184,7 +169,6 @@ def picks_csv(as_of, last_reb):
     pd.DataFrame([{"Date": as_of, "Symbol": "OWN", "Close": 50.0}]).to_csv(os.path.join(d, "sig.csv"), index=False)
     return d
 
-
 def midweek_csv(d, as_of, rows):
     p = os.path.join(d, "mid.csv")
     pd.DataFrame([{"Event": "mid-week check", "Event_Date": as_of, "Action": a, "Sell": s, "Buy": b,
@@ -192,7 +176,6 @@ def midweek_csv(d, as_of, rows):
                  [{"Event": "mid-week check", "Event_Date": as_of, "Action": "HOLD", "Sell": None, "Buy": None,
                    "Weight_%": 0.0, "Message": "nothing to trade"}]).to_csv(p, index=False)
     return p
-
 
 pt.latest_signal_status = lambda *a, **k: {f"S{i}": "hold" for i in range(10)}  # every pick 'hold'
 d = picks_csv("2026-09-30", "2026-09-25")
@@ -340,7 +323,6 @@ check("rerun: a third run finds nothing to do", res.empty and len(b.submitted) =
 class Rejecting(Broker):
     def submit_order(self, req):
         raise RuntimeError("insufficient buying power")
-
 
 o, r = eve("ANET", "BUY", 3.58, 3, "expired", 0)
 b = Rejecting(orders=[o]); p = write_pending([r])

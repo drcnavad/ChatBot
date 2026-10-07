@@ -248,12 +248,10 @@ fundamentals_extra = [
 ]
 fundamentals_symbols = sorted(set(tradable_symbols) | set(fundamentals_extra))
 
-
 def sector_etf_for(symbol):
     """SPDR sector ETF ticker for a symbol (None when its sector has no ETF)."""
     by_name = {name: etf for etf, name in sector_etfs.items()}
     return by_name.get(symbol_sector.get(symbol))
-
 
 if __name__ == "__main__":
     for s in stock_symbols:

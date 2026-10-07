@@ -19,16 +19,13 @@ import paper_trade as pt
 
 FAIL = []
 
-
 def check(name, ok, info=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({info})" if info and not ok else ""))
     if not ok:
         FAIL.append(name)
 
-
 def on_grid(w):
     return bool(np.all(np.abs(np.asarray(w) * 10_000 - np.round(np.asarray(w) * 10_000)) < 1e-6))
-
 
 check("target is 99%", be.LIVE_INVESTED == 0.99)
 rng = np.random.default_rng(7)

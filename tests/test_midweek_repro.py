@@ -44,7 +44,6 @@ if not PINNED:
           f"exactness checks still run - re-baseline EXPECTED / PINNED_UNIVERSE once they pass")
 MW = {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]}
 
-
 def check(exit_all, t20=False, e5=False):
     chk = []
     kw = {"exit_all_below": exit_all, "exit_to_top": None,  # pin the cash-until-Friday variant (live now refills)
@@ -85,7 +84,6 @@ def check(exit_all, t20=False, e5=False):
         print(f"[{label}] last rank-{exit_all} sells:\n" + se[["Date", "Sell", "Sell_Rank", "Weight"]].tail(4).to_string(index=False))
     print(f"[{label}] REPRODUCED EXACTLY")
     return swaps_test, sells_test
-
 
 plain = check(None)
 live_exit = be.WINNER.get("midweek_exit_below")

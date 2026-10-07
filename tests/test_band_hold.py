@@ -20,37 +20,30 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
-
 # --- stub alpaca.trading + dotenv (no keys, no network) -----------------------------------------------------------
 class OrderSide(_Enum):
     BUY = "buy"
     SELL = "sell"
 
-
 class TimeInForce(_Enum):
     DAY = "day"
-
 
 class QueryOrderStatus(_Enum):
     ALL = "all"
     OPEN = "open"
     CLOSED = "closed"
 
-
 class Sort(_Enum):
     DESC = "desc"
     ASC = "asc"
-
 
 class _Req:
     def __init__(self, **kw):
         self.__dict__.update(kw)
 
-
 class MarketOrderRequest(_Req): pass
 class LimitOrderRequest(_Req): pass
 class GetOrdersRequest(_Req): pass
-
 
 _mods = {n: types.ModuleType(n) for n in ("alpaca", "alpaca.trading", "alpaca.trading.client", "alpaca.trading.enums",
                                           "alpaca.trading.requests", "alpaca.common", "alpaca.common.enums", "dotenv")}
@@ -68,12 +61,10 @@ import paper_trade as pt  # noqa: E402
 
 FAIL = []
 
-
 def check(name, ok, detail=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({detail})" if detail and not ok else ""))
     if not ok:
         FAIL.append(name)
-
 
 # ================================================================= A. the rebalance math (auto_trade's own two steps)
 def friday(targets, held, prices, cash, statuses=None, blocked=None):
@@ -97,18 +88,14 @@ def friday(targets, held, prices, cash, statuses=None, blocked=None):
     w = {s: q * prices[s] / equity * 100 for s, q in end.items() if q > 1e-9}
     return o, w, (cash + got - spent) / equity * 100, equity
 
-
 def side(o, s):
     return o.set_index("Symbol").at[s, "Side"]
-
 
 P = {f"S{i}": 100.0 for i in range(12)}
 T10 = {f"S{i}": 0.099 for i in range(10)}                       # 10 picks x 9.9% = the live 99%
 
-
 def shares_for(pcts):
     return {s: round(p * 1000 / 100, 4) for s, p in pcts.items()}  # equity ~ $100,000, price $100
-
 
 # A1. several band-held names ABOVE target (+0.9 point each) and 5 new buys -> trim fix: the 5 are trimmed to target
 held = shares_for({f"S{i}": 10.8 for i in range(5)})
@@ -251,7 +238,6 @@ class FakeOrder:
     def __init__(self, **kw):
         self.__dict__.update(kw)
 
-
 class FakeBroker:
     """Fills every order at once at its limit price; updates cash and positions, so the re-read buying power is real."""
 
@@ -286,7 +272,6 @@ class FakeBroker:
     def cancel_order_by_id(self, oid):
         pass
 
-
 # Fake portfolio (no live Reports files): 7 kept picks (most inside the 1-point band, some above target -> the trim fix;
 # SLB 1.5 points under -> bought up), 3 new picks, 3 dropped holdings. Old weights and targets both sum to 99%.
 #        symbol  sector         close  old weight  target
@@ -312,7 +297,6 @@ pd.concat([picks.assign(Date="2026-10-01")[["Date", "Symbol", "Close"]],
                ["Date", "Symbol", "Close", "Strategy_Score", "Strategy_Rank", "Provisional_Weight", "Regime_On", "Midweek_Check"]]]
           ).to_csv(SIGNAL_CSV, index=False)
 pd.DataFrame({"Symbol": picks.Symbol, "Earnings Date": "2026-11-20", "Time": "PM"}).to_csv(EARNINGS_CSV, index=False)
-
 
 def run_day(day, last_reb, positions, cash, changes_rows=None, midweek_rows=None):
     """auto_trade() on a fake broker with the pipeline files as they would be after `day`'s 2:30 PM run."""
@@ -348,7 +332,6 @@ def run_day(day, last_reb, positions, cash, changes_rows=None, midweek_rows=None
         for k, v in saved.items():
             setattr(pt, k, v)
     return orders, meta, results, broker, float(acct.equity)
-
 
 EQ = 100000.0
 pos = {r.Symbol: int(r.Strategy_Weight * EQ / r.Close) for r in picks.itertuples() if r.Held}   # whole shares at the old weights

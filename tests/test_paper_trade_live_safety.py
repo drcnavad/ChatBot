@@ -94,7 +94,6 @@ def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
     print(("PASS " if cond else "FAIL ") + name + (f" ({detail})" if detail and not cond else ""))
 
-
 class FakeOrder:
     _n = 0
     def __init__(self, **kw):
@@ -137,7 +136,6 @@ class FakeClient:
     def cancel_order_by_id(self, oid): self.canceled.append(oid)
     def get_orders(self, req): return list(self.orders_list)
     def get_clock(self): return types.SimpleNamespace(is_open=True)
-
 
 def fake_orders_df():
     return pd.DataFrame([
@@ -336,7 +334,6 @@ paper_trade.PENDING_ORDERS_JSON = orig_pend
 for k, v in monkey.pop().items(): setattr(paper_trade, k, v)
 check("pending file kept for retry", os.path.exists(pend))
 
-
 # ------------------------------------------------- 11: client is paper=False; missing keys
 seen = {}
 class TC:
@@ -393,7 +390,6 @@ src = open(os.path.join(ROOT, "paper_trade.py")).read()
 check("no paper pending path constant", "paper_pending_orders" not in src)
 check("no paper log path constant", "paper_orders_log" not in src)
 check("no pa- client id prefix", '"pa-' not in src and "'pa-" not in src)
-
 
 # ------------------------------------------------- 13: morning BUY buying-power guards
 def _morning_bp_case(bp, price, qty, pend=None, fc=None):

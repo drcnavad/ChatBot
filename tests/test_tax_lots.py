@@ -27,40 +27,32 @@ import tax_lots as tl
 FAIL = []
 TODAY = date(2026, 10, 4)
 
-
 def check(name, ok, info=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({info})" if info and not ok else ""))
     if not ok:
         FAIL.append(name)
 
-
 def close(a, b, tol=0.005):
     return a is not None and b is not None and abs(float(a) - float(b)) <= tol
 
-
 _n = [0]
-
 
 def F(sym, side, qty, price, day, hh=15, order=None, kind="fill"):
     _n[0] += 1
     return {"activity_type": "FILL", "id": f"f{_n[0]:05d}", "symbol": sym, "side": side, "qty": str(qty), "price": str(price),
             "transaction_time": f"{day}T{hh:02d}:00:00Z", "order_id": order or f"o{_n[0]}", "type": kind}
 
-
 def NTA(t, day, **kw):
     _n[0] += 1
     return {"activity_type": t, "id": f"n{_n[0]:05d}", "date": day, "status": "executed", **kw}
-
 
 def run(acts, positions=None, method="FIFO", bots=None, start=None):
     acts = sorted(acts, key=lambda a: a.get("transaction_time") or a["date"] + "T00")
     return tl.build(acts, positions, method, bots or {}, today=TODAY, start=start)
 
-
 def lots(r, sym="AAA"):
     l = r["lots"]
     return l[l["Symbol"] == sym].reset_index(drop=True)
-
 
 # ---------------------------------------------------------------- 1. FIFO / HIFO / LIFO
 A = [F("AAA", "buy", 10, 100, "2025-01-02"), F("AAA", "buy", 10, 120, "2025-03-03"), F("AAA", "sell", 15, 130, "2025-06-02")]
@@ -294,7 +286,6 @@ check("full history (start=None) for comparison: Sep 20 loss washed into the Oct
 r = run(OLD + NEW, positions=None, start=tl.TAX_START)
 check("fresh start without positions: the CCC sale has no basis -> Unmatched sell check", "Unmatched sell" in set(r["issues"]["Check"]))
 
-
 class PageAcct:
     def __init__(self, acts):
         self.acts, self.calls = acts[::-1], []
@@ -305,7 +296,6 @@ class PageAcct:
             return []
         i = 0 if "page_token" not in params else [a["id"] for a in self.acts].index(params["page_token"]) + 1
         return self.acts[i:i + params["page_size"]]
-
 
 many = [F("ZZZ", "buy", 1, 10, "2026-09-0" + str(1 + i % 9)) for i in range(250)] + [F("ZZZ", "buy", 1, 10, "2026-10-02") for _ in range(50)]
 acct = PageAcct(many)
@@ -328,7 +318,6 @@ ACTS = sorted(W + [F("AAA", "buy", 5, 50, "2026-01-05"), NTA("FEE", "2026-01-06"
 POS = [{"symbol": "AAA", "qty": "19", "avg_entry_price": "48.42", "cost_basis": "920", "market_value": "988", "unrealized_pl": "68",
         "unrealized_plpc": "0.074", "current_price": "52", "change_today": "0.01", "lastday_price": "51.5"}]
 
-
 class FakeAccount(ap.PaperAccount):
     calls = []
 
@@ -349,7 +338,6 @@ class FakeAccount(ap.PaperAccount):
         items = [a for a in ACTS if params.get("activity_types") != "FILL" or a["activity_type"] == "FILL"][::-1]
         start = 0 if "page_token" not in params else [a["id"] for a in items].index(params["page_token"]) + 1
         return items[start:start + params["page_size"]]
-
 
 real, real_key = ap.PaperAccount, ap.holdings_refresh_key
 ap.PaperAccount, ap.holdings_refresh_key = FakeAccount, (lambda now=None: "k1")

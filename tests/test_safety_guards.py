@@ -30,16 +30,13 @@ import run_all as ra
 
 FAIL = []
 
-
 def check(name, ok, detail=None):
     print(("  ok    " if ok else "  FAIL  ") + name + ("" if ok or detail is None else f"   -> {detail}"))
     if not ok:
         FAIL.append(name)
 
-
 def t(s):
     return datetime.fromisoformat(s).replace(tzinfo=ra.CT)
-
 
 # ------------------------------------------------------------------ 20% max weight per stock (engine)
 import backtest_engine as be

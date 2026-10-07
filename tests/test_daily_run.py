@@ -25,16 +25,13 @@ import run_all as ra
 
 FAIL = []
 
-
 def check(name, ok, info=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({info})" if info and not ok else ""))
     if not ok:
         FAIL.append(name)
 
-
 def at(s):
     return datetime.fromisoformat(s).replace(tzinfo=ra.CT)
-
 
 # ---------------------------------------------------------------- the signal refresh (child of the after-close step)
 check("Tue 3:05 PM CT (no decision, bar final for the refresh): refresh runs", ra.refresh_idle(at("2026-10-06 15:05")) is None)
@@ -49,13 +46,11 @@ for when, word, what in (("2026-10-06 15:03", "not final", "Tue 3:03 PM CT: bar 
     why = ra.refresh_idle(at(when)) or ""
     check(f"{what} -> idle", word in why, why)
 
-
 def dry(now):
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         rc = ra.main(["--quick", "--scheduled", "--dry-run", "--now", now])
     return rc, out.getvalue()
-
 
 rc, out = dry("2026-10-06 15:05")
 check("Tue dry run: plans main_signal_analysis.ipynb in quick mode", rc == 0 and "main_signal_analysis.ipynb" in out
@@ -64,7 +59,6 @@ check("Tue dry run: no trade, no fill check, no paid API step",
       not re.search(r"\btrade\b|fill-check|NewsAPI|Finnhub|Alpha Vantage|company_report_autofetch|sentiment_analysis", out), out)
 rc, out = dry("2026-10-07 15:05")
 check("Wed dry run: idle (decision day), nothing planned", rc == 0 and out.startswith("idle:") and "decision day" in out, out)
-
 
 # ---------------------------------------------------------------- when the after-close step runs
 for when, state, word, what in (
@@ -81,11 +75,9 @@ for when, what in (("2026-10-06 15:05", "Tue 3:05 PM CT"), ("2026-10-07 15:05", 
                    ("2026-10-06 21:00", "Tue 9 PM CT (a late wake)")):
     check(f"after-close step due: {what}", ra.daily_idle(at(when), {"last_daily_date": "2026-10-05"}) is None)
 
-
 class Done:
     def __init__(self, rc):
         self.returncode = rc
-
 
 tmp = tempfile.mkdtemp()
 saved = {k: getattr(ra, k) for k in ("STATE_FILE", "DAILY_LOCK")}

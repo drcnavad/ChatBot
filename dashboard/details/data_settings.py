@@ -3,7 +3,6 @@ import streamlit as st
 
 from dashboard.style import toned
 
-
 def render_data_and_settings(p):
     """Data freshness table."""
     st.dataframe(toned(p.freshness, ["Status"]), width="stretch", hide_index=True)

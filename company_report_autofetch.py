@@ -78,7 +78,6 @@ OUTPUT_COLUMNS = [
 
 # --- FETCH -------------------------------------------------------------------
 
-
 def fetch_statement(function, symbol, fields):
     """Quarterly reports as a DataFrame; None on rate limit, empty on no data/error."""
     try:
@@ -98,9 +97,7 @@ def fetch_statement(function, symbol, fields):
         for r in data.get("quarterlyReports", [])
     ])
 
-
 # --- TRANSFORM + SAVE --------------------------------------------------------
-
 
 def build_fundamentals(income, balance):
     """Merge raw income + balance rows into the balance_sheet.csv format."""
@@ -121,7 +118,6 @@ def build_fundamentals(income, balance):
     # quarters of every fast grower (e.g. NVDA's last two quarters showed the same capped net income and assets).
     return df.sort_values(["Symbol", "FiscalDateEnding"])[OUTPUT_COLUMNS]
 
-
 def save_fundamentals(new_df):
     """Replace these symbols' rows in balance_sheet.csv; other symbols stay untouched."""
     existing = pd.read_csv(BALANCE_CSV, parse_dates=["FiscalDateEnding"])
@@ -129,9 +125,7 @@ def save_fundamentals(new_df):
     result = result.sort_values(["Symbol", "FiscalDateEnding"], ascending=[True, False])
     result[OUTPUT_COLUMNS].to_csv(BALANCE_CSV, index=False)
 
-
 # --- ROTATION ----------------------------------------------------------------
-
 
 def load_run_log():
     if not os.path.exists(RUN_LOG_CSV):
@@ -140,12 +134,10 @@ def load_run_log():
     log["RunDate"] = pd.to_datetime(log["RunDate"], errors="coerce").dt.date
     return log.dropna(subset=["RunDate"])
 
-
 def log_run(symbol, income_status, balance_status):
     pd.DataFrame([[symbol, datetime.now().date(), income_status, balance_status]]).to_csv(
         RUN_LOG_CSV, mode="a", header=not os.path.exists(RUN_LOG_CSV), index=False
     )
-
 
 def get_stale_symbols():
     """Symbols needing a fetch and outside cooldown: never-attempted first, then oldest attempt."""
@@ -167,9 +159,7 @@ def get_stale_symbols():
     stale.sort(key=lambda s: (s in last_any, last_any.get(s, date.min)))
     return stale, cool_for, in_cooldown
 
-
 # --- MAIN --------------------------------------------------------------------
-
 
 def fetch_symbol(symbol):
     """Fetch + save one symbol. Returns False when the API rate limit is hit."""
@@ -193,7 +183,6 @@ def fetch_symbol(symbol):
         print(f"  [OK] {len(new_df)} quarters saved -> balance_sheet.csv")
     log_run(symbol, income_status, balance_status)
     return True
-
 
 def main():
     print("=" * 60)
@@ -227,7 +216,6 @@ def main():
     print(f"\n  fetch_run_log.csv - today's entries ({len(today_log)}):")
     print(today_log.to_string(index=False))
     print("=" * 60)
-
 
 if __name__ == "__main__":
     main()

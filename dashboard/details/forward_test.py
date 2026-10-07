@@ -5,14 +5,12 @@ import streamlit as st
 from dashboard.data import load_benchmarks, read_report_csv
 from dashboard.style import INK, MUTED, PCT_COL, drawdown_tone, esc, live_row, show_html, symbol_link, toned
 
-
 def _board(daily, values):
     """(leaderboard, values) with the provisional close rows (forward_test.provisional), as shown on the dashboard."""
     import forward_test as ft
     bench = load_benchmarks()
     values, bench = ft.provisional(values, bench.reset_index() if bench is not None else None)
     return ft.leaderboard(daily, bench, values), values
-
 
 def render_forward_test():
     """Strategy tab: the forward-test leaderboard from FORWARD_START (forward_test.py): every paper strategy
@@ -49,9 +47,7 @@ def render_forward_test():
                "comparison only (not ranked). Weekly = Friday to Friday; None / – = no full week yet." + acct
                + marked + " Saved daily by the daily run's 3:05 PM CT step after the signal refresh (no orders); each strategy's rule and holdings are in the next section.")
 
-
 CONSENSUS_GOOD, CONSENSUS_WARN, EXIT_RANK = 3, 2, 30   # chip colors: held by 3+ / 2 of the 5; ranked worse than 30
-
 
 def render_top10(ranks=None):
     """Top 5 consensus card (display only): the 10 stocks most held by the 5 best forward-test strategies
@@ -84,7 +80,6 @@ def render_top10(ranks=None):
                + "Strategies with the same stocks at the same weights count once (the better-placed one). Order: most "
                "strategies, then summed weight, then latest rank. Green = held by 3+ of them, yellow = 2, red = ranked "
                f"worse than {EXIT_RANK} at the latest close. Display only: updated with the leaderboard, never traded.")
-
 
 def render_forward_rules(p=None):
     """Strategy tab: the Top 5 consensus card, then each forward-test strategy's one-line rule and its holdings,

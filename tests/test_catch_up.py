@@ -31,26 +31,21 @@ import run_all as ra
 CT = ra.CT
 PASS, FAIL = [], []
 
-
 def check(name, ok, detail=None):
     (PASS if ok else FAIL).append(name)
     print(("  ok    " if ok else "  FAIL  ") + name + ("" if ok or detail is None else f"   -> {detail}"))
 
-
 def t(s):
     return datetime.fromisoformat(s).replace(tzinfo=CT)
-
 
 def gate(when, done, **kw):
     """(decision date or None, how) at CT time `when` with `done` as the last decision that ran."""
     D, how, why = ra.decision_gate(t(when), {"last_decision": done} if done else {}, **kw)
     return (D.date().isoformat() if D is not None else None), how
 
-
 def superseded(when, done):
     s = ra.superseded_decision(t(when), {"last_decision": done})
     return s.date().isoformat() if s is not None else None
-
 
 # ------------------------------------------------------------------ missed Friday rebalance (Oct 2)
 check("Fri 10/2 3:40 PM: the rebalance runs in the evening", gate("2026-10-02 15:40", "2026-09-30") == ("2026-10-02", "evening"))
@@ -119,13 +114,11 @@ check("catch-up: quick when the full update already ran after the slot",
 tmp = tempfile.mkdtemp()
 picks, mid, chg = (os.path.join(tmp, f) for f in ("picks.csv", "mid.csv", "chg.csv"))
 
-
 def write(as_of, last_reb, mid_rows=(), chg_date=None):
     pd.DataFrame([{"As_Of": as_of, "Last_Rebalance": last_reb, "Last_Decision": last_reb, "Strategy": "x", "Symbol": s,
                    "Strategy_Weight": 0.1, "Provisional_Weight": 0.1, "Close": 100.0} for s in ("AAA", "BBB")]).to_csv(picks, index=False)
     pd.DataFrame(list(mid_rows), columns=["Event", "Event_Date", "Action", "Sell", "Buy", "Weight_%"]).to_csv(mid, index=False)
     pd.DataFrame([{"Date": chg_date or as_of, "Symbol": "AAA", "Status": "hold"}]).to_csv(chg, index=False)
-
 
 write("2026-10-02", "2026-10-02")
 check("Mon morning catch-up of Friday: its rebalance weights", pt.load_targets("auto", picks, mid, decision="2026-10-02")[1]["source"] == "provisional")
@@ -145,7 +138,6 @@ try:
 except ValueError:
     check("a rebalance is never traded from later data", True)
 
-
 def fresh(as_of, decision, now, chg_date=None):
     write(as_of, as_of, chg_date=chg_date)
     try:
@@ -153,7 +145,6 @@ def fresh(as_of, decision, now, chg_date=None):
         return True
     except ValueError:
         return False
-
 
 check("freshness: Mon 10 AM accepts Friday's files for Friday's decision", fresh("2026-10-02", "2026-10-02", "2026-10-05 10:00"))
 check("freshness: Mon 10 AM refuses Thursday's files", not fresh("2026-10-01", "2026-10-02", "2026-10-05 10:00"))

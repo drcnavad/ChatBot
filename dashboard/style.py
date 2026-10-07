@@ -12,7 +12,6 @@ import pandas as pd
 from pandas.io.formats.style import Styler
 import streamlit as st
 
-
 CSS = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
@@ -88,35 +87,27 @@ CSS = """
 CHART_FONT = "DM Sans, system-ui, sans-serif"
 PCT_COL, SCORE_COL = st.column_config.NumberColumn(format="%.2f%%"), st.column_config.NumberColumn(format="%.1f")
 
-
 MA_COLS = ['ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']
 MA_COLORS = ['#0ea5e9', '#8b5cf6', '#f59e0b', '#a16207', '#94a3b8']   # chart lines: sky, violet, amber, brown, slate
 TEAL, HOLD_SHADE = "#0f766e", "rgba(245,158,11,0.10)"               # price line; held periods (yellow = hold)
 EARN_LINE = dict(color="rgba(234,88,12,0.45)", width=1, dash="dot")  # dotted vertical line at each earnings date
 
-
 esc = html.escape
-
 
 def show_html(markup):
     st.markdown("".join(line.strip() for line in str(markup).splitlines()), unsafe_allow_html=True)
 
-
 def symbol_link(sym, cls=""):
     return f'<a href="?symbol={quote(sym)}" class="symbol-link {cls}" target="_self">{esc(sym)}</a>'
-
 
 def section(title):
     show_html(f'<div class="sa-section">{esc(title)}</div>')
 
-
 def num(v):
     return float(v) if pd.notna(v) else None
 
-
 def fmt(v, spec, prefix="", suffix=""):
     return f"{prefix}{v:{spec}}{suffix}" if v is not None else "—"
-
 
 # One color rule for both tabs: green = good / Bullish / buy / positive, yellow = hold / neutral / caution / warning,
 # red = bad / Bearish / sell / negative / error. Plain labels and headings stay slate (INK).
@@ -127,7 +118,6 @@ TONE_WORDS = ((GOOD, ("buy", "bull", "fresh", "ok", "success", "add")),
               (BAD, ("sell", "sold", "bear", "score below", "missing", "error", "fail", "drop", "exit")),
               (CAUTION, ("hold", "keep", "watch", "neutral", "stale", "warn", "wait", "pending", "swap", "skip", "earn", "within")))
 TONE_CLASS = {GOOD: "t-good", CAUTION: "t-warn", BAD: "t-bad"}
-
 
 def tone(v, good=0.0, bad=0.0):
     """Color of a value. Text: by its first word (Buy / Hold / Sold, fresh / stale / missing...; other text stays plain).
@@ -140,10 +130,8 @@ def tone(v, good=0.0, bad=0.0):
     v = float(v)
     return GOOD if v > good else BAD if v < bad else (INK if good == bad else CAUTION)
 
-
 def score_tone(v):
     return tone(v, SCORE_GOOD, 0.0)
-
 
 def toned(df, cols, fn=None, **kw):
     """DataFrame (or Styler) -> Styler with `cols` colored by fn (default tone(v, **kw)); st.dataframe keeps the
@@ -153,25 +141,20 @@ def toned(df, cols, fn=None, **kw):
     css = lambda v: "" if fn(v) == INK else f"color: {fn(v)}; font-weight: 600"
     return sty.map(css, subset=[c for c in cols if c in sty.data.columns])
 
-
 def drawdown_tone(v):
     return INK if v is None or pd.isna(v) or v == 0 else tone(v, 0.0, DD_RED)
-
 
 def live_row(sty, col, name):
     """Highlight the row whose `col` starts with `name` (the live rules) in the teal theme."""
     return sty.apply(lambda r: ["background-color: #f0fdfa; font-weight: 700" if str(r[col]).startswith(name) else ""] * len(r),
                      axis=1)
 
-
 def sign_color(v):
     return tone(v)
-
 
 def md_tone(text, color):
     """Markdown text in the tone color (st.caption / st.markdown color syntax)."""
     return {GOOD: f":green[{text}]", CAUTION: f":orange[{text}]", BAD: f":red[{text}]"}.get(color, text)
-
 
 def stat_html(label, value, color="#0f172a", tip=None):
     """One label/value pair in the stock header."""
@@ -179,19 +162,15 @@ def stat_html(label, value, color="#0f172a", tip=None):
     return (f'<div class="sa-stat"{title}><div class="sa-stat-label">{esc(label)}{" ⓘ" if tip else ""}</div>'
             f'<div class="sa-stat-val" style="color:{color};">{esc(str(value))}</div></div>')
 
-
 def caption_text(text):
     """st.caption with literal dollar signs (Streamlit reads $...$ as math)."""
     st.caption(str(text).replace("$", "\\$"))
 
-
 def warning_text(text):
     st.warning(str(text).replace("$", "\\$"))
 
-
 def info_text(text):
     st.info(str(text).replace("$", "\\$"))
-
 
 def stat_cards(items):
     """A row of card-style numbers: [(label, value text, color)]."""
@@ -199,15 +178,12 @@ def stat_cards(items):
         f'<div class="sa-stat"><div class="sa-stat-label">{esc(lbl)}</div><div class="sa-stat-val" style="color:{c}">{esc(v)}</div></div>'
         for lbl, v, c in items) + '</div>')
 
-
 def usd(v, sign=True):
     if v is None or v != v:
         return "—"
     return f"{'+' if sign and v > 0.005 else '-' if v < -0.005 else ''}${abs(v):,.2f}"
 
-
 MONEY = st.column_config.NumberColumn(format="dollar")
-
 
 def setup_page():
     """The page config (the first Streamlit call) and the CSS, on every run."""

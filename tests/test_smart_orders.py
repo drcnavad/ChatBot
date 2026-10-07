@@ -33,11 +33,9 @@ import paper_trade as pt
 CT = ZoneInfo("America/Chicago")
 PASS, FAIL, ROWS = [], [], []
 
-
 def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
     print(("PASS " if cond else "FAIL ") + name + (f" ({detail})" if detail and not cond else ""))
-
 
 pt.quote_client = lambda: (_ for _ in ()).throw(AssertionError("real market-data client used in a test"))
 pt.log_event = lambda run, status, moved, message, details="": ROWS.append((run, status, message))
@@ -46,12 +44,10 @@ NOW = [datetime(2026, 10, 2, 14, 45, tzinfo=CT)]          # the 2:30 PM run on F
 pt._today_ct = lambda: NOW[0]
 TERMINAL = pt.TERMINAL_STATUSES
 
-
 class Order:
     def __init__(self, id, symbol, side, qty, status, filled_qty=0, client_order_id="", filled_avg_price=None):
         self.id, self.symbol, self.side, self.qty, self.status = id, symbol, side, qty, status
         self.filled_qty, self.client_order_id, self.filled_avg_price = filled_qty, client_order_id, filled_avg_price
-
 
 class Broker:
     """Fake Alpaca. behave[symbol] = list of what each new order of that symbol does: "fill", "none" (stays open) or
@@ -89,7 +85,6 @@ class Broker:
         self.bp -= req.qty * req.limit_price if side == "BUY" else 0
         return o
 
-
 def pending(rows, evening_date="2026-10-02", send_now=True, recorded_at="2026-10-02T14:44:00-05:00"):
     p = os.path.join(tempfile.mkdtemp(), "live_pending_orders.json")
     rows = [{"limit_price": 100.0, "order_id": None, "exit": False, "recorded_at": recorded_at, **r} for r in rows]
@@ -97,19 +92,15 @@ def pending(rows, evening_date="2026-10-02", send_now=True, recorded_at="2026-10
                **({"send_now": True} if send_now else {})}, open(p, "w"))
     return p
 
-
 def run(b, p, log=None):
     pt.paper_trading_client = lambda: b
     return pt.complete_unfilled_orders(pending_path=p, log_csv=log)
 
-
 def status_of(res, sym):
     return " | ".join(res.loc[res["Symbol"] == sym, "Status"].astype(str))
 
-
 def left(p):
     return json.load(open(p))["orders"] if os.path.exists(p) else []
-
 
 GOOD = (99.90, 100.00)            # spread 0.10%: buy limit 100.00 + 0.05% = 100.05, sell 99.90 - 0.05% = 99.85
 WIDE = (99.00, 100.00)            # spread 1.0% > 0.5%
@@ -366,7 +357,6 @@ class DataClient:
             raise RuntimeError(f"{req.feed.value}: subscription does not permit querying recent data")
         sym = req.symbol_or_symbols if isinstance(req.symbol_or_symbols, str) else req.symbol_or_symbols[0]
         return {sym: types.SimpleNamespace(bid_price=99.9, ask_price=100.0, timestamp=datetime.now(timezone.utc))}
-
 
 pt._latest_quote = REAL_LATEST                # the real feed logic below, with fake data clients
 for sip_ok, want in ((True, "sip"), (False, "iex")):

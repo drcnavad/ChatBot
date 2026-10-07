@@ -9,7 +9,6 @@ from dashboard.settings import CHANGES_CSV, MIDWEEK, N_PICKS, symbol_sector
 from dashboard.signals import SIGNALS, plan_text
 from dashboard.style import PCT_COL, SCORE_COL, SCORE_GOOD, toned
 
-
 def render_last_decision(p):
     """The decisions in force, in ONE view: decision dates, then every stock with its signal, reason, ranks, weight before
     and after, and the next rebalance plan (filters: portfolio & changes / watch list / all). Click a row to open the stock."""

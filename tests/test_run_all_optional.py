@@ -18,29 +18,24 @@ import run_all as r
 
 FAIL = []
 
-
 def check(ok, what):
     print(("PASS " if ok else "FAIL ") + what)
     if not ok:
         FAIL.append(what)
 
-
 def test_optional_steps_cover_the_upstream_api_steps():
     check(r.OPTIONAL_STEPS == {"fundamentals", "processing", "sentiment", "earnings"},
           f"OPTIONAL_STEPS is exactly the five upstream API steps (got {sorted(r.OPTIONAL_STEPS)})")
 
-
 def test_main_and_validate_are_critical():
     check("main" not in r.OPTIONAL_STEPS and "validate" not in r.OPTIONAL_STEPS,
           "main and validate are NOT optional")
-
 
 def test_every_pipeline_step_is_classified():
     step_names = {s[0] for s in r.STEPS}
     known = set(r.OPTIONAL_STEPS) | {"main", "validate"}
     check(step_names <= known,
           f"every STEPS entry is optional, critical, or opt-in (unclassified: {sorted(step_names - known)})")
-
 
 def test_stop_on_failure():
     check(r._stop_on_failure("sentiment", False) is False,
@@ -55,7 +50,6 @@ def test_stop_on_failure():
           "validate failure stops the pipeline without --keep-going")
     check(r._stop_on_failure("main", True) is False,
           "--keep-going keeps going even past main")
-
 
 def test_critical_failures():
     check(r._critical_failures([]) == [],
@@ -72,7 +66,6 @@ def test_critical_failures():
           "a crashed trade stays critical")
     check(r._critical_failures(["trade_partial"]) == ["trade_partial"],
           "partial trade failures stay critical")
-
 
 def test_trade_decision():
     # Optional-only failures must NOT block the evening trade (the trade guard
@@ -102,7 +95,6 @@ def test_trade_decision():
     proceed, _ = r._trade_decision(["trade_partial"])
     check(proceed is False,
           "partial trade failure -> trade blocked")
-
 
 if __name__ == "__main__":
     test_optional_steps_cover_the_upstream_api_steps()

@@ -4,11 +4,9 @@ import os
 import sys
 from zoneinfo import ZoneInfo
 
-
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # the project folder
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)  # project modules (backtest_engine, sector_mapping) importable from any cwd
-
 
 try:
     from sector_mapping import sector_etf_for, symbol_sector
@@ -43,7 +41,6 @@ try:                                                                 # Mon/Wed s
     from paper_trade import DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK, TOPUP_RANKS
 except Exception:
     DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK, TOPUP_RANKS = 10, 0.01, 100.0, 20, 3
-
 
 def rules_text():
     """The live trading rules in plain words, in one place (numbers from backtest_engine.WINNER)."""
@@ -106,7 +103,6 @@ def rules_text():
             "the next Friday rebalance would do at the latest close.\n"
             "- **Changes:** Don't change the strategy until 12+ weeks of forward results (from Oct 2, 2026) compare against QQQ.\n")
 
-
 # Report files (all written by run_all.py)
 REPORTS = os.path.join(ROOT, "Reports")
 SIGNAL_CSV = os.path.join(REPORTS, "signal_analysis.csv")
@@ -121,7 +117,6 @@ NEWS_CSV = os.path.join(REPORTS, "news_cleaned_df.csv")
 SHORT_HISTORY_CSV = os.path.join(REPORTS, "short_history_reference.csv")   # main_signal_analysis.ipynb: too new to trade
 COMPANY_XLSX = os.path.join(REPORTS, "complete_company_analysis.xlsx")
 CT = ZoneInfo("America/Chicago")
-
 
 # file -> (what it is, max age in days before it is flagged stale)
 FRESHNESS = {

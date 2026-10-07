@@ -12,7 +12,6 @@ from dashboard.history import (RS_COLORS, daily_status, event_hover,
 from dashboard.settings import CT, HOLDINGS_CSV, W_TECH
 from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, HOLD_SHADE, MA_COLORS, MA_COLS, TEAL, num)
 
-
 def build_price_chart(ticker, tdata, show_strategy):
     """Last 12 months: price + moving averages + buy/sell markers, the score panel (when ranked), RSI/MACD and relative
     strength panels."""
@@ -164,11 +163,9 @@ def build_price_chart(ticker, tdata, show_strategy):
     fig.update_yaxes(title_text="Price ($)", tickformat='$,.0f', row=1, col=1)
     return fig
 
-
 def stock_chart_inputs(ticker, tdata):
     """The built figure (displayed later, below the detail block); the score panel only for a ranked stock."""
     return build_price_chart(ticker, tdata, bool(tdata['Strategy_Score'].notna().any()))
-
 
 def render_stock_figure(fig, ticker):
     """The price chart itself, under the always-open detail block."""

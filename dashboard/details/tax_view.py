@@ -9,7 +9,6 @@ from dashboard.settings import CT
 from dashboard.style import (BAD, CAUTION, GOOD, INK, MONEY, caption_text, esc, info_text, show_html, stat_cards, tone,
     toned, usd, warning_text)
 
-
 # ---------------------------------------------------------------------------- tax view (estimate, read-only)
 @st.cache_data(ttl=3600, max_entries=2, show_spinner=False)
 def _read_tax_inputs(hour_key):
@@ -18,22 +17,18 @@ def _read_tax_inputs(hour_key):
     import tax_lots as tl
     return {**tl.fetch_inputs(ap.PaperAccount()), "as_of": datetime.now(CT)}
 
-
 @st.cache_data(ttl=3600, max_entries=12, show_spinner=False)
 def _tax_report(hour_key, method, positions):
     import tax_lots as tl
     d = _read_tax_inputs(hour_key)
     return tl.build(d["activities"], list(positions), method, d["client_ids"], today=datetime.now(CT).date())
 
-
 HARVEST_COLS = {"Loss": MONEY, "Short-term loss": MONEY, "Long-term loss": MONEY, "Why": st.column_config.TextColumn(width="large"),
                 "Shares at a loss": st.column_config.NumberColumn(format="%.4g")}
-
 
 def _harvest_view(t):
     return (t.round({"Loss": 2, "Short-term loss": 2, "Long-term loss": 2})
             .assign(**{"Next long-term date": [f"{d:%b %-d, %Y}" if d is not None and d == d else "—" for d in t["Next long-term date"]]}))
-
 
 def render_tax_view(p):
     """Trading Account tab: realized / unrealized gains (short vs long term), wash sales, harvest list, estimated tax, Form 8949

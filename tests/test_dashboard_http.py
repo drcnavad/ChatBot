@@ -15,11 +15,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = 8599
 BASE = f"http://localhost:{PORT}"
 
-
 def port_busy(port):
     with socket.socket() as s:
         return s.connect_ex(("127.0.0.1", port)) == 0
-
 
 def status(url):
     try:
@@ -27,7 +25,6 @@ def status(url):
             return r.status, r.read().decode("utf-8", "replace")
     except Exception as e:
         return getattr(e, "code", None) or str(e), ""
-
 
 os.environ["STOCK_ANALYSIS_LIVE_HOLDINGS"] = "off"   # the test server never calls Alpaca
 if port_busy(PORT):

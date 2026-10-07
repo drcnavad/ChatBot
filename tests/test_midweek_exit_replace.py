@@ -14,12 +14,10 @@ import backtest_engine as be
 
 FAIL = []
 
-
 def check(name, ok, info=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({info})" if info and not ok else ""))
     if not ok:
         FAIL.append(name)
-
 
 # columns 0..4 = ranks 1..5 by score order; hold 0 and 4 (ranks 1 and 5); exit_below for exit = 3 means rank>3 exits
 # so holding 4 (rank 5) should leave; best non-held in top-3 is column 1 (rank 2).
@@ -68,7 +66,6 @@ _dates = pd.to_datetime(["2026-10-02", "2026-10-05"])                 # Fri reba
 _score = pd.DataFrame([[100.0 - i for i in range(25)]] * 2, index=_dates, columns=_cols)
 _ok = pd.DataFrame(True, index=_dates, columns=_cols)
 
-
 def mw_run(held, rules):
     """Holdings (column numbers, 9% each) after the Monday check; and the check-log actions."""
     base = pd.DataFrame(0.0, index=_dates, columns=_cols)
@@ -78,7 +75,6 @@ def mw_run(held, rules):
                                pd.Series([False, True], index=_dates), sector_cap=1.0, n=10, cap_soft=True, check_log=log,
                                **rules)
     return sorted(int(c[1:]) for c in t.columns[t.iloc[1] > 0]), [(r["Action"], r["Sell"], r["Buy"]) for r in log]
-
 
 _mw = be.WINNER["midweek_swap"]
 LIVE = dict(enter_top=_mw["enter_top"], exit_below=_mw["exit_below"], exit_all_below=be.WINNER["midweek_exit_below"],

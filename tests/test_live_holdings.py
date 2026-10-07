@@ -22,16 +22,13 @@ import alpaca_paper as ap
 
 FAIL = []
 
-
 def check(name, ok, info=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  ({info})" if info and not ok else ""))
     if not ok:
         FAIL.append(name)
 
-
 def fill(sym, side, qty, day, i=0):
     return {"id": f"{day}-{sym}-{i}", "symbol": sym, "side": side, "qty": str(qty), "transaction_time": f"{day}T19:30:00Z"}
-
 
 FILLS = [fill("AAA", "buy", 10, "2026-09-18"), fill("AAA", "buy", 5, "2026-09-25"), fill("AAA", "sell", 10, "2026-09-28"),
          fill("BBB", "buy", 5, "2026-09-11"), fill("BBB", "sell", 5, "2026-09-14"), fill("BBB", "buy", 3, "2026-09-25"),
@@ -45,10 +42,8 @@ POS = [{"symbol": "AAA", "qty": "5", "avg_entry_price": "100", "cost_basis": "50
        {"symbol": "CCC", "qty": "3", "avg_entry_price": "20", "cost_basis": "60", "market_value": "66",
         "unrealized_pl": "6", "unrealized_plpc": "0.1", "current_price": "22", "change_today": "0", "lastday_price": "22"}]
 
-
 DEPOSITS = [{"id": "d1", "activity_type": "CSD", "date": "2026-10-05", "created_at": "2026-10-05T21:15:38Z", "net_amount": "100",
              "status": "executed"}]
-
 
 class FakeAccount(ap.PaperAccount):
     """No network: answers the allow-listed GET paths from memory and records every call."""
@@ -76,7 +71,6 @@ class FakeAccount(ap.PaperAccount):
         newest_first = [f for f in FILLS[::-1] if f["transaction_time"] > params.get("after", "")]
         start = 0 if "page_token" not in params else [f["id"] for f in newest_first].index(params["page_token"]) + 1
         return newest_first[start:start + params["page_size"]]
-
 
 acct = FakeAccount()
 got = acct.fills()

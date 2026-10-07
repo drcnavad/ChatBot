@@ -5,7 +5,6 @@ A list gives one quote per call (the last one repeats); an Exception in it is ra
 prices = {symbol: price} (read at each call): a tight quote with the ask at that price. Every other symbol gets `default`. Waits and retry pauses are set to 0 so the tests run instantly."""
 from datetime import datetime, timedelta, timezone
 
-
 class FakeQuotes:
     def __init__(self, quotes=None, default=(99.99, 100.01), feed="sip", prices=None):
         self.quotes, self.default, self.feed, self.calls = dict(quotes or {}), default, feed, []
@@ -20,7 +19,6 @@ class FakeQuotes:
             raise v
         bid, ask, age = (tuple(v) + (0,))[:3]
         return bid, ask, datetime.now(timezone.utc) - timedelta(seconds=age), self.feed
-
 
 def install(pt, **kw):
     fq = FakeQuotes(**kw)

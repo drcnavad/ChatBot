@@ -24,11 +24,9 @@ sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 os.environ["STOCK_ANALYSIS_RUN_LOG"] = os.path.join(tempfile.mkdtemp(), "run_log.csv")   # never the real one
 
-
 class OrderSide(Enum):
     BUY = "buy"
     SELL = "sell"
-
 
 class _E(Enum):
     ALL = "all"
@@ -36,11 +34,9 @@ class _E(Enum):
     DESC = "desc"
     DAY = "day"
 
-
 class _Req:
     def __init__(self, **kw):
         self.__dict__.update(kw)
-
 
 mods = {n: types.ModuleType(n) for n in ("alpaca", "alpaca.trading", "alpaca.trading.client",
                                           "alpaca.trading.enums", "alpaca.trading.requests", "alpaca.common",
@@ -61,11 +57,9 @@ fake_quotes.install(pt)   # never a real quote
 
 PASS, FAIL = [], []
 
-
 def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
     print(("PASS " if cond else "FAIL ") + name + (f" ({detail})" if detail and not cond else ""))
-
 
 # ------------------------------------------------------------------ log_event: the CSV itself
 path = run_all.RUN_LOG
@@ -134,12 +128,10 @@ check("empty order list: no row at all", r.empty and not ROWS, ROWS)
 targets = pd.DataFrame({"Symbol": ["ANET", "AMD"], "Weight": [0.05, 0.05], "Price": [100.0, 100.0]})
 manual = {"ENPH": 4, "FIG": 6, "HIMS": 15, "IONQ": 5, "ORCL": 1.054222297, "UMAC": 7}
 
-
 def patch_account(held):
     pt.load_targets = lambda src="auto": (targets, {"source": "provisional"})
     pt.get_live_positions_and_equity = lambda: (dict(held), 10000.0, 5000.0, 5000.0)
     pt.latest_prices = lambda syms: {s: 50.0 for s in syms}
-
 
 patch_account({**manual, "ANET": 5})
 rep, ok = pt.reconcile_positions("auto", symbols={"ANET"})
@@ -150,7 +142,6 @@ check("reconcile without symbols= still sees everything (the old false alarm)", 
 pt.get_live_positions_and_equity = lambda: (_ for _ in ()).throw(ConnectionError("down"))
 rep, ok = pt.reconcile_positions("auto", symbols={"ANET"})
 check("reconcile: unreadable account -> None (not drift)", ok is None and rep.empty)
-
 
 class Broker:
     def __init__(self, held):
@@ -169,7 +160,6 @@ class Broker:
     def submit_order(self, req): raise AssertionError("no order may be sent in this test")
     def cancel_order_by_id(self, oid): raise AssertionError("no cancel in this test")
 
-
 def morning(held, reconcile_ok=True):
     patch_account(held)
     if not reconcile_ok:
@@ -183,7 +173,6 @@ def morning(held, reconcile_ok=True):
     with redirect_stdout(io.StringIO()):
         pt.complete_unfilled_orders(pending_path=p, log_csv=None)
     return list(ROWS)
-
 
 got = morning({**manual, "ANET": 5})
 check("filled + on target, hand-bought stocks held: one 'Fill check' ok row, money moved",

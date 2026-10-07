@@ -38,7 +38,6 @@ load_dotenv()
 setup_page()      # the first Streamlit call, on every run
 new_run()
 
-
 def main():
     with st.spinner("Loading data..."):
         p = build_page()
@@ -63,6 +62,5 @@ def main():
         render_strategy_tab(p)
     with tab_trading:
         render_trading_tab(p)
-
 
 main()

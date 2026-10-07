@@ -29,11 +29,9 @@ import paper_trade as pt
 
 PASS, FAIL = [], []
 
-
 def check(name, cond, detail=""):
     (PASS if cond else FAIL).append(name)
     print(("PASS " if cond else "FAIL ") + name + (f" ({detail})" if not cond else ""))
-
 
 # ---- simulate(band=): two stocks, flat prices except where noted; decisions at the close, fills at the next open
 dates = pd.bdate_range("2026-09-21", "2026-10-09")                 # Mon Sep 21 .. Fri Oct 9
@@ -77,16 +75,13 @@ check("band: a Mon/Wed weight change alone is not traded (no earnings half-sell)
 check("live band == backtest band (paper_trade.NO_TRADE_BAND == WINNER['rebalance_band'])",
       pt.NO_TRADE_BAND == be.WINNER.get("rebalance_band"), (pt.NO_TRADE_BAND, be.WINNER.get("rebalance_band")))
 
-
 # ---- paper_trade CLI --submit: buys capped at buying power + sells, 1% cushion (mocked client, nothing sent)
 class _Pos:
     def __init__(self, s, q):
         self.symbol, self.qty = s, q
 
-
 class _Acct:
     equity, buying_power = 10_000.0, 1_000.0
-
 
 class _Client:
     def get_all_positions(self):
@@ -94,7 +89,6 @@ class _Client:
 
     def get_account(self):
         return _Acct()
-
 
 plan = pd.DataFrame([{"Symbol": "OLD", "Side": "SELL", "Shares": 10, "Price": 50.0, "Est_Value": 500.0},
                      {"Symbol": "NEW", "Side": "BUY", "Shares": 30, "Price": 100.0, "Est_Value": 3000.0}],
@@ -121,13 +115,11 @@ import pipeline_watchdog as wd
 
 calls = []
 
-
 def fake_complete(provider, model, key, prompt):
     calls.append(model)
     if model == "gemini-flash-latest":
         raise urllib.error.HTTPError("u", 404, "Not Found", {}, None)
     return '{"diagnosis": "ok"}'
-
 
 orig_c, orig_p = wd._llm_complete, wd._llm_provider
 wd._llm_complete, wd._llm_provider = fake_complete, (lambda: ("gemini", "gemini-flash-latest", "k"))

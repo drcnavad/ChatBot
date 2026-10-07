@@ -9,13 +9,11 @@ from dashboard.data import etf_prices
 from dashboard.settings import CT
 from dashboard.style import live_row, section, toned
 
-
 @st.cache_resource(show_spinner=False)
 def _fill_history():
     """The fill history kept for the whole dashboard process (alpaca_paper.FillHistory: only new fills are read)."""
     import alpaca_paper as ap
     return ap.FillHistory()
-
 
 @st.cache_data(ttl=3600, max_entries=4, show_spinner=False)
 def _read_holdings(refresh_key):
@@ -29,7 +27,6 @@ def _read_holdings(refresh_key):
     return {"positions": positions, "fills": fills, "equity": snap["equity"], "snapshot": snap,
             "history": acct.daily_history(be.FORWARD_START), "as_of": datetime.now(CT)}
 
-
 def live_holdings():
     """(data, None) or (None, plain message). Keys come from .env via alpaca_paper; error messages never hold them."""
     if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off":                # tests: never call Alpaca
@@ -40,17 +37,14 @@ def live_holdings():
     except Exception as e:
         return None, f"Live holdings unavailable right now ({type(e).__name__}: {str(e)[:200]}). It tries again in a minute."
 
-
 def new_run():
     """Start of each page run (app.py): forget the last run's holdings read. When the panels lived in app.py this was a
     module dict rebuilt on every run; it is kept per session here so two browser tabs never share one."""
     st.session_state["_run_holdings"] = {}
 
-
 def _run_holdings():
     """This run's live holdings read: set by render_live_holdings, reused by the tax view and trade audit."""
     return st.session_state.setdefault("_run_holdings", {})
-
 
 def holdings_this_run():
     """(data, err) of this page run's live holdings read (one Alpaca read per run, also when it fails)."""
@@ -58,7 +52,6 @@ def holdings_this_run():
     if "v" not in run:
         run["v"] = live_holdings()
     return run["v"]
-
 
 @st.fragment(run_every=60)        # reruns only this table each minute; it reads Alpaca only when the refresh key changes
 def render_live_holdings():
@@ -76,7 +69,6 @@ def render_live_holdings():
         render_positions(table, data)
     render_benchmarks(data)
 
-
 def render_positions(table, data):
     """The holdings table (alpaca_paper.holdings_table) and its caption."""
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
@@ -91,7 +83,6 @@ def render_positions(table, data):
                "Cost basis = what you paid; Market value = shares x the latest price; P/L \\$ and P/L % = market value vs "
                "cost basis; Today % = price change since the last close; Weight % = share of the account's equity (the rest "
                "is cash). First bought = the earliest buy still in the position (sells use up the oldest shares first).")
-
 
 def render_benchmarks(data):
     """The account vs QQQ / SPY / IWM / DIA since the forward-test start close, the same deposits on the same days, all

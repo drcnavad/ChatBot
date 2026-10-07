@@ -9,10 +9,8 @@ from dashboard.settings import symbol_sector
 from dashboard.signals import plan_text
 from dashboard.style import PCT_COL, SCORE_COL, SCORE_GOOD, num, toned
 
-
 def latest_signals_title(p):
     return f"Latest signals · {p.df['Date'].max():%a %b %-d} close"
-
 
 def render_latest_signals(p):
     """Every stock at the LATEST close (signal_analysis.csv) + the next-rebalance plan (strategy_picks.csv)."""

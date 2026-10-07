@@ -17,7 +17,6 @@ import sector_mapping as sm
 
 FAIL = []
 
-
 def expect(ok, what):
     if not ok:
         FAIL.append(what)
@@ -38,12 +37,10 @@ for _s, _d in zip(_ed["Symbol"].astype(str).str.strip().str.upper(), pd.to_datet
     if pd.notna(_d):
         EARN.setdefault(_s, []).append(_d.normalize())
 
-
 def blocked(sym, D):
     """True when sym has an earnings date E with D < E <= D + EARN_DAYS (earnings rule on)."""
     D = pd.Timestamp(D).normalize()
     return bool(EARN_DAYS) and any(D < e <= D + pd.Timedelta(days=EARN_DAYS) for e in EARN.get(sym, []))
-
 
 def held_before(D):
     """Strategy holdings at the session before D (what counts as 'already held' for the earnings rule)."""
@@ -80,7 +77,6 @@ if uncovered:
 
 SKIPPED = []
 
-
 def auditable(D, label):
     """False (with a loud SKIP) when D is newer than the bar cache.
 
@@ -97,7 +93,6 @@ def auditable(D, label):
     return True
 
 main_start = pd.Timestamp("2023-09-20")  # main notebook fetch window (~1100 days before the run) for bar counting
-
 
 def rs_at(D):
     """RS_Score at date D from data up to and including D only (no look-ahead by construction)."""
@@ -124,11 +119,9 @@ def rs_at(D):
     pct = 0.6 * sum(parts_sv) / 3 + 0.4 * sum(parts_ss) / 3
     return (pct * 2 - 1) * 100
 
-
 def eligible_at(D):
     c = close.loc[main_start:D, tradable]
     return c.notna().sum() >= 200
-
 
 def check_scores(D, title=""):
     """(b) RS, (a) score, (c) rank checks at D; returns (day frame, tradable rows)."""
@@ -160,7 +153,6 @@ def check_scores(D, title=""):
           f"{int(t.Strategy_Rank.notna().sum())} ranked; tied scores {ties}; QQQ rank: {day.loc['QQQ','Strategy_Rank'] if 'QQQ' in day.index else 'n/a'}")
     print("    top 5:", [(s, int(r), round(sc, 1)) for s, r, sc in t.sort_values('Strategy_Rank')[['Strategy_Rank', 'Strategy_Score']].head(5).itertuples()])
     return day, t
-
 
 def audit(D, compare_col):
     day, t = check_scores(D)
@@ -205,7 +197,6 @@ def audit(D, compare_col):
         print(f"  skip CSV weight match on {D.date()} (live selection changed; next pipeline run rewrites the file)")
     return picked
 
-
 def audit_midweek(D, exit_all, top_n=None):
     """Independent re-derivation of a Mon/Wed mid-week check at D from the saved scores and the holdings of the previous session."""
     day, t = check_scores(D, "MID-WEEK CHECK ")
@@ -240,7 +231,6 @@ def audit_midweek(D, exit_all, top_n=None):
     print(f"    engine Strategy_Weight at {D.date()} matches: {same}; decision log drop/add {logged} vs mine {mine}: {logged == mine}")
     expect(same and logged == mine, f"mid-week check mismatch on {D.date()}")
     return exits, same and logged == mine
-
 
 reb = sa.loc[sa.Rebalance_Day == 1, "Date"].drop_duplicates().sort_values()
 off = sa.loc[(sa.Rebalance_Day == 1) & (sa.Regime_On == 0), "Date"].drop_duplicates()

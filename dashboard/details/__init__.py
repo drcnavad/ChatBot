@@ -10,7 +10,6 @@ from dashboard.details.tax_view import render_tax_view
 from dashboard.details.trade_audit import render_trade_audit
 from dashboard.settings import rules_text
 
-
 def render_strategy_tab(p):
     """Strategy tab: last decision, forward test, strategy rules and holdings, data freshness and settings."""
     with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=True):
@@ -23,7 +22,6 @@ def render_strategy_tab(p):
         render_forward_rules(p)
     with st.expander("Data freshness and settings", expanded=False):
         render_data_and_settings(p)
-
 
 def render_trading_tab(p):
     """Trading Account tab: live holdings, latest signals, trade audit, tax view, strategy rules."""

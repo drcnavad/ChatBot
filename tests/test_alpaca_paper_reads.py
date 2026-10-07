@@ -11,7 +11,6 @@ sys.path.insert(0, ROOT)
 
 import alpaca_paper as ap
 
-
 class FakeAccount(ap.PaperAccount):
     """Stub _get so no network is touched; asserts the path is allowlisted."""
 
@@ -24,10 +23,8 @@ class FakeAccount(ap.PaperAccount):
         self.seen.append((path, params))
         return self._payloads[path]
 
-
 ORDER = {"submitted_at": "2026-09-26T20:30:00Z", "symbol": "NVDA", "side": "buy", "qty": "10",
          "filled_qty": "0", "type": "limit", "status": "new", "filled_avg_price": None}
-
 
 def make_fake():
     return FakeAccount({
@@ -35,7 +32,6 @@ def make_fake():
         "/clock": {"is_open": False, "next_open": "2026-09-28T13:30:00Z",
                    "next_close": "2026-09-28T20:00:00Z", "timestamp": "2026-09-26T16:00:00Z"},
     })
-
 
 class TestNewReads(unittest.TestCase):
     def test_open_orders(self):
@@ -62,7 +58,6 @@ class TestNewReads(unittest.TestCase):
         f.recent_orders()
         self.assertEqual(f.seen[0][1]["status"], "all")
 
-
 class TestReadOnlyGuardrails(unittest.TestCase):
     def test_new_paths_allowlisted(self):
         self.assertIn("/clock", ap.ALLOWED_PATHS)
@@ -81,7 +76,6 @@ class TestReadOnlyGuardrails(unittest.TestCase):
         for needle in ("submit_order", "cancel_order", "replace_order", "close_position",
                        "method=\"post\"", "method='post'", '"post"', "'post'"):
             self.assertNotIn(needle, src, needle)
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

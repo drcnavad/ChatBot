@@ -12,7 +12,6 @@ from dashboard.short_stock import load_short_history
 from dashboard.signals import next_decision_date, rebalance_plan, signal_board
 from dashboard.style import esc, show_html
 
-
 def build_page():
     mtime = os.path.getmtime(SIGNAL_CSV)
     df = load_signals(mtime)
@@ -39,7 +38,6 @@ def build_page():
         freshness=data_freshness(df["Date"].max()),
     )
 
-
 def open_symbol(table, event, key):
     """Row click in a table -> open that stock in the stock view (applied on the rerun, before the picker is drawn)."""
     rows = event.selection.rows if event is not None and hasattr(event, "selection") else []
@@ -50,7 +48,6 @@ def open_symbol(table, event, key):
         st.session_state[f"_last_pick_{key}"] = pick
         st.session_state["_pending_ticker"] = pick
         st.rerun()
-
 
 def render_top_bar(p):
     stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()

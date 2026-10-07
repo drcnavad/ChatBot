@@ -37,12 +37,10 @@ import run_all  # noqa: E402
 
 FAIL = []
 
-
 def check(what, ok, got=""):
     print(("PASS " if ok else "FAIL ") + what + ("" if ok else f"  -> {got}"))
     if not ok:
         FAIL.append(what)
-
 
 ET = be.EASTERN
 at = lambda s: pd.Timestamp(s).tz_localize(ET).to_pydatetime()                # an ET wall time
@@ -87,7 +85,6 @@ check("no bar before the day -> no reference", es.prev_close(bars[bars.Symbol ==
 
 # ----------------------------------------------------------------------------- the live check, fully mocked
 
-
 class Account:
     def __init__(self, held):
         self.held, self.calls = held, 0
@@ -95,7 +92,6 @@ class Account:
     def position_dicts(self):
         self.calls += 1
         return [{"symbol": s, "qty": str(q)} for s, q in self.held.items()]
-
 
 class Client:
     def __init__(self, held, open_orders=(), prior=(), fail=False):
@@ -116,9 +112,7 @@ class Client:
         self.sent.append(req)
         return NS(id=f"oid-{len(self.sent) - 1}", status=NS(value="new"), filled_qty="0")
 
-
 CLOCK = [at("2026-10-29 11:00")]
-
 
 def setup(held=None, client=None, quote=(96.0, 96.04), age=0, earnings=E, quote_err=None):
     d = tempfile.mkdtemp(dir=TMP)
@@ -139,16 +133,13 @@ def setup(held=None, client=None, quote=(96.0, 96.04), age=0, earnings=E, quote_
     es.latest_quote = lq
     return d, acct, made
 
-
 def runlog():
     p = os.environ["STOCK_ANALYSIS_RUN_LOG"]
     return list(csv.DictReader(open(p))) if os.path.exists(p) else []
 
-
 def run(now, **kw):
     CLOCK[0] = now
     return es.run_check(now=now, **kw)
-
 
 REG = at("2026-10-29 11:00")                                                   # report day (PM), reference 100, trigger 95
 # above the trigger: no order, one 'watching' row, status written
@@ -288,17 +279,14 @@ setup(client=c, quote=(96.0, 96.04))
 clock = iter([REG + timedelta(seconds=30 * i) for i in range(10)])
 naps, quotes = [], iter([(96.0, 96.04), (95.5, 95.54), (94.0, 94.04), (93.0, 93.04)])
 
-
 def nap(s):
     naps.append(s)
     q = next(quotes)
     es.latest_quote = lambda sym, q=q: (q[0], q[1], CLOCK[0], "sip")
 
-
 def now_fn():
     CLOCK[0] = next(clock)
     return CLOCK[0]
-
 
 n = es.loop(now_fn=now_fn, sleep_fn=nap, max_checks=10)
 check("loop: a check every 30 s while watched; stops after the sale (4 checks: 96, 96, 95.5, 94 -> sold)",

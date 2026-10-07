@@ -13,7 +13,6 @@ from dashboard.signals import PLAN_BADGE, SIGNAL_BADGE, plan_text
 from dashboard.style import (BAD, GOOD, INK, MA_COLS, TONE_CLASS, esc, fmt, num, score_tone,
     show_html, sign_color, stat_html, symbol_link, tone)
 
-
 def ticker_label(p, s):
     if s in p.short.index:
         return f"{s}  ·  not traded yet (short history)  ·  rough {p.short.loc[s, 'Rough_Signal']} (less reliable)  ·  not ranked"
@@ -24,7 +23,6 @@ def ticker_label(p, s):
         parts.append(f"rank #{rank:.0f}")
     parts.append(f"score {score:.0f}" if pd.notna(score) else "score —")
     return "  ·  ".join(parts)
-
 
 def render_rank_tiers(p):
     """Horizontal clickable rank tiers: Rank 1 to 20, Rank 21 to 50, Rank 51+.
@@ -49,7 +47,6 @@ def render_rank_tiers(p):
     show_html(f'<div class="sa-card"><div class="sa-card-title">Stock list<span>ranks at the {day:%a %b %-d} close · '
               'click a stock to open it</span></div>' + "".join(rows) + '</div>')
 
-
 def render_stock_picker(p, jumped):
     """Rank tiers (click a symbol to open it) + dropdown for manual typing + AI button.
 
@@ -71,7 +68,6 @@ def render_stock_picker(p, jumped):
     if ticker not in p.short.index and ai_col.button("Generate AI Analysis", type="primary", width="stretch", key="generate_ai_btn"):
         ai_analysis_dialog(ticker, tdata, p.sig_off.get(ticker, 'Not ranked'), p.why_off.get(ticker, ''))
     return ticker, tdata
-
 
 def render_stock_section(p, ticker, tdata):
     """One unified stock card: header (name, price, signal, stats) flowing into moving averages and fundamentals/news."""
@@ -172,7 +168,6 @@ def render_stock_section(p, ticker, tdata):
           <div class="sa-section-divider"></div>
           {groups}
         </div>""")
-
 
 def _detail_group(title, stats):
     """One titled row of stat tiles inside the stock detail card; stats = [(label, value, color)]."""

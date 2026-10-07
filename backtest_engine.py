@@ -59,12 +59,12 @@ BAR_FINAL_ENV = "STOCK_ANALYSIS_BAR_FINAL_MIN"
 COST = 0.001                 # per side
 MIN_BARS = 200               # a stock is eligible once it has a full ma_200 (handles late IPOs consistently)
 DATA_START = "2023-06-01"    # warm-up for ma_200 and 252-bar rescaling windows (live pipeline)
-LONG_CACHE, LONG_START = "bars_daily_long.pkl", "2020-06-01"   # long bar history for the backtest and the tests
+LONG_CACHE, LONG_START = "bars_daily_long.pkl", "2020-06-01"   # long bar history for the tests and the forward test
 RS_WINDOWS = (21, 63, 126)
 RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 
-# The live rules. The daily pipeline (main_signal_analysis.ipynb), the trade step (paper_trade.py), the dashboard and the
-# archived backtest (Archive/backtest.ipynb, reference only) all read this one dict.
+# The live rules. The daily pipeline (main_signal_analysis.ipynb), the trade step (paper_trade.py) and the dashboard all
+# read this one dict.
 # Change a rule here, then run `python run_all.py`.
 WINNER = {
     "n": 10,                # stocks held
@@ -96,7 +96,6 @@ SECTOR_ETFS = list(sector_mapping.sector_etfs)
 BENCHMARKS = list(sector_mapping.BENCHMARK_SYMBOLS)
 SHORT_HISTORY_CSV = REPORTS_DIR / "short_history_reference.csv"   # stocks too new to score (main_signal_analysis.ipynb)
 
-
 def scored_stock_count():
     """Stocks the strategy scores: the list minus the short-history stocks of the latest run."""
     try:
@@ -104,7 +103,6 @@ def scored_stock_count():
     except (OSError, KeyError, pd.errors.EmptyDataError):
         short = set()
     return len([s for s in TRADABLE if s not in short])
-
 
 def winner_label(n_stocks):
     """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'C6-U91-NS-MW30R10-E5'."""
@@ -135,24 +133,19 @@ def winner_label(n_stocks):
         name += f' + no new buys with earnings in the next {S["earnings_block_days"]} days'
     return tag, name
 
-
 # Live portfolio size: the live weights (signal_analysis / strategy_picks / changes / mid-week check, read by paper_trade.py
 # and the app) are the rule weights x LIVE_INVESTED, each rounded DOWN to a 2-decimal percent (9.87% = 0.0987), so a full
 # portfolio sums to at most 99% and rounding can never push it over 100%. The regime halving is already in the rule weights
-# (a regime-off week targets at most 49.5%). The regression tests use the unscaled rule weights; Archive/backtest.ipynb traded the
-# live weights (run_rules(..., live_sizing=True), since 2026-10-01).
+# (a regime-off week targets at most 49.5%). The regression tests use the unscaled rule weights.
 LIVE_INVESTED = 0.99
-
 
 def live_weights(w):
     """Rule weights (number, Series or DataFrame of fractions) -> live weights: x LIVE_INVESTED, floored to 0.0001."""
     return np.floor(w * LIVE_INVESTED * 10_000) / 10_000
 
-
 def winner_max_per_sector():
     """Max names per sector implied by WINNER (same formula as rank_targets)."""
     return max(1, int(np.floor(WINNER["sector_cap"] * WINNER["n"])))
-
 
 def winner_rank_args(regime):
     """kwargs for rank_targets() implementing WINNER."""
@@ -162,9 +155,7 @@ def winner_rank_args(regime):
                 regime_scale=S["regime_scale"] if S["use_regime"] else None,
                 max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"))
 
-
 WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
-
 
 def rules_version():
     """Rules version stored in signal_analysis.csv (older rows of the same version keep their BUY/SELL/HOLD)."""
@@ -178,10 +169,8 @@ def rules_version():
         v += "-t20"
     return v + (f"-e{S['earnings_block_days']}" if S.get("earnings_block_days") else "")
 
-
 # ----------------------------------------------------------------------------- calendar
 SPECIAL_CLOSURES = ["2025-01-09"]   # one-off full-day NYSE closures (national day of mourning); add new ones here
-
 
 class NYSEHolidayCalendar(AbstractHolidayCalendar):
     """Full-day NYSE holidays + SPECIAL_CLOSURES (early closes: see is_early_close)."""
@@ -195,9 +184,7 @@ class NYSEHolidayCalendar(AbstractHolidayCalendar):
         Holiday("Christmas", month=12, day=25, observance=nearest_workday),
     ]
 
-
 NYSE_SESSION = CustomBusinessDay(calendar=NYSEHolidayCalendar())
-
 
 def is_early_close(d):
     """NYSE 1 PM ET close: the day after Thanksgiving, and July 3 / Dec 24 when they fall Mon-Thu (on a Friday they
@@ -205,7 +192,6 @@ def is_early_close(d):
     d = pd.Timestamp(d).normalize()
     thanksgiving = USThanksgivingDay.dates(f"{d.year}-11-01", f"{d.year}-11-30")[0]
     return bool(d == thanksgiving + pd.Timedelta(days=1) or ((d.month, d.day) in ((7, 3), (12, 24)) and d.weekday() < 4))
-
 
 def volatility(close, window=63):
     """Rolling std of daily returns. A single missing close (e.g. a halted day) is filled with the average of its
@@ -215,11 +201,9 @@ def volatility(close, window=63):
     filled = close.mask(gap, (close.shift(1) + close.shift(-1)) / 2)
     return filled.pct_change(fill_method=None).rolling(window).std().mask(gap).ffill(limit=1)
 
-
 def next_sessions(after, n):
     """The n NYSE sessions strictly after `after`."""
     return pd.date_range(pd.Timestamp(after).normalize() + NYSE_SESSION, periods=n, freq=NYSE_SESSION)
-
 
 # ----------------------------------------------------------------------------- data
 def market_data_client():
@@ -234,7 +218,6 @@ def market_data_client():
     if not key or not secret:
         raise EnvironmentError("Missing API keys. Make sure .env has ALPACA_LIVE_KEY_ID and ALPACA_LIVE_SECRET_KEY")
     return StockHistoricalDataClient(key, secret)
-
 
 def fetch_daily_bars(symbols, start=DATA_START, end=None, data_client=None, retries=3):
     """Split+dividend adjusted daily bars (long format). Market-data endpoint only."""
@@ -278,7 +261,6 @@ def fetch_daily_bars(symbols, start=DATA_START, end=None, data_client=None, retr
     bars = apply_history_start(bars)
     return bars[["Symbol", "Date", "Open", "High", "Low", "Close", "Volume"]].sort_values(["Symbol", "Date"]).reset_index(drop=True)
 
-
 def apply_history_start(bars):
     """Drop vendor bars before sector_mapping.HISTORY_START[symbol] (e.g. NBIS before 2024-10-21 = Yandex N.V. history incl. a flat
     zero-volume 2022-24 halt). Bar counts, MAs and the 200-bar eligibility then start at the first real session: no lookahead."""
@@ -288,7 +270,6 @@ def apply_history_start(bars):
     first = bars["Symbol"].map(lambda s: pd.Timestamp(starts[s]) if s in starts else pd.NaT)
     return bars[first.isna() | (bars["Date"] >= first)].reset_index(drop=True)
 
-
 def bar_final_min():
     """Minutes after the 4 PM ET close from which today's bar counts as final: BAR_FINAL_MIN, or BAR_FINAL_ENV when a job
     sets it (the 3:00 PM CT dashboard refresh sets AFTER_CLOSE_BAR_MIN)."""
@@ -296,7 +277,6 @@ def bar_final_min():
         return int(os.environ.get(BAR_FINAL_ENV, BAR_FINAL_MIN))
     except ValueError:
         return BAR_FINAL_MIN
-
 
 def drop_partial_last_bar(bars, now=None, close_buffer_min=None):
     """Drop today's bar if the US session (16:00 ET + buffer, default bar_final_min()) has not finished yet - except on a
@@ -313,10 +293,8 @@ def drop_partial_last_bar(bars, now=None, close_buffer_min=None):
         return bars[bars["Date"] < today].reset_index(drop=True), True
     return bars, False
 
-
 DECISION_BARS_CSV = REPORTS_DIR / "decision_bars.csv"   # each decision day's 2:30 PM bar, as ratios (keep_decision_bars)
 BAR_COLS = ["Open", "High", "Low", "Close", "Volume"]
-
 
 def keep_decision_bars(bars, now=None, path=DECISION_BARS_CSV, state_path=REPORTS_DIR / "run_state.json"):
     """Every decision day keeps the bar its 2:30 PM CT run traded on, not the final close, so later runs rebuild the same
@@ -355,7 +333,6 @@ def keep_decision_bars(bars, now=None, path=DECISION_BARS_CSV, state_path=REPORT
         log.warning("decision bars (Reports/decision_bars.csv) not used: %s", e)
         return bars
 
-
 def ensure_long_cache(cache_name=LONG_CACHE, start=LONG_START, data_client=None):
     """A stock added to sector_mapping.py gets its backtest history automatically: the bars of every missing symbol
     are fetched from Alpaca's free market data, `start` -> the cache's last date, and appended; the
@@ -388,7 +365,6 @@ def ensure_long_cache(cache_name=LONG_CACHE, start=LONG_START, data_client=None)
         log.warning("backtest bar cache: Alpaca has no bars for %s - check the ticker in sector_mapping.py", still)
     return got
 
-
 def load_bars(refresh=False, cache_name=LONG_CACHE, start=LONG_START):
     """All bars needed by the backtest (tradable + benchmarks + sector ETFs), cached under Reports/cache.
     The cache is refetched when asked, when it is missing, or when it starts later than `start`; a stock added to
@@ -405,14 +381,12 @@ def load_bars(refresh=False, cache_name=LONG_CACHE, start=LONG_START):
     bars, dropped = drop_partial_last_bar(bars)
     return bars, dropped
 
-
 # ----------------------------------------------------------------------------- technical indicators
 # (merged from signal_analysis_functions.py) calculate_technical_indicators (moving averages, RSI, MACD, Bollinger
 # bands, ATR, OBV, Force Index) -> one signal column per indicator (+1 buy / 0 / -1 sell) -> weighted_signal combines
 # them into combined_signal = Technical_Score. All rescaling is point-in-time (trailing windows only).
 pd.options.display.float_format = '{:.2f}'.format    # notebook display only (2 decimals, all columns)
 pd.set_option('display.max_columns', None)
-
 
 def apply_by_symbol(df, fn, ticker_col='Symbol'):
     """Run fn on each symbol's rows and concatenate (keeps the Symbol column; avoids the deprecated
@@ -428,7 +402,6 @@ OBV_SLOPE_DAYS = 3
 OBV_THRESHOLD = 1.0     # 3-day net signed volume must exceed 1x the 20-day average daily volume
 BB_WINDOW = 20          # same window as bb_middle/bb_upper/bb_lower in calculate_technical_indicators
 
-
 def pit_scale(series, window=SCALE_WINDOW, min_periods=SCALE_MIN_PERIODS):
     """Point-in-time rescale to -100..100: value / trailing max(|value|) over `window` bars.
 
@@ -436,7 +409,6 @@ def pit_scale(series, window=SCALE_WINDOW, min_periods=SCALE_MIN_PERIODS):
     s = pd.Series(series, dtype=float)
     denom = s.abs().rolling(window, min_periods=min_periods).max()
     return (s / denom.replace(0, np.nan) * 100).clip(-100, 100)
-
 
 def wilder_rsi(close, period=14):
     """RSI with Wilder smoothing; 100 when there are no losses, 50 when flat."""
@@ -450,7 +422,6 @@ def wilder_rsi(close, period=14):
     rsi = rsi.mask((avg_loss == 0) & (avg_gain > 0), 100.0)
     rsi = rsi.mask((avg_loss == 0) & (avg_gain == 0), 50.0)
     return rsi
-
 
 def calculate_technical_indicators(df):
     """Indicators for ONE symbol (rows sorted by date). All values are point-in-time."""
@@ -516,7 +487,6 @@ def calculate_technical_indicators(df):
     # --- Clean up --- (warm-up rows get 0; callers drop rows without a full ma_200)
     df = df.fillna(0)
     return df
-
 
 def generate_strict_signals(df):
     """Moving-average signals (+1 when the close is 1% above an MA, -1 when 1% below; MA50/100/200 also need the
@@ -586,7 +556,6 @@ def rsi_signals(group, lower=20, upper=85, ma_period=3, oversold_threshold=30):
     group.loc[moderate_overbought & price_at_or_below_ma, 'rsi_signal'] = -1
     
     return group.drop(columns=['ma'])
-
 
 def fi_signals_strict(df, lookback=3, min_fi=2):
     """
@@ -723,7 +692,6 @@ def fibonacci_signals(df, close_col='Close'):
             df.loc[near_resistance & price_below_fib & downtrend_confirmation, 'fib_signal'] = -1
     return df
 
-
 def weighted_signal(df, weights=None, signal_cols=None, final_col='combined_signal'):
     """
     Combine multiple signals with given weights into a final score.
@@ -785,7 +753,6 @@ def weighted_signal(df, weights=None, signal_cols=None, final_col='combined_sign
     
     return df
 
-
 # ----------------------------------------------------------------------------- signals
 def build_technical(bars, symbols=None):
     """Current technical rules recomputed from raw bars, point-in-time. Returns long df."""
@@ -814,13 +781,10 @@ def build_technical(bars, symbols=None):
         df.loc[warm, sig_cols + ["Technical_Score"]] = 0.0
     return df.sort_values(["Symbol", "Date"]).reset_index(drop=True)
 
-
 # ----------------------------------------------------------------------------- short history (too new to trade)
-SHORT_HISTORY_NOTE = "Reference only - not traded yet (short history)"
-SHORT_HISTORY_COLUMNS = ["As_Of", "Symbol", "Name", "Sector", "Status", "First_Trade", "Days_Of_History", "Days_Needed",
-                         "Days_To_Go", "Est_Eligible_Date", "Last_Date", "Last_Close", "Return_Since_First_Close_%",
-                         "Return_21d_%", "Return_63d_%", "RSI_14", "MA_10", "MA_30", "MA_50", "Close_vs_MA_50_%",
-                         "High_Since_First", "Off_High_%", "Rough_Signal"]
+SHORT_HISTORY_COLUMNS = ["As_Of", "Symbol", "Name", "First_Trade", "Days_Of_History", "Days_Needed", "Est_Eligible_Date",
+                         "Last_Date", "Last_Close", "Return_Since_First_Close_%", "Return_21d_%", "Return_63d_%", "RSI_14",
+                         "MA_10", "MA_30", "MA_50", "High_Since_First", "Off_High_%", "Rough_Signal"]   # all shown by the app
 def rough_signal(close, ma10, ma30, ma50, rsi):
     """Rough Buy / Hold / Sell for a short-history stock (display only, never traded): Buy if close > ma_10 > ma_30 > ma_50 and
     RSI 50-70; Sell if close < ma_30 and < ma_50, or RSI < 40; otherwise (or a value missing) Hold."""
@@ -832,7 +796,6 @@ def rough_signal(close, ma10, ma30, ma50, rsi):
         return "Sell"
     return "Hold"
 
-
 def short_history_symbols(bars, symbols=None, min_bars=MIN_BARS):
     """Stocks of the list (default TRADABLE) with some, but fewer than `min_bars`, daily bars in `bars`: too new for a full
     ma_200. They are NOT scored, ranked, picked or traded, and they stay out of the relative-strength cross-section (which
@@ -842,13 +805,11 @@ def short_history_symbols(bars, symbols=None, min_bars=MIN_BARS):
     n = bars.loc[bars["Symbol"].isin(symbols), "Symbol"].value_counts()
     return [s for s in symbols if 0 < n.get(s, 0) < min_bars]
 
-
 def scored_symbols(bars, symbols=None, min_bars=MIN_BARS):
     """`symbols` (default TRADABLE) minus short_history_symbols: the stocks that are scored and ranked."""
     symbols = list(symbols if symbols is not None else TRADABLE)
     short = set(short_history_symbols(bars, symbols, min_bars))
     return [s for s in symbols if s not in short]
-
 
 def short_history_reference(bars, symbols=None, min_bars=MIN_BARS):
     """Reference table (display only, never traded) for every short-history stock: first trade, days of history vs the
@@ -869,24 +830,20 @@ def short_history_reference(bars, symbols=None, min_bars=MIN_BARS):
         rsi = wilder_rsi(c, 14).iloc[-1] if n > 14 else np.nan
         hi = float(b["High"].max())
         rows.append({"As_Of": as_of.date(), "Symbol": sym, "Name": sector_mapping.symbol_name.get(sym, ""),
-                     "Sector": sector_mapping.symbol_sector.get(sym, ""), "Status": SHORT_HISTORY_NOTE,
                      "First_Trade": b["Date"].iloc[0].date(), "Days_Of_History": n, "Days_Needed": min_bars,
-                     "Days_To_Go": min_bars - n, "Est_Eligible_Date": (last + (min_bars - n) * NYSE_SESSION).date(),
+                     "Est_Eligible_Date": (last + (min_bars - n) * NYSE_SESSION).date(),
                      "Last_Date": last.date(), "Last_Close": round(float(c.iloc[-1]), 2),
                      "Return_Since_First_Close_%": round((c.iloc[-1] / c.iloc[0] - 1) * 100, 2),
                      "Return_21d_%": ret(21), "Return_63d_%": ret(63),
                      "RSI_14": round(float(rsi), 1) if pd.notna(rsi) else np.nan,
                      "MA_10": ma(10), "MA_30": ma(30), "MA_50": ma(50),
-                     "Close_vs_MA_50_%": round((c.iloc[-1] / ma(50) - 1) * 100, 2) if n >= 50 else np.nan,
                      "High_Since_First": round(hi, 2), "Off_High_%": round((c.iloc[-1] / hi - 1) * 100, 2),
                      "Rough_Signal": rough_signal(c.iloc[-1], ma(10), ma(30), ma(50), rsi)})
     return pd.DataFrame(rows, columns=SHORT_HISTORY_COLUMNS)
 
-
 def save_short_history_reference(ref, path=SHORT_HISTORY_CSV):
     """Write the reference table (header only when no stock is short on history -> the app hides its section)."""
     ref.reindex(columns=SHORT_HISTORY_COLUMNS).to_csv(path, index=False)
-
 
 def short_history_message(ref):
     """One plain line for the logs, e.g. 'Skipped for short history (not tradable yet): X (77 of 200 days, first traded ...)'."""
@@ -896,17 +853,14 @@ def short_history_message(ref):
         f"{r.Symbol} ({r.Days_Of_History} of {r.Days_Needed} days, first traded {r.First_Trade}, est. eligible {r.Est_Eligible_Date})"
         for r in ref.itertuples())
 
-
 def wide(df, col, index="Date", columns="Symbol"):
     """Long table -> wide Date x Symbol matrix of one column (last value per cell)."""
     return df.pivot_table(index=index, columns=columns, values=col, aggfunc="last").sort_index()
-
 
 def bool_wide(df, col, index, columns):
     """Boolean dates x symbols matrix (missing -> False) without object-dtype downcasting warnings."""
     w = df.pivot_table(index="Date", columns="Symbol", values=col, aggfunc="last").astype(float)
     return w.reindex(index=index, columns=columns).fillna(0.0).astype(bool)
-
 
 def _peer_median(r, symbols, sector_of, min_peers=3, leave_one_out=True):
     """Per stock: median return of its sector peers inside `symbols` (excluding the stock itself when leave_one_out),
@@ -922,7 +876,6 @@ def _peer_median(r, symbols, sector_of, min_peers=3, leave_one_out=True):
             med = peers.median(axis=1, skipna=True)
             out[s] = med.where(peers.notna().sum(axis=1) >= min_peers)
     return pd.DataFrame(out, index=r.index)[symbols]
-
 
 def relative_strength(close_w, symbols=None, benchmark=None):
     """Point-in-time relative strength, all -100..100 cross-sectional scores.
@@ -969,12 +922,10 @@ def relative_strength(close_w, symbols=None, benchmark=None):
     sector_rs63 = pd.DataFrame({s: (r63[etf_of[s]] if etf_of[s] in r63 else r63["SPY"]) - r63["SPY"] for s in symbols}) * 100
     return rs_score, sector_rs63
 
-
 def regime_series(close_w, symbol=None, ma=200):
     """Market filter: True while the regime symbol (WINNER["regime_symbol"], QQQ) closes above its 200-day average."""
     c = close_w[symbol or WINNER["regime_symbol"]]
     return (c > c.rolling(ma).mean()).fillna(False)
-
 
 # ----------------------------------------------------------------------------- earnings
 def load_earnings(path=None):
@@ -983,7 +934,6 @@ def load_earnings(path=None):
     e["Symbol"] = e["Symbol"].str.strip().str.upper()
     e["Earnings Date"] = pd.to_datetime(e["Earnings Date"], errors="coerce").dt.normalize()
     return e.dropna(subset=["Earnings Date"])
-
 
 def earnings_days_ahead(dates, symbols, earnings, block_days):
     """Days from each decision date d to the stock's next earnings date E when d < E <= d + block_days (calendar days);
@@ -1001,12 +951,10 @@ def earnings_days_ahead(dates, symbols, earnings, block_days):
         out[:, j] = np.where((k < len(e)) & (days <= block_days), days, np.nan)
     return pd.DataFrame(out, index=dates, columns=symbols)
 
-
 def earnings_note(days, d):
     """'earnings in 3 days (Wed Sep 30)' for a decision on date d."""
     days = int(days)
     return f"earnings in {days} day{'' if days == 1 else 's'} ({pd.Timestamp(d) + pd.Timedelta(days=days):%a %b %d})"
-
 
 # ----------------------------------------------------------------------------- simulator
 def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST, band=None, block=None):
@@ -1156,7 +1104,6 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
     return {"equity": pd.Series(eq, idx), "exposure": pd.Series(expo, idx), "turnover": pd.Series(turn, idx),
             "trades": trades, "open_positions": open_pos}
 
-
 def metrics(res, name=None):
     """Summary statistics of one simulation (return, CAGR, Sharpe, drawdown, turnover, trade stats)."""
     eq, ex = res["equity"], res["exposure"]
@@ -1191,14 +1138,12 @@ def metrics(res, name=None):
     }
     return out
 
-
 # ----------------------------------------------------------------------------- ranking and selection
 def _name_positions(cols):
     """Alphabetical position of each column name (final, deterministic tie-break)."""
     pos = np.empty(len(cols), int)
     pos[np.argsort(np.array([str(c) for c in cols]))] = np.arange(len(cols))
     return pos
-
 
 def ranking_order(idx, scores, tiebreak, name_pos, decimals=6):
     """Indices idx sorted best-first: score (rounded to `decimals`) desc, then tiebreak desc, then name A-Z.
@@ -1213,7 +1158,6 @@ def ranking_order(idx, scores, tiebreak, name_pos, decimals=6):
     tb = np.zeros(len(idx)) if tiebreak is None else np.nan_to_num(np.round(tiebreak[idx], decimals), nan=-np.inf)
     return idx[np.lexsort((name_pos[idx], -tb, -s))]
 
-
 def deterministic_rank(score_w, eligible_w=None, tiebreak_w=None):
     """Per-date rank 1..N (1 = best) over eligible symbols with a score; NaN otherwise. Unique ranks, same order
     as rank_targets (score desc at 6 decimals, then tiebreak desc, then name A-Z). Computed date by date."""
@@ -1226,7 +1170,6 @@ def deterministic_rank(score_w, eligible_w=None, tiebreak_w=None):
         o = ranking_order(np.flatnonzero(~np.isnan(S[t])), S[t], None if TB is None else TB[t], name_pos)
         out[t, o] = np.arange(1, len(o) + 1)
     return pd.DataFrame(out, index=score_w.index, columns=score_w.columns)
-
 
 def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=None, min_score=0.0,
                  sector_cap=0.4, vol_sizing=True, buffer_rank=None, regime_scale=None, decision_log=None,
@@ -1350,7 +1293,6 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
         out[t] = current
     return pd.DataFrame(out, index=dates, columns=cols)
 
-
 def weekly_rebalance_days(dates, live=False):
     """Last trading day of each ISO week (decision at that close, fill next open).
 
@@ -1368,9 +1310,7 @@ def weekly_rebalance_days(dates, live=False):
             out.iloc[-1] = False
     return out
 
-
 WEEKDAY_CODES = {"Mon": 0, "Tue": 1, "Wed": 2, "Thu": 3, "Fri": 4}
-
 
 def midweek_check_days(dates, days=("Mon", "Wed"), rebalance_days=None):
     """Sessions with a mid-week swap check (decision at that close, fill next open).
@@ -1389,7 +1329,6 @@ def midweek_check_days(dates, days=("Mon", "Wed"), rebalance_days=None):
     mapped = {dates[p] for p in dates.searchsorted(cal) if p < len(dates)}
     weekly = rebalance_days.reindex(dates).astype("boolean").fillna(False).to_numpy(bool)
     return pd.Series(dates.isin(list(mapped)) & ~weekly, index=dates)
-
 
 def midweek_swap_pairs(cur, order, rank, sectors, enter_top=3, exit_below=15, cap=4, skip=None):
     """The mid-week swap rule on one check day (used by apply_midweek_swaps).
@@ -1422,7 +1361,6 @@ def midweek_swap_pairs(cur, order, rank, sectors, enter_top=3, exit_below=15, ca
             break
     return swaps
 
-
 def midweek_exit_replacements(cur, order, rank, exit_all_below, exit_to_top, skip=None):
     """After midweek_swap_pairs: each holding ranked worse than exit_all_below is swapped for the best non-held name in
     order[:exit_to_top] (same weight). skip: column indices that may not be bought (earnings rule). Worst-ranked first;
@@ -1441,7 +1379,6 @@ def midweek_exit_replacements(cur, order, rank, exit_all_below, exit_to_top, ski
         cur[e], cur[h] = cur[h], 0.0
     return reps
 
-
 def midweek_exit_sells(cur, rank, exit_all_below):
     """The mid-week exit rule on one check day, applied AFTER midweek_swap_pairs (and midweek_exit_replacements when
     exit_to_top is on). Every remaining holding ranked worse than exit_all_below (or with no rank) is sold; the cash
@@ -1452,7 +1389,6 @@ def midweek_exit_sells(cur, rank, exit_all_below):
     for j, _ in sells:
         cur[j] = 0.0
     return sells
-
 
 def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_days, enter_top=3, exit_below=15,
                         sector_cap=0.4, n=10, min_score=0.0, tiebreak_w=None, decision_log=None, check_log=None,
@@ -1619,7 +1555,6 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
         decision_log[:] = new_log
     return pd.DataFrame(out, index=dates, columns=cols)
 
-
 def _rebase_weekly_log(decision_log, date, idx, held_before, new, cols, sectors, s_t, e_t, v_t, tb_t, name_pos, min_score, n):
     """After mid-week swaps the holdings going into a weekly rebalance differ from rank_targets' own carry-forward: fix that
     day's rows (Old_Weight, add/hold/drop) so the log compares with what is really held; add rows for held names it skipped."""
@@ -1655,7 +1590,6 @@ def _rebase_weekly_log(decision_log, date, idx, held_before, new, cols, sectors,
         decision_log.append({"Date": date, "Symbol": cols[j], "Status": "drop",
                              "Reason": why, "Rank": rank.get(j, np.nan), "Score": s_t[j], "Sector": sectors[j],
                              "Old_Weight": held_before[j], "New_Weight": new[j]})
-
 
 def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_w=None, decision_log=None,
                    check_log=None, midweek=None, exit_all_below="winner", selection=None, earnings_block_days="winner",
@@ -1702,7 +1636,6 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
                               reselect=reselect if block is not None else None, exit_to_top=exit_to_top)
     return tgt, checks
 
-
 def next_decision(latest, days=None):
     """Next decision session after ``latest``: (date, 'full rebalance' | 'mid-week check', fill_date).
 
@@ -1722,17 +1655,14 @@ def next_decision(latest, days=None):
             return d, "mid-week check", sess[i + 1]
     return sess[1], "full rebalance", sess[2]
 
-
 # ----------------------------------------------------------------------------- decision calendar (live schedule)
 DECISION_TIME_CT = (14, 30)                    # each decision is made and traded at 2:30 PM CT (30 min before the close)
 CENTRAL = ZoneInfo("America/Chicago")
-
 
 def is_session(d):
     """True when date d is an NYSE session (full-day holidays excluded)."""
     d = pd.Timestamp(d).normalize()
     return len(pd.date_range(d, d, freq=NYSE_SESSION)) == 1
-
 
 def decision_kind(d):
     """'full rebalance' / 'mid-week check' when date d is a decision session (same calendar as next_decision:
@@ -1743,12 +1673,10 @@ def decision_kind(d):
     nxt, kind, _ = next_decision(d - NYSE_SESSION)
     return kind if nxt == d else None
 
-
 def decision_slot(d):
     """The decision's scheduled time: 2:30 PM CT on session d (tz-aware)."""
     d = pd.Timestamp(d)
     return datetime(d.year, d.month, d.day, *DECISION_TIME_CT, tzinfo=CENTRAL)
-
 
 def last_decision_date(t):
     """The latest decision session whose 2:30 PM CT slot is at or before t (tz-aware), as a Timestamp."""
@@ -1759,7 +1687,6 @@ def last_decision_date(t):
         d -= pd.Timedelta(days=1)
     return None
 
-
 def next_decision_slot(t):
     """The first decision slot (2:30 PM CT) strictly after t (tz-aware). A missed decision can be caught up until then."""
     d = pd.Timestamp(t.astimezone(CENTRAL).date())
@@ -1769,14 +1696,12 @@ def next_decision_slot(t):
         d += pd.Timedelta(days=1)
     return None
 
-
 def decision_bar_ready(t):
     """True when today (at t, tz-aware) is a decision day and its decision slot has passed: the decision uses today's
     bar as of then, before it is final. A naive t is read as US Eastern (like drop_partial_last_bar's `now`)."""
     t = t if t.tzinfo else t.replace(tzinfo=EASTERN)
     d = pd.Timestamp(t.astimezone(CENTRAL).date())
     return bool(decision_kind(d)) and t >= decision_slot(d)
-
 
 def last_complete_session(t):
     """The latest session whose daily bar the pipeline uses at t (the drop_partial_last_bar rule): today after 4:30 PM ET
@@ -1787,10 +1712,9 @@ def last_complete_session(t):
         return d
     return pd.Timestamp(pd.date_range(end=d - pd.Timedelta(days=1), periods=1, freq=NYSE_SESSION)[0])
 
-
 # ----------------------------------------------------------------------------- live helpers
 def holding_details(weights, open_w, close_w, vol_w):
-    """Per current holding: decision/fill dates, entry price (next open after the decision), days held,
+    """Per current holding: entry (fill) date, entry price (next open after the decision), days held,
     P&L since entry and 63d annualized volatility (Reports/strategy_holdings.csv)."""
     last = weights.index[-1]
     rows = []
@@ -1803,21 +1727,16 @@ def holding_details(weights, open_w, close_w, vol_w):
         entry = float(open_w.at[fill, sym]) if fill is not None and pd.notna(open_w.at[fill, sym]) else np.nan
         close = float(close_w.at[last, sym])
         since = close_w.loc[fill:, sym] if fill is not None else pd.Series(dtype=float)
-        rows.append({"Symbol": sym, "Weight": float(w.loc[last]), "Decision_Date": run_start.date(),
+        rows.append({"Symbol": sym, "Weight": float(w.loc[last]),
                      "Entry_Date": fill.date() if fill is not None else None, "Entry_Price": entry,
                      "Close": close, "PnL_%": (close / entry - 1) * 100 if entry == entry else np.nan,
                      "Days_Held": int(len(since)) if len(since) else 0,
                      "Vol_63d_%": float(vol_w.at[last, sym]) * np.sqrt(252) * 100 if sym in vol_w else np.nan})
     return pd.DataFrame(rows)
 
-
-# ----------------------------------------------------------------------------- backtest of the live rules (Archive/backtest.ipynb)
-WALK_FORWARD_START = "2022-04-01"                              # first trading day of the backtest
-NEVER_SEEN_END = "2024-09-16"                                  # 2022-04 -> 2024-09 was never used to choose the rules
-
-
+# ----------------------------------------------------------------------------- long-history inputs (tests)
 def backtest_inputs(refresh=False):
-    """Prices, scores, eligibility, volatility, market filter and decision calendar for the live-rules backtest, from
+    """Prices, scores, eligibility, volatility, market filter and decision calendar of the live rules over the long history, from
     Reports/cache/bars_daily_long.pkl (refresh=True downloads the bars again: Alpaca market data, no quota; the pinned test
     numbers in tests/ assume the cached bars). Same set-up as tests/backtest_setup.py."""
     bars, _ = load_bars(refresh=refresh, cache_name=LONG_CACHE, start=LONG_START)
@@ -1832,95 +1751,8 @@ def backtest_inputs(refresh=False):
             "vol": volatility(close[U]),
             "regime": regime_series(close), "weekly": weekly_rebalance_days(idx, live=True)}
 
-
-def run_rules(inp, start=WALK_FORWARD_START, live_sizing=False, **overrides):
-    """Backtest WINNER (optionally with some keys changed, e.g. run_rules(inp, midweek_exit_below=None)) from `start`.
-    Fills follow the live planner (WINNER['rebalance_band']; None = adds and exits only).
-    live_sizing=True trades the LIVE weights (live_weights: rule weights x LIVE_INVESTED = 99%, floored to 0.01%) instead of
-    the rule weights - what paper_trade.py actually buys; the selection is the same either way.
-    Returns {"res": simulate() output, "targets", "checks": mid-week check log, "decisions": decision log}."""
-    saved = dict(WINNER)
-    try:
-        WINNER.update(overrides)
-        checks, decisions = [], []
-        tgt, _ = winner_targets(inp["score"], inp["eligible"], inp["vol"], inp["regime"], inp["weekly"],
-                                tiebreak_w=inp["tiebreak"], check_log=checks, decision_log=decisions)
-        band, block_days = WINNER.get("rebalance_band"), WINNER.get("earnings_block_days")
-    finally:
-        WINNER.clear()
-        WINNER.update(saved)
-    full = tgt.reindex(index=inp["close"].index, columns=inp["close"].columns).fillna(0.0)
-    if live_sizing:
-        full = live_weights(full)
-    block = (earnings_days_ahead(full.index, list(full.columns), load_earnings(), block_days)
-             if band is not None and block_days else None)
-    res = simulate(inp["open"], inp["close"], full, start, rebalance=inp["weekly"], cost=COST, band=band, block=block)
-    return {"res": res, "targets": tgt, "checks": pd.DataFrame(checks), "decisions": pd.DataFrame(decisions)}
-
-
-def buy_and_hold(inp, symbol, start=WALK_FORWARD_START):
-    """simulate() result of holding 100% of one symbol (e.g. QQQ) from `start`."""
-    t = pd.DataFrame(0.0, index=inp["close"].index, columns=inp["close"].columns)
-    t[symbol] = 1.0
-    return simulate(inp["open"], inp["close"], t, start)
-
-
-def curve_metrics(eq):
-    """Total %, CAGR %, Sharpe and max DD % of one equity curve."""
-    m = metrics({"equity": eq, "exposure": eq * 0 + 1, "turnover": eq * 0, "trades": pd.DataFrame({"Return": []}),
-                 "open_positions": pd.DataFrame()})
-    return {k: m[k] for k in ("Total Return %", "CAGR %", "Sharpe", "Max DD %")}
-
-
-def period_rows(name, eq):
-    """One row per standard period: the whole walk-forward, the never-seen 2022-04 -> 2024-09 part, and the last 2 years /
-    last 1 year (close-to-close, e.g. close 2025-09-24 -> close 2026-09-24)."""
-    rows, last = [], eq.index[-1]
-
-    def add(period, seg):
-        rows.append({"Strategy": name, "Period": period, "Start": seg.index[0].date(), "End": seg.index[-1].date(),
-                     **curve_metrics(seg)})
-    add("Walk-forward", eq)
-    add("Never-seen 2022-04 → 2024-09", eq.loc[:NEVER_SEEN_END])
-    for years in (2, 1):
-        start_close = eq.index[eq.index <= last - pd.DateOffset(years=years)][-1]
-        add(f"Last {years} year" + ("s" if years > 1 else ""), eq.loc[start_close:] / eq.loc[start_close])
-    return rows
-
-
-def trade_stats(res, dates):
-    """Trades (incl. open), win rate, median trade and median hold of one simulation (medians, not averages)."""
-    tr = res["trades"]
-    hold = dates.searchsorted(tr["Exit"]) - dates.searchsorted(tr["Entry"]) if len(tr) else np.array([])
-    return {"Trades": len(tr) + len(res["open_positions"]),
-            "Win rate %": (tr["Return"] > 0).mean() * 100 if len(tr) else np.nan,
-            "Median trade %": tr["Return"].median() * 100 if len(tr) else np.nan,
-            "Median hold (sessions)": float(np.median(hold)) if len(hold) else np.nan}
-
-
-def per_stock_table(run, inp, start=WALK_FORWARD_START):
-    """Per stock over the backtest: closed trades, win rate, median trade %, median hold, share of sessions held, and the
-    stock's own buy & hold return from the first open on/after `start` (for comparison)."""
-    tr, dates = run["res"]["trades"], inp["close"].index
-    held = run["targets"].loc[start:] > 0
-    rows = []
-    for sym in inp.get("universe", TRADABLE):
-        t = tr[tr["Symbol"] == sym]
-        first = inp["open"][sym].loc[start:].first_valid_index()
-        last_close = inp["close"][sym].dropna()
-        bh = (last_close.iloc[-1] / inp["open"].at[first, sym] - 1) * 100 if first is not None else np.nan
-        stats = trade_stats({"trades": t, "open_positions": pd.DataFrame()}, dates)
-        rows.append({"Symbol": sym, "Sector": sector_mapping.symbol_sector.get(sym, "Other"),
-                     "Closed trades": len(t), "Win rate %": stats["Win rate %"], "Median trade %": stats["Median trade %"],
-                     "Median hold (sessions)": stats["Median hold (sessions)"],
-                     "Held % of sessions": held[sym].mean() * 100 if sym in held else 0.0,
-                     "Buy & hold %": bh, "First bar": first.date() if first is not None else None})
-    return pd.DataFrame(rows)
-
-
 # ----------------------------------------------------------------------------- per-stock forward test (dashboard)
 FORWARD_START = "2026-10-02"          # the dashboard's per-stock forward test counts trades and stats from this close on
-
 
 def forward_test(close, weight, start=FORWARD_START):
     """One stock's live rules from `start` on. `close` and `weight` (the live daily target, Strategy_Weight) are Series by
