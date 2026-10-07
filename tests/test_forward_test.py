@@ -90,10 +90,12 @@ daily = pd.DataFrame({"Date": days, "Equity": eq.values, "Net_Deposits": [0.0] *
 bench = pd.DataFrame({"Date": days, "QQQ": [100.0] * 5 + [110.0] * 5 + [99.0] * 1, "SPY": 100.0})
 sm = ft.leaderboard(daily, bench, values=pd.DataFrame(columns=["Date", "Strategy", "Value"])).set_index("Strategy")
 st_ = sm.loc[ft.ACCOUNT]
-check("leaderboard: deposits are not returns (total +6%)", abs(st_["Total return %"] - 6) < 1e-9, st_.to_dict())
-check("leaderboard: median weekly return Friday to Friday (+3%, +2.91%), 2 weeks",
-      abs(st_["Median weekly return %"] - (3 + (106 / 103 - 1) * 100) / 2) < 1e-9 and st_["Weeks"] == 2, st_.to_dict())
-check("leaderboard: max drawdown (103k -> 100k on Oct 12)", abs(st_["Max drawdown %"] - (100 / 103 - 1) * 100) < 1e-9,
+# time-weighted: the deposit day is flat (105k on 100k + 5k), then 105k -> 108k -> 105k -> 111k
+check("leaderboard: deposits are not returns, time-weighted (total 111/105 = +5.71%)",
+      abs(st_["Total return %"] - (111 / 105 - 1) * 100) < 1e-9, st_.to_dict())
+check("leaderboard: median weekly return Friday to Friday (108/105 = +2.86%, 111/108 = +2.78%), 2 weeks",
+      abs(st_["Median weekly return %"] - ((108 / 105 - 1) + (111 / 108 - 1)) * 50) < 1e-9 and st_["Weeks"] == 2, st_.to_dict())
+check("leaderboard: max drawdown (108k -> 105k on Oct 12)", abs(st_["Max drawdown %"] - (105 / 108 - 1) * 100) < 1e-9,
       st_["Max drawdown %"])
 q = sm.loc["QQQ (comparison)"]
 check("leaderboard: QQQ from the start close", abs(q["Total return %"] + 1) < 1e-9 and abs(q["Max drawdown %"] - (99 / 110 - 1) * 100) < 1e-9,

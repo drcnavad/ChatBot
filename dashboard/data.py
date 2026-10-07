@@ -208,3 +208,38 @@ def live_quote(ticker: str):
         return float(closes.iloc[-1]), pd.Timestamp(closes.index[-1])
     except Exception:
         return None
+
+
+def _closes(df):
+    """The Close column(s) of a yfinance download as a DataFrame with one column per ticker."""
+    c = df["Close"]
+    return c if isinstance(c, pd.DataFrame) else c.to_frame()
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def etf_prices(symbols: tuple, start: str):
+    """Display only (the Trading Account comparison): (daily closes by date from `start`, adjusted for dividends,
+    one column per ETF; {ETF: latest price, pre/after hours included}). yfinance, two requests per call (cached 2 min);
+    Reports/benchmark_prices.csv fills in QQQ / SPY closes and the latest daily close stands in for a missing quote."""
+    closes, now = pd.DataFrame(), {}
+    if _YF_OK:
+        try:
+            df = _yf.download(list(symbols), start=str(pd.Timestamp(start) - pd.Timedelta(days=7))[:10], interval="1d",
+                              progress=False, auto_adjust=True)
+            closes = _closes(df).dropna(how="all")
+            closes.index = pd.to_datetime(closes.index).tz_localize(None).normalize()
+        except Exception:
+            closes = pd.DataFrame()
+        try:
+            q = _closes(_yf.download(list(symbols), period="1d", interval="1m", prepost=True, progress=False,
+                                     auto_adjust=False))
+            now = {s: float(q[s].dropna().iloc[-1]) for s in q.columns if s in symbols and len(q[s].dropna())}
+        except Exception:
+            now = {}
+    bench = load_benchmarks()
+    for s in symbols:
+        if (s not in closes or closes[s].dropna().empty) and bench is not None and s in bench:
+            closes[s] = bench[s]
+        if s not in now and s in closes and len(closes[s].dropna()):
+            now[s] = float(closes[s].dropna().iloc[-1])
+    return closes, now

@@ -709,9 +709,9 @@ def _stats(v):
 
 
 def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
-    """One row per strategy (STRATEGIES order) + the real account (equity net of deposits made after the first saved
-    day: deposits are not returns) + QQQ / SPY (closes, comparison only), sorted by RANK_RULE. Rank counts strategies
-    only; the account and QQQ / SPY show where they would sit."""
+    """One row per strategy (STRATEGIES order) + the real account (time-weighted, alpaca_paper.account_twr_index:
+    deposits and withdrawals are not returns) + QQQ / SPY (closes, comparison only), sorted by RANK_RULE. Rank counts
+    strategies only; the account and QQQ / SPY show where they would sit."""
     daily = _read(DAILY_CSV, parse_dates=["Date"]) if daily is None else daily
     bench = _read(BENCH_CSV, parse_dates=["Date"]) if bench is None else bench
     values = _read(STRATEGIES_CSV, parse_dates=["Date"]) if values is None else values
@@ -725,7 +725,8 @@ def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
     if daily is not None and len(daily):
         d = since(daily)
         if len(d):
-            series.append((ACCOUNT, False, d["Equity"] - (d["Net_Deposits"] - d["Net_Deposits"].iloc[0])))
+            import alpaca_paper as ap
+            series.append((ACCOUNT, False, ap.account_twr_index(d.reset_index()) * float(d["Equity"].iloc[0])))
     if bench is not None:
         b = since(bench)
         series += [(f"{s} (comparison)", False, b[s]) for s in ("QQQ", "SPY") if s in b]

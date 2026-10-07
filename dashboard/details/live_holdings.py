@@ -5,9 +5,9 @@ from datetime import datetime
 
 import streamlit as st
 
-from dashboard.data import live_quote, load_benchmarks
-from dashboard.settings import CT
-from dashboard.style import toned
+from dashboard.data import etf_prices, read_report_csv
+from dashboard.settings import CT, REPORTS
+from dashboard.style import live_row, section, toned
 
 
 @st.cache_resource(show_spinner=False)
@@ -19,14 +19,13 @@ def _fill_history():
 
 @st.cache_data(ttl=3600, max_entries=4, show_spinner=False)
 def _read_holdings(refresh_key):
-    """One read of the Alpaca LIVE account (GET only: positions, account, fills) and the QQQ quote per refresh_key
+    """One read of the Alpaca LIVE account (GET only: positions, account, fills, deposits/withdrawals) per refresh_key
     (alpaca_paper.holdings_refresh_key: a new key each minute in market hours, each hour otherwise). A failure raises,
     and Streamlit never caches a raise, so the next minute tries again."""
     import alpaca_paper as ap
     acct = ap.PaperAccount()
-    q = live_quote("QQQ")
     return {"positions": acct.position_dicts(), "fills": _fill_history().update(acct), "equity": acct.account_summary()["Equity"],
-            "qqq_now": q[0] if q else None, "as_of": datetime.now(CT)}
+            "flows": acct.cash_flows(), "as_of": datetime.now(CT)}
 
 
 def live_holdings():
@@ -61,19 +60,23 @@ def holdings_this_run():
 
 @st.fragment(run_every=60)        # reruns only this table each minute; it reads Alpaca only when the refresh key changes
 def render_live_holdings():
-    """Trading Account tab: the real Alpaca positions with cost, value, P/L and the first purchase date, plus QQQ for comparison."""
+    """Trading Account tab: the real Alpaca positions with cost, value, P/L and the first purchase date, then the account
+    vs the index ETFs (render_benchmarks)."""
     data, err = _run_holdings()["v"] = live_holdings()
     if err:
         st.info(err)
         return
     import alpaca_paper as ap
-    last = load_benchmarks()                                     # no live QQQ quote: the last daily close
-    last = last["QQQ"].dropna() if last is not None and "QQQ" in last else ()
-    table = ap.holdings_table(data["positions"], data["fills"], data["equity"],
-                              data["qqq_now"] or (float(last.iloc[-1]) if len(last) else None))
+    table = ap.holdings_table(data["positions"], data["fills"], data["equity"])
     if table.empty:
         st.info(f"No open positions in the Alpaca account (as of {data['as_of']:%a %b %-d %I:%M %p} CT).")
-        return
+    else:
+        render_positions(table, data)
+    render_benchmarks(data)
+
+
+def render_positions(table, data):
+    """The holdings table (alpaca_paper.holdings_table) and its caption."""
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
     money, pct = st.column_config.NumberColumn(format="dollar"), st.column_config.NumberColumn(format="%+.2f%%")
     st.dataframe(toned(table, ["P/L $", "P/L %", "Today %"]), hide_index=True, width="stretch",
@@ -85,6 +88,27 @@ def render_live_holdings():
                "minute in market hours (8:30 AM-3:00 PM CT on trading days), every hour otherwise. "
                "Cost basis = what you paid; Market value = shares x the latest price; P/L \\$ and P/L % = market value vs "
                "cost basis; Today % = price change since the last close; Weight % = share of the account's equity (the rest "
-               "is cash). First bought = the earliest buy still in the position (sells use up the oldest shares first). "
-               f"QQQ is not held: its row invests the same total cost basis in QQQ at its Fri Oct 2, 2026 close "
-               f"(\\${ap.QQQ_BASE_CLOSE:,.2f}, fixed) and values it at QQQ's latest price, to compare with the Total row.")
+               "is cash). First bought = the earliest buy still in the position (sells use up the oldest shares first).")
+
+
+def render_benchmarks(data):
+    """The account vs QQQ / SPY / IWM / DIA since the forward-test start, the same deposits on the same days
+    (alpaca_paper.benchmark_table); the daily account rows come from Reports/forward_test_daily.csv (4:15 PM CT job)."""
+    import alpaca_paper as ap
+    daily = read_report_csv(os.path.join(REPORTS, "forward_test_daily.csv"))
+    if daily is None or daily.empty:
+        return
+    closes, now = etf_prices(tuple(ap.BENCHMARK_ETFS), str(daily["Date"].min()))
+    table, start, put_in = ap.benchmark_table(daily, data["equity"], data["flows"], closes, now)
+    section(f"Your account vs index ETFs since {start:%a %b %-d, %Y}")
+    pct, money = st.column_config.NumberColumn(format="%+.2f%%"), st.column_config.NumberColumn(format="dollar")
+    sty = live_row(toned(table, ["Return %", "Gain $", "Account ahead by (pts)"]), "Compared with", "Your account")
+    st.dataframe(sty, hide_index=True, width="stretch", height=35 * (len(table) + 1) + 3,
+                 column_config={"Return %": pct, "Value now": money, "Gain $": money,
+                                "Account ahead by (pts)": st.column_config.NumberColumn(format="%+.2f")})
+    st.caption(f"The same money in each ETF instead: your {start:%b %-d} close balance plus every later deposit "
+               f"(\\${put_in:,.2f} in total), each deposit or withdrawal bought or sold at the close of its date, valued at "
+               "the latest price (ETF closes adjusted for dividends, from yfinance; display only). Return % is "
+               "time-weighted, so deposits never count as gains: for an ETF it is its price change; for your account each "
+               "day's growth net of that day's deposits. Gain \\$ = value now - money put in. Account ahead by: green = "
+               "your account beats that ETF, red = it trails.")

@@ -2,7 +2,8 @@
   - only allow-listed read-only GETs (positions, account, fills with paging), never an order call
   - the fill history is kept: a full read once a day, then only new fills (one request)
   - First bought = the earliest buy still in the position (FIFO: sells use the oldest shares; a full exit restarts)
-  - per-stock numbers from Alpaca's fields, the Total row, Weight % of equity, the QQQ row (fixed Oct 2, 2026 close)
+  - per-stock numbers from Alpaca's fields, the Total row, Weight % of equity; the account vs index ETFs table below it
+    (its math: test_benchmark_compare.py)
   - refresh: a new read each minute in market hours (8:30 AM-3:00 PM CT), each hour otherwise; the table reruns itself
   - the dashboard renders it (and a plain message when Alpaca fails, never cached) without exceptions
 No network to Alpaca, no keys. Run: python tests/run_tests.py  (or python tests/test_live_holdings.py)"""
@@ -45,6 +46,10 @@ POS = [{"symbol": "AAA", "qty": "5", "avg_entry_price": "100", "cost_basis": "50
         "unrealized_pl": "6", "unrealized_plpc": "0.1", "current_price": "22", "change_today": "0", "lastday_price": "22"}]
 
 
+DEPOSITS = [{"id": "d1", "activity_type": "CSD", "date": "2026-10-05", "created_at": "2026-10-05T21:15:38Z", "net_amount": "100",
+             "status": "executed"}]
+
+
 class FakeAccount(ap.PaperAccount):
     """No network: answers the allow-listed GET paths from memory and records every call."""
     calls, fail = [], None
@@ -63,6 +68,8 @@ class FakeAccount(ap.PaperAccount):
             return []
         if path == "/account":
             return {"equity": "1000", "cash": "249", "buying_power": "249", "long_market_value": "751", "last_equity": "990"}
+        if params.get("activity_types") != "FILL":                # deposits / withdrawals (cash_flows)
+            return DEPOSITS
         newest_first = [f for f in FILLS[::-1] if f["transaction_time"] > params.get("after", "")]
         start = 0 if "page_token" not in params else [f["id"] for f in newest_first].index(params["page_token"]) + 1
         return newest_first[start:start + params["page_size"]]
@@ -78,12 +85,9 @@ check("First bought restarts after a full exit: BBB = Sep 25", str(first.get("BB
 check("First bought keeps the oldest shares still held: CCC = Sep 18", str(first.get("CCC")) == "2026-09-18", first)
 check("a closed position has no date (ZZZ)", "ZZZ" not in first, first)
 
-t = ap.holdings_table(acct.position_dicts(), got, 1000.0, 760.0)
+t = ap.holdings_table(acct.position_dicts(), got, 1000.0)
 check("columns", list(t.columns) == ap.HOLDING_COLS, list(t.columns))
-check("rows: 3 stocks (largest first) + Total + QQQ", list(t["Stock"]) == ["AAA", "BBB", "CCC", "Total (3 stocks)", ap.QQQ_LABEL],
-      list(t["Stock"]))
-check("QQQ label says since Oct 2, 2026, not held, comparison only",
-      ap.QQQ_LABEL == "QQQ since Oct 2, 2026 — not held, comparison only" and (ap.QQQ_BASE_DATE, ap.QQQ_BASE_CLOSE) == ("2026-10-02", 749.58))
+check("rows: 3 stocks (largest first) + Total", list(t["Stock"]) == ["AAA", "BBB", "CCC", "Total (3 stocks)"], list(t["Stock"]))
 a = t.iloc[0]
 check("AAA from Alpaca's fields", (a["Shares"], a["Avg price"], a["Cost basis"], a["Market value"], a["P/L $"], a["Price"])
       == (5, 100, 500, 550, 50, 110) and math.isclose(a["P/L %"], 10) and math.isclose(a["Today %"], 2) and math.isclose(a["Weight %"], 55))
@@ -93,15 +97,7 @@ check("Total row: sums, P/L % on cost, weight of equity",
       and math.isclose(tot["Weight %"], 75.1), tot.to_dict())
 prev = 5 * 107.84 + 3 * 45.4545 + 3 * 22
 check("Total Today % = value now vs last close", math.isclose(tot["Today %"], (751 - prev) / prev * 100), tot["Today %"])
-qrow, pct = t.iloc[4], 760.0 / 749.58 - 1
-check("QQQ: same total cost ($710) at the fixed Oct 2, 2026 close $749.58, valued at $760",
-      math.isclose(qrow["Cost basis"], 710) and math.isclose(qrow["P/L %"], pct * 100) and math.isclose(qrow["Market value"], 710 * (1 + pct))
-      and math.isclose(qrow["P/L $"], 710 * pct) and qrow["Avg price"] == 749.58 and qrow["Price"] == 760.0
-      and str(qrow["First bought"]) == "2026-10-02" and pd.isna(qrow["Shares"]), qrow.to_dict())
-check("QQQ ignores the stocks' purchase dates (same % for any fills)",
-      math.isclose(ap.holdings_table(POS, [], 1000.0, 760.0).iloc[4]["P/L %"], pct * 100))
-check("no QQQ price: no QQQ row", len(ap.holdings_table(POS, got, 1000.0)) == 4)
-check("no positions: empty table", ap.holdings_table([], [], 1000.0, 760.0).empty)
+check("no positions: empty table", ap.holdings_table([], [], 1000.0).empty)
 
 # ---------------------------------------------------------------- fill history kept between reads (request count stays flat)
 from datetime import datetime  # noqa: E402
@@ -141,7 +137,14 @@ check("the table reruns by itself (st.fragment run_every=60), not the whole page
       "@st.fragment(run_every=60)" in app_src.split("def render_live_holdings")[0][-200:])
 
 # ---------------------------------------------------------------- the dashboard renders it (fake client, no Alpaca)
+import dashboard.details.live_holdings as lh  # noqa: E402
 real, real_key = ap.PaperAccount, ap.holdings_refresh_key
+real_lh = lh.read_report_csv, lh.etf_prices
+DAILY = pd.DataFrame({"Date": ["2026-10-02", "2026-10-06"], "Time_CT": ["16:15", "16:15"], "Equity": [880.0, 990.0],
+                      "Net_Deposits": [0.0, 100.0]})
+lh.read_report_csv = lambda path: DAILY if path.endswith("forward_test_daily.csv") else real_lh[0](path)
+lh.etf_prices = lambda symbols, start: (pd.DataFrame({s: [100.0, 105.0] for s in symbols},       # no yfinance call
+                                                     index=pd.to_datetime(["2026-10-02", "2026-10-05"])), dict.fromkeys(symbols, 110.0))
 ap.PaperAccount = FakeAccount
 os.environ.pop("STOCK_ANALYSIS_LIVE_HOLDINGS", None)
 reads = lambda: sum(1 for p, _ in FakeAccount.calls if p == "/positions")
@@ -153,7 +156,16 @@ try:
     at = AppTest.from_file("app.py", default_timeout=180).run()
     frames = [d.value for d in at.dataframe if "First bought" in d.value.columns]
     check("app: no exceptions, holdings table on the Details tab", not at.exception and len(frames) == 1, [str(e) for e in at.exception])
-    check("app: 3 stocks + Total + QQQ rows", len(frames) == 1 and len(frames[0]) == 5 and frames[0]["Stock"].iloc[-1] == ap.QQQ_LABEL)
+    check("app: 3 stocks + Total rows", len(frames) == 1 and len(frames[0]) == 4 and frames[0]["Stock"].iloc[-1] == "Total (3 stocks)")
+    bm = [d.value for d in at.dataframe if "Compared with" in d.value.columns]
+    check("app: the account vs QQQ / SPY / IWM / DIA table, each ETF +10% (110 vs the Oct 2 close 100)",
+          len(bm) == 1 and list(bm[0]["Compared with"]) == ["Your account"] + [f"{s} ({n})" for s, n in ap.BENCHMARK_ETFS.items()]
+          and all(math.isclose(r, 10) for r in bm[0]["Return %"].iloc[1:]), bm)
+    check("app: the account's return nets out the $100 deposit (990 on 880 + 100 = +0%, then 1000 / 990)",
+          len(bm) == 1 and math.isclose(bm[0]["Return %"].iloc[0], (990 / 980 * 1000 / 990 - 1) * 100), bm)
+    check("app: the comparison caption explains the same deposits and time-weighting",
+          any("each deposit or withdrawal bought or sold at the close of its date" in c.value and "time-weighted" in c.value
+              for c in at.caption))
     check("app: as-of time and how-to-read note", any(c.value.startswith("As of ") and "every hour otherwise" in c.value for c in at.caption))
     check("app: only read-only GET paths used", FakeAccount.calls and all(p in ("/positions", "/account", "/account/activities", "/orders", "/clock")
                                                                           for p, _ in FakeAccount.calls), FakeAccount.calls)
@@ -162,7 +174,7 @@ try:
     ap.holdings_refresh_key = lambda now=None: "k2"
     at.run()
     check("app: new refresh key (next minute / hour) -> one new read", reads() == 2, reads())
-    acts = [q for p, q in FakeAccount.calls if p == "/account/activities"]
+    acts = [q for p, q in FakeAccount.calls if p == "/account/activities" and q.get("activity_types") == "FILL"]
     check("app: the second read asks only for new fills (after=...)", "after" in acts[-1] and sum("after" in q for q in acts) == 1, acts)
     FakeAccount.fail = "GET /positions failed: HTTP 401 Unauthorized"
     ap.holdings_refresh_key = lambda now=None: "k3"
@@ -175,6 +187,7 @@ try:
           reads() == 4 and any("First bought" in d.value.columns for d in at.dataframe), reads())
 finally:
     ap.PaperAccount, ap.holdings_refresh_key, FakeAccount.fail = real, real_key, None
+    lh.read_report_csv, lh.etf_prices = real_lh
     st.cache_data.clear()
     st.cache_resource.clear()
 

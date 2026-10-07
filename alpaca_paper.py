@@ -165,16 +165,21 @@ class PaperAccount:
         return {"Is open": bool(c.get("is_open")), "Next open (CT)": ct(c.get("next_open")),
                 "Next close (CT)": ct(c.get("next_close")), "Timestamp (CT)": ct(c.get("timestamp"))}
 
-    def net_deposits(self):
-        """Lifetime deposits minus withdrawals (CSD/CSW cash transfers + JNLC cash journals; Alpaca signs withdrawals
-        negative; canceled transfers excluded), so the strategy's P&L can leave them out."""
-        total, params = 0.0, {"activity_types": "CSD,CSW,JNLC", "page_size": 100, "direction": "desc"}
+    def cash_flows(self):
+        """Every deposit (+) and withdrawal (-), newest first: [{"date": "YYYY-MM-DD", "time": ISO UTC, "amount": $}] from
+        the CSD/CSW cash transfers + JNLC cash journals (Alpaca signs withdrawals negative; canceled ones left out)."""
+        out, params = [], {"activity_types": "CSD,CSW,JNLC", "page_size": 100, "direction": "desc"}
         while True:
             page = self._get("/account/activities", params)
-            total += sum(float(a.get("net_amount") or 0) for a in page if a.get("status") != "canceled")
+            out += [{"date": str(a.get("date") or "")[:10], "time": str(a.get("created_at") or a.get("transaction_time") or ""),
+                     "amount": float(a.get("net_amount") or 0)} for a in page if a.get("status") != "canceled"]
             if len(page) < 100:
-                return total
+                return out
             params = {**params, "page_token": page[-1]["id"]}
+
+    def net_deposits(self):
+        """Lifetime deposits minus withdrawals (cash_flows), so the strategy's P&L can leave them out."""
+        return sum(f["amount"] for f in self.cash_flows())
 
     def position_dicts(self):
         """Open positions as Alpaca returns them (GET /positions), for the dashboard's holdings table."""
@@ -216,8 +221,6 @@ class FillHistory:
 
 
 # --- the dashboard's live holdings table (pure: no requests here) -------------------------------------------------------
-QQQ_BASE_DATE, QQQ_BASE_CLOSE = "2026-10-02", 749.58   # the QQQ comparison row starts at QQQ's close on Fri Oct 2, 2026
-QQQ_LABEL = "QQQ since Oct 2, 2026 — not held, comparison only"
 HOLDING_COLS = ["Stock", "Shares", "Avg price", "First bought", "Cost basis", "Market value", "P/L $", "P/L %",
                 "Price", "Today %", "Weight %"]
 
@@ -251,11 +254,9 @@ def first_buy_dates(fills):
     return {s: q[0][0] for s, q in lots.items() if q}
 
 
-def holdings_table(positions, fills, equity, qqq_now=None):
-    """One row per held stock, a Total row and a QQQ comparison row (not held). positions: GET /positions dicts;
-    fills: GET /account/activities FILL dicts; equity: account equity (Weight % = market value / equity);
-    qqq_now: latest QQQ price. The QQQ row (only with qqq_now) invests the same total cost basis in QQQ at its fixed
-    Oct 2, 2026 close (QQQ_BASE_CLOSE) and values it at qqq_now: a hypothetical P/L, not a holding."""
+def holdings_table(positions, fills, equity):
+    """One row per held stock and a Total row. positions: GET /positions dicts; fills: GET /account/activities FILL dicts;
+    equity: account equity (Weight % = market value / equity). The ETF comparison is benchmark_table."""
     num = lambda d, k: float(d.get(k)) if d.get(k) not in (None, "") else float("nan")
     first = first_buy_dates(fills)
     rows = [{"Stock": p["symbol"], "Shares": num(p, "qty"), "Avg price": num(p, "avg_entry_price"),
@@ -271,13 +272,77 @@ def holdings_table(positions, fills, equity, qqq_now=None):
     total = {"Stock": f"Total ({len(t)} stocks)", "Cost basis": cost, "Market value": t["Market value"].sum(), "P/L $": pl,
              "P/L %": pl / cost * 100 if cost else float("nan"), "Weight %": t["Weight %"].sum(),
              "Today %": (t["Market value"].sum() - prev) / prev * 100 if prev else float("nan")}
-    out = [t.drop(columns="_prev"), pd.DataFrame([total])]
-    if qqq_now:
-        worth = cost * qqq_now / QQQ_BASE_CLOSE
-        out.append(pd.DataFrame([{"Stock": QQQ_LABEL, "Avg price": QQQ_BASE_CLOSE, "First bought": pd.Timestamp(QQQ_BASE_DATE).date(),
-                                  "Cost basis": cost, "Market value": worth, "P/L $": worth - cost,
-                                  "P/L %": (qqq_now / QQQ_BASE_CLOSE - 1) * 100, "Price": qqq_now}]))
-    return pd.concat(out, ignore_index=True)[HOLDING_COLS]
+    return pd.concat([t.drop(columns="_prev"), pd.DataFrame([total])], ignore_index=True)[HOLDING_COLS]
+
+
+# --- the account vs index ETFs, deposits handled fairly (pure: no requests here) ----------------------------------------
+BENCHMARK_ETFS = {"QQQ": "Nasdaq 100", "SPY": "S&P 500", "IWM": "Russell 2000", "DIA": "Dow Jones"}
+
+
+def account_twr_index(daily):
+    """Time-weighted growth of the account (1.0 on the first row) from daily rows (Date, Equity, Net_Deposits; e.g.
+    Reports/forward_test_daily.csv): each row's growth = Equity / (previous Equity + the net deposit since the previous
+    row), so deposits and withdrawals are never returns and a big deposit does not change the % already earned. A deposit
+    counts from the start of the period after it (they arrive after the close, ready for the next session), the same
+    day the ETFs in benchmark_table buy it (at its date's close)."""
+    d = daily.assign(Date=pd.to_datetime(daily["Date"])).sort_values("Date")
+    eq, nd = d["Equity"].astype(float), d["Net_Deposits"].astype(float)
+    growth = eq / (eq.shift(1) + nd.diff())
+    return pd.Series(growth.fillna(1.0).cumprod().to_numpy(), index=d["Date"].to_numpy())
+
+
+def account_twr(daily, equity_now, net_deposits_now):
+    """Time-weighted return (fraction) from the first daily row to now: account_twr_index chained with one live step
+    (equity_now; net_deposits_now - the last row's Net_Deposits = deposits since that row)."""
+    d = daily.assign(Date=pd.to_datetime(daily["Date"])).sort_values("Date")
+    last_eq, last_nd = float(d["Equity"].iloc[-1]), float(d["Net_Deposits"].iloc[-1])
+    base = last_eq + net_deposits_now - last_nd
+    step = equity_now / base if base > 0 else float("nan")
+    return float(account_twr_index(d).iloc[-1]) * step - 1.0
+
+
+def _close_on(closes, day, price_now):
+    """The close of `day`, or of the next session with a close; price_now when there is none yet (today, open market)."""
+    c = closes.dropna()
+    c = c[c.index >= pd.Timestamp(day).normalize()]
+    return float(c.iloc[0]) if len(c) else float(price_now)
+
+
+def _flow_time(f):
+    """When a cash_flows() entry happened, in CT (end of its date when Alpaca gave no time)."""
+    t = pd.Timestamp(f["time"]) if f.get("time") else pd.NaT
+    return pd.Timestamp(f"{f['date']} 23:59", tz=CT) if pd.isna(t) else (t.tz_localize("UTC") if t.tz is None else t).tz_convert(CT)
+
+
+def benchmark_table(daily, equity_now, flows, closes, prices_now):
+    """The account vs each BENCHMARK_ETFS fund, the same money on the same days. Start = the first daily row (its Equity,
+    deposits until that row's time are in it). Each ETF buys that amount at the start day's close, and every later
+    deposit (withdrawal) buys (sells) it at the close of the deposit's date. Value = units x the latest price.
+    Return % = time-weighted, so deposits are not gains: for an ETF that is its price change since the start close; for
+    the account account_twr. Gain $ = value - (start equity + later deposits), the same for every row's money.
+    daily: Date, Time_CT, Equity, Net_Deposits rows; flows: every cash_flows() dict (lifetime); closes: DataFrame of
+    daily closes by date (one column per ETF); prices_now: {ETF: latest price}. Returns (table, start date, money put in)."""
+    d = daily.assign(Date=pd.to_datetime(daily["Date"])).sort_values("Date").reset_index(drop=True)
+    start, start_eq = d["Date"].iloc[0], float(d["Equity"].iloc[0])
+    flows = flows or []
+    start_at = pd.Timestamp(f"{start:%Y-%m-%d} {d['Time_CT'].iloc[0]}", tz=CT)       # deposits before it are in start_eq
+    later = [f for f in flows if _flow_time(f) > start_at]
+    put_in = start_eq + sum(f["amount"] for f in later)
+    acct_ret = account_twr(d, equity_now, sum(f["amount"] for f in flows))           # lifetime net deposits now
+    rows = [{"Compared with": "Your account", "Return %": acct_ret * 100, "Value now": equity_now, "Gain $": equity_now - put_in,
+             "Account ahead by (pts)": float("nan")}]
+    for sym, name in BENCHMARK_ETFS.items():
+        px_now = prices_now.get(sym)
+        col = closes[sym] if closes is not None and sym in closes else pd.Series(dtype=float)
+        if not px_now or col.dropna().empty:
+            continue
+        col = col.set_axis(pd.to_datetime(col.index).normalize())
+        p0 = _close_on(col, start, px_now)
+        units = start_eq / p0 + sum(f["amount"] / _close_on(col, f["date"], px_now) for f in later)
+        ret = (px_now / p0 - 1) * 100
+        rows.append({"Compared with": f"{sym} ({name})", "Return %": ret, "Value now": units * px_now,
+                     "Gain $": units * px_now - put_in, "Account ahead by (pts)": acct_ret * 100 - ret})
+    return pd.DataFrame(rows), start, put_in
 
 
 # --- files for the rest of the pipeline --------------------------------------------------------------------------------

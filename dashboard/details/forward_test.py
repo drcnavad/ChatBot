@@ -45,7 +45,7 @@ def render_forward_test():
                 + (f" ({cost / traded * 1e4:+.1f} bps; + = it cost money)" if traded else "") + ".")
     st.caption(f"**{ft.verdict(board)}** {ft.RANK_RULE} Every strategy is paper only (never traded): it decides at the "
                "day's close, pays 0.1% per trade side, holds no stock above 20%, invests at most 99% and earns nothing on cash; each "
-               f"starts at 1.0 on the {start} close. Your account = equity net of new deposits; QQQ / SPY = closes, "
+               f"starts at 1.0 on the {start} close. Your account = time-weighted (deposits and withdrawals are not returns); QQQ / SPY = closes, "
                "comparison only (not ranked). Weekly = Friday to Friday; None / – = no full week yet." + acct
                + marked + " Saved by the 4:15 PM CT job (no orders); each strategy's rule and holdings are in the next section.")
 
