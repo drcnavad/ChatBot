@@ -3,7 +3,7 @@
 Sizing: 2-decimal shares rounded DOWN for buys/trims, exact held qty for full exits, WHOLE shares
 after hours (the fractional rest goes to the next morning's regular-hours market order).
 Rebalance: unowned 'hold' picks are bought like 'add'; owned 'hold' picks are not topped up;
-Mon/Wed auto mode trades only swaps/exits (never a mass buy).
+Mon/Wed auto mode trades only replacements/exits (never a mass buy).
 Fill check: partial fill, full fill, no fill, still-open order (cancel confirmed / not confirmed),
 crash between cancel and replace, crash after submit, rerun of the same day, market closed,
 open order already on the broker, unreadable broker orders, $1 minimum.
@@ -174,7 +174,7 @@ check("plan: full exit sells exact held qty (ORCL 1.054)", row["ORCL"].Side == "
 check("plan: trim rounded down to 2 decimals (MRK 10 -> 5.55, sell 4.45)",
       row["MRK"].Side == "SELL" and row["MRK"].Shares == 4.45, row["MRK"].Shares)
 
-# ---- Mon/Wed auto mode: only the strategy's swaps/exits - never a mass buy of unowned picks
+# ---- Mon/Wed auto mode: only the strategy's replacements/exits - never a mass buy of unowned picks
 def picks_csv(as_of, last_reb):
     rows = [{"As_Of": as_of, "Last_Rebalance": last_reb, "Last_Decision": last_reb, "Strategy": "test",
              "Symbol": f"S{i}", "Strategy_Weight": 0.1, "Provisional_Weight": 0.1, "Close": 100.0}
@@ -190,7 +190,7 @@ def midweek_csv(d, as_of, rows):
     pd.DataFrame([{"Event": "mid-week check", "Event_Date": as_of, "Action": a, "Sell": s, "Buy": b,
                    "Weight_%": 10.0, "Message": "m"} for a, s, b in rows] or
                  [{"Event": "mid-week check", "Event_Date": as_of, "Action": "HOLD", "Sell": None, "Buy": None,
-                   "Weight_%": 0.0, "Message": "no swap"}]).to_csv(p, index=False)
+                   "Weight_%": 0.0, "Message": "nothing to trade"}]).to_csv(p, index=False)
     return p
 
 
@@ -200,9 +200,9 @@ kw = dict(picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "si
 o, m = pt.plan_orders("auto", 10000, {"OWN": 5}, midweek_csv=midweek_csv(d, "2026-09-30", []), **kw)[:2]
 check("Wednesday quiet check: auto -> 'hold', nothing bought or sold",
       m["source"] == "hold" and set(o["Side"]) == {"HOLD"}, (m["source"], list(o["Side"])))
-o, m = pt.plan_orders("auto", 10000, {"OWN": 5}, midweek_csv=midweek_csv(d, "2026-09-30", [("SWAP", "OWN", "S3")]), **kw)[:2]
+o, m = pt.plan_orders("auto", 10000, {"OWN": 5}, midweek_csv=midweek_csv(d, "2026-09-30", [("REPLACE", "OWN", "S3")]), **kw)[:2]
 buys = list(o.loc[o.Side == "BUY", "Symbol"])
-check("Wednesday swap: only the swap trades (sell OWN, buy S3), no other picks bought",
+check("Wednesday replacement: only it trades (sell OWN, buy S3), no other picks bought",
       m["source"] == "midweek" and buys == ["S3"] and list(o.loc[o.Side == "SELL", "Symbol"]) == ["OWN"],
       (m["source"], buys))
 d = picks_csv("2026-10-02", "2026-10-02")
@@ -412,9 +412,9 @@ o = pt.plan_orders("auto", 10000, {"S1": 0.4}, midweek_csv=midweek_csv(d, "2026-
                    picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
 check("Friday rebalance: a leftover S1 fraction is not topped up", o.set_index("Symbol").Side["S1"] == "HOLD")
 d = picks_csv("2026-09-30", "2026-09-25")
-o = pt.plan_orders("auto", 10000, {"OWN": 5}, midweek_csv=midweek_csv(d, "2026-09-30", [("SWAP", "OWN", "S3")]),
+o = pt.plan_orders("auto", 10000, {"OWN": 5}, midweek_csv=midweek_csv(d, "2026-09-30", [("REPLACE", "OWN", "S3")]),
                    picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
-check("Wednesday swap into a stopped stock: no BUY (SKIP), the swap's sell still goes",
+check("Wednesday replacement into a stopped stock: no BUY (SKIP), its sell still goes",
       not (o["Side"] == "BUY").any() and o.set_index("Symbol").Side["S3"].startswith("SKIP") and list(o.loc[o.Side == "SELL", "Symbol"]) == ["OWN"],
       list(zip(o.Symbol, o.Side)))
 o, r = eve("ANET", "BUY", 3.58, 3, "expired", 0)

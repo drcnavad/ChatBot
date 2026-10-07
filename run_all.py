@@ -28,7 +28,7 @@ so the 2:30 PM trade still runs on fresh signals. Only a main or validate failur
                                       # (pulls live positions + equity; Friday rebalance brings every target
                                       #  pick ('add' or 'hold') to Weight * equity - bought up or trimmed -
                                       #  unless within 1 point of equity (no-trade band); no new buy / top-up
-                                      #  of a pick with earnings within 5 days; Mon/Wed = swaps/exits only;
+                                      #  of a pick with earnings within 5 days; Mon/Wed = replacements/exits only;
                                       #  non-targets sold entirely; sells sent first; logs to Reports/live_orders_log.csv).
                                       # A decision (Fri rebalance / Mon-Wed check, holiday-shifted) is due at 2:30 PM CT
                                       # on its day and runs ONCE (run_state last_decision, Reports/.trade.lock):
@@ -167,7 +167,7 @@ REQUIRED = {
                             "Strategy_Rank", "Strategy_Weight", "Provisional_Weight", "Regime_On", "Rebalance_Day"],
     "strategy_picks.csv": ["As_Of", "Last_Rebalance", "Strategy", "Symbol", "Strategy_Weight", "Provisional_Weight", "Close"],
     "strategy_changes.csv": ["Date", "Symbol", "Status", "Reason", "Rank", "Score", "Sector", "Old_Weight", "New_Weight", "View"],
-    "strategy_holdings.csv": ["Symbol", "Weight", "Entry_Date", "Entry_Price", "Close", "PnL_%", "Days_Held", "Vol_63d_%", "ATR_Stop"],
+    "strategy_holdings.csv": ["Symbol", "Weight", "Entry_Date", "Entry_Price", "Close", "PnL_%", "Days_Held", "Vol_63d_%"],
     "strategy_decisions.csv": ["Date", "Symbol", "Status", "Reason", "Rank", "Score", "Old_Weight", "New_Weight", "Regime_On"],
     "strategy_midweek_check.csv": ["As_Of", "Event", "Event_Date", "Applies_To_Open", "Action", "Sell", "Buy", "Message",
                                    "Next_Message", "Rules"],

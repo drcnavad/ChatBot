@@ -279,7 +279,7 @@ expect("run_pipeline" not in blob, "old command 'run_pipeline' still shown in th
 # the Rank history expander was removed
 expect(not any(e.label.startswith("Rank history") for e in at.expander), "stale Rank history expander still present")
 # the rules shown match the live config (backtest_engine.WINNER), in one place
-W, mw = be.WINNER, be.WINNER["midweek_swap"]
+W = be.WINNER
 rules = next((m.value for m in at.markdown if m.value.startswith("**Strategy rules")), "")
 _friday = f"the {W['n']} best-ranked stocks by rank (no sector limit)"
 _wants = [f"Strategy rules ({W['tag']})", f"{W['w_tech']:g} × Technical", f"at least {be.MIN_BARS} trading days",
@@ -293,8 +293,7 @@ _wants = [f"Strategy rules ({W['tag']})", f"{W['w_tech']:g} × Technical", f"at 
           "9 AM CT", "2-decimal shares", "never runs twice"]
 for want in _wants:
     expect(want in rules, f"rules text is missing {want!r}")
-expect(mw["enter_top"] is not None or ("swap:" not in rules and "None" not in rules),
-       "rules text still shows the top-3 swap (off live since 2026-10-07)")
+expect("swap" not in rules.lower() and "None" not in rules, "rules text still mentions a swap (removed 2026-10-07)")
 expect("next open" not in blob, "outdated 'next open' wording (orders go out the same evening)")
 
 # ---------------------------------------------------------------- removed: alert banner, Summary section, Strategy Health tab

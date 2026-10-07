@@ -5,7 +5,7 @@ DEFAULT = DRY RUN: prints the order list and writes nothing to any broker.
     python paper_trade.py --account-size 25000                       # dry run, assumes an all-cash account
     python paper_trade.py --account-size 25000 --positions my.csv    # dry run vs current holdings (CSV: Symbol,Shares)
     python paper_trade.py --target provisional                       # use "if rebalanced at latest close" weights
-    python paper_trade.py --target midweek --positions my.csv        # only the latest Mon/Wed mid-week swap(s) / exit(s)
+    python paper_trade.py --target midweek --positions my.csv        # only the latest Mon/Wed replacement(s) / exit(s)
 
 Submitting talks to the LIVE account (real money):
 
@@ -38,11 +38,10 @@ Targets come from Reports/strategy_picks.csv (written by main_signal_analysis.ip
   - `provisional` = Provisional_Weight (what the rules would pick at the latest close)
   - `midweek`     = the decisions of the latest Mon/Wed mid-week check (Reports/strategy_midweek_check.csv, live rules):
                     REPLACE = SELL a holding worse than rank 20 (always) and BUY the best eligible non-held top-10
-                    (same dollars; earnings rule); SELL = exit (no top-10 refill left). SWAP (old top-3 swap: below
-                    rank 15 out, new top-3 in) is off live since 2026-10-07 and no longer produced; its handling here is
-                    kept until that code is removed. The strategy's holdings are not otherwise traded.
+                    (same dollars; earnings rule); SELL = exit (no top-10 refill left). The strategy's holdings are
+                    not otherwise traded.
   - `auto` (default) = provisional on a rebalance day (the decision day itself); midweek when the latest bar is a Mon/Wed
-                    check that produced a swap, replace, or cash exit; hold on a quiet mid-week day (no swap/exit at the
+                    check that produced a replacement or cash exit; hold on a quiet mid-week day (nothing at the
                     latest check) - every position is left unchanged (no drift rebalance).
 Mon/Wed spare cash (live only, approved 2026-10-06, leftover rule 2026-10-07): after the sells/replacements, the account's actual
 cash above 1% of equity (e.g. a deposit, a cash exit) buys the top-10 stocks the account does NOT hold in the latest ranking
@@ -230,9 +229,9 @@ def check_signal_freshness(picks_csv=PICKS_CSV, changes_csv=CHANGES_CSV, decisio
 
 
 # ----------------------------------------------------------------------------- target weights and prices (from the Reports CSVs)
-def latest_midweek_swaps(midweek_csv=MIDWEEK_CSV, as_of=None):
-    """Swap / replace / cash-exit rows (Action SWAP, REPLACE, or SELL) of the latest mid-week check, only if that check
-    was made at the latest bar (`as_of`). SWAP and REPLACE have Sell+Buy (same dollars); SELL has no Buy (its cash goes to the spare-cash step).
+def latest_midweek_changes(midweek_csv=MIDWEEK_CSV, as_of=None):
+    """Replace / cash-exit rows (Action REPLACE or SELL) of the latest mid-week check, only if that check was made at the
+    latest bar (`as_of`). REPLACE has Sell+Buy (same dollars); SELL has no Buy (its cash goes to the spare-cash step).
     Empty DataFrame otherwise."""
     if not os.path.exists(midweek_csv):
         return pd.DataFrame()
@@ -242,40 +241,40 @@ def latest_midweek_swaps(midweek_csv=MIDWEEK_CSV, as_of=None):
     m = m[m["Event"] == "mid-week check"]
     if as_of is not None:
         m = m[m["Event_Date"].astype(str) == str(as_of)]
-    return m[m["Action"].isin(["SWAP", "REPLACE", "SELL"])].reset_index(drop=True)
+    return m[m["Action"].isin(["REPLACE", "SELL"])].reset_index(drop=True)
 
 
 def load_targets(source="auto", picks_csv=PICKS_CSV, midweek_csv=MIDWEEK_CSV, decision=None):
     """(targets DataFrame[Symbol, Weight, Price], meta dict). Weights are fractions of the account (rest = cash).
 
-    meta['swaps'] holds the latest mid-week swap rows (source 'midweek'); targets are then the weights after the swap.
-    decision (a date): trade that decision - a missed one caught up later - instead of the latest bar's: its rebalance
-    weights (only while the data is as of that Friday) or the swaps/exits of its mid-week check."""
+    meta['midweek'] holds the latest mid-week check's REPLACE / SELL rows (source 'midweek'); targets are then the weights
+    after them. decision (a date): trade that decision - a missed one caught up later - instead of the latest bar's: its
+    rebalance weights (only while the data is as of that Friday) or the replacements/exits of its mid-week check."""
     picks = pd.read_csv(picks_csv)
     if picks.empty:
         raise ValueError(f"{picks_csv} is empty - run main_signal_analysis.ipynb first")
     as_of, last_reb = str(picks["As_Of"].iloc[0]), str(picks["Last_Rebalance"].iloc[0])
     last_dec = str(picks["Last_Decision"].iloc[0]) if "Last_Decision" in picks.columns else last_reb
     day = pd.Timestamp(decision).date().isoformat() if decision is not None else as_of
-    swaps = latest_midweek_swaps(midweek_csv, day)
+    changes = latest_midweek_changes(midweek_csv, day)
     if source == "auto" and day == last_reb and as_of != day:
         raise ValueError(f"the {day} rebalance weights are gone (data now as of {as_of}) - cannot trade that decision")
     if source == "auto" and day != as_of and day < last_reb:
         raise ValueError(f"the {day} decision is older than the {last_reb} rebalance - superseded, not traded")
     if source == "auto":
-        # A quiet mid-week day (no swap/exit at the latest check) holds every position unchanged (no drift rebalance).
-        source = "provisional" if day == last_reb else ("midweek" if len(swaps) else "hold")
-    if source == "midweek" and not len(swaps):
-        raise ValueError(f"no mid-week swap or exit at the latest check ({as_of}) - nothing to trade (use target 'current')")
+        # A quiet mid-week day (nothing at the latest check) holds every position unchanged (no drift rebalance).
+        source = "provisional" if day == last_reb else ("midweek" if len(changes) else "hold")
+    if source == "midweek" and not len(changes):
+        raise ValueError(f"no mid-week replacement or exit at the latest check ({as_of}) - nothing to trade (use target 'current')")
     if source == "hold":
         t = pd.DataFrame(columns=["Symbol", "Weight", "Price"])
         return t, {"as_of": as_of, "last_rebalance": last_reb, "last_decision": last_dec, "source": "hold",
-                   "strategy": str(picks["Strategy"].iloc[0]), "invested": None, "swaps": swaps}
+                   "strategy": str(picks["Strategy"].iloc[0]), "invested": None, "midweek": changes}
     col = {"current": "Strategy_Weight", "provisional": "Provisional_Weight", "midweek": "Strategy_Weight"}[source]
     t = picks.loc[picks[col].fillna(0) > 0, ["Symbol", col, "Close"]].rename(columns={col: "Weight", "Close": "Price"})
     return t.reset_index(drop=True), {"as_of": as_of, "last_rebalance": last_reb, "last_decision": last_dec, "source": source,
                                       "strategy": str(picks["Strategy"].iloc[0]), "invested": float(t["Weight"].sum()),
-                                      "swaps": swaps}
+                                      "midweek": changes}
 
 
 def latest_prices(symbols, signal_csv=SIGNAL_CSV):
@@ -590,21 +589,21 @@ def invested_after(orders):
     return float((shares.fillna(0) * pd.to_numeric(orders["Price"], errors="coerce").fillna(0)).sum())
 
 
-def build_swap_orders(swaps, account_size, positions=None, prices=None, fractional=False):
-    """Orders for mid-week SWAP/REPLACE: SELL every share of `Sell`, BUY `Buy` with the same dollars (shares x latest close).
+def build_replace_orders(changes, account_size, positions=None, prices=None, fractional=False):
+    """Orders for mid-week REPLACE rows: SELL every share of `Sell`, BUY `Buy` with the same dollars (shares x latest close).
     Cash-exit rows (Action SELL, no Buy): SELL every share of `Sell` only (plan_orders then invests spare cash).
 
-    If the account holds no `Sell` shares (no --positions given) the dollars = the swap's target weight x account_size.
+    If the account holds no `Sell` shares (no --positions given) the dollars = the row's target weight x account_size.
     Whole shares (rounded down) by default; fractional=True rounds DOWN to 2 decimals.
     Every other holding is left alone (HOLD rows)."""
     if not account_size or account_size <= 0 or not math.isfinite(account_size):
         raise ValueError("account_size must be a positive number")
-    if "Weight_%" not in swaps.columns:
-        raise ValueError("mid-week swaps data is missing 'Weight_%' column - rerun main_signal_analysis.ipynb")
+    if "Weight_%" not in changes.columns:
+        raise ValueError("mid-week check data is missing 'Weight_%' column - rerun main_signal_analysis.ipynb")
     positions = _clean_positions(positions)
     prices = prices or {}
     rows, touched = [], set()
-    for r in swaps.itertuples():
+    for r in changes.itertuples():
         out_sym = str(r.Sell)
         in_sym = str(r.Buy) if isinstance(r.Buy, str) and r.Buy.strip() else None       # None = mid-week exit (sell only)
         # Normalize prices: None/NaN/inf/non-numeric all mean "no usable price".
@@ -614,9 +613,9 @@ def build_swap_orders(swaps, account_size, positions=None, prices=None, fraction
         p_in = _safe_number(prices.get(in_sym), default=None)
         have = positions.get(out_sym, 0.0)
         try:
-            w = float(swaps.loc[r.Index, "Weight_%"]) / 100
+            w = float(changes.loc[r.Index, "Weight_%"]) / 100
         except (TypeError, ValueError) as e:
-            raise ValueError(f"mid-week swap row {r.Index} has invalid Weight_%: {swaps.loc[r.Index, 'Weight_%']!r}") from e
+            raise ValueError(f"mid-week check row {r.Index} has invalid Weight_%: {changes.loc[r.Index, 'Weight_%']!r}") from e
         dollars = have * p_out if have and p_out else w * account_size
         rows.append({"Symbol": out_sym, "Side": "SELL" if have else "SELL (none held)", "Shares": have, "Price": p_out,
                      "Est_Value": round(have * p_out, 2) if have and p_out else 0.0, "Current_Shares": have, "Target_Shares": 0,
@@ -674,7 +673,7 @@ def build_swap_orders(swaps, account_size, positions=None, prices=None, fraction
 def build_hold_orders(positions, prices=None):
     """HOLD rows for every current position: a quiet mid-week check trades nothing.
 
-    The backtest holds positions unchanged on mid-week days with no swap/exit (no drift
+    The backtest holds positions unchanged on mid-week days with no replacement/exit (no drift
     rebalance) - live matches it with HOLD rows (nothing submitted for them). Live then
     invests the account's spare cash (build_cash_deploy_orders: top-10 stocks not held, then ranks 1-3).
     """
@@ -825,21 +824,21 @@ def build_account_exit_orders(orders, positions, equity, ranking, listed=None, b
 
 def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=None, fractional=False, prices=None,
                              max_rank=DEPLOY_MAX_RANK, topup_ranks=TOPUP_RANKS, min_pct=DEPLOY_MIN_PCT, min_usd=DEPLOY_MIN_USD):
-    """Mon/Wed spare-cash rule, run AFTER the mid-week swaps/exits (`orders`): returns (orders + new rows, info).
+    """Mon/Wed spare-cash rule, run AFTER the mid-week replacements/exits (`orders`): returns (orders + new rows, info).
 
     Spare cash = Alpaca cash + the planned sells - the planned buys - (1 - invested level) x equity, where the invested level
     is LIVE_INVESTED (99%), halved like the Friday weights while QQQ is at/below its 200-day average (Regime_On 0 in the
     latest ranking). From the latest ranking (`ranking`, see latest_ranking: score above 0), best rank first:
-      1. Stocks the account does NOT hold after the swaps (actual Alpaca positions, not the pipeline's view) ranked
+      1. Stocks the account does NOT hold after the replacements (actual Alpaca positions, not the pipeline's view) ranked
          1-`max_rank` (the top 10) are bought, each at its latest rule weight x equity (Provisional_Weight; none -> the
          median positive Provisional_Weight, a typical top-10 slot), until the spare cash is used.
       2. What is left tops up ranks 1-`topup_ranks` (1-3), held or not: rank 1 is filled up to the cap first, then rank 2,
          then rank 3 (a held stock counts at shares after today's orders x price). Ranks 11-20 are never bought.
     Cap: WINNER['max_weight'] x 99% of equity (19.8%) per stock, including what is already held. Names sold by today's
-    swaps/exits and names in `blocked` (earnings within 5 days, earnings-day stop sale) are skipped. An order below
+    replacements/exits and names in `blocked` (earnings within 5 days, earnings-day stop sale) are skipped. An order below
     max(min_pct x equity, min_usd) is not made; whatever no stock can take stays in cash. Stocks outside ranks 1-3 that
     are held get no order (no top-up, no trim). Shares are rounded DOWN (2 decimals when fractional, else whole shares).
-    A top-up of a stock with a HOLD row (or today's swap BUY row) changes that row, so each symbol has one order."""
+    A top-up of a stock with a HOLD row (or today's replacement BUY row) changes that row, so each symbol has one order."""
     import backtest_engine as be
     blocked, prices = blocked or {}, prices or {}
     positions = _clean_positions(positions)
@@ -901,7 +900,7 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
             continue
         row = orders.index[sym_col == sym]
         if len(row) and str(orders.at[row[0], "Side"]) not in ("BUY", "HOLD"):
-            continue                                # e.g. a swap trimmed it to its weight: no top-up today
+            continue                                # e.g. a replacement capped it at its weight: no top-up today
         shares = _safe_number(orders.at[row[0], "Target_Shares"], 0.0) if len(row) else positions.get(sym, 0.0)
         have = shares * px + (new[sym][2] if sym in new else 0.0)
         add = min(cap - have, left)
@@ -916,7 +915,7 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
             info["skipped"].append((sym, f"rank {rk}: under the minimum order"))
             continue
         row = orders.index[sym_col == sym]
-        if len(row):                                # a held stock's HOLD row (or today's swap BUY) becomes / grows the BUY
+        if len(row):                                # a held stock's HOLD row (or today's replacement BUY) becomes / grows the BUY
             i = row[0]
             num = ["Shares", "Price", "Est_Value", "Target_Shares", "Target_Weight_%", "Target_Value"]
             orders[num] = orders[num].apply(pd.to_numeric, errors="coerce").astype(float)
@@ -981,15 +980,15 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     targets = targets.assign(Price=targets["Symbol"].map(live_prices).fillna(targets["Price"]))
     if meta["source"] in ("hold", "midweek"):
         if meta["source"] == "hold":
-            # Quiet mid-week check: no swap / exit, so every held position is left unchanged (HOLD rows).
+            # Quiet mid-week check: no replacement / exit, so every held position is left unchanged (HOLD rows).
             px = {**latest_prices(sorted(positions), signal_csv), **live_prices}
             orders = build_hold_orders(positions, px)
         else:
-            syms = sorted(set(meta["swaps"]["Sell"].astype(str)) | set(meta["swaps"]["Buy"].dropna().astype(str)) | set(positions))
+            syms = sorted(set(meta["midweek"]["Sell"].astype(str)) | set(meta["midweek"]["Buy"].dropna().astype(str)) | set(positions))
             px = latest_prices(syms, signal_csv)
             px.update(dict(zip(targets["Symbol"], targets["Price"])))
             px.update(live_prices)
-            orders = build_swap_orders(meta["swaps"], account_size, positions, px, fractional=fractional)
+            orders = build_replace_orders(meta["midweek"], account_size, positions, px, fractional=fractional)
             orders = skip_stop_buys(orders, earnings_stop_blocked(meta["as_of"]))
         day = pd.Timestamp(decision).date().isoformat() if decision is not None else meta["as_of"]
         if not (force_deploy or is_midweek_check_day(day, signal_csv)):
@@ -2605,7 +2604,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
       its target is not traded. A pick the account does not own with earnings within 5 days is not
       bought (earnings rule); its weight goes to the next eligible stock ranked up to 20 that is not already a pick
       (substitute_blocked_picks, also for an earnings-day stop sale). Non-target stocks are sold entirely (the exact shares held).
-      Mon/Wed (auto -> 'midweek' or 'hold') trade the strategy's swaps/exits, then sell every other account position
+      Mon/Wed (auto -> 'midweek' or 'hold') trade the strategy's replacements/exits, then sell every other account position
       ranked worse than 20 or not ranked, refilled 1-for-1 from the top 10 not held (build_account_exit_orders), then invest the spare cash
       (cash above 1% of equity) in the top-10 stocks NOT held, the rest topping up ranks 1-3 to the 19.8% cap
       (build_cash_deploy_orders); other held stocks are not topped up or trimmed. Friday is unchanged.
@@ -2863,8 +2862,8 @@ def main(argv=None):
           f"(last weekly rebalance {meta['last_rebalance']}, last decision {meta['last_decision']}) | "
           f"invested {f'{inv:.0%}' if inv is not None else ('holdings unchanged except the Mon/Wed sells + spare cash' if '+' in meta['source'] else 'unchanged (hold)')})")
     if meta["source"].startswith("midweek"):
-        for act, m in zip(meta["swaps"]["Action"], meta["swaps"]["Message"]):
-            print(("MID-WEEK EXIT: " if act == "SELL" else "MID-WEEK SWAP: ") + m)
+        for act, m in zip(meta["midweek"]["Action"], meta["midweek"]["Message"]):
+            print(("MID-WEEK EXIT: " if act == "SELL" else "MID-WEEK REPLACE: ") + m)
     if meta.get("substitutions") is not None:
         print("FRIDAY REPLACEMENTS (new pick blocked by earnings / stop sale): "
               + (substitution_text(meta["substitutions"]) or "none needed"))
@@ -2879,7 +2878,8 @@ def main(argv=None):
                  if dep["topups"] else ""))
         for s_, why in dep["skipped"]:
             print(f"  not bought: {s_} - {why}")
-        if not positions and (meta["swaps"]["Action"] == "SWAP").any():
+        mw = meta.get("midweek")
+        if not positions and mw is not None and "Action" in mw and (mw["Action"] == "REPLACE").any():
             print("(no --positions given: the buy is sized at the sold stock's target weight x account size)")
     print(earnings_rule_note())
     print(f"Account size ${account_size:,.2f}; prices = latest close (actual fills will differ)\n")
@@ -2892,7 +2892,7 @@ def main(argv=None):
         print(f"\nBuys ${buys:,.2f} · Sells ${sells:,.2f} · invested now ≈ ${held_now:,.2f} ({held_now / account_size:.1%}) "
               f"→ after ≈ ${after:,.2f} ({after / account_size:.1%}) · cash after ≈ ${cash + sells - buys:,.2f}")
     elif meta["source"] == "midweek":
-        print(f"\nBuys ${buys:,.2f} · Sells ${sells:,.2f} (swaps: same dollars; exits: sell only - "
+        print(f"\nBuys ${buys:,.2f} · Sells ${sells:,.2f} (replacements: same dollars; exits: sell only - "
               "spare cash is invested only when the account's cash is known: --cash or --from-account)")
     else:
         held_after = invested_after(orders)

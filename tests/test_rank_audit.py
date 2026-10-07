@@ -1,5 +1,5 @@
 """Independent audit of the saved pipeline output (Reports/signal_analysis.csv + strategy_decisions.csv): RS_Score,
-Strategy_Score, Strategy_Rank, the weekly top-10 selection, the Mon/Wed mid-week checks (swap + rank-exit sells) and the
+Strategy_Score, Strategy_Rank, the weekly top-10 selection, the Mon/Wed mid-week checks (rank-exit sells + refills) and the
 earnings rule (no new buy when an earnings date is within WINNER['earnings_block_days'] calendar days) are re-derived from
 raw bars and Reports/earnings_date.csv WITHOUT the engine's code (backtest_engine is only read for its settings).
 Run: python tests/run_tests.py  (or PYTHONPATH=. python tests/test_rank_audit.py)"""
@@ -24,7 +24,7 @@ def expect(ok, what):
         print("   !! FAIL:", what)
 CAP = be.winner_max_per_sector()
 MAX_RANK = be.WINNER.get("max_pick_rank")          # T20: picks only from ranks 1..20
-SOFT = bool(be.WINNER.get("cap_soft"))             # T20: fill free slots ignoring the cap; mid-week swaps ignore the cap
+SOFT = bool(be.WINNER.get("cap_soft"))             # T20: fill free slots ignoring the cap
 # Reports/*.csv Strategy_Weight / Provisional_Weight were written under T20 soft-cap. Live since 2026-10-05 is pure
 # top-10 (sector_cap 1.0, no rank-20 gate). Skip the CSV weight match until the next pipeline run rewrites them.
 _CSV_RULES = (be.WINNER.get("max_pick_rank") == 20 and SOFT and be.WINNER.get("sector_cap", 0.4) < 1.0 - 1e-12)
@@ -206,7 +206,7 @@ def audit(D, compare_col):
     return picked
 
 
-def audit_midweek(D, enter_top=3, exit_below=15, exit_all=None, top_n=None):
+def audit_midweek(D, exit_all, top_n=None):
     """Independent re-derivation of a Mon/Wed mid-week check at D from the saved scores and the holdings of the previous session."""
     day, t = check_scores(D, "MID-WEEK CHECK ")
     sess = sorted(sa.Date.unique())
@@ -216,22 +216,7 @@ def audit_midweek(D, enter_top=3, exit_below=15, exit_all=None, top_n=None):
     q = t[(t.Strategy_Score > 0) & (vol.reindex(t.index) > 0)]
     q = q.assign(k1=-q.Strategy_Score.round(4), k2=-q.RS_Score, k3=q.index).sort_values(["k1", "k2", "k3"])
     rank = {s: i + 1 for i, s in enumerate(q.index)}
-    held, swaps = dict(before), []
-    sector = lambda s: sm.symbol_sector.get(s, "Other")
-    while True:                                   # best entrant first; for it, the worst-ranked holding whose removal fits the cap
-        # worst rank first; several holdings that no longer qualify (no rank) -> order of sector_mapping.tradable_symbols
-        if not enter_top:                         # no top-3 swap (live since 2026-10-07): only the rank exits below
-            break
-        weak = sorted([s for s in held if rank.get(s, 10 ** 9) > exit_below], key=lambda s: (-rank.get(s, 10 ** 9), tradable.index(s)))
-        ent = [s for s in list(q.index[:enter_top]) if s not in held and not blocked(s, D)]
-        pair = next(((e, h) for e in ent for h in weak
-                     if SOFT or sum(sector(k) == sector(e) for k in held if k != h) < CAP), None)
-        if pair is None:
-            break
-        e, h = pair
-        held[e] = held.pop(h)
-        swaps.append((h, rank.get(h), e, rank[e], round(held[e], 4)))
-    exits, refills = [], []
+    held, exits, refills = dict(before), [], []
     if exit_all and top_n:                         # rank-exit refill (8f57015): worst first -> best free top-N stock, same weight
         for s in sorted([s for s in held if rank.get(s, 10 ** 9) > exit_all], key=lambda s: -rank.get(s, 10 ** 9)):
             e = next((x for x in list(q.index[:top_n]) if x not in held and not blocked(x, D)), None)
@@ -249,13 +234,12 @@ def audit_midweek(D, enter_top=3, exit_below=15, exit_all=None, top_n=None):
     dec = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
     dd = dec[dec.Date == D]
     logged = (sorted(dd.loc[dd.Status == "drop", "Symbol"]), sorted(dd.loc[dd.Status == "add", "Symbol"]))
-    mine = (sorted([h for h, *_ in swaps] + [x for x, _ in exits]), sorted([e for _, _, e, _, _ in swaps] + refills))
+    mine = (sorted(x for x, _ in exits), sorted(refills))
     print(f"(m) held before (at {pd.Timestamp(P).date()} close): {sorted(before)}")
-    print(f"    independent swaps (sell, sell rank, buy, buy rank, weight): {swaps if swaps else 'none'}"
-          + (f"; rank-{exit_all} exits (sell, rank): {exits if exits else 'none'}" if exit_all else ""))
+    print(f"    independent rank-{exit_all} exits (sell, rank): {exits if exits else 'none'}")
     print(f"    engine Strategy_Weight at {D.date()} matches: {same}; decision log drop/add {logged} vs mine {mine}: {logged == mine}")
     expect(same and logged == mine, f"mid-week check mismatch on {D.date()}")
-    return swaps, exits, same and logged == mine
+    return exits, same and logged == mine
 
 
 reb = sa.loc[sa.Rebalance_Day == 1, "Date"].drop_duplicates().sort_values()
@@ -287,44 +271,34 @@ if n_reb_audited == 0:
                 f"{CACHE_MAX}, older than every checked rebalance date - refresh it: "
                 "python -c \"import backtest_engine as be; be.backtest_inputs(refresh=True)\"")
 
-# --- Mid-week checks: the last 3 historical swap days, the last 3 historical rank-exit days (if the exit rule is on) and this
-#     week's Mon/Wed checks ---
-# The Mon/Wed rules that wrote the CSV (its rules_version): the current WINNER, or the rules until 2026-10-07 (top-3 swap
-# below 15 + exit below 30 refilled from the top 10) while the file is still from before the t187u change.
+# --- Mid-week checks (live rule: worse than rank 20 sold, refilled from the top 10): the last 3 historical rank-exit days
+#     and this week's Mon/Wed checks. Only when the CSV was written by the current rules (else the next run rewrites it).
 CSV_VER = str(sa["rules_version"].dropna().iloc[-1]) if "rules_version" in sa.columns else be.rules_version()
-if CSV_VER == be.rules_version():
-    MW_RULES = ((be.WINNER.get("midweek_swap") or {}).get("enter_top"), (be.WINNER.get("midweek_swap") or {}).get("exit_below"),
-                be.WINNER.get("midweek_exit_below"), be.WINNER.get("midweek_exit_to_top")) if be.WINNER.get("midweek_swap") else None
-elif CSV_VER == "v4-mw30r10-ns-e5":
-    MW_RULES = (3, 15, 30, 10)
-    print(f"\nMid-week audit uses the rules that wrote the CSV ({CSV_VER}); the next pipeline run rewrites it "
-          f"({be.rules_version()})")
-else:
-    MW_RULES = None
+MW_RULES = None
+if CSV_VER != be.rules_version():
     print(f"\nskip mid-week audit: CSV rules {CSV_VER} != {be.rules_version()} (next pipeline run rewrites the file)")
+elif be.WINNER.get("midweek_swap"):
+    MW_RULES = (be.WINNER.get("midweek_exit_below"), be.WINNER.get("midweek_exit_to_top"))
 if MW_RULES:
-    enter_top, swap_below, exit_all, top_n = MW_RULES
+    exit_all, top_n = MW_RULES
     dec = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
-    swap_days = sorted(dec.loc[dec.Reason.astype(str).str.startswith("mid-week swap"), "Date"].unique())
     exit_days = sorted(dec.loc[dec.Reason.astype(str).str.startswith("mid-week exit"), "Date"].unique())
     checks = sorted(sa.loc[sa.Midweek_Check == 1, "Date"].unique())
-    print(f"\nMid-week: {len(checks)} check sessions in the window, {len(swap_days)} with a swap, {len(exit_days)} with a "
-          f"rank-{exit_all} exit; last swap days {[str(pd.Timestamp(d).date()) for d in swap_days[-3:]]}, last exit days "
-          f"{[str(pd.Timestamp(d).date()) for d in exit_days[-3:]]}")
-    if exit_all:
-        expect(len(exit_days) >= 2, "fewer than 2 historical rank-exit days to audit")
-    days = sorted({pd.Timestamp(d) for d in swap_days[-3:] + exit_days[-3:] + checks[-2:]})
+    print(f"\nMid-week: {len(checks)} check sessions in the window, {len(exit_days)} with a rank-{exit_all} exit; "
+          f"last exit days {[str(pd.Timestamp(d).date()) for d in exit_days[-3:]]}")
+    expect(len(exit_days) >= 2, "fewer than 2 historical rank-exit days to audit")
+    days = sorted({pd.Timestamp(d) for d in exit_days[-3:] + checks[-2:]})
     results, n_exit, mw_skipped = [], 0, 0
     for D in days:
         if not auditable(D, "mid-week"):
             mw_skipped += 1
             continue
-        _, ex, ok = audit_midweek(D, enter_top, swap_below, exit_all, top_n)
+        ex, ok = audit_midweek(D, exit_all, top_n)
         results.append(ok); n_exit += len(ex)
     print(f"\nMID-WEEK AUDIT: {sum(results)}/{len(results)} check days reproduced independently"
-          + (f" (incl. {n_exit} rank-{exit_all} sells)" if exit_all else "")
+          + f" (incl. {n_exit} rank-{exit_all} sells)"
           + (f"; {mw_skipped} skipped (newer than bar cache)" if mw_skipped else ""))
-    if exit_all and not mw_skipped:
+    if not mw_skipped:
         expect(n_exit >= 2, "fewer than 2 rank-exit sells audited")
 
 if SKIPPED:

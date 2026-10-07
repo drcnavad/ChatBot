@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from dashboard.data import last_next_earnings, read_report_csv
-from dashboard.settings import CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, MIDWEEK, N_PICKS, PICKS_CSV, symbol_sector
+from dashboard.settings import CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, N_PICKS, PICKS_CSV, symbol_sector
 
 
 SIGNALS = ["Buy", "Hold", "Sold", "Score below 0", "Watch", "Not ranked"]
@@ -22,10 +22,6 @@ def plain_reason(signal, reason, rank=None, score=None):
     m = re.search(r"rank (\d+)", reason)
     if reason.startswith("earnings in"):
         return f"rank {r}, not bought: {reason.split(': not bought')[0]} (no new buys within {EARNINGS or 5} days of earnings)"
-    if reason.startswith("mid-week swap in"):
-        rep_m = re.search(r"replaces (\S+)", reason)
-        return (f"mid-week swap: jumped into the top {(MIDWEEK or {}).get('enter_top') or 3} at rank "
-                f"{m.group(1) if m else r}" + (f", replaces {rep_m.group(1)}" if rep_m else ""))
     if reason.startswith("mid-week exit replace in"):
         rep_m = re.search(r"replaces (\S+)", reason)
         return (f"mid-week exit refill: into top-{EXIT_TO_TOP or 10} at rank {m.group(1) if m else r}"
@@ -37,10 +33,6 @@ def plain_reason(signal, reason, rank=None, score=None):
                     f"replaced by {by.group(1)}")
         return (f"mid-week exit: {'rank ' + m.group(1) if m else 'no longer ranked'} is worse than {EXIT_BELOW or 30}; "
                 f"sold (no top-{EXIT_TO_TOP or 10} stock left to refill)")
-    if reason.startswith("mid-week swap out"):
-        by = re.search(r"replaced by (\S+)", reason)
-        return (f"mid-week swap: fell to {'rank ' + m.group(1) if m else 'no longer qualifying'} "
-                f"(below {(MIDWEEK or {}).get('exit_below') or 15})" + (f", replaced by {by.group(1)}" if by else ""))
     if signal == "Buy":
         rk = int(m.group(1)) if m else (int(rank) if rank is not None and pd.notna(rank) else None)
         if rk is not None and rk > N_PICKS:
@@ -70,12 +62,9 @@ def decision_tag(signal, reason):
     """Short reason shown in brackets on the dated decision badge, e.g. 'Sold (mid-week exit)'."""
     reason = "" if reason is None or (isinstance(reason, float) and pd.isna(reason)) else str(reason)
     if signal == "Sold":
-        for key, tag in (("mid-week exit", "mid-week exit"), ("mid-week swap out", "mid-week swap"),
-                         ("outside top", f"outside top {N_PICKS}"), ("score", "score below 0"), ("not eligible", "not eligible")):
+        for key, tag in (("mid-week exit", "mid-week exit"), ("outside top", f"outside top {N_PICKS}"), ("score", "score below 0"), ("not eligible", "not eligible")):
             if key in reason:
                 return tag
-    if signal == "Buy" and reason.startswith("mid-week swap in"):
-        return "mid-week swap"
     if signal == "Buy" and reason.startswith("mid-week exit replace in"):
         return "mid-week exit refill"
     return ""

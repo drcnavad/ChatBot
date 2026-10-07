@@ -29,7 +29,6 @@ RS_LABEL = {"etf": "vs sector ETF and SPY",
             "median_all": "vs the median of its sector peers, and sector median vs the universe median",
             }.get(WINNER.get("rs_benchmark", "etf"), "vs sector ETF and SPY")
 MIDWEEK = WINNER.get("midweek_swap")                                 # Mon/Wed checks (None = weekly only)
-SWAP_TOP = MIDWEEK.get("enter_top") if MIDWEEK else None             # top-3 swap (off since 2026-10-07: None)
 EXIT_BELOW = WINNER.get("midweek_exit_below") if MIDWEEK else None   # mid-week exit below this rank
 EXIT_TO_TOP = WINNER.get("midweek_exit_to_top") if EXIT_BELOW else None  # refill an exit from the best non-held top-N
 EARNINGS = WINNER.get("earnings_block_days")                         # no new buys with earnings within N days (None = off)
@@ -66,17 +65,14 @@ def rules_text():
             + (f"- **Max per stock:** No single stock gets more than {MAX_WEIGHT:.0%}; any extra stays in cash.\n" if MAX_WEIGHT else "")
             + (f"- **Rebalance:** every pick is brought back to its weight unless it is within {band * 100:g} percentage point "
                "of it; overweight holdings are trimmed so new buys get their full weight.\n" if band else "")
-            + (f"- **{days} swap:** if a stock that is not held ranks in the top {SWAP_TOP} and a held stock has "
-               f"fallen below rank {MIDWEEK['exit_below']}, the worst-ranked held stock is sold and the new one bought for "
-               "the same dollar amount (repeated while both are true; no sector limit).\n" if SWAP_TOP else "")
-            + (f"- **{days} sell rule:** {'after the swaps, ' if SWAP_TOP else ''}every position in the account (the "
+            + (f"- **{days} sell rule:** every position in the account (the "
                f"strategy's and any other) ranked worse than {EXIT_BELOW}, or with no rank (score 0 or below, or not in the "
                "stock list), is always sold in full, worst rank first (one sell order per stock), "
                + (f"and replaced 1-for-1 by the best-ranked top-{EXIT_TO_TOP} stock the account does not hold (same dollars; "
                   "earnings rule, no buy back after an earnings-day stop sale); if none is left the cash goes to the "
                   "spare-cash rule below.\n" if EXIT_TO_TOP else
                   "and the cash goes to the spare-cash rule below.\n") if EXIT_BELOW else "")
-            + (f"- **{days} spare cash:** after the {'swaps and ' if SWAP_TOP else ''}sells, the account's cash above {1 - LIVE_INVESTED:.0%} of equity "
+            + (f"- **{days} spare cash:** after the sells, the account's cash above {1 - LIVE_INVESTED:.0%} of equity "
                f"(e.g. a deposit, an exit or an earnings-day stop sale) buys the top-{DEPLOY_MAX_RANK} stocks the account does "
                "not hold, in rank order, each at its current rule weight; what is left tops up ranks "
                f"1-{TOPUP_RANKS} (held or not): rank 1 first, up to the cap, then rank 2, then rank 3"
@@ -131,8 +127,8 @@ CT = ZoneInfo("America/Chicago")
 FRESHNESS = {
     "signal_analysis.csv": ("prices, signals, strategy weights", 3),
     "strategy_picks.csv": ("current / provisional portfolio", 3),
-    "strategy_decisions.csv": ("decision history: weekly rebalances + mid-week swaps (chart markers)", 3),
-    "strategy_midweek_check.csv": ("this week's decisions: Friday rebalance + Mon/Wed swap checks", 3),
+    "strategy_decisions.csv": ("decision history: weekly rebalances + mid-week replacements/exits (chart markers)", 3),
+    "strategy_midweek_check.csv": ("this week's decisions: Friday rebalance + Mon/Wed checks", 3),
     "benchmark_prices.csv": ("SPY / QQQ / sector ETF closes (RS lines)", 3),
     "weighted_sentiment.csv": ("news sentiment scores", 7),
     "news_cleaned_df.csv": ("news articles for AI summaries", 7),

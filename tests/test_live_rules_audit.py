@@ -66,7 +66,7 @@ check("band: without the earnings block the underweight pick is bought up on Mon
       (r_free["exposure"].loc["2026-09-28"], r_blk["exposure"].loc["2026-09-28"]))
 check("band: with earnings in the window it is NOT bought up before earnings", n_blk == 0, n_blk)
 
-# a mid-week weight change alone (no swap, no exit) is never traded: the band applies only at the Friday rebalance
+# a mid-week weight change alone (no replacement, no exit) is never traded: the band applies only at the Friday rebalance
 tgt3 = tgt.copy()
 tgt3.loc["2026-09-30":"2026-10-01", "BBB"] = 0.2
 t3 = be.simulate(px, px, tgt3, "2026-09-22", rebalance=weekly, cost=0.0, band=0.01)["trades"]
@@ -104,7 +104,7 @@ orig = (pt.paper_trading_client, pt.plan_orders, pt.submit_paper)
 pt.paper_trading_client = lambda: _Client()
 pt.plan_orders = lambda *a, **k: (plan.copy(), {"source": "provisional", "as_of": "2026-10-02", "strategy": "x",
                                                "invested": 1.0, "last_rebalance": "2026-10-02",
-                                               "last_decision": "2026-10-02", "swaps": pd.DataFrame()}, plan)
+                                               "last_decision": "2026-10-02", "midweek": pd.DataFrame()}, plan)
 pt.submit_paper = lambda orders, positions=None: sent.setdefault("o", orders)
 try:
     with redirect_stdout(io.StringIO()):

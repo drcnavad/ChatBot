@@ -1,4 +1,4 @@
-"""Mon/Wed spare-cash rule (live only, approved 2026-10-06; leftover rule 2026-10-07): after the mid-week swaps/exits, the
+"""Mon/Wed spare-cash rule (live only, approved 2026-10-06; leftover rule 2026-10-07): after the mid-week replacements/exits, the
 account's cash above 1% of equity buys the top-10 stocks NOT held (latest ranking, rank order) at their rule weights; what
 is left tops up ranks 1-3 (held or not), rank 1 to the 19.8% cap first, then 2, then 3; ranks 11-20 are never bought; other
 held stocks get no order; earnings / earnings-day-stop blocks; an order under max($100, 1% of equity) is not made; cash no
@@ -100,7 +100,7 @@ check("BBB weight 30% capped at 19.8% of equity", abs(b.get("BBB", 0) - 19_800) 
 check("leftover tops AAA (rank 1) up to the 19.8% cap: one AAA row, the rest ($19,400) stays cash",
       abs(b.get("AAA", 0) - 19_800) < 0.01 and list(o["Symbol"]).count("AAA") == 1 and abs(info["spent"] - 39_600) < 0.01, b)
 
-# 6) swaps run first: a name sold today is not bought back or topped up; the swap's buy counts as held; proceeds count as cash
+# 6) replacements run first: a name sold today is not bought back or topped up; the replacement buy counts as held; proceeds count as cash
 sw = pd.DataFrame([{"Symbol": "AAA", "Side": "SELL", "Shares": 100, "Price": 100.0, "Est_Value": 10_000.0,
                     "Current_Shares": 100, "Target_Shares": 0, "Target_Weight_%": 0, "Target_Value": 0},
                    {"Symbol": "BBB", "Side": "BUY", "Shares": 200, "Price": 50.0, "Est_Value": 10_000.0,
@@ -108,11 +108,11 @@ sw = pd.DataFrame([{"Symbol": "AAA", "Side": "SELL", "Shares": 100, "Price": 100
                   columns=pt.ORDER_COLUMNS)
 o, info = pt.build_cash_deploy_orders(sw, {"AAA": 100}, EQ, cash=13_000, ranking=R, fractional=True)
 b = buys(o)
-check("sold-today AAA not bought back; swap-buy BBB not doubled; CCC gets the spare $12,000",
+check("sold-today AAA not bought back; replacement buy BBB not doubled; CCC gets the spare $12,000",
       list(o["Symbol"]).count("BBB") == 1 and list(o["Symbol"]).count("AAA") == 1 and abs(b.get("CCC", 0) - 12_000) < 1, b)
 o, info = pt.build_cash_deploy_orders(sw, {"AAA": 100, "CCC": 1, "DDD": 1}, EQ, cash=13_000, ranking=R, fractional=True)
 bb = o[o["Symbol"] == "BBB"]
-check("leftover skips sold-today AAA (rank 1), grows the swap's BBB buy (rank 2: $10,000 -> $19,800) in its own row, "
+check("leftover skips sold-today AAA (rank 1), grows the replacement's BBB buy (rank 2: $10,000 -> $19,800) in its own row, "
       "then rank 3 CCC gets the last $2,200",
       len(bb) == 1 and abs(bb["Est_Value"].iloc[0] - 19_800) < 1 and bb["Target_Shares"].iloc[0] == 396
       and list(o["Symbol"]).count("AAA") == 1 and o.loc[o.Symbol == "AAA", "Side"].tolist() == ["SELL"]

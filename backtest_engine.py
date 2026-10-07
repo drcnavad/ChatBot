@@ -77,10 +77,9 @@ WINNER = {
     "vol_sizing": True,     # weights proportional to 1 / 63-day volatility
     "max_weight": 0.20,     # no stock above 20% (after the vol weights and the regime halving); the extra stays in cash
     "buffer_rank": None,    # no rank buffer (tested, did not help)
-    "atr_stop_k": 3.0,      # ATR multiple of the stop level in strategy_holdings.csv (reference only, never an automatic exit)
     "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF ('sector_median' / 'median_all': tested, not live)
-    # Mon/Wed close checks (the days come from this dict). The top-3 swap is OFF since 2026-10-07 (Chirag, t187u):
-    # enter_top / exit_below None. (Was: a non-held top-3 stock replaces the worst holding ranked below 15.)
+    # Mon/Wed close checks (the days come from this dict). No top-3 swap live (enter_top / exit_below None since
+    # 2026-10-07, t187u); the swap code in apply_midweek_swaps is kept only for the forward test's pinned strategies.
     "midweek_swap": {"enter_top": None, "exit_below": None, "days": ["Mon", "Wed"]},
     "midweek_exit_below": 20,   # Mon/Wed: a holding ranked worse than 20 is always sold (was 30 until 2026-10-07) ...
     "midweek_exit_to_top": 10,  # ... and replaced 1-for-1 by the best non-held top-10 (same weight, earnings rule);
@@ -124,25 +123,13 @@ def winner_label(n_stocks):
     elif S.get("max_pick_rank") or S.get("cap_soft"):
         tag += (f'-T{S["max_pick_rank"]}' + ("" if S.get("cap_soft") else "H")) if S.get("max_pick_rank") else "-SC"
         name += ((f' [picks from ranks 1-{S["max_pick_rank"]} only' if S.get("max_pick_rank") else " [")
-                 + ("; sector cap relaxed to fill the 10 slots; top-3 swaps ignore the cap]" if S.get("cap_soft") else "]"))
-    if mw and not mw.get("enter_top"):                  # Mon/Wed exit only (no top-3 swap, since 2026-10-07)
-        if S.get("midweek_exit_below"):
-            top = S.get("midweek_exit_to_top")
-            tag += f'-X{S["midweek_exit_below"]}' + (f"R{top}" if top else "")
-            name += (f' + {"/".join(mw["days"])} exit (worse than rank {S["midweek_exit_below"]}: '
-                     + (f"replace with best top-{top} not held; cash until Friday only if none is left)" if top
-                        else "sell, cash until Friday)"))
-    elif mw:
-        tag += "-MW" + (str(S["midweek_exit_below"]) if S.get("midweek_exit_below") else "")
-        name += f' + mid-week swap ({"/".join(mw["days"])} close: top {mw["enter_top"]} in, below rank {mw["exit_below"]} out)'
-        if S.get("midweek_exit_below"):
-            top = S.get("midweek_exit_to_top")
-            if top:
-                tag += f"R{top}"
-                name += (f' + mid-week exit (worse than rank {S["midweek_exit_below"]}: replace with best top-{top} not held; '
-                         'cash until Friday only if none is left)')
-            else:
-                name += f' + mid-week exit (sell if worse than rank {S["midweek_exit_below"]}, cash until Friday)'
+                 + ("; sector cap relaxed to fill the 10 slots]" if S.get("cap_soft") else "]"))
+    if mw and S.get("midweek_exit_below"):              # Mon/Wed exit rule (the only mid-week rule live)
+        top = S.get("midweek_exit_to_top")
+        tag += f'-X{S["midweek_exit_below"]}' + (f"R{top}" if top else "")
+        name += (f' + {"/".join(mw["days"])} exit (worse than rank {S["midweek_exit_below"]}: '
+                 + (f"replace with best top-{top} not held; cash until Friday only if none is left)" if top
+                    else "sell, cash until Friday)"))
     if S.get("earnings_block_days"):
         tag += f'-E{S["earnings_block_days"]}'
         name += f' + no new buys with earnings in the next {S["earnings_block_days"]} days'
@@ -182,10 +169,7 @@ WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
 def rules_version():
     """Rules version stored in signal_analysis.csv (older rows of the same version keep their BUY/SELL/HOLD)."""
     S, mw = WINNER, WINNER.get("midweek_swap")
-    if mw and not mw.get("enter_top"):                  # Mon/Wed exit only (no top-3 swap): v5-x20r10-...
-        v = f"v5-x{S.get('midweek_exit_below') or 0}"
-    else:
-        v = ("v4-mw30" if S.get("midweek_exit_below") else "v4-mw") if mw else "v3"
+    v = f"v5-x{S.get('midweek_exit_below') or 0}" if mw else "v3"      # v5-x20r10-ns-e5: Mon/Wed exit rule, no swap
     if S.get("midweek_exit_below") and S.get("midweek_exit_to_top"):
         v += f"r{S['midweek_exit_to_top']}"
     if S.get("sector_cap", 0.4) >= 1.0 - 1e-12:
@@ -1492,8 +1476,8 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
     reselect(t, held) -> (weights, log rows): redo the weekly selection with the REAL holdings (needed when the earnings
     rule is on, because "already held" then matters); its rows replace rank_targets' rows for that date.
     decision_log: rows (like rank_targets) for check days WITH a swap or exit (hold / add / drop).
-    check_log: one dict per check day and swap (Action 'SWAP') / exit-replace (Action 'REPLACE') / cash exit (Action 'SELL'),
-    or one 'NO SWAP' row with a Note.
+    check_log: one dict per check day and swap (Action 'SWAP', forward-test pins only) / exit-replace (Action 'REPLACE') /
+    cash exit (Action 'SELL'), or one 'NO CHANGE' row (live, exit rule only) / 'NO SWAP' row (swap pins) with a Note.
     """
     dates, cols = base.index, list(base.columns)
     S = score_w.reindex(index=dates, columns=cols).to_numpy(float)
@@ -1553,8 +1537,8 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
                                           "Weight": w, "Sell_Sector": sectors[h], "Buy_Sector": "",
                                           "Note": f"worse than rank {exit_all_below}: sold, cash until the weekly rebalance"
                                                   + (f" (no top-{exit_to_top} refill)" if exit_to_top else "")})
-                elif not enter_top:                       # exit-only checks (no top-3 swap)
-                    check_log.append({"Date": dates[t], "Action": "NO SWAP", "Sell": "", "Sell_Rank": np.nan,
+                elif not enter_top:                       # exit-only checks (live: no top-3 swap)
+                    check_log.append({"Date": dates[t], "Action": "NO CHANGE", "Sell": "", "Sell_Rank": np.nan,
                                       "Sell_Score": np.nan, "Buy": "", "Buy_Rank": np.nan, "Buy_Score": np.nan,
                                       "Weight": np.nan, "Sell_Sector": "", "Buy_Sector": "",
                                       "Note": f"no holding is worse than rank {exit_all_below}" if exit_all_below
@@ -1805,9 +1789,9 @@ def last_complete_session(t):
 
 
 # ----------------------------------------------------------------------------- live helpers
-def holding_details(weights, open_w, close_w, atr_w, vol_w, k=3.0):
+def holding_details(weights, open_w, close_w, vol_w):
     """Per current holding: decision/fill dates, entry price (next open after the decision), days held,
-    P&L since entry, 63d annualized volatility, ATR and an ATR trailing-stop level."""
+    P&L since entry and 63d annualized volatility (Reports/strategy_holdings.csv)."""
     last = weights.index[-1]
     rows = []
     for sym in weights.columns[weights.loc[last] > 0]:
@@ -1819,15 +1803,11 @@ def holding_details(weights, open_w, close_w, atr_w, vol_w, k=3.0):
         entry = float(open_w.at[fill, sym]) if fill is not None and pd.notna(open_w.at[fill, sym]) else np.nan
         close = float(close_w.at[last, sym])
         since = close_w.loc[fill:, sym] if fill is not None else pd.Series(dtype=float)
-        peak = since.max() if len(since) else np.nan
-        atr = float(atr_w.at[last, sym]) if sym in atr_w else np.nan
         rows.append({"Symbol": sym, "Weight": float(w.loc[last]), "Decision_Date": run_start.date(),
                      "Entry_Date": fill.date() if fill is not None else None, "Entry_Price": entry,
                      "Close": close, "PnL_%": (close / entry - 1) * 100 if entry == entry else np.nan,
                      "Days_Held": int(len(since)) if len(since) else 0,
-                     "Vol_63d_%": float(vol_w.at[last, sym]) * np.sqrt(252) * 100 if sym in vol_w else np.nan,
-                     "ATR": atr, "ATR_Stop": peak - k * atr if peak == peak else np.nan,
-                     "Dist_to_Stop_%": (close / (peak - k * atr) - 1) * 100 if peak == peak else np.nan})
+                     "Vol_63d_%": float(vol_w.at[last, sym]) * np.sqrt(252) * 100 if sym in vol_w else np.nan})
     return pd.DataFrame(rows)
 
 

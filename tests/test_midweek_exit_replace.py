@@ -96,8 +96,8 @@ C = [1, 2, 3, 4, 5, 6, 7, 8, 9, 21, 24]                                         
 check("live: refills run out -> the next worse-than-20 holding is sold to cash",
       mw_run(C, LIVE)[1] == [("REPLACE", "S24", "S00"), ("SELL", "S21", "")], mw_run(C, LIVE))
 D = list(range(10)) + [19]                                                         # rank 20 = not worse than 20
-check("live: rank 20 is kept; nothing to do -> one NO SWAP row ('no holding is worse than rank 20')",
-      mw_run(D, LIVE)[1] == [("NO SWAP", "", "")] and 19 in mw_run(D, LIVE)[0], mw_run(D, LIVE))
+check("live: rank 20 is kept; nothing to do -> one NO CHANGE row ('no holding is worse than rank 20')",
+      mw_run(D, LIVE)[1] == [("NO CHANGE", "", "")] and 19 in mw_run(D, LIVE)[0], mw_run(D, LIVE))
 
 # --- paper_trade must treat REPLACE like a mid-week trade (Sell+Buy), not ignore it ---
 import tempfile
@@ -107,16 +107,16 @@ _csv = (
     "As_Of,Event,Event_Date,Applies_To_Open,Action,Sell,Buy,Message,Sell_Rank,Buy_Rank,Weight_%,Is_Latest\n"
     "2026-10-05,mid-week check,2026-10-05,2026-10-06,REPLACE,BE,U,exit refill,40,10,6.0,1\n"
     "2026-10-05,mid-week check,2026-10-05,2026-10-06,SELL,ZZ,,cash leftover,55,,5.0,1\n"
-    "2026-10-05,mid-week check,2026-10-05,2026-10-06,NO SWAP,,,quiet,,,,1\n"
+    "2026-10-05,mid-week check,2026-10-05,2026-10-06,NO CHANGE,,,quiet,,,,1\n"
 )
 with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
     f.write(_csv)
     path = f.name
-rows = pt.latest_midweek_swaps(path, "2026-10-05")
-check("paper_trade.latest_midweek_swaps includes REPLACE and SELL, skips NO SWAP",
+rows = pt.latest_midweek_changes(path, "2026-10-05")
+check("paper_trade.latest_midweek_changes includes REPLACE and SELL, skips NO CHANGE",
       list(rows["Action"]) == ["REPLACE", "SELL"] and list(rows["Buy"].fillna("")) == ["U", ""],
       rows.to_dict("list"))
-orders = pt.build_swap_orders(rows, account_size=100_000, positions={"BE": 10, "ZZ": 5},
+orders = pt.build_replace_orders(rows, account_size=100_000, positions={"BE": 10, "ZZ": 5},
                               prices={"BE": 50.0, "U": 25.0, "ZZ": 40.0}, fractional=True)
 sides = orders.set_index("Symbol")["Side"].to_dict()
 check("REPLACE builds SELL BE + BUY U; SELL builds SELL ZZ only",

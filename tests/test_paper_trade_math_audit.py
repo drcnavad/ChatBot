@@ -1,7 +1,7 @@
 """Mocked regression tests for the paper_trade.py math/safety audit (zero broker calls).
 
 Covers the audit fixes:
-- +inf prices rejected everywhere (build_orders / swap / hold builders / client ids)
+- +inf prices rejected everywhere (build_orders / replace / hold builders / client ids)
 - duplicate symbols and >100% total weights raise (fail closed)
 - per-symbol weight >100% becomes SKIP (bad weight)
 - apply_buying_power_guard recomputes shares x price, never trusts Est_Value
