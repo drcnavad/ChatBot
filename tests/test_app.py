@@ -286,8 +286,9 @@ _wants = [f"Strategy rules ({W['tag']})", f"{W['w_tech']:g} × Technical", f"at 
           _friday, f"scaled to {be.LIVE_INVESTED:.0%} invested", f"{W['regime_symbol']} at or below its 200-day average",
           "every weight is halved" if W["regime_scale"] == 0.5 else "every weight is multiplied",
           f"within {W['rebalance_band'] * 100:g} percentage point", "sell rule:",
-          f"any holding ranked worse than {W['midweek_exit_below']}", "is always sold",
-          f"replaced 1-for-1 by the best-ranked top-{W['midweek_exit_to_top']} stock not held",
+          f"ranked worse than {W['midweek_exit_below']}", "is always sold",
+          "every position in the account", "not in the stock list",
+          f"replaced 1-for-1 by the best-ranked top-{W['midweek_exit_to_top']} stock the account does not hold",
           f"within {W['earnings_block_days']} calendar days", "after-hours limit orders",
           "9 AM CT", "2-decimal shares", "never runs twice"]
 for want in _wants:

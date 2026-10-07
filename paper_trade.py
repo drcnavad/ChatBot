@@ -48,7 +48,11 @@ Mon/Wed spare cash (live only, approved 2026-10-06, leftover rule 2026-10-07): a
 cash above 1% of equity (e.g. a deposit, a cash exit) buys the top-10 stocks the account does NOT hold in the latest ranking
 (score > 0, rank order), each at its latest rule weight; what is left tops up ranks 1-3 (held or not), rank 1 to the 19.8%
 cap first, then 2, then 3; the rest stays cash (earnings rule, pre-earnings stop no-buy-back and the cap apply throughout).
-Other held stocks get no top-up or trim; Friday's rebalance is unchanged. See build_cash_deploy_orders(). Dry run with the
+Other held stocks get no top-up or trim; Friday's rebalance is unchanged. See build_cash_deploy_orders().
+Mon/Wed sell rule on EVERY account position (Chirag, t188u, 2026-10-07), between the two: an actual Alpaca position ranked
+worse than 20 (or with no rank: score 0 or below, or not in the stock list) is sold in full, worst first, and replaced 1-for-1
+(same dollars) by the best top-10 stock the account does not hold (earnings / stop blocks apply); no refill -> the cash goes
+to the spare-cash step. A stock the strategy already sells keeps one SELL row. See build_account_exit_orders(). Dry run with the
 real account (read only): python paper_trade.py --from-account [--midweek-preview]
 Earnings rule (backtest_engine.WINNER["earnings_block_days"] = 5): the targets leave out stocks not held with earnings
 within 5 calendar days. The live planner adds its own check for the LIVE account: a pick with earnings within 5 days is
@@ -83,7 +87,7 @@ MAX_ORDER_PCT = 0.20   # backstop: a BUY worth more than 20% of equity is refuse
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
 INVESTED_CAP = 0.99   # trim fix: a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED, tests check)
 CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills a bit above the estimate still fit.
-# Mon/Wed spare-cash rule (Chirag, 2026-10-06; leftover rule 2026-10-07): after the mid-week swaps / exit refills, the cash
+# Mon/Wed spare-cash rule (Chirag, 2026-10-06; leftover rule 2026-10-07): after the mid-week sells / refills, the cash
 # above 1% of equity buys the top-10 stocks the account does NOT hold (latest ranking, pure rank), each at its latest rule
 # weight (Provisional_Weight), and what is left tops up ranks 1-3 (held or not): rank 1 up to the 19.8% cap first, then 2,
 # then 3. Ranks 11-20 are not bought; cash no stock can take stays cash. Other held stocks are never traded by it.
@@ -709,6 +713,110 @@ def is_midweek_check_day(day, signal_csv=SIGNAL_CSV):
     return bool(len(hit) and pd.to_numeric(hit, errors="coerce").fillna(0).max() == 1)
 
 
+def build_account_exit_orders(orders, positions, equity, ranking, listed=None, blocked=None, fractional=False, prices=None,
+                              exit_below=None, refill_top=None, min_pct=DEPLOY_MIN_PCT, min_usd=DEPLOY_MIN_USD):
+    """Mon/Wed sell rule on EVERY actual Alpaca position (Chirag, t188u, 2026-10-07), run AFTER the strategy's own mid-week
+    orders (`orders`) and BEFORE the spare-cash step: returns (orders, info).
+
+    A position still held after today's orders that ranks worse than `exit_below` (WINNER['midweek_exit_below'], 20) in the
+    latest ranking (`ranking`, see latest_ranking: score above 0), or has no rank at all (score 0 or below, or not in the
+    stock list = not in `listed`), is sold in full, worst first (no rank first, then the worst rank). Each sale is replaced
+    1-for-1 with the same dollars (capped at WINNER['max_weight'] x 99% of equity) by the best-ranked stock in the top
+    `refill_top` (WINNER['midweek_exit_to_top'], 10) that the account does not hold after today's orders and that is not
+    blocked (`blocked`: earnings within 5 days, pre-earnings stop sale). With no refill left (or a refill under
+    max(min_pct x equity, min_usd)) the cash goes to the spare-cash step. A stock the strategy already sells in full
+    keeps its one SELL row (never a second sell); a partial strategy SELL becomes a full sale; a HOLD row becomes the SELL.
+    An empty ranking (no data for the day) sells nothing. Shares are rounded DOWN (2 decimals when fractional)."""
+    import backtest_engine as be
+    blocked, prices = blocked or {}, prices or {}
+    exit_below = be.WINNER.get("midweek_exit_below") if exit_below is None else exit_below
+    refill_top = be.WINNER.get("midweek_exit_to_top") if refill_top is None else refill_top
+    positions = _clean_positions(positions)
+    orders = orders.copy() if len(orders) else pd.DataFrame(columns=ORDER_COLUMNS)
+    orders = orders.reset_index(drop=True)
+    info = {"exit_below": exit_below, "refill_top": refill_top, "sold": [], "replaced": [], "unlisted": [], "unranked": [],
+            "skipped": [], "note": ""}
+    if not exit_below:
+        info["note"] = "no Mon/Wed sell rank set: nothing sold"
+        return orders, info
+    if ranking is None or not len(ranking):
+        info["note"] = "no ranking for the day: nothing sold"
+        return orders, info
+    num = ["Shares", "Price", "Est_Value", "Current_Shares", "Target_Shares", "Target_Weight_%", "Target_Value"]
+    orders[num] = orders[num].apply(pd.to_numeric, errors="coerce").astype(float)
+    sym_col = orders["Symbol"].astype(str).str.upper()
+    side = orders["Side"].astype(str)
+    rank = {str(s).upper(): int(r) for s, r in zip(ranking["Symbol"], pd.to_numeric(ranking["Rank"], errors="coerce"))
+            if r == r}
+    listed = {str(s).upper() for s in (listed if listed is not None else rank)}
+    after = {}                                      # shares held after today's strategy orders
+    for sym, have in positions.items():
+        row = orders.index[sym_col == sym]
+        if not len(row):
+            after[sym] = have
+            continue
+        s, t = str(orders.at[row[0], "Side"]), _safe_number(orders.at[row[0], "Target_Shares"], have)
+        after[sym] = 0.0 if s.startswith("SELL") and t <= 0 else (t if s in ("SELL", "BUY") else have)
+    bought = set(sym_col[side == "BUY"])
+    held = {s for s, q in after.items() if q > 0} | bought
+    weak = [s for s in after if after[s] > 0 and s not in bought and rank.get(s, 10 ** 9) > exit_below]
+    weak.sort(key=lambda s: (-rank.get(s, 10 ** 9), s))                 # no rank first, then the worst rank
+    for s in positions:
+        if s not in rank:
+            info["unlisted" if s not in listed else "unranked"].append(s)
+    floor_usd = max(min_pct * _safe_number(equity, 0.0), min_usd)
+    cap = float(be.WINNER.get("max_weight") or 1.0) * be.LIVE_INVESTED * _safe_number(equity, 0.0)
+    cands = []
+    for r in ranking.itertuples() if _safe_number(equity, 0.0) > 0 else ():
+        sym = str(r.Symbol).upper()
+        if not refill_top or rank.get(sym, 10 ** 9) > refill_top or sym in held or sym in set(sym_col):
+            continue
+        if sym in blocked:
+            info["skipped"].append((sym, f"rank {rank[sym]}: {blocked[sym]}"))
+            continue
+        px = _safe_number(prices.get(sym), default=None) or _safe_number(getattr(r, "Close", None), default=None)
+        if px and px > 0:
+            cands.append((sym, px))
+        else:
+            info["skipped"].append((sym, f"rank {rank[sym]}: no price"))
+    new_rows = []
+    for sym in weak:
+        px = _safe_number(prices.get(sym), default=None)
+        q = positions[sym]                          # the whole position (a partial strategy SELL becomes a full sale)
+        value = round(q * px, 2) if px else 0.0
+        row = orders.index[sym_col == sym]
+        vals = {"Side": "SELL", "Shares": q, "Price": px, "Est_Value": value, "Current_Shares": q, "Target_Shares": 0.0,
+                "Target_Weight_%": 0.0, "Target_Value": 0.0}
+        if len(row):
+            orders.loc[row[0], list(vals)] = list(vals.values())
+        else:
+            new_rows.append({"Symbol": sym, **vals})
+        rk = rank.get(sym)
+        info["sold"].append((sym, rk, q, value))
+        if not cands:
+            continue
+        d = min(value, cap)
+        if d < floor_usd:
+            continue
+        buy, bpx = cands.pop(0)
+        bq = _floor2(d / bpx) if fractional else math.floor(d / bpx)
+        if bq <= 0:
+            info["skipped"].append((buy, f"rank {rank[buy]}: under one share"))
+            continue
+        new_rows.append({"Symbol": buy, "Side": "BUY", "Shares": bq, "Price": float(bpx), "Est_Value": round(bq * bpx, 2),
+                         "Current_Shares": 0.0, "Target_Shares": bq, "Target_Weight_%": round(bq * bpx / equity * 100, 2),
+                         "Target_Value": round(bq * bpx, 2)})
+        info["replaced"].append((sym, rk, buy, rank[buy], round(bq * bpx, 2)))
+    if new_rows:
+        import warnings
+        with warnings.catch_warnings():             # HOLD rows have an all-NaN Target_Weight_% column (harmless)
+            warnings.simplefilter("ignore", FutureWarning)
+            orders = pd.concat([orders, pd.DataFrame(new_rows, columns=ORDER_COLUMNS)], ignore_index=True)
+    order = {"SELL": 0, "SELL (none held)": 0, "BUY": 1, "HOLD": 2}
+    orders = orders.sort_values(["Side", "Symbol"], key=lambda s: s.map(order).fillna(3) if s.name == "Side" else s)
+    return orders.reset_index(drop=True), info
+
+
 def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=None, fractional=False, prices=None,
                              max_rank=DEPLOY_MAX_RANK, topup_ranks=TOPUP_RANKS, min_pct=DEPLOY_MIN_PCT, min_usd=DEPLOY_MIN_USD):
     """Mon/Wed spare-cash rule, run AFTER the mid-week swaps/exits (`orders`): returns (orders + new rows, info).
@@ -831,11 +939,33 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
     return orders, info
 
 
+def account_exit_text(ex):
+    """One line for the Mon/Wed sell rule on every account position (meta['account_exits']), e.g.
+    'BE (rank 24) sold $3,488 -> no top-10 stock left to buy, cash to the spare-cash step; positions with no rank: none'."""
+    if not ex:
+        return ""
+    if ex.get("note"):
+        return ex["note"]
+    rep = {s_: (b, br, v) for s_, _, b, br, v in ex["replaced"]}
+    parts = []
+    for s_, rk, _, v in ex["sold"]:
+        who = f"{s_} ({f'rank {rk}' if rk else 'no rank'}) sold ${v:,.0f}"
+        parts.append(who + (f" -> BUY {rep[s_][0]} (rank {rep[s_][1]}) ${rep[s_][2]:,.0f}" if s_ in rep
+                            else " -> no refill, cash to the spare-cash step"))
+    none_txt = ", ".join([f"{s_} (not in the stock list)" for s_ in ex["unlisted"]]
+                         + [f"{s_} (score 0 or below)" for s_ in ex["unranked"]]) or "none"
+    return ((f"worse than rank {ex['exit_below']}: " + "; ".join(parts)) if parts
+            else f"no position is worse than rank {ex['exit_below']}") + f"; positions with no rank: {none_txt}" + (
+        f"; not bought: {', '.join(f'{s_} ({w})' for s_, w in ex['skipped'])}" if ex["skipped"] and parts else "")
+
+
 def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signal_csv=SIGNAL_CSV, midweek_csv=MIDWEEK_CSV,
                 min_value=1.0, fractional=False, decision=None, live_prices=None, cash=None, force_deploy=False):
     """(orders, meta, targets) for any target source; used by the CLI and the live trade step. No broker calls.
     decision: see load_targets. live_prices {symbol: price}: size with these (a daytime catch-up) instead of the closes.
-    cash (the account's actual cash): on a Mon/Wed check (source hold / midweek) the spare cash is then invested in
+    On a Mon/Wed check (source hold / midweek) every actual position ranked worse than 20 / not ranked is then sold and
+    refilled 1-for-1 from the top 10 not held (build_account_exit_orders; meta['account_exits'], source + '+exits').
+    cash (the account's actual cash): on a Mon/Wed check the spare cash is then invested in
     top-10 stocks the account does not hold, the rest in ranks 1-3 (build_cash_deploy_orders); meta['source'] becomes 'hold+cash' / 'midweek+cash'
     when it buys something. None = no spare-cash step. force_deploy: run it even if the data's day is not a Mon/Wed
     check (dry-run preview only)."""
@@ -856,10 +986,28 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
             orders = build_swap_orders(meta["swaps"], account_size, positions, px, fractional=fractional)
             orders = skip_stop_buys(orders, earnings_stop_blocked(meta["as_of"]))
         day = pd.Timestamp(decision).date().isoformat() if decision is not None else meta["as_of"]
-        if cash is not None and (force_deploy or is_midweek_check_day(day, signal_csv)):
-            ranking = latest_ranking(meta["as_of"], signal_csv)
-            cand = list(ranking.loc[pd.to_numeric(ranking["Rank"], errors="coerce") <= DEPLOY_MAX_RANK, "Symbol"].astype(str))
-            blocked = {**earnings_blocked(cand, meta["as_of"]), **earnings_stop_blocked(meta["as_of"])}
+        if not (force_deploy or is_midweek_check_day(day, signal_csv)):
+            return orders, meta, targets
+        ranking = latest_ranking(meta["as_of"], signal_csv)
+        cand = list(ranking.loc[pd.to_numeric(ranking["Rank"], errors="coerce") <= DEPLOY_MAX_RANK, "Symbol"].astype(str))
+        blocked = {**earnings_blocked(cand, meta["as_of"]), **earnings_stop_blocked(meta["as_of"])}
+        # Mon/Wed sell rule on every actual position (t188u): worse than rank 20 / not ranked -> sold, refilled 1-for-1.
+        sig_day = pd.read_csv(signal_csv, usecols=["Date", "Symbol"])
+        listed = set(sig_day.loc[sig_day["Date"].astype(str).str[:10] == str(meta["as_of"])[:10], "Symbol"].astype(str).str.upper())
+        ranked = set(ranking["Symbol"].astype(str).str.upper())
+        acct_px = {**latest_prices(sorted(positions), signal_csv), **dict(zip(ranking["Symbol"], ranking["Close"])),
+                   **dict(zip(orders["Symbol"].astype(str), pd.to_numeric(orders["Price"], errors="coerce"))), **live_prices}
+        acct_px = {k: v for k, v in acct_px.items() if _safe_number(v, default=None)}
+        missing = sorted(s for s in _clean_positions(positions) if s not in ranked and s not in acct_px)
+        if missing and len(ranking):                # e.g. a stock no longer in the list: Alpaca market data (read-only)
+            acct_px.update(current_prices(missing))
+        orders, exits = build_account_exit_orders(orders, positions, account_size, ranking, listed=listed, blocked=blocked,
+                                                  fractional=fractional, prices=acct_px)
+        meta["account_exits"] = exits
+        if exits["sold"]:
+            meta["source"] += "+exits"
+            meta["invested"] = None
+        if cash is not None:
             orders, info = build_cash_deploy_orders(orders, positions, account_size, cash, ranking, blocked=blocked,
                                                     fractional=fractional, prices=live_prices)
             meta["cash_deploy"] = info
@@ -2297,9 +2445,10 @@ def reconcile_positions(target_source="auto", tolerance_pct=1.0, symbols=None):
     "couldn't check" is never reported as drift). Never raises.
     """
     cols = ["Symbol", "Target_Weight_%", "Actual_Weight_%", "Diff_pp", "Shares_Held", "Status"]
-    if str(target_source).endswith("+cash"):
-        # A Mon/Wed check that also invested spare cash in stocks outside the strategy's holdings: the account
-        # deliberately differs from Strategy_Weight until Friday, so there is nothing to reconcile against (like hold).
+    if str(target_source).endswith(("+cash", "+exits")):
+        # A Mon/Wed check that also invested spare cash in stocks outside the strategy's holdings, or sold / refilled
+        # account positions (sell rule on every position): the account deliberately differs from Strategy_Weight until
+        # Friday, so there is nothing to reconcile against (like hold).
         return pd.DataFrame(columns=cols), True
     try:
         targets, meta = load_targets(target_source)
@@ -2364,7 +2513,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
       holdings are bought up, overweight ones trimmed, and a holding within 1 percentage point of
       its target is not traded. A pick the account does not own with earnings within 5 days is not
       bought (earnings rule). Non-target stocks are sold entirely (the exact shares held).
-      Mon/Wed (auto -> 'midweek' or 'hold') trade the strategy's swaps/exits, then invest the spare cash
+      Mon/Wed (auto -> 'midweek' or 'hold') trade the strategy's swaps/exits, then sell every other account position
+      ranked worse than 20 or not ranked, refilled 1-for-1 from the top 10 not held (build_account_exit_orders), then invest the spare cash
       (cash above 1% of equity) in the top-10 stocks NOT held, the rest topping up ranks 1-3 to the 19.8% cap
       (build_cash_deploy_orders); other held stocks are not topped up or trimmed. Friday is unchanged.
     - Caps total BUY spending at Alpaca's BUYING POWER less a 1% cushion via
@@ -2440,6 +2590,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         print(f"  Catch-up in regular hours: sized at current prices ({len(live)} quotes)")
     orders, meta, targets = plan_orders(target, equity, positions, min_value=min_value, fractional=True,
                                         decision=decision, live_prices=live, cash=cash)
+    if meta.get("account_exits"):
+        print(f"  Mon/Wed sell rule (every position): {account_exit_text(meta['account_exits'])}")
     dep = meta.get("cash_deploy")
     if dep:
         print(f"  Mon/Wed spare cash: ${dep['spare']:,.2f} above {1 - dep['invested_level']:.1%} of equity -> "
@@ -2614,10 +2766,12 @@ def main(argv=None):
     inv = meta["invested"]
     print(f"Strategy: {meta['strategy']} | targets = {meta['source']} weights | as of {meta['as_of']} "
           f"(last weekly rebalance {meta['last_rebalance']}, last decision {meta['last_decision']}) | "
-          f"invested {f'{inv:.0%}' if inv is not None else ('holdings unchanged + spare cash' if meta['source'].endswith('+cash') else 'unchanged (hold)')})")
+          f"invested {f'{inv:.0%}' if inv is not None else ('holdings unchanged except the Mon/Wed sells + spare cash' if '+' in meta['source'] else 'unchanged (hold)')})")
     if meta["source"].startswith("midweek"):
         for act, m in zip(meta["swaps"]["Action"], meta["swaps"]["Message"]):
             print(("MID-WEEK EXIT: " if act == "SELL" else "MID-WEEK SWAP: ") + m)
+    if meta.get("account_exits"):
+        print(f"MON/WED SELL RULE (every account position): {account_exit_text(meta['account_exits'])}")
     dep = meta.get("cash_deploy")
     if dep:
         print(f"MON/WED SPARE CASH: cash ${dep['cash']:,.2f}, spare ${dep['spare']:,.2f} (keeps {1 - dep['invested_level']:.1%} "

@@ -69,10 +69,12 @@ def rules_text():
             + (f"- **{days} swap:** if a stock that is not held ranks in the top {SWAP_TOP} and a held stock has "
                f"fallen below rank {MIDWEEK['exit_below']}, the worst-ranked held stock is sold and the new one bought for "
                "the same dollar amount (repeated while both are true; no sector limit).\n" if SWAP_TOP else "")
-            + (f"- **{days} sell rule:** {'after the swaps, ' if SWAP_TOP else ''}any holding ranked worse than {EXIT_BELOW} "
-               "(or no longer ranked) is always sold, worst rank first, "
-               + (f"and replaced 1-for-1 by the best-ranked top-{EXIT_TO_TOP} stock not held (same dollars; earnings rule); "
-                  "if none is left the cash goes to the spare-cash rule below.\n" if EXIT_TO_TOP else
+            + (f"- **{days} sell rule:** {'after the swaps, ' if SWAP_TOP else ''}every position in the account (the "
+               f"strategy's and any other) ranked worse than {EXIT_BELOW}, or with no rank (score 0 or below, or not in the "
+               "stock list), is always sold in full, worst rank first (one sell order per stock), "
+               + (f"and replaced 1-for-1 by the best-ranked top-{EXIT_TO_TOP} stock the account does not hold (same dollars; "
+                  "earnings rule, no buy back after a pre-earnings stop sale); if none is left the cash goes to the "
+                  "spare-cash rule below.\n" if EXIT_TO_TOP else
                   "and the cash goes to the spare-cash rule below.\n") if EXIT_BELOW else "")
             + (f"- **{days} spare cash:** after the {'swaps and ' if SWAP_TOP else ''}sells, the account's cash above {1 - LIVE_INVESTED:.0%} of equity "
                f"(e.g. a deposit, an exit or a pre-earnings stop sale) buys the top-{DEPLOY_MAX_RANK} stocks the account does "
