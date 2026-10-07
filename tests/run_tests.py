@@ -63,9 +63,10 @@
                          dip / ATR dip buys / earnings drift / risk parity / VWAP / ATR stops (replay = live, stop + refill, open
                          sales) by hand, fake bars (no download), live rules =
                          live Strategy_Weight, no live file / WINNER change
-  test_earnings_stop.py  live pre-earnings 3x ATR stop (mocked broker, quotes and bars): window through the reaction
-                         day, sessions, stop = engine ATR, one whole-share limit SELL (extended_hours outside regular
-                         hours), fraction to 9 AM, never twice, fails closed; dry run sends and writes nothing
+  test_earnings_stop.py  live earnings-day 5% drop stop (mocked broker, quotes and bars): AM / PM / unknown / weekend
+                         earnings days and sessions, previous-close reference, exactly 5%, one whole-share extended-hours
+                         limit SELL, fraction to 9 AM, never twice, no buy back, fails closed, 30 s loop + pid lock;
+                         dry run sends and writes nothing
   test_safety_guards.py  20% max weight per stock (extra stays cash); mocked: BUYs over 20% of equity refused (backstop);
                          a missed scheduled decision gets one run-log warning while it waits
   test_tax_lots.py       tax view, hand-worked cases: fresh start at TAX_START (older activity, prior years and

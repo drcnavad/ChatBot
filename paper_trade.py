@@ -47,7 +47,7 @@ Targets come from Reports/strategy_picks.csv (written by main_signal_analysis.ip
 Mon/Wed spare cash (live only, approved 2026-10-06, leftover rule 2026-10-07): after the sells/replacements, the account's actual
 cash above 1% of equity (e.g. a deposit, a cash exit) buys the top-10 stocks the account does NOT hold in the latest ranking
 (score > 0, rank order), each at its latest rule weight; what is left tops up ranks 1-3 (held or not), rank 1 to the 19.8%
-cap first, then 2, then 3; the rest stays cash (earnings rule, pre-earnings stop no-buy-back and the cap apply throughout).
+cap first, then 2, then 3; the rest stays cash (earnings rule, earnings-day stop no-buy-back and the cap apply throughout).
 Other held stocks get no top-up or trim; Friday's rebalance is unchanged. See build_cash_deploy_orders().
 Mon/Wed sell rule on EVERY account position (Chirag, t188u, 2026-10-07), between the two: an actual Alpaca position ranked
 worse than 20 (or with no rank: score 0 or below, or not in the stock list) is sold in full, worst first, and replaced 1-for-1
@@ -56,8 +56,8 @@ to the spare-cash step. A stock the strategy already sells keeps one SELL row. S
 real account (read only): python paper_trade.py --from-account [--midweek-preview]
 Earnings rule (backtest_engine.WINNER["earnings_block_days"] = 5): the targets leave out stocks not held with earnings
 within 5 calendar days. The live planner adds its own check for the LIVE account: a pick with earnings within 5 days is
-not newly bought or topped up (this rule never sells; the pre-earnings stop, earnings_stop.py, may). Friday (t191u,
-2026-10-07): a NEW pick (account holds none) blocked by earnings or a pre-earnings stop sale gives its weight to the next
+not newly bought or topped up (this rule never sells; the earnings-day stop, earnings_stop.py, may). Friday (t191u,
+2026-10-07): a NEW pick (account holds none) blocked by earnings or an earnings-day stop sale gives its weight to the next
 best-ranked eligible stock not already picked, down to rank 20 (FRIDAY_SUB_MAX_RANK), so the account still ends with 10
 stocks; cash only if none is left. Held picks keep the old behaviour. See substitute_blocked_picks().
 """
@@ -77,7 +77,7 @@ SIGNAL_CSV = os.path.join(PROJECT_ROOT, "Reports", "signal_analysis.csv")
 CHANGES_CSV = os.path.join(PROJECT_ROOT, "Reports", "strategy_changes.csv")
 ORDER_LOG_CSV = os.path.join(PROJECT_ROOT, "Reports", "live_orders_log.csv")
 PENDING_ORDERS_JSON = os.path.join(PROJECT_ROOT, "Reports", "live_pending_orders.json")
-EARNINGS_STOP_STATE = (os.environ.get("STOCK_ANALYSIS_EARNINGS_STOP_STATE")      # the pre-earnings stop's sales (earnings_stop.py);
+EARNINGS_STOP_STATE = (os.environ.get("STOCK_ANALYSIS_EARNINGS_STOP_STATE")      # the earnings-day stop's sales (earnings_stop.py);
                        or os.path.join(PROJECT_ROOT, "Reports", "earnings_stop_state.json"))   # the tests point it elsewhere
 # NOTE (2026-09-28): LIVE account (real money). paper_* names are historical, kept so the
 # pipeline keeps working unchanged. paper=False, ALPACA_LIVE_* keys, live- order ids,
@@ -94,7 +94,7 @@ CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills
 # above 1% of equity buys the top-10 stocks the account does NOT hold (latest ranking, pure rank), each at its latest rule
 # weight (Provisional_Weight), and what is left tops up ranks 1-3 (held or not): rank 1 up to the 19.8% cap first, then 2,
 # then 3. Ranks 11-20 are not bought; cash no stock can take stays cash. Other held stocks are never traded by it.
-# Friday replacement (Chirag, t191u, 2026-10-07): a new pick blocked by earnings / a pre-earnings stop sale gives its
+# Friday replacement (Chirag, t191u, 2026-10-07): a new pick blocked by earnings / an earnings-day stop sale gives its
 # weight to the next best-ranked eligible stock not already picked, never worse than this rank (else that weight is cash).
 FRIDAY_SUB_MAX_RANK = 20
 DEPLOY_MAX_RANK = 10     # spare-cash buys of stocks not held: top 10 only
@@ -396,8 +396,8 @@ def earnings_blocked(symbols, as_of, earnings_csv=None):
 
 
 def earnings_stop_blocked(as_of, state_json=None):
-    """{SYMBOL: note} for stocks the live pre-earnings stop sold (earnings_stop.py, Reports/earnings_stop_state.json) whose
-    earnings reaction day is on or after `as_of`: not bought back by any live run until after that day (the forward
+    """{SYMBOL: note} for stocks the live earnings-day stop sold (earnings_stop.py, Reports/earnings_stop_state.json) whose
+    last earnings-day session is on or after `as_of`: not bought back by any live run until after that day (the forward
     test's no-buy-back rule). {} when no stop has fired; an unreadable file prints a warning and blocks nothing."""
     try:
         with open(state_json or EARNINGS_STOP_STATE) as f:
@@ -405,10 +405,10 @@ def earnings_stop_blocked(as_of, state_json=None):
     except FileNotFoundError:
         return {}
     except (OSError, ValueError, AttributeError) as e:
-        print(f"WARNING: pre-earnings stop sales not read ({e}) - no buy-back was blocked")
+        print(f"WARNING: earnings-day stop sales not read ({e}) - no buy-back was blocked")
         return {}
     d = str(pd.Timestamp(str(as_of)).date())
-    return {str(k).split("|")[0].upper(): f"sold by the pre-earnings stop, no buy back until after {pd.Timestamp(v['react']):%a %b %d}"
+    return {str(k).split("|")[0].upper(): f"sold by the earnings-day stop, no buy back until after {pd.Timestamp(v['react']):%a %b %d}"
             for k, v in sold.items() if isinstance(v, dict) and v.get("react") and d <= str(v["react"])}
 
 
@@ -729,7 +729,7 @@ def build_account_exit_orders(orders, positions, equity, ranking, listed=None, b
     stock list = not in `listed`), is sold in full, worst first (no rank first, then the worst rank). Each sale is replaced
     1-for-1 with the same dollars (capped at WINNER['max_weight'] x 99% of equity) by the best-ranked stock in the top
     `refill_top` (WINNER['midweek_exit_to_top'], 10) that the account does not hold after today's orders and that is not
-    blocked (`blocked`: earnings within 5 days, pre-earnings stop sale). With no refill left (or a refill under
+    blocked (`blocked`: earnings within 5 days, earnings-day stop sale). With no refill left (or a refill under
     max(min_pct x equity, min_usd)) the cash goes to the spare-cash step. A stock the strategy already sells in full
     keeps its one SELL row (never a second sell); a partial strategy SELL becomes a full sale; a HOLD row becomes the SELL.
     An empty ranking (no data for the day) sells nothing. Shares are rounded DOWN (2 decimals when fractional)."""
@@ -836,7 +836,7 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
       2. What is left tops up ranks 1-`topup_ranks` (1-3), held or not: rank 1 is filled up to the cap first, then rank 2,
          then rank 3 (a held stock counts at shares after today's orders x price). Ranks 11-20 are never bought.
     Cap: WINNER['max_weight'] x 99% of equity (19.8%) per stock, including what is already held. Names sold by today's
-    swaps/exits and names in `blocked` (earnings within 5 days, pre-earnings stop sale) are skipped. An order below
+    swaps/exits and names in `blocked` (earnings within 5 days, earnings-day stop sale) are skipped. An order below
     max(min_pct x equity, min_usd) is not made; whatever no stock can take stays in cash. Stocks outside ranks 1-3 that
     are held get no order (no top-up, no trim). Shares are rounded DOWN (2 decimals when fractional, else whole shares).
     A top-up of a stock with a HOLD row (or today's swap BUY row) changes that row, so each symbol has one order."""
@@ -1043,7 +1043,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
         check |= set(ranking.loc[pd.to_numeric(ranking["Rank"], errors="coerce") <= FRIDAY_SUB_MAX_RANK, "Symbol"].astype(str))
     blocked = {**earnings_blocked(sorted(check), meta["as_of"]), **earnings_stop_blocked(meta["as_of"])}
     if ranking is not None:
-        # A new pick blocked by earnings / a pre-earnings stop sale: the next eligible stock (rank <= 20) takes its weight.
+        # A new pick blocked by earnings / an earnings-day stop sale: the next eligible stock (rank <= 20) takes its weight.
         targets, statuses, blocked, subs = substitute_blocked_picks(targets, positions, ranking, blocked, statuses,
                                                                     prices={**prices, **live_prices})
         meta["substitutions"] = subs
@@ -1056,7 +1056,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
 
 def substitute_blocked_picks(targets, positions, ranking, blocked, statuses=None, prices=None, max_rank=None):
     """Friday rebalance (Chirag, t191u, 2026-10-07): a NEW pick (the account holds none of it) that is blocked - earnings
-    within the earnings window, or no buy back after a pre-earnings stop sale (`blocked` {SYMBOL: note}) - does not leave
+    within the earnings window, or no buy back after an earnings-day stop sale (`blocked` {SYMBOL: note}) - does not leave
     its weight in cash: the next best-ranked eligible stock not already in the targets takes it. Candidates come from the
     latest ranking (`ranking`, see latest_ranking: score above 0), best rank first, down to rank `max_rank`
     (FRIDAY_SUB_MAX_RANK, 20), and must not be blocked themselves and must have a price. The replacement gets the skipped
@@ -2142,7 +2142,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     # Completion ids use the row's EVENING date, so a retry on any later day still finds them.
     fill_date = str(pend.get("evening_date") or _today_ct().date().isoformat()).replace("-", "")
     today = _today_ct().date().isoformat()
-    stop_sold = earnings_stop_blocked(today)   # sold by the pre-earnings stop: no buy back until after the reaction day
+    stop_sold = earnings_stop_blocked(today)   # sold by the earnings-day stop: no buy back until after its last earnings-day session
     results = []
     px = {}        # results row number -> price columns for the order log (quote, limit, fill, slippage)
     to_retry = []  # rows kept for the next fill check: FAILED completions, cash waits, BUY rests, bad quotes
@@ -2562,7 +2562,7 @@ def reconcile_positions(target_source="auto", tolerance_pct=1.0, symbols=None):
     except Exception:
         pass
     target_w = {str(s): float(w) for s, w in zip(targets["Symbol"].astype(str), targets["Weight"])}
-    for s in earnings_stop_blocked(_today_ct().date()):   # sold by the pre-earnings stop: 0% is expected, not drift
+    for s in earnings_stop_blocked(_today_ct().date()):   # sold by the earnings-day stop: 0% is expected, not drift
         target_w.pop(s, None)
     rows = []
     for sym in syms:
@@ -2604,7 +2604,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
       holdings are bought up, overweight ones trimmed, and a holding within 1 percentage point of
       its target is not traded. A pick the account does not own with earnings within 5 days is not
       bought (earnings rule); its weight goes to the next eligible stock ranked up to 20 that is not already a pick
-      (substitute_blocked_picks, also for a pre-earnings stop sale). Non-target stocks are sold entirely (the exact shares held).
+      (substitute_blocked_picks, also for an earnings-day stop sale). Non-target stocks are sold entirely (the exact shares held).
       Mon/Wed (auto -> 'midweek' or 'hold') trade the strategy's swaps/exits, then sell every other account position
       ranked worse than 20 or not ranked, refilled 1-for-1 from the top 10 not held (build_account_exit_orders), then invest the spare cash
       (cash above 1% of equity) in the top-10 stocks NOT held, the rest topping up ranks 1-3 to the 19.8% cap

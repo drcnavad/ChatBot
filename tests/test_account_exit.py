@@ -1,7 +1,7 @@
 """Mon/Wed sell rule on EVERY actual account position (Chirag, t188u, 2026-10-07): after the strategy's own mid-week orders,
 any Alpaca position ranked worse than 20 - or with no rank (score 0 or below, or not in the stock list) - is sold in full,
 worst first, and replaced 1-for-1 (same dollars, 19.8% cap) by the best top-10 stock the account does not hold (earnings /
-pre-earnings-stop blocks apply); no refill -> the cash goes to the spare-cash step. One SELL row per stock. Friday and
+earnings-day-stop blocks apply); no refill -> the cash goes to the spare-cash step. One SELL row per stock. Friday and
 non-check days are unchanged. Hand-worked cases with fake CSVs; no network, no orders.
 Run: python tests/run_tests.py  (or python tests/test_account_exit.py)"""
 import os
@@ -77,7 +77,7 @@ check("orders: every SELL before every BUY, one row per stock", list(o["Side"]).
 # 4) blocks: an earnings / stop-blocked top-10 stock is not bought; the next best one is
 pos = {**{f"S{i:02d}": 100 for i in (2, 4, 5, 6, 7, 8, 9)}, "S23": 50}           # S01, S03, S10 not held
 o, info = pt.build_account_exit_orders(pt.build_hold_orders(pos, PX), pos, EQ, R, prices=PX, fractional=True,
-                                       blocked={"S01": "earnings Thu Oct 08, in 1 day", "S03": "sold by the pre-earnings stop"})
+                                       blocked={"S01": "earnings Thu Oct 08, in 1 day", "S03": "sold by the earnings-day stop"})
 check("S01 (earnings) and S03 (stop sale) skipped -> S23 replaced by S10 (rank 10)",
       info["replaced"] == [("S23", 23, "S10", 10, 5_000.0)] and [s for s, _ in info["skipped"]] == ["S01", "S03"]
       and "S01" not in set(o["Symbol"]) and "S03" not in set(o["Symbol"]), (info["replaced"], info["skipped"]))
@@ -119,7 +119,7 @@ check("summary text names the rule and the positions with no rank", "no position
 
 # --- end to end through plan_orders with fake report files ---
 tmp = tempfile.mkdtemp()
-pt.EARNINGS_STOP_STATE = os.path.join(tmp, "no_stop_state.json")      # no pre-earnings stop sales
+pt.EARNINGS_STOP_STATE = os.path.join(tmp, "no_stop_state.json")      # no earnings-day stop sales
 picks, sig, mid = (os.path.join(tmp, n) for n in ("picks.csv", "sig.csv", "mid.csv"))
 pd.DataFrame([{"As_Of": "2026-10-07", "Last_Rebalance": "2026-10-02", "Last_Decision": "2026-10-02", "Strategy": "C6",
                "Symbol": "S01", "Strategy_Weight": 0.1, "Provisional_Weight": 0.10, "Close": 100.0}]).to_csv(picks, index=False)

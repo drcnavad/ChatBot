@@ -1,7 +1,7 @@
 """Mon/Wed spare-cash rule (live only, approved 2026-10-06; leftover rule 2026-10-07): after the mid-week swaps/exits, the
 account's cash above 1% of equity buys the top-10 stocks NOT held (latest ranking, rank order) at their rule weights; what
 is left tops up ranks 1-3 (held or not), rank 1 to the 19.8% cap first, then 2, then 3; ranks 11-20 are never bought; other
-held stocks get no order; earnings / pre-earnings-stop blocks; an order under max($100, 1% of equity) is not made; cash no
+held stocks get no order; earnings / earnings-day-stop blocks; an order under max($100, 1% of equity) is not made; cash no
 stock can take stays cash. Friday's rebalance (exactly the top-10 targets, every other stock sold) is unchanged.
 Hand-worked cases with fake CSVs; no network, no orders.
 Run: python tests/run_tests.py  (or python tests/test_midweek_cash_deploy.py)"""

@@ -73,15 +73,15 @@ def rules_text():
                f"strategy's and any other) ranked worse than {EXIT_BELOW}, or with no rank (score 0 or below, or not in the "
                "stock list), is always sold in full, worst rank first (one sell order per stock), "
                + (f"and replaced 1-for-1 by the best-ranked top-{EXIT_TO_TOP} stock the account does not hold (same dollars; "
-                  "earnings rule, no buy back after a pre-earnings stop sale); if none is left the cash goes to the "
+                  "earnings rule, no buy back after an earnings-day stop sale); if none is left the cash goes to the "
                   "spare-cash rule below.\n" if EXIT_TO_TOP else
                   "and the cash goes to the spare-cash rule below.\n") if EXIT_BELOW else "")
             + (f"- **{days} spare cash:** after the {'swaps and ' if SWAP_TOP else ''}sells, the account's cash above {1 - LIVE_INVESTED:.0%} of equity "
-               f"(e.g. a deposit, an exit or a pre-earnings stop sale) buys the top-{DEPLOY_MAX_RANK} stocks the account does "
+               f"(e.g. a deposit, an exit or an earnings-day stop sale) buys the top-{DEPLOY_MAX_RANK} stocks the account does "
                "not hold, in rank order, each at its current rule weight; what is left tops up ranks "
                f"1-{TOPUP_RANKS} (held or not): rank 1 first, up to the cap, then rank 2, then rank 3"
                + (f" (max {MAX_WEIGHT * LIVE_INVESTED:.1%} of equity per stock)" if MAX_WEIGHT else "")
-               + ("; earnings rule" if EARNINGS else "") + ", no buy back after a pre-earnings stop sale. Cash no stock can "
+               + ("; earnings rule" if EARNINGS else "") + ", no buy back after an earnings-day stop sale. Cash no stock can "
                f"take, and any order under ${DEPLOY_MIN_USD:,.0f} or {DEPLOY_MIN_PCT:.0%} of equity (whichever is larger), "
                f"stays in cash. Other held stocks are not topped up or trimmed; Friday rebalances everything as usual.\n"
                if MIDWEEK else "")
@@ -89,15 +89,17 @@ def rules_text():
                "calendar days; on Friday its slot goes to the next eligible stock, mid-week it is just not bought. "
                "A held stock is not topped up before them.\n" if EARNINGS else "")
             + (f"- **Friday replacement:** a new pick the account does not hold that is blocked (earnings within {EARNINGS} days, "
-               "or no buy back after a pre-earnings stop sale) gets no cash slot: the next best-ranked eligible stock that is not "
+               "or no buy back after an earnings-day stop sale) gets no cash slot: the next best-ranked eligible stock that is not "
                f"already a pick (score above 0, not blocked, down to rank {FRIDAY_SUB_MAX_RANK}) is bought at the blocked "
                f"pick's weight{f' (max {MAX_WEIGHT * LIVE_INVESTED:.1%})' if MAX_WEIGHT else ''}, so the account still ends "
                f"with {N_PICKS} stocks; only if none is left does that weight stay in cash.\n" if EARNINGS else "")
-            + "- **Pre-earnings stop:** a held stock with earnings within 7 calendar days is sold if its price falls to its "
-            "highest close since bought - 3 × ATR(14), from 7 days before the report through the reaction day (checked "
-            "every 10 minutes in the pre-market, regular and after-hours sessions; in regular hours every share at once, "
-            "outside them the whole shares and the fraction at the 9 AM CT check). One sale per report; the cash waits for "
-            "the next scheduled run, and the stock is not bought back until after its reaction day.\n"
+            + "- **Earnings-day stop:** on a held stock's earnings day the price is checked every 30 seconds in the "
+            "pre-market, regular and after-hours sessions; if it is ever 5% or more below the previous trading day's close, "
+            "all whole shares are sold once with a limit at the bid - 0.05% (extended hours allowed; the fraction at the "
+            "9 AM CT check). Earnings day = the session where the reaction happens: a before-open report is watched that "
+            "day; an after-close (or unknown-time) report that day and the next day's pre-market and regular session "
+            "(then measured against the earnings-day close). The cash waits for the next scheduled run, and the stock is "
+            "not bought back until after its last earnings-day session.\n"
             + "- **Orders:** sells go first. Every order is a limit at the live quote: buy at the ask + 0.05%, sell at the "
             "bid - 0.05% (no market orders). An order whose quote is stale or wider than 0.5% waits for the next 9 AM CT "
             "check. The 2:30 PM CT run trades in market hours (2-decimal shares); from 5 minutes before the close, "

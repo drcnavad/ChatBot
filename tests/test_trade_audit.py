@@ -1,6 +1,6 @@
 """Trade audit (trade_audit.py + the Details panel), hand-worked cases. Pure functions with fake orders / fills, then the
 app with a FAKE Alpaca account (GET only, no network, no keys):
-  - who sent an order (bot decision / fill check / rest / replacement / pre-earnings stop / manual) and its plan price
+  - who sent an order (bot decision / fill check / rest / replacement / earnings-day stop / manual) and its plan price
     from the client order id (ids cut at 48 characters not trusted)
   - slippage vs the plan price in % and $ (+ = it cost money) for buys and sells; the ledger and its summary
   - round trips: FIFO buy price / sell price per sale, partial lots, a sale with no purchase in the history
@@ -55,7 +55,7 @@ check("source: decision / fill check / rest / replacement / stop / manual",
                                     "live-rest-20261002-BUY-AMD-1-63391", "live-fill-20261002-BUY-AMD-1-63391-c",
                                     "live-stop-20261029-BE-1", "fa38dbe4-aa57-4b2d-8fbe-1621a63967d9", "")]
       == ["bot: decision", "bot: fill check", "bot: rest that did not fit", "bot: replacement at a fresh quote",
-          "pre-earnings stop", "manual / other", "manual / other"])
+          "earnings-day stop", "manual / other", "manual / other"])
 check("plan price from the id: TWLO 29458 -> $294.58, FIG fill check 2136 -> $21.36, -r2 / -c suffixes kept",
       ta.plan_price("live-20261002-BUY-TWLO-19-29458") == 294.58 and ta.plan_price("live-fill-20261002-SELL-FIG-5-2136") == 21.36
       and ta.plan_price("live-fill-20261002-SELL-FIG-5-2136-r2") == 21.36 and ta.plan_price("live-fill-20261002-SELL-FIG-5-2136-c") == 21.36)

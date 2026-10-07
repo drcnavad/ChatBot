@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Pre-earnings 3.5x ATR stop (LIVE): every 10 min (StartInterval), at login/boot (RunAtLoad) and once on wake.
-     earnings_stop.py --scheduled acts only on NYSE trading days in the pre-market (3:00-8:30 AM CT), regular hours and
-     after hours (until 7:00 PM CT, 4:00 PM CT on early-close days); otherwise it prints one "idle" line. It sells a held
-     stock with earnings within 7 days at or below its stop (limit at the bid: every share in regular hours; outside them
-     the whole shares, the fraction at 9 AM CT), once per report. Installed by launchd/install_schedule.sh. -->
+<!-- Earnings-day 5% drop stop (LIVE, t192u; replaced the pre-earnings ATR stop on Oct 7, 2026): launchd starts
+     earnings_stop.py with the loop flag every 5 min (StartInterval) and at login/boot (RunAtLoad). The loop runs only while a held
+     stock is in an earnings-day session (AM report: that day; PM/unknown: that day + the next pre-market and regular
+     session; 3:00 AM - 7:00 PM CT on trading days), checks every 30 seconds, sells the whole shares once if the price is
+     5% or more below the previous close (bid-based limit, extended hours), and exits when nothing is left to watch.
+     One loop at a time (pid lock). Quiet days: a quick look at the earnings file, no broker call.
+     Installed by launchd/install_schedule.sh. -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -13,7 +15,7 @@
     <array>
         <string>/opt/anaconda3/bin/python</string>
         <string>/Users/drcnavad/Desktop/Stock Analysis/earnings_stop.py</string>
-        <string>--scheduled</string>
+        <string>--loop</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/drcnavad/Desktop/Stock Analysis</string>
@@ -23,7 +25,7 @@
         <string>/opt/anaconda3/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
     <key>StartInterval</key>
-    <integer>600</integer>
+    <integer>300</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>

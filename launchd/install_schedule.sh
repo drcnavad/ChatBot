@@ -7,8 +7,9 @@
 #   com.stockanalysis.forwardtest     Mon-Fri 4:15 PM CT, on wake: forward_test.py --record (one row per trading day in
 #                                     Reports/forward_test_daily.csv; read-only GETs, never orders; + the paper
 #                                     strategies' days in Reports/forward_strategies*.csv from saved data + free daily bars)
-#   com.stockanalysis.earningsstop    every 10 min, at login, on wake: earnings_stop.py --scheduled (LIVE pre-earnings
-#                                     3.5x ATR stop; acts only 3:00 AM-7:00 PM CT on trading days, else one idle line)
+#   com.stockanalysis.earningsstop    every 5 min + at login: earnings_stop.py --loop (LIVE earnings-day 5% drop stop;
+#                                     30-second checks only while a held stock is in an earnings-day session, 3:00 AM-
+#                                     7:00 PM CT on trading days; one loop at a time; otherwise exits after a quick look)
 #   com.stockanalysis.tradeaudit      Mon-Fri 9:45 AM + 3:45 PM CT: trade_audit.py --write --log (read-only ledger, round
 #                                     trips, reconciliation + alerts to the run log; GET only, never orders)
 #   com.stockanalysis.dashboard-8502  always on (restarted if it stops): the app on http://localhost:8502

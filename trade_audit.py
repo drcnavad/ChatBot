@@ -4,7 +4,7 @@ the trading files' state: GET only through alpaca_paper.PaperAccount (/account, 
 /account/activities), the keys stay inside alpaca_paper.
 
   1. Order ledger (Reports/live_trade_ledger.csv): every order on the account, filled or not, with its source (the bot's
-     decision / fill check / rest / replacement / pre-earnings stop, or manual), type, time in force, the INTENDED price
+     decision / fill check / rest / replacement / earnings-day stop, or manual), type, time in force, the INTENDED price
      (the plan price the bot stamps into its client order id, live-...-<cents>), the limit, the average fill price and the
      slippage vs the plan (+ = it cost money) in % and $.
   2. Round trips (Reports/live_round_trips.csv): every sale matched to its purchase (FIFO, as Alpaca): buy date and
@@ -81,7 +81,7 @@ def order_source(cid):
     """Who sent an order, from its client order id (paper_trade._client_order_id / earnings_stop.stop_cid)."""
     cid = str(cid or "")
     if cid.startswith("live-stop-"):
-        return "pre-earnings stop"
+        return "earnings-day stop"
     if not cid.startswith("live-"):
         return "manual / other"
     if cid.endswith("-c"):

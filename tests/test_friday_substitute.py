@@ -1,5 +1,5 @@
 """Friday replacement (Chirag, t191u, 2026-10-07): a NEW pick (the account holds none) blocked by earnings within the
-window or by the no-buy-back after a pre-earnings stop sale gives its weight to the next best-ranked eligible stock not
+window or by the no-buy-back after an earnings-day stop sale gives its weight to the next best-ranked eligible stock not
 already picked (score above 0, not blocked, down to rank 20), so the account still ends with 10 stocks; cash only if
 none is left. Held picks with earnings keep the old behaviour (kept, not topped up). Mid-week is unchanged.
 Hand-worked cases with fake data; no network, no orders.
@@ -62,8 +62,8 @@ t, st, bl, info = pt.substitute_blocked_picks(T, HELD8, R, {"S01": "earnings Mon
 check("held S01 with earnings: no replacement (old behaviour)", info["replaced"] == [] and kept(t) == SYMS[:10], info)
 
 # 3) blocked candidates are skipped: rank 11 earnings, rank 12 stop sale -> rank 13; a stop-blocked new pick is replaced too
-blk = {"S10": "sold by the pre-earnings stop, no buy back until after Wed Oct 14",
-       "S11": "earnings Tue Oct 13, in 4 days", "S12": "sold by the pre-earnings stop, no buy back until after Thu Oct 15"}
+blk = {"S10": "sold by the earnings-day stop, no buy back until after Wed Oct 14",
+       "S11": "earnings Tue Oct 13, in 4 days", "S12": "sold by the earnings-day stop, no buy back until after Thu Oct 15"}
 t, st, bl, info = pt.substitute_blocked_picks(T, HELD8, R, blk, ST)
 check("stop-blocked new pick S10 (12%) -> S13 (S11 earnings, S12 stop sale skipped)",
       [(a, r) for a, _, _, r, *_ in info["replaced"]] == [("S10", "S13")] and info["replaced"][0][5] == 0.12
