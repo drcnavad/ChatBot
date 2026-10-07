@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Decision run: Mon-Fri 2:30 PM CT (30 min before the close), at login/boot (RunAtLoad), once on wake for a slot missed in sleep, and every
-     30 min (StartInterval) as a catch-up net. run_all.py --scheduled does work only when a decision is due: the
-     day's decision after 2:30 PM, or a missed one (Mac asleep/off) at the next regular session until the next
-     decision slot. Otherwise it prints one "idle:" line. A decision never runs twice (run_state last_decision + lock).
+<!-- The ONE daily run: Mon-Fri 2:30 PM CT (30 min before the close) and 3:05 PM CT, at login/boot (RunAtLoad), once
+     on wake for a slot missed in sleep, and every 30 min (StartInterval) as a catch-up net. run_all.py with trade and
+     scheduled options: (1) the decision only when one is due: the day's decision after 2:30 PM (Mon/Wed/Fri,
+     holiday-shifted), or a missed one at the next regular session until the next decision slot; a decision never runs
+     twice (run_state last_decision + lock); (2) from 3:05 PM CT, once per trading day, the after-close step
+     (run_all.daily_step): the signal refresh with the day's final bar on non-decision days (normally Tue/Thu), then the
+     forward test row; never 4:05-4:30 PM CT, when Alpaca books deposits. Otherwise it prints one "idle:" line.
      Installed by launchd/install_schedule.sh. -->
 <plist version="1.0">
 <dict>
@@ -30,6 +33,11 @@
         <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>30</integer></dict>
         <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>30</integer></dict>
         <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>30</integer></dict>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>5</integer></dict>
     </array>
     <key>StartInterval</key>
     <integer>1800</integer>

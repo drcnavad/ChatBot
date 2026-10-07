@@ -55,6 +55,9 @@
   test_single_universe.py  sector_mapping.py is the only stock list: no hardcoded ticker list / symbol map / C6-U<n>
                          tag / "NN stocks" count in any other .py or notebook; derived lists (engine, autofetch, call
                          counts, bar cache) equal sector_mapping's
+  test_daily_run.py      the one daily run (evening job, Mon-Fri 2:30 + 3:05 PM CT): the after-close step (signal refresh
+                         on non-decision days, then the forward test) once a day from 3:05 PM CT, never 4:05-4:30 PM CT;
+                         retired refresh / forward-test jobs; no order code in main_signal_analysis.ipynb
   test_decision_bars.py  decision days keep their 2:30 PM bar (saved as ratios, split-safe; never overwritten after the
                          trade; unchanged bars when nothing is saved or the file is bad)
   test_forward_test.py   forward testing from FORWARD_START (2026-10-02): per-stock panel cutoff / empty state;
@@ -93,7 +96,7 @@ TESTS = ["test_midweek_repro.py", "test_rank_audit.py", "test_runner.py", "test_
          "test_paper_trade_math_audit.py", "test_run_log.py", "test_rebalance_rules.py", "test_pipeline_watchdog.py", "test_alpaca_paper_reads.py",
          "test_live_rules_audit.py", "test_catch_up.py",
          "test_alpaca_api_names.py", "test_smart_orders.py", "test_live_weights.py", "test_band_hold.py", "test_single_universe.py",
-         "test_decision_bars.py", "test_refresh_job.py", "test_live_holdings.py", "test_benchmark_compare.py", "test_forward_test.py", "test_earnings_stop.py",
+         "test_decision_bars.py", "test_daily_run.py", "test_live_holdings.py", "test_benchmark_compare.py", "test_forward_test.py", "test_earnings_stop.py",
          "test_safety_guards.py", "test_tax_lots.py",
          "test_trade_audit.py",
          "test_midweek_exit_replace.py", "test_midweek_cash_deploy.py", "test_account_exit.py",

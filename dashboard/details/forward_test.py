@@ -22,13 +22,13 @@ def render_forward_test():
     start = f"{pd.Timestamp(FORWARD_START):%b %-d, %Y}"
     daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
     if (daily is None or daily.empty) and (values is None or values.empty):
-        st.info(f"Forward test started {start}; the first daily row is saved after the close (the 3:00 PM CT job on trading days, after the refresh).")
+        st.info(f"Forward test started {start}; the first daily row is saved after the close (the daily run's 3:05 PM CT step on trading days, after the signal refresh).")
         return
     board, values = _board(daily, values)
     marked = ""
     if values is not None and "Provisional" in values and values["Provisional"].fillna(False).astype(bool).any():
         marked = (f" {pd.Timestamp(values['Date'].max()):%a %b %-d}: each strategy's holdings from the last saved day marked "
-                  "to that day's close (provisional, no trades yet); the 3:00 PM CT job saves that day with its trades.")
+                  "to that day's close (provisional, no trades yet); the daily run's 3:05 PM CT step saves that day with its trades.")
     board = board.rename(columns={"Total return %": f"Total return since {start[:-6]} %"}).assign(
         Rank=lambda b: b["Rank"].map(lambda r: "–" if pd.isna(r) else str(r)))   # – = not ranked (comparison / no full week yet)
     sty = toned(toned(board, [c for c in board.columns if "return" in c]), ["Max drawdown %"], fn=drawdown_tone)
@@ -47,7 +47,7 @@ def render_forward_test():
                "day's close, pays 0.1% per trade side, holds no stock above 20%, invests at most 99% and earns nothing on cash; each "
                f"starts at 1.0 on the {start} close. Your account = time-weighted (deposits and withdrawals are not returns); QQQ / SPY = closes, "
                "comparison only (not ranked). Weekly = Friday to Friday; None / – = no full week yet." + acct
-               + marked + " Saved daily by the 3:00 PM CT job after the price refresh (no orders); each strategy's rule and holdings are in the next section.")
+               + marked + " Saved daily by the daily run's 3:05 PM CT step after the signal refresh (no orders); each strategy's rule and holdings are in the next section.")
 
 
 CONSENSUS_GOOD, CONSENSUS_WARN, EXIT_RANK = 3, 2, 30   # chip colors: held by 3+ / 2 of the 5; ranked worse than 30

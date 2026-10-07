@@ -61,12 +61,15 @@ State: Reports/run_state.json - the runner's memory (all values are ISO timestam
     decision_attempts .............. {decision, n, at}: launchd attempts of a decision that failed before trading
     last_superseded ................ last missed decision reported as skipped (run-log row written once)
     fill_problem_logged_on ......... date a failed fill check was last written to the run log (once a day)
+    last_daily_date ................ date the after-close step (signal refresh on non-decision days + forward test) ran
     last_trade_at .................. last --trade that actually submitted or staged orders
     last_fill_check_at ............. last fill check that sent orders
     last_run_at / last_mode ......... last invocation (any mode)
 Logs: Reports/logs/run_*.log (last 30 kept); launchd output: Reports/logs/launchd_*.log.
-Schedule (launchd, see launchd/install_schedule.sh): --trade --scheduled Mon-Fri 2:30 PM CT, --fill-check --scheduled
-Mon-Fri 9:00 AM CT; both also at login (RunAtLoad), once on wake for a slot missed in sleep, and every 30 min.
+Schedule (launchd, see launchd/install_schedule.sh): ONE daily run, --trade --scheduled Mon-Fri 2:30 PM + 3:05 PM CT:
+the decision (Mon/Wed/Fri at 2:30 PM, holiday-shifted), then from 3:05 PM CT the after-close step (daily_step: the
+signal refresh with the day's final bar on non-decision days, normally Tue/Thu, then the forward test). --fill-check
+--scheduled Mon-Fri 9:00 AM CT. Both also at login (RunAtLoad), once on wake for a slot missed in sleep, and every 30 min.
 By default no orders are placed. Alpaca account endpoints are only called with --sync-live (3 read-only GETs via
 alpaca_paper.py), --trade (paper_trade.auto_trade(): reads positions + equity, then submits extended-hours DAY
 limit orders to the LIVE account (REAL MONEY)) or --fill-check (paper_trade.complete_unfilled_orders(): checks the evening orders
@@ -95,9 +98,10 @@ FULL_AFTER = (14, 30)                  # 2:30 PM CT - the scheduled pipeline/tra
 SLOT_TEXT = f"{FULL_AFTER[0] - 12}:{FULL_AFTER[1]:02d} PM CT"
 NEWS_MIN_GAP_H = 24                    # NewsAPI free tier: 100 requests/day, one run = len(stock_symbols) (N_CALLS)
 BAR_FINAL_ET = (16, 30)                # the pipeline treats the daily bar as final after 4:30 PM ET (3:30 PM CT)
-REFRESH_BAR_ET = (16, 5)               # the 3:00 PM CT Tue/Thu refresh takes it at 4:05 PM ET (3:05 PM CT), see
+REFRESH_BAR_ET = (16, 5)               # the after-close step takes today's bar from 4:05 PM ET (3:05 PM CT), see
                                        # backtest_engine.AFTER_CLOSE_BAR_MIN
-REFRESH_MAX_WAIT_MIN = 15              # a refresh started up to 15 min early waits for that time instead of idling
+DEPOSIT_QUIET_CT = ((16, 5), (16, 30)) # 4:05-4:30 PM CT: Alpaca books deposits about 4:15 PM CT; the after-close step
+                                       # does not start then (it starts at 3:05 PM CT, or after 4:30 on a late wake)
 NB_TIMEOUT = 3600
 KEEP_LOGS = 30
 
@@ -617,9 +621,9 @@ def fill_check_allowed(now_ct, pending_path=None):
 
 
 def refresh_idle(now_ct):
-    """Why the weekday dashboard refresh (launchd refresh job: --quick --scheduled, never --trade) does nothing now, else
-    None. It refreshes only a trading day that is not a decision day (the 2:30 PM decision run refreshes those) and only
-    once the day's bar is final for it (after 4:05 PM ET = 3:05 PM CT), so it never overlaps a decision run."""
+    """Why the signal refresh (run_all.py --quick --scheduled, started by daily_step; never --trade) does nothing now,
+    else None. It refreshes only a trading day that is not a decision day (the 2:30 PM decision run refreshes those) and
+    only once the day's bar is final for it (after 4:05 PM ET = 3:05 PM CT), so it never overlaps a decision run."""
     if not is_trading_day(now_ct.date()):
         return "market closed today (weekend or holiday) - nothing to refresh"
     if decision_day(now_ct.date()):
@@ -629,15 +633,48 @@ def refresh_idle(now_ct):
     return None
 
 
-def refresh_wait_seconds(now_ct):
-    """Seconds a refresh started now should sleep before running: until 4:05 PM ET when that is at most
-    REFRESH_MAX_WAIT_MIN away on a trading day that is not a decision day (the launchd job starts at 3:00 PM CT), else 0."""
-    et = now_ct.astimezone(ET)
-    ready = et.replace(hour=REFRESH_BAR_ET[0], minute=REFRESH_BAR_ET[1], second=0, microsecond=0)
-    wait = (ready - et).total_seconds()
-    if wait <= 0 or wait > REFRESH_MAX_WAIT_MIN * 60 or not is_trading_day(now_ct.date()) or decision_day(now_ct.date()):
+DAILY_LOCK = os.path.join(REPORTS, ".daily_step.lock")
+
+
+def daily_idle(now_ct, state):
+    """Why the after-close step (daily_step) does nothing now, else None: it runs once per trading day, from 3:05 PM CT
+    (today's bar final for it, 4:05 PM ET), never 4:05-4:30 PM CT (Alpaca books deposits about 4:15 PM CT)."""
+    if not is_trading_day(now_ct.date()):
+        return "market closed today - no after-close step"
+    if str(state.get("last_daily_date") or "") >= now_ct.date().isoformat():
+        return "the after-close step (refresh + forward test) already ran today"
+    et, hm = now_ct.astimezone(ET), (now_ct.hour, now_ct.minute)
+    if (et.hour, et.minute) < REFRESH_BAR_ET:
+        return "the after-close step starts at 3:05 PM CT (today's final bar)"
+    if DEPOSIT_QUIET_CT[0] <= hm < DEPOSIT_QUIET_CT[1]:
+        return "4:05-4:30 PM CT: Alpaca books deposits about 4:15 PM CT - the after-close step waits until 4:30"
+    return None
+
+
+def daily_step(now_ct, run=subprocess.run):
+    """The after-close part of the one daily run (the evening job: Mon-Fri 3:05 PM CT, plus its wake / 30-min starts):
+      1. the signal refresh, run_all.py --quick --scheduled: main_signal_analysis.ipynb with today's final bar on a
+         trading day that is not a decision day (normally Tue/Thu; no paid APIs, never orders). On a decision day the
+         2:30 PM run already wrote the day's rows, so it idles;
+      2. the forward test, forward_test.py --record: the paper strategies' day + the account row (read-only GETs, never
+         orders), after the refresh, so both read the same Reports/signal_analysis.csv.
+    Each part writes its own run-log row on a problem; the day is marked done (run_state last_daily_date) once both
+    ran, so a failure waits for the next trading day (the forward test catches up missed strategy days). Returns 0."""
+    locked, why = acquire_trade_lock(DAILY_LOCK)
+    if not locked:
+        print(f"idle: {now_ct:%a %b %d %I:%M %p} CT - the after-close step is already running ({why})", flush=True)
         return 0
-    return wait
+    try:
+        print(f"after-close step {now_ct:%a %b %d %I:%M %p} CT: signal refresh (non-decision days), then forward test",
+              flush=True)
+        refresh = run([sys.executable, os.path.join(ROOT, "run_all.py"), "--quick", "--scheduled"], cwd=ROOT)
+        forward = run([sys.executable, os.path.join(ROOT, "forward_test.py"), "--record"], cwd=ROOT)
+        update_state(last_daily_date=now_ct.date().isoformat())
+        print(f"after-close step done (refresh exit {refresh.returncode}, forward test exit {forward.returncode})",
+              flush=True)
+    finally:
+        release_trade_lock(DAILY_LOCK)
+    return 0
 
 
 def fill_check_idle(now_ct):
@@ -856,8 +893,9 @@ def main(argv=None):
                    help="morning fill check: complete the previous evening's unfilled extended-hours orders "
                         "with regular-hours limit orders (no notebooks run; LIVE - real money)")
     p.add_argument("--scheduled", action="store_true",
-                   help="launchd runs: nothing due -> one 'idle:' line (no log); --trade retries a failed decision <= 3 times; "
-                        "alone (with --quick) = the weekday dashboard refresh after the close on non-decision days")
+                   help="launchd runs: nothing due -> one 'idle:' line (no log); --trade retries a failed decision <= 3 times "
+                        "and from 3:05 PM CT runs the after-close step (refresh + forward test) once a day; alone (with "
+                        "--quick) = that step's signal refresh on non-decision days")
     p.add_argument("--now", help=argparse.SUPPRESS)          # tests: pretend it is this CT time ("2026-09-28 15:40")
     p.add_argument("--no-resume", action="store_true", help="do not resume from a previous failed run's checkpoint")
     a = p.parse_args(argv)
@@ -899,15 +937,10 @@ def main(argv=None):
             if how == "wait":                                  # a missed decision: one run-log row, then quiet
                 state.update(report_waiting(D, gate_why, state))
             print(f"idle: {now:%a %b %d %I:%M %p} CT - {gate_why}", flush=True)   # launchd wake/interval run: no log
+            if a.now is None and not a.start and daily_idle(now, state) is None:   # the after-close step (real clock)
+                return daily_step(now)
             return 0
-    if a.scheduled and not a.trade and not a.fill_check:       # the weekday dashboard refresh: no orders, ever
-        wait = refresh_wait_seconds(now)
-        if wait and a.now is None and not a.dry_run:          # started at 3:00 PM CT: sleep until the bar is final
-            print(f"waiting {wait / 60:.0f} min for today's final daily bar (3:05 PM CT) ...", flush=True)
-            time.sleep(wait)
-            now = datetime.now(CT)
-        elif wait:                                             # tests / dry runs: plan as of the ready time
-            now = now + timedelta(seconds=wait)
+    if a.scheduled and not a.trade and not a.fill_check:       # the signal refresh (daily_step): no orders, ever
         idle = refresh_idle(now)
         if idle is None:                                       # the notebook takes today's bar from 4:05 PM ET
             import backtest_engine as be
@@ -1016,8 +1049,13 @@ def main(argv=None):
         finally:
             release_trade_lock(FILL_LOCK)
 
-    return _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_path, ckpt_write, ckpt_clear, clock,
-                     D, how)
+    rc = _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_path, ckpt_write, ckpt_clear, clock,
+                   D, how)
+    if a.trade and a.scheduled and a.now is None and not a.start:   # a decision run that ends after 3:05 PM CT
+        later = datetime.now(CT)
+        if daily_idle(later, load_state()) is None:
+            daily_step(later)
+    return rc
 
 
 def report_waiting(D, why, state):

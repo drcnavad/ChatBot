@@ -46,8 +46,9 @@ project's .env file (loaded automatically) or the environment:
   review. It is never applied automatically.
 
 The trade and fill-check launchd jobs (launchd/com.stockanalysis.evening / .morning) run pipeline_watchdog.py, so it
-rides along with each scheduled trade run - between runs the pipeline is idle and there is nothing to watch. The
-dashboard refresh job (.refresh) runs run_all.py directly: it sends no orders.
+rides along with each scheduled run - between runs the pipeline is idle and there is nothing to watch. The daily run's
+after-close step (run_all.daily_step: signal refresh + forward test) starts its own child processes and reports its own
+problems in the run log; it sends no orders.
 """
 import collections
 import json
