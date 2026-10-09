@@ -157,9 +157,10 @@ class PaperAccount:
                 return out
             params = {**params, "page_token": page[-1]["id"]}
 
-    def net_deposits(self):
-        """Lifetime deposits minus withdrawals (cash_flows), so the strategy's P&L can leave them out."""
-        return sum(f["amount"] for f in self.cash_flows())
+    def net_deposits(self, before=None):
+        """Lifetime deposits minus withdrawals (cash_flows) booked by `before` (UTC Timestamp; None = all), so the
+        strategy's P&L can leave them out."""
+        return sum(f["amount"] for f in self.cash_flows() if before is None or _flow_time(f) <= before)
 
     def snapshot(self):
         """{"equity", "flows", "at"}: the equity now and only the deposits already in it. The balance is read first, then
@@ -357,7 +358,7 @@ def write_snapshot(summary, positions, snapshot_csv=SNAPSHOT_CSV, history_csv=HI
     return snapshot_csv, history_csv
 
 def sync_paper_account(account=None, positions_csv=None, snapshot_csv=None, history_csv=None):
-    """Read the LIVE account (3 GET calls) and write my_positions.csv + the snapshot files. Returns the summary dict.
+    """Read the LIVE account (read-only GET calls) and write my_positions.csv + the snapshot files. Returns the summary dict.
     Paths default to the module settings (POSITIONS_CSV, SNAPSHOT_CSV, HISTORY_CSV), looked up at call time."""
     account = account or PaperAccount()
     positions_csv, snapshot_csv = positions_csv or POSITIONS_CSV, snapshot_csv or SNAPSHOT_CSV
@@ -366,8 +367,7 @@ def sync_paper_account(account=None, positions_csv=None, snapshot_csv=None, hist
     at = pd.Timestamp.now(tz="UTC")                       # deposits booked after the balance read are not in it yet
     positions = account.positions()
     write_positions_csv(positions, positions_csv)
-    net = sum(f["amount"] for f in account.cash_flows() if _flow_time(f) <= at)
-    write_snapshot(summary, positions, snapshot_csv, history_csv, net_deposits=net)
+    write_snapshot(summary, positions, snapshot_csv, history_csv, net_deposits=account.net_deposits(before=at))
     return {**summary, "Positions": int((positions["Qty"] != 0).sum()), "positions_csv": positions_csv}
 
 def main(argv=None):

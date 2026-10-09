@@ -99,6 +99,11 @@ check("FIFO: the Nov 27 sale of 12 = 10 bought $100 (+$200, +20%, 56 days) + 2 b
 check("the Dec 4 sale of 5 = the 3 left at $110 (-$60) + 2 with no purchase in the history (noted, no P/L)",
       close(rows[2]["Shares"], 3) and close(rows[2]["P/L $"], -60) and close(rows[3]["Shares"], 2) and pd.isna(rows[3]["Buy_Price"])
       and "before the account history" in rows[3]["Note"], rows[2:])
+rt = ta.round_trips([FL("AAA", "buy", 10, 100, "2026-09-15T15:00:00Z"), FL("AAA", "buy", 5, 150, "2026-10-05T15:00:00Z"),
+                     FL("AAA", "sell", 10, 140, "2026-10-09T15:00:00Z")])
+check("a sale of shares bought before Oct 2 is matched to them (FIFO over every fill), only sales from Oct 2 listed",
+      len(rt) == 1 and close(rt["Shares"].iloc[0], 10) and close(rt["Buy_Price"].iloc[0], 100) and close(rt["P/L $"].iloc[0], 400),
+      rt.to_dict("records"))
 
 # ---------------------------------------------------------------- 4. reconciliation
 picks = pd.DataFrame({"Symbol": ["AAA", "BBB", "EEE"], "Strategy_Weight": [0.5, 0.2, 0.1]})

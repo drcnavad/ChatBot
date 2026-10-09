@@ -406,5 +406,15 @@ inv3 = sum(q * PX[s] for s, q in broker3.pos.items()) / eq3 * 100
 check("Mon 10/5 exit: the account ends ~99% invested (<= 99%, >= 97%; the fractional rest goes at 9 AM)",
       97.0 <= inv3 <= 99.0 + 1e-6 and broker3.cash >= 0, (inv3, broker3.cash))
 
+# do-not-sell stock outside the targets: its planned sale is skipped BEFORE the trim fix, so no cash is counted from it
+tg = pd.DataFrame({"Symbol": ["P1", "P2", "P3", "P4", "P5"], "Weight": [0.178] * 5, "Price": 100.0})
+pos = {"SNOW": 100, **{f"P{i}": 185 for i in range(1, 5)}}                      # SNOW $10k kept, P1-P4 $18.5k each, $16k cash
+o = pt.build_orders(tg, 100_000, pos, {"SNOW": 100.0}, fractional=True, statuses={f"P{i}": "hold" for i in range(1, 6)},
+                    keep={"SNOW": "on your do-not-sell list"}).set_index("Symbol")
+check("do-not-sell SNOW is a SKIP row, and P1-P4 are trimmed so the P5 buy fits the real cash",
+      o.Side["SNOW"] == "SKIP (on your do-not-sell list)" and all(o.Side[f"P{i}"] == "SELL" for i in range(1, 5))
+      and o.loc[o.Side == "BUY", "Est_Value"].sum() * 1.01 <= 16_000 + o.loc[o.Side == "SELL", "Est_Value"].sum() + 1,
+      o[["Side", "Shares", "Est_Value"]].to_dict("index"))
+
 print("\nBAND-HOLD AUDIT OK" if not FAIL else f"\nBAND-HOLD AUDIT FAILURES ({len(FAIL)}): {FAIL}")
 sys.exit(1 if FAIL else 0)

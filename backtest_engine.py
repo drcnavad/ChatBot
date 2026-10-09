@@ -877,7 +877,7 @@ def _peer_median(r, symbols, sector_of, min_peers=3, leave_one_out=True):
             out[s] = med.where(peers.notna().sum(axis=1) >= min_peers)
     return pd.DataFrame(out, index=r.index)[symbols]
 
-def relative_strength(close_w, symbols=None, benchmark=None):
+def relative_strength(close_w, symbols=None, benchmark=None, eligible_w=None):
     """Point-in-time relative strength, all -100..100 cross-sectional scores.
 
     benchmark (default WINNER['rs_benchmark'], live = 'etf'):
@@ -890,12 +890,16 @@ def relative_strength(close_w, symbols=None, benchmark=None):
 
     stock_vs_sector: stock return - its sector ETF return; sector_vs_spy: sector ETF return - SPY return,
     each over 21/63/126 trading days, converted to cross-sectional percentile ranks per date and blended
-    60/40. Also returns Sector_RS_63 (sector ETF 63-day excess return vs SPY, in %) for display.
+    60/40. eligible_w (dates x symbols, build_technical's 'eligible'): each date ranks only the stocks eligible on it
+    (others NaN), so a stock still short of MIN_BARS never moves the others' percentiles (no look-ahead from a
+    symbol list chosen at the end of the data).
     """
     symbols = symbols or [s for s in TRADABLE if s in close_w.columns]
     benchmark = benchmark or WINNER.get("rs_benchmark", "etf")
     assert benchmark in ("etf", "sector_median", "median_all"), benchmark
     etf_of = {s: sector_mapping.sector_etf_for(s) for s in symbols}
+    ok = (eligible_w.reindex(index=close_w.index, columns=symbols).astype("boolean").fillna(False).astype(bool)
+          if eligible_w is not None else close_w[symbols].notna())
     parts_sv, parts_ss = [], []
     for w in RS_WINDOWS:
         r = close_w / close_w.shift(w) - 1
@@ -913,14 +917,11 @@ def relative_strength(close_w, symbols=None, benchmark=None):
                 sec_all = _peer_median(r, symbols, sec_of, leave_one_out=False)
                 univ_med = stock.median(axis=1, skipna=True)
                 ss = sec_all.sub(univ_med, axis=0).fillna(sector.sub(r["SPY"], axis=0))
-        parts_sv.append(sv.rank(axis=1, pct=True))
-        parts_ss.append(ss.rank(axis=1, pct=True))
+        parts_sv.append(sv.where(ok).rank(axis=1, pct=True))
+        parts_ss.append(ss.where(ok).rank(axis=1, pct=True))
     pct = (RS_WEIGHTS["stock_vs_sector"] * sum(parts_sv) / len(parts_sv)
            + RS_WEIGHTS["sector_vs_spy"] * sum(parts_ss) / len(parts_ss))
-    rs_score = (pct * 2 - 1) * 100
-    r63 = close_w / close_w.shift(63) - 1
-    sector_rs63 = pd.DataFrame({s: (r63[etf_of[s]] if etf_of[s] in r63 else r63["SPY"]) - r63["SPY"] for s in symbols}) * 100
-    return rs_score, sector_rs63
+    return (pct * 2 - 1) * 100
 
 def regime_series(close_w, symbol=None, ma=200):
     """Market filter: True while the regime symbol (WINNER["regime_symbol"], QQQ) closes above its 200-day average."""
@@ -936,25 +937,32 @@ def load_earnings(path=None):
     return e.dropna(subset=["Earnings Date"])
 
 def earnings_days_ahead(dates, symbols, earnings, block_days):
-    """Days from each decision date d to the stock's next earnings date E when d < E <= d + block_days (calendar days);
-    NaN when there is none in that window or no date on file. `earnings` = load_earnings() frame."""
+    """Days from each decision date d (2:30 PM CT) to the stock's next earnings report E not yet out at the decision, when
+    E <= d + block_days (calendar days): d < E, or E = d for a report after the close (Time PM or unknown; an AM report
+    is already out) - so 0 = reports today after the close. NaN when there is none in that window or no date on file.
+    `earnings` = load_earnings() frame."""
     d = pd.DatetimeIndex(dates).normalize().values
     out = np.full((len(d), len(symbols)), np.nan)
-    by_symbol = {s: np.sort(g.dropna().unique()) for s, g in earnings.groupby("Symbol")["Earnings Date"]}
+    e_all = earnings.drop_duplicates(["Symbol", "Earnings Date"]).sort_values("Earnings Date")
+    pm = e_all.reindex(columns=["Time"])["Time"].ne("AM").to_numpy()
+    e_all = e_all.assign(Out=e_all["Earnings Date"] + pd.to_timedelta(pm.astype(int), unit="D"))   # first date it is out
+    by_symbol = {s: (g["Out"].to_numpy("datetime64[ns]"), g["Earnings Date"].to_numpy("datetime64[ns]"))
+                 for s, g in e_all.groupby("Symbol")}
     for j, sym in enumerate(symbols):
-        e = by_symbol.get(sym)
+        out_d, e = by_symbol.get(sym, (None, None))
         if e is None or not len(e):
             continue
-        k = np.searchsorted(e, d, side="right")                     # first earnings date strictly after d
+        k = np.searchsorted(out_d, d, side="right")                 # first report not yet out at d's decision
         nxt = e[np.minimum(k, len(e) - 1)]
         days = (nxt - d) / np.timedelta64(1, "D")
         out[:, j] = np.where((k < len(e)) & (days <= block_days), days, np.nan)
     return pd.DataFrame(out, index=dates, columns=symbols)
 
 def earnings_note(days, d):
-    """'earnings in 3 days (Wed Sep 30)' for a decision on date d."""
+    """'earnings in 3 days (Wed Sep 30)' (or 'earnings today after the close (...)') for a decision on date d."""
     days = int(days)
-    return f"earnings in {days} day{'' if days == 1 else 's'} ({pd.Timestamp(d) + pd.Timedelta(days=days):%a %b %d})"
+    when = "today after the close" if days == 0 else f"in {days} day{'' if days == 1 else 's'}"
+    return f"earnings {when} ({pd.Timestamp(d) + pd.Timedelta(days=days):%a %b %d})"
 
 # ----------------------------------------------------------------------------- simulator
 def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST, band=None, block=None):
@@ -1116,7 +1124,7 @@ def metrics(res, name=None):
     vol = r.std()
     downside = np.sqrt((np.minimum(r, 0) ** 2).mean())
     dd = (eq / eq.cummax().clip(lower=1.0) - 1).min()
-    closed = res["trades"]
+    closed = res["trades"][res["trades"]["Kind"] != "trim"]     # a trim is a partial sell, not a closed trade
     opened = len(closed) + len(res["open_positions"])
     out = {
         "Strategy": name,
@@ -1745,9 +1753,10 @@ def backtest_inputs(refresh=False):
     close, opn = wide(bars, "Close"), wide(bars, "Open")
     idx = close.index
     tech_score = wide(tech, "Technical_Score").reindex(index=idx, columns=U)
-    rs, _ = relative_strength(close, U)
+    elig = bool_wide(tech, "eligible", idx, U)
+    rs = relative_strength(close, U, eligible_w=elig)
     return {"close": close, "open": opn, "score": 0.5 * tech_score + 0.5 * rs, "tiebreak": rs, "universe": U,
-            "eligible": bool_wide(tech, "eligible", idx, U),
+            "eligible": elig,
             "vol": volatility(close[U]),
             "regime": regime_series(close), "weekly": weekly_rebalance_days(idx, live=True)}
 

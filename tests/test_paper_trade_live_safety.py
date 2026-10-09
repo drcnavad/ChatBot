@@ -424,7 +424,7 @@ check("morning: short on cash -> partial noted; the rest (3.02) stays for the ne
       and left[0]["order_id"] is None and left[0]["rest_of"] == "ord-1", (res.iloc[0]["Status"], left))
 res2, fc, pend = _morning_bp_case(1000.0, 50.0, 5, pend, fc)   # next check: cash is free now
 check("next check: buys the rest once, with its own live-rest- id",
-      [(o.qty, o.client_order_id.split("-")[1]) for o in fc.submitted] == [(1.98, "fill"), (3.02, "rest")]
+      [(o.qty, o.client_order_id.split("-")[1]) for o in fc.submitted] == [(1.98, "fill"), (3.02, "restord1")]
       and not os.path.exists(pend), [(o.qty, o.client_order_id) for o in fc.submitted])
 res, fc, pend = _morning_bp_case(0.5, 50.0, 5)  # not even $1 free
 check("morning: no cash -> nothing sent", len(fc.submitted) == 0)

@@ -445,7 +445,7 @@ def _finish(b, positions, income, fee_rows, today):
                 continue
             if l.source == PRE_START:
                 pq, pc = _num(pos.get(sym, {}).get("qty")), _num(pos.get(sym, {}).get("cost_basis"))
-                pre_open.append({"Symbol": sym, "Shares": l.qty, "Alpaca avg cost": pc / pq * l.qty if pq > EPS else math.nan,
+                pre_open.append({"Symbol": sym, "Shares": l.qty, "Alpaca cost": pc / pq * l.qty if pq > EPS else math.nan,
                                  "Value": l.qty * price.get(sym, math.nan)})
                 continue
             px = price.get(sym, math.nan)
@@ -485,7 +485,7 @@ def _finish(b, positions, income, fee_rows, today):
     issues = pd.DataFrame(b.issues, columns=["Check", "Detail"]).drop_duplicates()
     return {"sales": disp, "lots": lots, "washes": washes, "income": inc, "fees": pd.DataFrame(fee_rows, columns=["Date", "Type", "Amount"]),
             "issues": issues, "method": b.method, "today": today,
-            "pre_open": pd.DataFrame(pre_open, columns=["Symbol", "Shares", "Alpaca avg cost", "Value"]),
+            "pre_open": pd.DataFrame(pre_open, columns=["Symbol", "Shares", "Alpaca cost", "Value"]),
             "pre_sales": pd.DataFrame(b.pre_sales, columns=["Symbol", "Shares", "Sold", "Proceeds"])}
 
 # ----------------------------------------------------------------------------- summaries

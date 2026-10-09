@@ -28,6 +28,7 @@ last_run_at/last_mode). Logs: Reports/logs/run_*.log (last 30) + launchd_*.log; 
 Keys (ALPACA_LIVE_KEY_ID / ALPACA_LIVE_SECRET_KEY in .env) are used only by --sync-live, --trade and --fill-check.
 """
 import argparse
+import contextlib
 import glob
 import json
 import logging
@@ -613,15 +614,16 @@ def setup_logging():
     """Log to the console and to Reports/logs/run_<time>.log (keeps the newest KEEP_LOGS logs; other logs over 5 MB
     are cut to their last 1 MB)."""
     os.makedirs(LOG_DIR, exist_ok=True)
-    for old in sorted(glob.glob(os.path.join(LOG_DIR, "run_*.log")))[:-KEEP_LOGS + 1]:
-        os.remove(old)
-    for big in glob.glob(os.path.join(LOG_DIR, "*.log")) + glob.glob(os.path.join(LOG_DIR, "*.err")):
-        if os.path.getsize(big) > 5_000_000:            # launchd/dashboard logs only grow: keep their last 1 MB
-            with open(big, "rb") as f:
-                f.seek(-1_000_000, 2)
-                tail = f.read()
-            with open(big, "wb") as f:                  # launchd appends (O_APPEND), so it keeps writing at the end
-                f.write(tail)
+    with contextlib.suppress(FileNotFoundError):        # the morning and evening jobs can start (and prune) together
+        for old in sorted(glob.glob(os.path.join(LOG_DIR, "run_*.log")))[:-KEEP_LOGS + 1]:
+            os.remove(old)
+        for big in glob.glob(os.path.join(LOG_DIR, "*.log")) + glob.glob(os.path.join(LOG_DIR, "*.err")):
+            if os.path.getsize(big) > 5_000_000:        # launchd/dashboard logs only grow: keep their last 1 MB
+                with open(big, "rb") as f:
+                    f.seek(-1_000_000, 2)
+                    tail = f.read()
+                with open(big, "wb") as f:              # launchd appends (O_APPEND), so it keeps writing at the end
+                    f.write(tail)
     path = os.path.join(LOG_DIR, f"run_{datetime.now():%Y%m%d_%H%M%S}.log")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S", force=True,
                         handlers=[logging.FileHandler(path), logging.StreamHandler(sys.stdout)])
@@ -787,7 +789,7 @@ def main(argv=None):
     p.add_argument("--keep-going", action="store_true", help="continue after a failed step (still exits 1)")
     p.add_argument("--list", action="store_true", help="list the steps and exit")
     p.add_argument("--sync-live", action="store_true",
-                   help="refresh my_positions.csv from the Alpaca LIVE account before the alert (3 read-only GET calls)")
+                   help="refresh my_positions.csv from the Alpaca LIVE account before the alert (read-only GET calls only)")
     p.add_argument("--trade", action="store_true",
                    help="after the pipeline, auto-trade the Alpaca LIVE account (REAL MONEY) from the fresh signals "
                         "(pulls live positions + equity, submits extended-hours DAY limit orders; LIVE only)")
@@ -891,9 +893,11 @@ def main(argv=None):
             except (ValueError, TypeError):
                 ckpt_today = False
             ckpt_mode = ckpt.get("mode")
-            # Only resume same-day, same-mode checkpoints; stale or mismatched ones are ignored
+            # Only resume same-day, same-mode checkpoints with no decision slot (2:30 PM CT) since them - a newer
+            # decision needs fresh signals; stale or mismatched ones are ignored
             # (the plan printout below lists each resumed step as "SKIP - resumed ...")
-            if ckpt_today and ckpt_mode == mode:
+            import backtest_engine as be
+            if ckpt_today and ckpt_mode == mode and (be.next_decision_slot(ckpt_time) or now) >= now:
                 for done_name in ckpt.get("steps_done", []):
                     if done_name not in skip:
                         skip[done_name] = f"resumed - already completed in failed {ckpt_time:%I:%M %p} run"
@@ -909,7 +913,7 @@ def main(argv=None):
         extra = f"  [{EXPECTED_CALLS[name]} calls]" if name in EXPECTED_CALLS and name not in skip else ""
         logging.info("  %-13s %s%s", name, f"SKIP - {skip[name]}" if name in skip else (target or "report checks"), extra)
     if a.sync_live:
-        logging.info("  %-13s %s", "sync_live", "alpaca_paper.py  [Alpaca LIVE account: 3 read-only GET calls]")
+        logging.info("  %-13s %s", "sync_live", "alpaca_paper.py  [Alpaca LIVE account: read-only GET calls only]")
     if a.trade:
         logging.info("  %-13s %s", "trade", "paper_trade.auto_trade  [Alpaca LIVE (REAL MONEY): reads positions+equity, " + (
             "sends regular-hours limit orders now, 2-decimal shares]" if how == "session" else
@@ -987,11 +991,11 @@ def _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, cl
     if not ok and needs_investigation:
         logging.warning("FILL CHECK: %s", reason)
         if scheduled and state.get("fill_problem_logged_on") == now.date().isoformat():
-            return 1                                      # already logged today (launchd runs every 30 min)
+            return EXIT_REPORTED                          # already logged today (launchd runs every 30 min)
         log_event("Fill check", "failed", "no", "The pending order list is damaged, so nothing was sent (no money "
                   "moved). Check Alpaca, then clear the live_pending_orders files in Reports. Log: Reports/logs", reason)
         state.update(update_state(fill_problem_logged_on=now.date().isoformat()))
-        return 1
+        return EXIT_REPORTED
     if not ok:
         logging.info("FILL CHECK: %s - nothing to do", reason)
         return 0
@@ -1175,7 +1179,7 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
     logging.info("  API calls used: %s", ", ".join(f"{k} {v}" for k, v in quota.items()) if quota
                  else "none (Alpaca market-data bars only)")
     if live_synced:
-        logging.info("  Alpaca LIVE account: 3 read-only GET calls (my_positions.csv refreshed)")
+        logging.info("  Alpaca LIVE account: read-only GET calls only (my_positions.csv refreshed)")
     if trade_results is not None and not trade_results.empty:
         logging.info("  %s", trade_summary(trade_results, (trade_meta or {}).get("sent_now")))
     if info["data_date"]:
@@ -1280,7 +1284,7 @@ def trade_failure_text(D, crit, error, state, scheduled):
     if "trade" in crit:
         sent = len(paper_trade._todays_recorded_orders())
         moved = ("No orders went out, no money moved." if not sent else
-                 f"{sent} order(s) went out before the error; they are saved and never sent twice - check Alpaca.")
+                 f"{sent} order(s) were sent or queued today before the error; they are saved and never sent twice - check Alpaca.")
         return ("yes" if sent else "no"), f"The {D:%a %b %d} trade stopped: {_clip(error or 'see the log', 90)}. {moved} {again}"
     if "send_now" in crit:
         return ("no", "The orders are saved; the fill check sends them in market hours (within 30 min, or 9 AM CT the "

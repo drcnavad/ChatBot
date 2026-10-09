@@ -12,7 +12,8 @@ from dashboard.style import (BAD, CAUTION, GOOD, INK, MONEY, caption_text, esc, 
 # ---------------------------------------------------------------------------- tax view (estimate, read-only)
 @st.cache_data(ttl=3600, max_entries=2, show_spinner=False)
 def _read_tax_inputs(hour_key):
-    """Every account activity + order client ids from the live account (GET only), once per hour (hour_key)."""
+    """Every account activity + order client ids from the live account (GET only), once per hour_key (the hour + the
+    number of fills, so a new fill is read at once and never shows as a pre-start holding)."""
     import alpaca_paper as ap
     import tax_lots as tl
     return {**tl.fetch_inputs(ap.PaperAccount()), "as_of": datetime.now(CT)}
@@ -39,7 +40,7 @@ def render_tax_view(p):
     if err:
         caption_text("The tax view needs the live holdings, which are not available right now (see Live holdings above).")
         return
-    key = f"{datetime.now(CT):%Y-%m-%d %H}"
+    key = f"{datetime.now(CT):%Y-%m-%d %H}-{len(data['fills'])}"
     positions = tuple(data["positions"])
     try:
         inputs = _read_tax_inputs(key)
@@ -59,7 +60,7 @@ def render_tax_view(p):
                 "wash-sale matching against older trades.")
         if len(pre):
             note += (" Left out (bought before the start; Alpaca's positions have no purchase date, so they are not carried "
-                     "in): " + ", ".join(f"{r['Symbol']} {r['Shares']:.4g} sh (Alpaca cost {usd(r['Alpaca avg cost'], sign=False)})"
+                     "in): " + ", ".join(f"{r['Symbol']} {r['Shares']:.4g} sh (Alpaca cost {usd(r['Alpaca cost'], sign=False)})"
                                          for _, r in pre.iterrows()) + ".")
         if len(pre_sales):
             note += (f" {len(pre_sales)} sale(s) {when} sold shares bought before it ({', '.join(sorted(set(pre_sales['Symbol'])))}; "

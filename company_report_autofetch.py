@@ -135,7 +135,8 @@ def load_run_log():
     return log.dropna(subset=["RunDate"])
 
 def log_run(symbol, income_status, balance_status):
-    pd.DataFrame([[symbol, datetime.now().date(), income_status, balance_status]]).to_csv(
+    pd.DataFrame([[symbol, datetime.now().date(), income_status, balance_status]],
+                 columns=["Symbol", "RunDate", "IncomeStatus", "BalanceStatus"]).to_csv(
         RUN_LOG_CSV, mode="a", header=not os.path.exists(RUN_LOG_CSV), index=False
     )
 

@@ -17,10 +17,16 @@ stock_symbols = [
     'RCL', 'REGN', 'SLB', 'SNOW', 'TEAM', 'TSLA', 'UBER', 'UI', 'UNH', 'UPST', 'VEEV', 'VRT',
     'ZS', 'UMAC', 'NOC', 'LMT', 'U', 'CRCL', 'TWLO', 'ACHR', 'ALAB', 'APLD', 'ARM', 'ASTS',
     'CIFR', 'CVNA', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RDDT', 'RKLB', 'SHOP', 'SMCI', 'SOUN', 'TEM',
-    'TTWO', 'SPCX', 'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'COF', 'C', 'BE', 'BA', 'URI',
+    'TTWO', 'SPCX', 'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'BE', 'BA', 'URI',
     'PH', 'FCX', 'LYB', 'CRDO', 'NBIS', 'LITE', 'CLS', 'RBRK', 'CORZ', 'HIMX', 'LUNR', 'NU',
-    'QQQ',
+    'QQQ'
 ]
+
+# Your manual overrides for the live Mon/Wed/Fri trades and the 9 AM fill check (paper_trade.py), e.g. ['TSLA', 'NVDA'].
+# do_not_buy: never bought or topped up (on Friday its slot goes to the next eligible stock, down to rank 20).
+# do_not_sell: never sold or trimmed (the Mon/Wed rank-20 rule keeps it too). The earnings-day stop still sells.
+do_not_buy = ['SMCI', 'UBER']
+do_not_sell = ['SNOW', 'TWLO', 'LITE']
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
 sector_etfs = {
@@ -41,7 +47,7 @@ symbol_sector = {
     'CDW': 'Technology', 'CELH': 'Consumer Staples', 'COF': 'Financials',
     'COIN': 'Financials', 'CRM': 'Technology', 'CRWD': 'Technology',
     'CRWV': 'Technology', 'CRCL': 'Technology', 'CRSP': 'Health Care',
-    'CVLT': 'Technology', 'CVX': 'Energy', 'DASH': 'Communication Services',
+    'CVLT': 'Technology', 'CVX': 'Energy', 'DASH': 'Consumer Discretionary',
     'DDOG': 'Technology', 'ELV': 'Health Care', 'ENPH': 'Technology',
     'ETH-USD': 'Commodities', 'FANG': 'Energy', 'FCX': 'Materials',
     'FIG': 'Technology', 'FLEX': 'Industrials', 'FTNT': 'Technology',
@@ -68,8 +74,8 @@ symbol_sector = {
     'SOFI': 'Financials', 'SOL-USD': 'Commodities', 'SOUN': 'Technology',
     'SYM': 'Industrials', 'TEAM': 'Technology', 'TEM': 'Health Care',
     'TMO': 'Health Care', 'TMUS': 'Communication Services', 'TSLA': 'Consumer Discretionary',
-    'TTD': 'Communication Services', 'TTWO': 'Technology', 'TWLO': 'Technology',
-    'TXN': 'Technology', 'TYL': 'Technology', 'UBER': 'Consumer Discretionary',
+    'TTD': 'Communication Services', 'TTWO': 'Communication Services', 'TWLO': 'Technology',
+    'TXN': 'Technology', 'TYL': 'Technology', 'UBER': 'Industrials',
     'UI': 'Technology', 'UMAC': 'Technology', 'UNH': 'Health Care',
     'UPST': 'Financials', 'VEEV': 'Technology', 'VRT': 'Industrials',
     'WAT': 'Health Care', 'WDAY': 'Technology', 'ZENA': 'Technology',
@@ -230,7 +236,7 @@ symbol_name = {
 }
 
 # First usable bar date per symbol (earlier vendor bars belong to a different business or a trading halt).
-HISTORY_START = {'NBIS': '2024-10-21'}
+HISTORY_START = {'NBIS': '2024-10-21', 'CORZ': '2024-01-24'}   # CORZ: relisted after its bankruptcy (flat 0.0751 stub before)
 
 # Benchmarks: never traded, used for the market regime and relative strength.
 BENCHMARK_SYMBOLS = ['SPY', 'QQQ']

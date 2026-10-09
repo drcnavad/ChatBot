@@ -272,7 +272,7 @@ try:
     check("pipeline broke before the trade: 'not placed ... No money moved'", "not placed" in m and "No money moved" in m, m)
     _pt._todays_recorded_orders = lambda *a, **k: {("AMD", "BUY"), ("MU", "SELL")}
     t, m = ra.trade_failure_text(D0, ["trade"], "network", {}, False)
-    check("trade failed after 2 orders went out: says so, never sent twice, money_moved yes", "2 order(s) went out" in m
+    check("trade failed after 2 orders went out: says so, never sent twice, money_moved yes", "2 order(s) were sent or queued" in m
           and "never sent twice" in m and t == "yes", (t, m))
 finally:
     _pt._todays_recorded_orders = _saved_rec

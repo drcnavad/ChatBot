@@ -112,6 +112,12 @@ check("whole shares when not fractional: $3,300 / $333 -> 9 shares", o.loc[o.Sym
 txt = pt.account_exit_text(info | {"note": ""})
 check("summary text names the rule and the positions with no rank", "no position is worse than rank 20" in txt
       and "positions with no rank: none" in txt, txt)
+pos = {"S01": 10, "S21": 50, "S24": 50}
+o, info = pt.build_account_exit_orders(pt.build_hold_orders(pos, PX), pos, EQ, R, prices=PX, fractional=True,
+                                       keep={"S24": "on your do-not-sell list"})
+check("do-not-sell S24 (rank 24) is kept (HOLD, no refill for it); S21 still sold and refilled",
+      side(o, "S24") == ["HOLD"] and [s for s, *_ in info["sold"]] == ["S21"] and info["kept"] == [("S24", 24)]
+      and "kept (do-not-sell list): S24 (rank 24)" in pt.account_exit_text(info), (info, o.values.tolist()))
 
 # --- end to end through plan_orders with fake report files ---
 tmp = tempfile.mkdtemp()

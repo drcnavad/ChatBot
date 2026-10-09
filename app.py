@@ -14,7 +14,7 @@ a paid data API (the optional "AI analysis" button uses the Hugging Face token f
 shows a display-only live quote from yfinance (free), and yfinance also draws the price chart of stocks too new to trade
 (short history); neither ever feeds back into signals, picks, backtests, or orders.
 
-Code layout: this file is only the entry point (page setup + the two tabs); every tab and panel lives in the dashboard/
+Code layout: this file is only the entry point (page setup + the three tabs); every tab and panel lives in the dashboard/
 package (dashboard/__init__.py lists the modules; dashboard/details/ has one module per Details expander).
 """
 import os

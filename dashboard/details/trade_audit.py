@@ -11,11 +11,12 @@ from dashboard.style import (BAD, CAUTION, GOOD, INK, MONEY, caption_text, info_
 
 # ---------------------------------------------------------------------------- trade audit (read-only)
 @st.cache_data(ttl=3600, max_entries=2, show_spinner=False)
-def _read_audit(hour_key, positions):
-    """trade_audit.report() once per hour (GET only: account, orders, fills, clock; positions from the holdings read)."""
+def _read_audit(hour_key, _positions):
+    """trade_audit.report() once per hour_key (the hour + the number of fills; GET only: account, orders, fills, clock;
+    positions from the holdings read, not part of the cache key since their prices change every minute)."""
     import alpaca_paper as ap
     import trade_audit as ta
-    return ta.report(ta.fetch(ap.PaperAccount(), positions=list(positions)))
+    return ta.report(ta.fetch(ap.PaperAccount(), positions=list(_positions)))
 
 AUDIT_LEDGER_COLS = ["Submitted", "Symbol", "Side", "Source", "Status", "Qty", "Filled_Qty", "Plan_Price", "Limit", "Fill_Price",
                      "Slippage_vs_Plan_%", "Slippage_vs_Plan_$"]
@@ -29,7 +30,7 @@ def render_trade_audit():
         caption_text("The trade audit needs the live account, which is not available right now (see Live holdings above).")
         return
     try:
-        rep = _read_audit(f"{datetime.now(CT):%Y-%m-%d %H}", tuple(data["positions"]))
+        rep = _read_audit(f"{datetime.now(CT):%Y-%m-%d %H}-{len(data['fills'])}", tuple(data["positions"]))
     except Exception as e:
         info_text(f"Trade audit unavailable right now ({type(e).__name__}: {str(e)[:200]}). It tries again next hour.")
         return

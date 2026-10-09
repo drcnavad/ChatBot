@@ -156,10 +156,9 @@ def md_tone(text, color):
     """Markdown text in the tone color (st.caption / st.markdown color syntax)."""
     return {GOOD: f":green[{text}]", CAUTION: f":orange[{text}]", BAD: f":red[{text}]"}.get(color, text)
 
-def stat_html(label, value, color="#0f172a", tip=None):
+def stat_html(label, value, color="#0f172a"):
     """One label/value pair in the stock header."""
-    title = f' title="{esc(tip)}"' if tip else ""
-    return (f'<div class="sa-stat"{title}><div class="sa-stat-label">{esc(label)}{" ⓘ" if tip else ""}</div>'
+    return (f'<div class="sa-stat"><div class="sa-stat-label">{esc(label)}</div>'
             f'<div class="sa-stat-val" style="color:{color};">{esc(str(value))}</div></div>')
 
 def caption_text(text):

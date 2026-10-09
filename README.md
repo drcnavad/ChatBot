@@ -13,9 +13,15 @@ All code lives in this folder. Everything the pipeline writes goes to `Reports/`
 - **Monday / Wednesday check** (2:30 PM CT): a holding ranked worse than 20 is sold and replaced, same dollars, by the
   best-ranked top-10 stock not held (cash until Friday only if none is left). On the live account this applies to every
   position. Then cash above 1% of equity buys top-10 stocks not held, and what is left tops up ranks 1-3 (19.8% cap).
-- **Earnings:** no new buy or top-up of a stock with earnings within 5 days. On Friday a new pick blocked this way is
+- **Earnings:** no new buy or top-up of a stock with earnings within 5 days (including a report after that day's close). On Friday a new pick blocked this way is
   replaced by the next eligible stock (down to rank 20). On a held stock's earnings day, a drop of 5% or more below the
   previous close sells it (`earnings_stop.py`), and it is not bought back until its earnings sessions are over.
+- **Your overrides:** `do_not_buy` and `do_not_sell` in `sector_mapping.py` (e.g. `do_not_buy = ['TSLA']`). The Mon/Wed/Fri
+  runs and the 9 AM fill check never buy or top up a do-not-buy stock (on Friday its slot goes to the next eligible stock,
+  down to rank 20) and never sell or trim a do-not-sell stock (a Mon/Wed replacement out of it is dropped with its buy).
+  These show as `SKIP (on your do-not-... list)` rows. On Friday a held do-not-sell stock outside the picks stays
+  invested, so the picks share the rest (99% invested, SNOW kept at 10% -> picks scaled to 89%). The earnings-day stop
+  still sells do-not-sell stocks.
 
 ## Schedule (launchd, `launchd/install_schedule.sh`, US Central time)
 | Job | When | What |

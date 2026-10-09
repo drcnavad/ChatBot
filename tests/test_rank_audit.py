@@ -97,6 +97,7 @@ main_start = pd.Timestamp("2023-09-20")  # main notebook fetch window (~1100 day
 def rs_at(D):
     """RS_Score at date D from data up to and including D only (no look-ahead by construction)."""
     c = close.loc[:D]
+    ok = eligible_at(D)                               # only the stocks eligible at D are ranked
     parts_sv, parts_ss = [], []
     for w in (21, 63, 126):
         r = c.iloc[-1] / c.iloc[-1 - w] - 1
@@ -114,8 +115,8 @@ def rs_at(D):
                 members = stock[[x for x in tradable if sm.symbol_sector.get(x) == sm.symbol_sector.get(s)]].dropna()
                 if len(members) >= 3:
                     sec_part[s] = members.median() - stock.median()
-        parts_sv.append((stock - bench).rank(pct=True))
-        parts_ss.append(sec_part.rank(pct=True))
+        parts_sv.append((stock - bench).where(ok).rank(pct=True))
+        parts_ss.append(sec_part.where(ok).rank(pct=True))
     pct = 0.6 * sum(parts_sv) / 3 + 0.4 * sum(parts_ss) / 3
     return (pct * 2 - 1) * 100
 

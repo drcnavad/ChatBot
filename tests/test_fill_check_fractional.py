@@ -413,6 +413,40 @@ check("reconciliation: a stock sold by the stop is expected at 0% (no false 'bel
 pt.load_targets, pt.get_live_positions_and_equity, pt.latest_prices = saved_rec
 pt.EARNINGS_STOP_STATE = saved_state
 
+# ------------------------------------------------------------------ your do-not-buy / do-not-sell lists (sector_mapping)
+import sector_mapping as sm
+sm.do_not_buy, sm.do_not_sell = ["s2"], ["OWN", "S5"]   # lower case is fine
+d = picks_csv("2026-10-02", "2026-10-02")
+o, m = pt.plan_orders("auto", 10000, {"OWN": 20, "S5": 1}, midweek_csv=midweek_csv(d, "2026-10-02", []),
+                      picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[:2]
+sd = o.set_index("Symbol").Side
+check("Friday: kept OWN ($1,000 = 10%) comes out of the picks: each 10% pick scaled to 9% ($900), source +kept",
+      m["kept_outside"] == {"OWN": 0.1} and m["source"].endswith("+kept") and abs(m["invested"] - 0.9) < 1e-9
+      and abs(o.set_index("Symbol").Est_Value["S0"] - 900) < 1, (m["kept_outside"], m["source"], m["invested"],
+                                                                 o[["Symbol", "Side", "Est_Value"]].values.tolist()))
+check("reconcile skips a +kept Friday (the account differs from Provisional_Weight on purpose)",
+      pt.reconcile_positions("provisional+kept")[0].empty and pt.reconcile_positions("provisional+kept")[1] is True)
+check("Friday: do-not-buy S2 is a SKIP row; non-pick OWN (do-not-sell) is not sold; S5 (do-not-sell) can still be topped up",
+      sd["S2"] == "SKIP (on your do-not-buy list)" and sd["OWN"] == "SKIP (on your do-not-sell list)" and sd["S5"] == "BUY"
+      and not (o["Side"] == "SELL").any() and (o["Side"] == "BUY").sum() == 9, list(zip(o.Symbol, o.Side)))
+d = picks_csv("2026-09-30", "2026-09-25")
+o = pt.plan_orders("auto", 10000, {"OWN": 5}, midweek_csv=midweek_csv(d, "2026-09-30", [("REPLACE", "OWN", "S3")]),
+                   picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
+check("Wednesday replacement out of a do-not-sell stock: neither its sell nor its paired buy is sent",
+      not o["Side"].isin(["BUY", "SELL"]).any(), list(zip(o.Symbol, o.Side)))
+o = pt.plan_orders("auto", 10000, {"S9": 5}, midweek_csv=midweek_csv(d, "2026-09-30", [("REPLACE", "S9", "S2")]),
+                   picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
+check("Wednesday replacement into a do-not-buy stock: its sell goes, the buy is a SKIP row",
+      list(o.loc[o.Side == "SELL", "Symbol"]) == ["S9"] and o.set_index("Symbol").Side["S2"] == "SKIP (on your do-not-buy list)",
+      list(zip(o.Symbol, o.Side)))
+o1, r1 = eve("S2", "BUY", 3.58, 3, "expired", 0)
+o2, r2 = eve("OWN", "SELL", 5, 5, "expired", 0)
+b = Broker(orders=[o1, o2], positions={"OWN": 5}); p = write_pending([r1, r2]); res = run(b, p)
+check("9 AM fill check: a do-not-buy BUY rest and a do-not-sell SELL rest are dropped, nothing sent",
+      not b.submitted and "do-not-buy" in status_of(res, "S2") and "do-not-sell" in status_of(res, "OWN"),
+      (status_of(res, "S2"), status_of(res, "OWN")))
+sm.do_not_buy, sm.do_not_sell = [], []
+
 bad = [n for n in NOTES if n[0] not in ("ok", "warning", "failed") or " pp" in n[1] or "DRIFT" in n[1]]
 check(f"all {len(NOTES)} run-log rows written here have a valid status and plain words", NOTES and not bad, bad)
 

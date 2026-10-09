@@ -1,6 +1,6 @@
 """Self-healing wrapper around run_all.py (same arguments), run by the launchd evening (--trade) and morning (--fill-check)
 jobs. On a failed run it reads Reports/.pipeline_checkpoint.json and:
-  * transient errors (rate limits, timeouts, HTTP 5xx): re-runs `run_all.py --from <step>` after 60/300/900 s (3 tries);
+  * transient errors (rate limits, timeouts, HTTP 5xx): re-runs `run_all.py --from <step>` after 60 s, then 300 s (3 tries);
   * a missing upstream file: re-runs once from the step that writes it;
   * anything else: writes Reports/pipeline_diagnosis_<time>.md (optional LLM diagnosis) + a run-log row, and stops.
 It never edits code and never places, cancels or retries orders: --trade / --fill-check failures go straight to diagnosis.
@@ -27,7 +27,7 @@ sys.path.insert(0, ROOT)
 import run_all                                                        # noqa: E402  (checkpoints, log_event, STEPS)
 
 MAX_TRIES = 3                       # total attempts for transient failures (1 initial + 2 retries)
-RETRY_BACKOFF_S = [60, 300, 900]    # wait between transient retries
+RETRY_BACKOFF_S = [60, 300]         # wait before retry 1 and retry 2
 LOG_TAIL_LINES = 4000               # bounded buffer kept for error classification
 LLM_TIMEOUT_S = 120
 

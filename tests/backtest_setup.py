@@ -25,7 +25,7 @@ C, O = be.wide(bars, "Close"), be.wide(bars, "Open")
 idx = C.index
 st = be.wide(tech, "Technical_Score").reindex(index=idx, columns=U)
 el = be.bool_wide(tech, "eligible", idx, U)
-rs, _ = be.relative_strength(C, U)
+rs = be.relative_strength(C, U, eligible_w=el)
 sc = 0.5 * st + 0.5 * rs
 vol = be.volatility(C[U])
 reg = be.regime_series(C, "QQQ")
@@ -90,17 +90,20 @@ def targets_t20(reb, max_rank=20, n=10):
 
 def block_matrix(days=5, path=None):
     """INDEPENDENT earnings block (no engine earnings code): True at (session t, stock j) when an earnings date E of j in
-    Reports/earnings_date.csv satisfies t < E <= t + days (calendar days)."""
+    Reports/earnings_date.csv is not yet out at t's 2:30 PM decision (t < E, or t == E unless Time is AM) and E <= t + days
+    (calendar days). The first row of a (symbol, date) in the file gives its Time."""
     e = pd.read_csv(path or os.path.join(be.REPORTS_DIR, "earnings_date.csv"))
     dates = {}
-    for sym, d in zip(e["Symbol"].astype(str).str.strip().str.upper(), pd.to_datetime(e["Earnings Date"], errors="coerce")):
+    for sym, d, tm in zip(e["Symbol"].astype(str).str.strip().str.upper(), pd.to_datetime(e["Earnings Date"], errors="coerce"),
+                          e.reindex(columns=["Time"])["Time"]):
         if pd.notna(d):
-            dates.setdefault(sym, set()).add(d.normalize())
+            dates.setdefault(sym, {}).setdefault(d.normalize(), tm)
     days_idx = idx.normalize()
     B = np.zeros((len(idx), len(U)), bool)
     for j, sym in enumerate(U):
-        for d in dates.get(sym, ()):
-            B[:, j] |= (days_idx < d) & (days_idx >= d - pd.Timedelta(days=days))
+        for d, tm in dates.get(sym, {}).items():
+            out = d if tm == "AM" else d + pd.Timedelta(days=1)       # first date the report is out at the decision
+            B[:, j] |= (days_idx < out) & (days_idx >= d - pd.Timedelta(days=days))
     return B
 
 def select_t20(t, held, block, max_rank=20, n=10):
@@ -164,5 +167,5 @@ def full(t):
 
 def em(eq):
     """Metrics of a plain equity curve."""
-    return be.metrics({"equity": eq, "exposure": eq * 0 + 1, "turnover": eq * 0, "trades": pd.DataFrame({"Return": []}),
+    return be.metrics({"equity": eq, "exposure": eq * 0 + 1, "turnover": eq * 0, "trades": pd.DataFrame({"Return": [], "Kind": []}),
                        "open_positions": pd.DataFrame()})

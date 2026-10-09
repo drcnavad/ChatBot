@@ -207,6 +207,13 @@ nine = datetime(2026, 10, 30, 9, 5, tzinfo=run_all.CT)
 check("pre-market sale: the fraction goes to that morning's 9 AM CT check (dated the previous session)",
       ev_day == "2026-10-29" and run_all.fill_check_allowed(nine, pt.PENDING_ORDERS_JSON)[0]
       and pt.superseded_orders(nine, pt.PENDING_ORDERS_JSON) == [], ev_day)
+c = Client({"XYZ": 10.4})
+setup(client=c, quote=(85.4, 85.44), age=0)
+run(at("2026-10-30 10:00"))                                                    # a regular-hours sale on a Friday
+mon = datetime(2026, 11, 2, 9, 5, tzinfo=run_all.CT)
+check("regular-hours sale: its fraction is not dropped by the 2:30 PM decision; the next 9 AM check still has it",
+      run_all.fill_check_allowed(mon, pt.PENDING_ORDERS_JSON)[0] and pt.superseded_orders(mon, pt.PENDING_ORDERS_JSON) == [],
+      json.load(open(pt.PENDING_ORDERS_JSON)))
 
 # fail closed / skips
 bid = 94.0

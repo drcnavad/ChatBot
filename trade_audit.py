@@ -185,11 +185,12 @@ def slippage_summary(led):
 
 # ----------------------------------------------------------------------------- 2. round trips (FIFO)
 def round_trips(fills, orders=None):
-    """Every sale matched to its purchase, oldest shares first (FIFO, Alpaca's default). Fees are not included."""
+    """Every sale matched to its purchase, oldest shares first (FIFO, Alpaca's default). Fees are not included.
+    Every fill is replayed (so a sale of shares bought before AUDIT_START finds them); only sales from AUDIT_START (CT)
+    are listed."""
     src = {o.get("id"): order_source(o.get("client_order_id")) for o in orders or []}
     book, out = {}, []
     rows = sorted(fills or [], key=lambda a: str(a.get("transaction_time") or ""))
-    rows = [a for a in rows if str(a.get("transaction_time") or "")[:10] >= AUDIT_START]  # fresh start: Friday Oct 2, 2026 onwards
     for a in rows:
         sym, side = str(a.get("symbol") or "").upper(), str(a.get("side") or "").lower()
         q, px, t, oid = _num(a.get("qty")), _num(a.get("price")), _ct(a.get("transaction_time")), a.get("order_id")
@@ -216,6 +217,7 @@ def round_trips(fills, orders=None):
                         "Sell_Price": px, "P/L $": math.nan, "P/L %": math.nan, "Days_Held": math.nan, "Buy_Source": "",
                         "Sell_Source": src.get(oid, ""), "Note": "bought before the account history (no purchase fill)"})
     df = pd.DataFrame(out, columns=TRIP_COLS)
+    df = df[df["Sold_CT"] >= pd.Timestamp(AUDIT_START)]   # fresh start: Friday Oct 2, 2026 onwards
     return df.sort_values("Sold_CT", ascending=False, kind="stable").reset_index(drop=True) if len(df) else df
 
 # ----------------------------------------------------------------------------- 3. reconciliation
@@ -264,10 +266,18 @@ def reconcile(data, pending=None, stop_state=None, picks=None):
         sells = {str(r.get("symbol")).upper() for r in rows if isinstance(r, dict) and str(r.get("side")).upper() == "SELL"}
         buys = {str(r.get("symbol")).upper() for r in rows if isinstance(r, dict) and str(r.get("side")).upper() == "BUY"}
         stopped = {k.split("|")[0] for k in ((stop_state or {}).get("sold") or {})}
-        for s in sorted(set(held) - set(target)):
+        # The live account also holds today's top-10 rule picks (Provisional_Weight: Mon/Wed refills and spare-cash buys).
+        prov = pd.to_numeric(picks.reindex(columns=["Provisional_Weight"])["Provisional_Weight"], errors="coerce").fillna(0)
+        live = set(target) | {str(s).upper() for s, w in zip(picks["Symbol"], prov) if w > 0}
+        import sector_mapping as sm
+        kept = {str(s).upper() for s in sm.do_not_sell}
+        for s in sorted(set(held) - live):
             if s in sells:
                 out.append(_finding("info", f"leftover|{s}", f"{s} {held[s]:g} sh is not in the strategy; its sale is queued "
                                     "for the next fill check (Reports/live_pending_orders.json)."))
+            elif s in kept:
+                out.append(_finding("info", f"kept|{s}", f"{s} {held[s]:g} sh is not in the strategy but is on your "
+                                    "do-not-sell list (sector_mapping.py), so the bot keeps it."))
             else:
                 out.append(_finding("warning", f"untracked|{s}", f"{s} {held[s]:g} sh is held but not in the strategy, and no "
                                     "sale is queued. The next Friday rebalance sells it; sell it by hand if you want it gone sooner."))
@@ -363,7 +373,7 @@ def report(data=None, now=None, pending=None, stop_state=None, picks=None):
     stop_state = stop_state if stop_state is not None else _read_json(STOP_STATE_JSON)
     if picks is None:
         try:
-            picks = pd.read_csv(PICKS_CSV, usecols=["Symbol", "Strategy_Weight"])
+            picks = pd.read_csv(PICKS_CSV, usecols=["Symbol", "Strategy_Weight", "Provisional_Weight"])
         except Exception:
             picks = None
     led = ledger(data.get("orders"))

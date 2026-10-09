@@ -270,7 +270,7 @@ for m in tl.METHODS:
           sorted(zip(ps["Symbol"], ps["Shares"])) == [("BBB", 3), ("CCC", 4)] and close(ps["Proceeds"].sum(), 212), ps.to_dict("list"))
     check(f"fresh start ({m}): BBB 2 sh held from before the start left out (Alpaca avg cost 2 x $150/7 = $42.86); "
           "the Oct 2 BBB lot keeps 5 sh at $22", list(pre["Symbol"]) == ["BBB"] and close(pre["Shares"][0], 2)
-          and close(pre["Alpaca avg cost"][0], 42.857) and close(l.loc[l.Symbol == "BBB", "Shares"].sum(), 5)
+          and close(pre["Alpaca cost"][0], 42.857) and close(l.loc[l.Symbol == "BBB", "Shares"].sum(), 5)
           and close(l.loc[l.Symbol == "BBB", "Basis / share"].iloc[0], 22), (pre.to_dict("list"), l.to_dict("list")))
 r = run(OLD + NEW, positions=FPOS, start=tl.TAX_START)
 a = lots(r)

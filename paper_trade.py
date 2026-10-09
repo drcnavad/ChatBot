@@ -48,6 +48,8 @@ MAX_ORDER_PCT = 0.20   # backstop: a BUY worth more than 20% of equity is refuse
                        # Normal buys stay under it: each target weight is clipped to 20% (WINNER["max_weight"], 19.8% live).
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
 INVESTED_CAP = 0.99   # trim fix: a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED, tests check)
+                      # A cap, not a second scale-down: weights already sum to <= 99% (backtest_engine.LIVE_INVESTED),
+                      # and 99% of equity always fits under it, so the account ends ~99% invested, not ~98%.
 CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills a bit above the estimate still fit.
 # Mon/Wed spare-cash rule (Chirag, 2026-10-06; leftover rule 2026-10-07): after the mid-week sells / refills, the cash
 # above 1% of equity buys the top-10 stocks the account does NOT hold (latest ranking, pure rank), each at its latest rule
@@ -60,9 +62,8 @@ DEPLOY_MAX_RANK = 10     # spare-cash buys of stocks not held: top 10 only
 TOPUP_RANKS = 3          # the leftover tops up ranks 1-3, in rank order, each to the per-stock cap
 DEPLOY_MIN_PCT = 0.01    # a spare-cash buy must be worth at least 1% of equity (a smaller rest stays in cash) ...
 DEPLOY_MIN_USD = 100.0   # ... and at least $100
-                       # A cap, not a second scale-down: weights already sum to <= 99% (backtest_engine.LIVE_INVESTED),
-                       # and 99% of equity always fits under it, so the account ends ~99% invested, not ~98%.
-# LIVE order pricing: every order is a LIMIT priced from the latest quote, never a market order.
+# LIVE order pricing (auto_trade and the 9 AM fill check): every order is a LIMIT priced from the latest quote, never a
+# market order. Only the manual `paper_trade.py --submit` CLI sends DAY market orders, without the 20% / freshness checks.
 LIMIT_OFFSET = 0.0005      # buy limit = ask + 0.05%, sell limit = bid - 0.05%
 MAX_SPREAD = 0.005         # a quote with a spread over 0.5% of the mid price is not traded (skipped, see below)
 QUOTE_MAX_AGE_SECS = 60    # a quote older than 60 seconds is stale (not traded)
@@ -317,9 +318,9 @@ def _clean_positions(positions):
     return out
 
 def earnings_blocked(symbols, as_of, earnings_csv=None):
-    """{SYMBOL: 'earnings Wed Sep 30, in 2 days'} for `symbols` whose next earnings date E is within
-    the strategy's earnings rule window after the decision date (as_of < E <= as_of + N days, N =
-    WINNER['earnings_block_days'], i.e. E5). Used so a pick is not newly bought, and an owned one not
+    """{SYMBOL: 'earnings Wed Sep 30, in 2 days'} for `symbols` whose next earnings report E is within
+    the strategy's earnings rule window (as_of < E <= as_of + N days, N = WINNER['earnings_block_days'], i.e. E5;
+    also E = as_of for a report after the close - see backtest_engine.earnings_days_ahead). Used so a pick is not newly bought, and an owned one not
     topped up, right before earnings. {} when the rule is off; an unreadable earnings file
     prints a warning and blocks nothing (same as a stock with no date on file)."""
     try:
@@ -332,7 +333,8 @@ def earnings_blocked(symbols, as_of, earnings_csv=None):
     except Exception as e:
         print(f"WARNING: earnings rule not checked for live buys ({e}) - no buy was blocked")
         return {}
-    return {s: f"earnings {d + pd.Timedelta(days=int(v)):%a %b %d}, in {int(v)} day{'' if int(v) == 1 else 's'}"
+    return {s: f"earnings {d + pd.Timedelta(days=int(v)):%a %b %d}, "
+               + ("today after the close" if int(v) == 0 else f"in {int(v)} day{'' if int(v) == 1 else 's'}")
             for s, v in days.items() if pd.notna(v)}
 
 def earnings_stop_blocked(as_of, state_json=None):
@@ -351,18 +353,25 @@ def earnings_stop_blocked(as_of, state_json=None):
     return {str(k).split("|")[0].upper(): f"sold by the earnings-day stop, no buy back until after {pd.Timestamp(v['react']):%a %b %d}"
             for k, v in sold.items() if isinstance(v, dict) and v.get("react") and d <= str(v["react"])}
 
-def skip_stop_buys(orders, stop):
-    """Mid-week orders: a BUY of a stock in `stop` (earnings_stop_blocked) becomes a SKIP row (nothing bought)."""
-    hit = (orders["Side"] == "BUY") & orders["Symbol"].astype(str).isin(list(stop))
+def manual_list(kind):
+    """{SYMBOL: note} for sector_mapping.do_not_buy / do_not_sell (kind 'buy' / 'sell'): Chirag's manual overrides for the
+    Mon/Wed/Fri runs and the 9 AM fill check."""
+    import sector_mapping as sm
+    return {str(s).upper(): f"on your do-not-{kind} list" for s in getattr(sm, f"do_not_{kind}")}
+
+def skip_orders(orders, notes, side="BUY"):
+    """`side` rows (BUY / SELL) of the stocks in `notes` {SYMBOL: note} become SKIP rows (nothing traded)."""
+    hit = (orders["Side"] == side) & orders["Symbol"].astype(str).str.upper().isin(list(notes))
     if hit.any():
         orders = orders.copy()
-        orders.loc[hit, "Side"] = [f"SKIP ({stop[s]})" for s in orders.loc[hit, "Symbol"].astype(str)]
+        orders.loc[hit, "Side"] = [f"SKIP ({notes[s]})" for s in orders.loc[hit, "Symbol"].astype(str).str.upper()]
         orders.loc[hit, ["Shares", "Est_Value"]] = 0
+        orders.loc[hit, "Target_Shares"] = orders.loc[hit, "Current_Shares"]
     return orders
 
 # ----------------------------------------------------------------------------- order sizing (whole shares by default)
 def build_orders(targets, account_size, positions=None, prices=None, min_value=1.0, fractional=False,
-               statuses=None, band=NO_TRADE_BAND, blocked=None):
+               statuses=None, band=NO_TRADE_BAND, blocked=None, keep=None):
     """Orders (sells first) to move `positions` {symbol: shares} toward target weights of `account_size` dollars.
 
     Every target pick ('add' or 'hold') is brought to Weight x account_size: an underweight
@@ -379,6 +388,7 @@ def build_orders(targets, account_size, positions=None, prices=None, min_value=1
     each new pick gets (close to) its full target weight. Otherwise the 1-point band is unchanged.
     Trades worth less than `min_value` are skipped. `statuses` maps SYMBOL -> status string from
     strategy_changes.csv; a missing/unknown status is treated as HOLD (fail closed), never traded.
+    `keep` {SYMBOL: note} (the do-not-sell list): never sold or trimmed (SKIP row); the trim fix counts no cash from them.
     """
     if not account_size or account_size <= 0 or not math.isfinite(account_size):
         raise ValueError("account_size must be a positive number")
@@ -466,11 +476,15 @@ def build_orders(targets, account_size, positions=None, prices=None, min_value=1
         else:
             side = "BUY" if delta > 0 else "SELL"
         if side == "BUY" and sym in (blocked or {}):
-            side = "HOLD"  # earnings soon: an owned pick is not bought more before earnings
+            side, tgt = "HOLD", cur  # earnings soon / do-not-buy: an owned pick is not bought more
         rows.append({"Symbol": sym, "Side": side, "Shares": abs(delta) if side != "HOLD" else 0, "Price": float(price),
                      "Est_Value": round(abs(delta) * price, 2) if side != "HOLD" else 0.0, "Current_Shares": cur,
                      "Target_Shares": tgt, "Target_Weight_%": round(weight * 100, 2), "Target_Value": round(target_value, 2)})
-    _trim_band_holds(rows, account_size, positions, px, fractional, min_value, total_weight)
+    keep = keep or {}
+    for r in rows:
+        if r["Side"] == "SELL" and r["Symbol"] in keep:
+            r.update(Side=f"SKIP ({keep[r['Symbol']]})", Shares=0, Est_Value=0.0, Target_Shares=r["Current_Shares"])
+    _trim_band_holds(rows, account_size, positions, px, fractional, min_value, total_weight, keep=keep)
     orders = pd.DataFrame(rows, columns=ORDER_COLUMNS)
     order = {"SELL": 0, "BUY": 1, "HOLD": 2}
     return orders.sort_values(["Side", "Symbol"], key=lambda s: s.map(order).fillna(3) if s.name == "Side" else s).reset_index(drop=True)
@@ -479,18 +493,18 @@ def _ceil2(x):
     """Round UP to 2 decimals (a trim sells at least the dollars it needs)."""
     return math.ceil(round(x * 100, 6)) / 100
 
-def _trim_band_holds(rows, account_size, positions, px, fractional, min_value, total_weight, cushion=CASH_CUSHION):
+def _trim_band_holds(rows, account_size, positions, px, fractional, min_value, total_weight, cushion=CASH_CUSHION, keep=()):
     """Trim fix, in place on build_orders' rows: when new BUYs exist and the plan would end above the cap
     (max(total target weight, INVESTED_CAP), at most 100%) or the buys would not fit the cash, the band-held picks
     above their target (HOLD rows marked _band) are turned into SELL rows that trim them toward their target, pro rata to
-    their excess, never below it. Mirrors backtest_engine.simulate(band=...)."""
+    their excess, never below it (`keep`: the do-not-sell list, never trimmed). Mirrors backtest_engine.simulate(band=...)."""
     buys = sum(r["Est_Value"] for r in rows if r["Side"] == "BUY")
     if buys <= 0:
         return
     over = []
     for r in rows:
         p = _safe_number(r["Price"], default=None)
-        if r.get("_band") and p and p > 0 and r["Current_Shares"] * p > r["Target_Value"] + 0.005:
+        if r.get("_band") and r["Symbol"] not in keep and p and p > 0 and r["Current_Shares"] * p > r["Target_Value"] + 0.005:
             over.append((r, p, r["Current_Shares"] * p - r["Target_Value"]))
     if not over:
         return
@@ -650,7 +664,7 @@ def is_midweek_check_day(day, signal_csv=SIGNAL_CSV):
     return bool(len(hit) and pd.to_numeric(hit, errors="coerce").fillna(0).max() == 1)
 
 def build_account_exit_orders(orders, positions, equity, ranking, listed=None, blocked=None, fractional=False, prices=None,
-                              exit_below=None, refill_top=None, min_pct=DEPLOY_MIN_PCT, min_usd=DEPLOY_MIN_USD):
+                              exit_below=None, refill_top=None, min_pct=DEPLOY_MIN_PCT, min_usd=DEPLOY_MIN_USD, keep=None):
     """Mon/Wed sell rule on EVERY actual Alpaca position (Chirag, t188u, 2026-10-07), run AFTER the strategy's own mid-week
     orders (`orders`) and BEFORE the spare-cash step: returns (orders, info).
 
@@ -662,16 +676,17 @@ def build_account_exit_orders(orders, positions, equity, ranking, listed=None, b
     blocked (`blocked`: earnings within 5 days, earnings-day stop sale). With no refill left (or a refill under
     max(min_pct x equity, min_usd)) the cash goes to the spare-cash step. A stock the strategy already sells in full
     keeps its one SELL row (never a second sell); a partial strategy SELL becomes a full sale; a HOLD row becomes the SELL.
-    An empty ranking (no data for the day) sells nothing. Shares are rounded DOWN (2 decimals when fractional)."""
+    An empty ranking (no data for the day) sells nothing. Shares are rounded DOWN (2 decimals when fractional).
+    `keep` {SYMBOL: note} (the do-not-sell list): never sold here, so no refill either (info['kept'])."""
     import backtest_engine as be
-    blocked, prices = blocked or {}, prices or {}
+    blocked, prices, keep = blocked or {}, prices or {}, keep or {}
     exit_below = be.WINNER.get("midweek_exit_below") if exit_below is None else exit_below
     refill_top = be.WINNER.get("midweek_exit_to_top") if refill_top is None else refill_top
     positions = _clean_positions(positions)
     orders = orders.copy() if len(orders) else pd.DataFrame(columns=ORDER_COLUMNS)
     orders = orders.reset_index(drop=True)
     info = {"exit_below": exit_below, "refill_top": refill_top, "sold": [], "replaced": [], "unlisted": [], "unranked": [],
-            "skipped": [], "note": ""}
+            "skipped": [], "kept": [], "note": ""}
     if not exit_below:
         info["note"] = "no Mon/Wed sell rank set: nothing sold"
         return orders, info
@@ -696,6 +711,8 @@ def build_account_exit_orders(orders, positions, equity, ranking, listed=None, b
     bought = set(sym_col[side == "BUY"])
     held = {s for s, q in after.items() if q > 0} | bought
     weak = [s for s in after if after[s] > 0 and s not in bought and rank.get(s, 10 ** 9) > exit_below]
+    info["kept"] = [(s, rank.get(s, "none")) for s in weak if s in keep]
+    weak = [s for s in weak if s not in keep]
     weak.sort(key=lambda s: (-rank.get(s, 10 ** 9), s))                 # no rank first, then the worst rank
     for s in positions:
         if s not in rank:
@@ -890,7 +907,9 @@ def account_exit_text(ex):
                          + [f"{s_} (score 0 or below)" for s_ in ex["unranked"]]) or "none"
     return ((f"worse than rank {ex['exit_below']}: " + "; ".join(parts)) if parts
             else f"no position is worse than rank {ex['exit_below']}") + f"; positions with no rank: {none_txt}" + (
-        f"; not bought: {', '.join(f'{s_} ({w})' for s_, w in ex['skipped'])}" if ex["skipped"] and parts else "")
+        f"; not bought: {', '.join(f'{s_} ({w})' for s_, w in ex['skipped'])}" if ex["skipped"] and parts else "") + (
+        f"; kept (do-not-sell list): {', '.join(f'{s_} (rank {rk})' for s_, rk in ex['kept'])}"
+        if ex.get("kept") else "")
 
 def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signal_csv=SIGNAL_CSV, midweek_csv=MIDWEEK_CSV,
                 min_value=1.0, fractional=False, decision=None, live_prices=None, cash=None, force_deploy=False):
@@ -903,6 +922,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     when it buys something. None = no spare-cash step. force_deploy: run it even if the data's day is not a Mon/Wed
     check (dry-run preview only)."""
     targets, meta = load_targets(source, picks_csv, midweek_csv, decision=decision)
+    no_buy, no_sell = manual_list("buy"), manual_list("sell")
     positions = positions or {}
     live_prices = live_prices or {}
     targets = targets.assign(Price=targets["Symbol"].map(live_prices).fillna(targets["Price"]))
@@ -912,18 +932,19 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
             px = {**latest_prices(sorted(positions), signal_csv), **live_prices}
             orders = build_hold_orders(positions, px)
         else:
-            syms = sorted(set(meta["midweek"]["Sell"].astype(str)) | set(meta["midweek"]["Buy"].dropna().astype(str)) | set(positions))
+            mw = meta["midweek"][~meta["midweek"]["Sell"].astype(str).str.upper().isin(list(no_sell))]   # kept: no paired buy
+            syms = sorted(set(mw["Sell"].astype(str)) | set(mw["Buy"].dropna().astype(str)) | set(positions))
             px = latest_prices(syms, signal_csv)
             px.update(dict(zip(targets["Symbol"], targets["Price"])))
             px.update(live_prices)
-            orders = build_replace_orders(meta["midweek"], account_size, positions, px, fractional=fractional)
-            orders = skip_stop_buys(orders, earnings_stop_blocked(meta["as_of"]))
+            orders = build_replace_orders(mw, account_size, positions, px, fractional=fractional)
+            orders = skip_orders(orders, {**earnings_stop_blocked(meta["as_of"]), **no_buy})
         day = pd.Timestamp(decision).date().isoformat() if decision is not None else meta["as_of"]
         if not (force_deploy or is_midweek_check_day(day, signal_csv)):
             return orders, meta, targets
         ranking = latest_ranking(meta["as_of"], signal_csv)
         cand = list(ranking.loc[pd.to_numeric(ranking["Rank"], errors="coerce") <= DEPLOY_MAX_RANK, "Symbol"].astype(str))
-        blocked = {**earnings_blocked(cand, meta["as_of"]), **earnings_stop_blocked(meta["as_of"])}
+        blocked = {**earnings_blocked(cand, meta["as_of"]), **earnings_stop_blocked(meta["as_of"]), **no_buy}
         # Mon/Wed sell rule on every actual position (t188u): worse than rank 20 / not ranked -> sold, refilled 1-for-1.
         sig_day = pd.read_csv(signal_csv, usecols=["Date", "Symbol"])
         listed = set(sig_day.loc[sig_day["Date"].astype(str).str[:10] == str(meta["as_of"])[:10], "Symbol"].astype(str).str.upper())
@@ -935,7 +956,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
         if missing and len(ranking):                # e.g. a stock no longer in the list: Alpaca market data (read-only)
             acct_px.update(current_prices(missing))
         orders, exits = build_account_exit_orders(orders, positions, account_size, ranking, listed=listed, blocked=blocked,
-                                                  fractional=fractional, prices=acct_px)
+                                                  fractional=fractional, prices=acct_px, keep=no_sell)
         meta["account_exits"] = exits
         if exits["sold"]:
             meta["source"] += "+exits"
@@ -947,7 +968,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
             if info["buys"] or info["topups"]:
                 meta["source"] += "+cash"
                 meta["invested"] = None
-        return orders, meta, targets
+        return skip_orders(orders, no_sell, "SELL"), meta, targets
     others = [s for s in positions if s not in set(targets["Symbol"])]
     prices = {**latest_prices(others, signal_csv), **live_prices}
     unpriced = sorted(s for s in others if _safe_number(prices.get(s), default=None) is None)
@@ -968,7 +989,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     check = set(targets["Symbol"].astype(str))
     if ranking is not None:                         # Friday: also check the possible replacements (ranks up to 20)
         check |= set(ranking.loc[pd.to_numeric(ranking["Rank"], errors="coerce") <= FRIDAY_SUB_MAX_RANK, "Symbol"].astype(str))
-    blocked = {**earnings_blocked(sorted(check), meta["as_of"]), **earnings_stop_blocked(meta["as_of"])}
+    blocked = {**earnings_blocked(sorted(check), meta["as_of"]), **earnings_stop_blocked(meta["as_of"]), **no_buy}
     if ranking is not None:
         # A new pick blocked by earnings / an earnings-day stop sale: the next eligible stock (rank <= 20) takes its weight.
         targets, statuses, blocked, subs = substitute_blocked_picks(targets, positions, ranking, blocked, statuses,
@@ -977,8 +998,20 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
         if subs["replaced"]:
             meta["source"] += "+subs"
             meta["invested"] = float(pd.to_numeric(targets["Weight"], errors="coerce").fillna(0).sum())
+    # Held do-not-sell stocks outside the targets stay invested: the targets share what is left of the invested level
+    # (e.g. 99% invested, SNOW kept at 10% -> the picks are scaled to 89%).
+    w = pd.to_numeric(targets["Weight"], errors="coerce").fillna(0.0)
+    px = {**dict(zip(targets["Symbol"].astype(str), targets["Price"])), **prices}
+    kept = {s: q * _safe_number(px.get(s), default=0.0) for s, q in _clean_positions(positions).items()
+            if s in no_sell and s not in set(targets.loc[w > 0, "Symbol"].astype(str))}
+    scale = max(0.0, 1 - sum(kept.values()) / max(account_size * w.sum(), 1e-9))
+    targets = targets.assign(Weight=w * scale)
+    meta["kept_outside"] = {s: v / account_size for s, v in kept.items()}
+    if kept:
+        meta["source"] += "+kept"
+        meta["invested"] = float(targets["Weight"].sum())
     return build_orders(targets, account_size, positions, prices, min_value=min_value, fractional=fractional,
-                        statuses=statuses, blocked=blocked), meta, targets
+                        statuses=statuses, blocked=blocked, keep=no_sell), meta, targets
 
 def substitute_blocked_picks(targets, positions, ranking, blocked, statuses=None, prices=None, max_rank=None):
     """Friday rebalance (Chirag, t191u, 2026-10-07): a NEW pick (the account holds none of it) that is blocked - earnings
@@ -1036,6 +1069,10 @@ def substitute_blocked_picks(targets, positions, ranking, blocked, statuses=None
     if new:
         t = pd.concat([t, pd.DataFrame(new).reindex(columns=t.columns)], ignore_index=True)
     return t, statuses, blocked, info
+
+def kept_text(kept):
+    """meta['kept_outside'] {SYMBOL: fraction of equity} as e.g. 'SNOW 10.0%, NVDA 4.2% (14.2% of the account)'."""
+    return ", ".join(f"{s} {f:.1%}" for s, f in kept.items()) + f" ({sum(kept.values()):.1%} of the account)"
 
 def substitution_text(info):
     """One line for meta['substitutions'], e.g. 'GTLB (rank 4, earnings Tue Oct 13, in 4 days) -> MSFT (rank 11) 9.90%'."""
@@ -1439,6 +1476,10 @@ def _next_9am(row=None, pend=None):
     return None if exp is not None and exp <= t else t
 
 # ----------------------------------------------------------------------------- crash-safe order ids + broker reconciliation
+def _id_symbol(symbol):
+    """The symbol as written in our client order ids (BRK.B -> BRKB)."""
+    return re.sub(r"[^A-Z0-9]", "", str(symbol).upper())
+
 def _client_order_id(symbol, side, qty, price, date_str, kind=""):
     """Deterministic client order id, stable across retries of the same plan.
 
@@ -1447,7 +1488,8 @@ def _client_order_id(symbol, side, qty, price, date_str, kind=""):
     deterministic, a crash between the broker submit and the local pending-file record
     cannot duplicate the order: the retry finds it on the broker by id.
     """
-    sym = re.sub(r"[^A-Z0-9]", "", str(symbol).upper())
+    sym = _id_symbol(symbol)
+    kind = re.sub(r"[^a-z0-9]", "", str(kind).lower())
     try:
         cents = int(round(float(price) * 100))
     except (TypeError, ValueError, OverflowError):
@@ -1482,7 +1524,7 @@ def _broker_orders_by_client_id(client):
         return None
 
 def _evening_submitted_on_broker(client, date_str):
-    """{(SYMBOL, SIDE)} already submitted to the broker this evening (any status).
+    """{(SYMBOL, SIDE)} already submitted to the broker this evening (any status); SYMBOL as in the id (_id_symbol).
 
     Matches our deterministic client_order_id prefix live-YYYYMMDD-SIDE-SYMBOL- (morning
     fill-check orders, live-fill-..., are excluded). A row found here was submitted before
@@ -1630,8 +1672,9 @@ def _morning_completion_plan(broker_by_cid, sym, side, qty, price, date_str, kin
     on the broker. If a prior attempt's order already covers the quantity, returns
     (None, 0, prior_order) so the caller marks it completed instead of duplicating.
     Otherwise the already-filled part is subtracted and a fresh deterministic id
-    (suffixed -rN when needed) is returned for the rest. kind="rest" (live-rest-...) for a BUY rest that did not fit
-    in the cash of an earlier check, so its ids never collide with that check's own order.
+    (suffixed -rN when needed) is returned for the rest. kind="rest<parent order id[:6]>" (live-rest1a2b3c-...) for a BUY
+    rest that did not fit in the cash of an earlier check, so its ids never collide with that check's own order (nor
+    with the order of an earlier rest of the same row).
     """
     base = _client_order_id(sym, side, qty, price, date_str, kind=kind)
     cid, n, covered = base, 2, 0.0
@@ -1735,10 +1778,13 @@ def record_pending_order(entry, meta, pending_path=PENDING_ORDERS_JSON):
 
 def _order_expiry(row, pend):
     """When a pending row is superseded: the first decision slot (2:30 PM CT) after it was recorded (rows without
-    recorded_at: after 2:30 PM CT on their evening date). None when it cannot be told."""
+    recorded_at: after 2:30 PM CT on their evening date). None when it cannot be told, and for an earnings-day stop
+    leftover (source earnings-stop): it is not a decision's order, so a newer decision never replaces it."""
     from datetime import datetime
 
     import backtest_engine as be
+    if row.get("source") == "earnings-stop":
+        return None
     try:
         t = datetime.fromisoformat(str(row["recorded_at"]))
     except (KeyError, TypeError, ValueError):
@@ -2031,7 +2077,8 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     # Completion ids use the row's EVENING date, so a retry on any later day still finds them.
     fill_date = str(pend.get("evening_date") or _today_ct().date().isoformat()).replace("-", "")
     today = _today_ct().date().isoformat()
-    stop_sold = earnings_stop_blocked(today)   # sold by the earnings-day stop: no buy back until after its last earnings-day session
+    stop_sold = {**earnings_stop_blocked(today), **manual_list("buy")}   # earnings-day stop sale (no buy back yet) / do-not-buy
+    keep = manual_list("sell")
     results = []
     px = {}        # results row number -> price columns for the order log (quote, limit, fill, slippage)
     to_retry = []  # rows kept for the next fill check: FAILED completions, cash waits, BUY rests, bad quotes
@@ -2069,6 +2116,9 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             continue
         if side == "BUY" and sym in stop_sold:
             results.append((sym, side, qty, oid, f"SKIPPED: {stop_sold[sym]} (dropped)"))
+            continue
+        if side == "SELL" and sym in keep:
+            results.append((sym, side, qty, oid, f"SKIPPED: {keep[sym]} (dropped)"))
             continue
         if str(o.get("retry_on") or "") > today:
             # Carried to a later 9 AM CT check (a bad quote, or a limit left working): nothing now.
@@ -2159,7 +2209,8 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             # of submitting a duplicate.
             cid, to_order, prior = _morning_completion_plan(
                 broker_by_cid, sym, side, remaining, o.get("limit_price") or 0,
-                str(o.get("evening_date") or "").replace("-", "") or fill_date, kind="rest" if o.get("rest_of") else "fill")
+                str(o.get("evening_date") or "").replace("-", "") or fill_date,
+                kind="rest" + str(o["rest_of"])[:6] if o.get("rest_of") else "fill")
             if prior is not None:
                 o["completed_order_id"] = str(prior.id)  # retry-safety: this row is done
                 _save_pending()
@@ -2421,11 +2472,11 @@ def reconcile_positions(target_source="auto", tolerance_pct=1.0, symbols=None):
     "couldn't check" is never reported as drift). Never raises.
     """
     cols = ["Symbol", "Target_Weight_%", "Actual_Weight_%", "Diff_pp", "Shares_Held", "Status"]
-    if str(target_source).endswith(("+cash", "+exits", "+subs")):
+    if str(target_source).endswith(("+cash", "+exits", "+subs", "+kept")):
         # A Mon/Wed check that also invested spare cash in stocks outside the strategy's holdings, or sold / refilled
         # account positions (sell rule on every position): the account deliberately differs from Strategy_Weight until
-        # Friday, so there is nothing to reconcile against (like hold). A Friday with replacements (+subs) holds
-        # stocks outside Provisional_Weight on purpose: same.
+        # Friday, so there is nothing to reconcile against (like hold). A Friday with replacements (+subs) or with
+        # do-not-sell stocks kept outside the scaled-down picks (+kept) holds stocks outside Provisional_Weight on purpose: same.
         return pd.DataFrame(columns=cols), True
     try:
         targets, meta = load_targets(target_source)
@@ -2569,6 +2620,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
                                         decision=decision, live_prices=live, cash=cash)
     if meta.get("substitutions") and substitution_text(meta["substitutions"]):
         print(f"  Friday replacements (new pick blocked): {substitution_text(meta['substitutions'])}")
+    if meta.get("kept_outside"):
+        print(f"  Do-not-sell kept outside the picks: {kept_text(meta['kept_outside'])} - the picks share the rest")
     if meta.get("account_exits"):
         print(f"  Mon/Wed sell rule (every position): {account_exit_text(meta['account_exits'])}")
     dep = meta.get("cash_deploy")
@@ -2613,8 +2666,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         key = (str(r.Symbol).upper(), r.Side)
         if r.Side in ("BUY", "SELL") and key in already:
             dup_rows.append((r.Symbol, r.Side, r.Shares, None,
-                             "SKIPPED: already submitted/staged this evening"))
-        elif r.Side in ("BUY", "SELL") and key in broker_submitted:
+                             "SKIPPED: already done earlier this evening"))
+        elif r.Side in ("BUY", "SELL") and (_id_symbol(r.Symbol), r.Side) in broker_submitted:
             dup_rows.append((r.Symbol, r.Side, r.Shares, None,
                              "SKIPPED: already on the broker this evening (recovered after a crash - "
                              "the morning fill check completes any remainder)"))
@@ -2750,6 +2803,8 @@ def main(argv=None):
     if meta.get("substitutions") is not None:
         print("FRIDAY REPLACEMENTS (new pick blocked by earnings / stop sale): "
               + (substitution_text(meta["substitutions"]) or "none needed"))
+    if meta.get("kept_outside"):
+        print(f"DO-NOT-SELL KEPT OUTSIDE THE PICKS: {kept_text(meta['kept_outside'])} - the picks share the rest")
     if meta.get("account_exits"):
         print(f"MON/WED SELL RULE (every account position): {account_exit_text(meta['account_exits'])}")
     dep = meta.get("cash_deploy")
