@@ -38,5 +38,3 @@ def render_notes():
         edited.to_csv(NOTES_CSV, index=False)
         del st.session_state["notes_editor"]
         st.rerun(scope="fragment")
-    st.caption("Click the empty bottom row (or + above the table) to add a note (today's date and time are filled in), click a cell to edit it, "
-               "tick rows on the left and press the trash icon to delete them. Saved automatically to Reports/my_notes.csv.")
