@@ -10,5 +10,6 @@
   stock_view.py    Home tab: stock list, picker, header, detail card
   stock_chart.py   Home tab: price chart
   short_stock.py   Home tab: stocks too new to trade
+  notes.py         Home tab: your notes table (add / edit / delete, saved to Reports/my_notes.csv)
   details/         Strategy and Trading Account tabs: one module per expander (details/__init__.py lays them out)
 """

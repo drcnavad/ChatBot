@@ -63,7 +63,7 @@ uses only Alpaca market data.
 | `alpaca_paper.py` | Read-only Alpaca account client (positions, orders, activities, daily history). |
 | `earnings_stop.py`, `trade_audit.py`, `tax_lots.py` | Earnings-day stop, trade audit, tax lots (dashboard). |
 | `forward_test.py` | Forward test of the account and 39 paper strategies from Fri Oct 2, 2026. |
-| `app.py`, `dashboard/` | Streamlit dashboard. |
+| `app.py`, `dashboard/` | Streamlit dashboard. Home tab "My notes" = an editable table (Stock, Date, Time, Note, Action, Price) saved to `Reports/my_notes.csv` on every change. |
 | `sector_mapping.py` | The stock list, sectors and names. |
 | `tests/run_tests.py` | Runs every regression test (`--fast` skips the app tests). |
 
