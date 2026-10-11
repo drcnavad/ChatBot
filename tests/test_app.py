@@ -208,7 +208,7 @@ exp_titles = [f"Last decision · {fmt(dec_day)}",
               f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
               "Strategy rules and holdings (paper strategies)",
               "Live holdings (Alpaca account)", f"Latest signals · {fmt(SIG.Date.max())} close"]
-labels = [e.label for e in at.expander]
+labels = [e.label for e in at.expander if e.label != "My notes"]   # the notes table sits on top (daf6f89)
 expect(len(labels) >= 3 and labels[0].startswith(exp_titles[0]) and labels[1:3] == exp_titles[1:3]
        and set(exp_titles[3:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
 expect(sum("forward test" in l.lower() for l in labels) == 1, f"the forward test is in one place only: {labels}")
@@ -231,8 +231,8 @@ expect(len(_top) == 1 and len(_top_syms) == 10 and len({s for s, _, _ in _top_sy
        and [int(c) for _, c, _ in _top_syms] == sorted((int(c) for _, c, _ in _top_syms), reverse=True)
        and all(int(c) <= int(n) == 5 for _, c, n in _top_syms),
        f"Top 5 consensus: 10 linked stocks from 5 strategies, most held first: {_top_syms}")
-expect(any("overflow-x: auto" in m.value and "sa-tier-syms" in m.value for m in at.markdown),
-       "stock-list rows (sa-tier-syms) must scroll horizontally on overflow")
+expect(any("flex-wrap: wrap" in m.value and "sa-tier-syms" in m.value for m in at.markdown),
+       "stock-list rows (sa-tier-syms) must wrap onto more lines, not scroll")
 _rule = "Don't change the strategy until 12+ weeks of forward results (from Oct 2, 2026) compare against QQQ."
 for _rule in (_rule, "No single stock gets more than 20%; any extra stays in cash."):
     expect(sum(_rule in m.value for m in at.markdown) + sum(_rule in c.value for c in at.caption) == 1, f"shown once: {_rule}")

@@ -23,17 +23,21 @@ def render_notes():
     """The notes table: add a row at the bottom, edit any cell, select rows and delete them. Every change is saved at
     once and the table reloads from the file (a fragment: only this section reruns)."""
     notes = read_notes()
-    now = datetime.now(CT)
+    # No per-run defaults in column_config: a default that changes every minute (the current time) changes the
+    # editor's identity, which reset the table mid-edit and dropped unsaved typing. Blank Date/Time are filled on save.
     edited = tidy(st.data_editor(
         notes, key="notes_editor", num_rows="dynamic", hide_index=True, width="stretch",
         column_config={
             "Stock": st.column_config.TextColumn("Stock", max_chars=10),
-            "Date": st.column_config.DateColumn("Date", format="MMM D, YYYY", default=now.date()),
-            "Time": st.column_config.TimeColumn("Time", format="h:mm a", step=60, default=now.time().replace(second=0, microsecond=0)),
+            "Date": st.column_config.DateColumn("Date", format="MMM D, YYYY"),
+            "Time": st.column_config.TimeColumn("Time", format="h:mm a", step=60),
             "Note": st.column_config.TextColumn("Note", width="large"),
             "Action": st.column_config.SelectboxColumn("Action", options=ACTIONS),
             "Price": st.column_config.NumberColumn("Price", format="$%.2f", min_value=0.0),
         }))
+    now = datetime.now(CT)
+    edited["Date"] = edited["Date"].where(edited["Date"].notna(), now.date())
+    edited["Time"] = edited["Time"].where(edited["Time"].notna(), now.time().replace(second=0, microsecond=0))
     if edited.to_csv(index=False) != notes.to_csv(index=False):
         edited.to_csv(NOTES_CSV, index=False)
         del st.session_state["notes_editor"]
