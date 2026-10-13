@@ -11,14 +11,16 @@ REPORTS_DIR = os.path.join(PROJECT_ROOT, "Reports")
 
 # The stocks the strategy ranks and trades (QQQ is the benchmark; it is listed for the dashboard but never traded).
 stock_symbols = [
-    'AAPL', 'AMZN', 'ANET', 'AMD', 'APP', 'AVAV', 'AVGO', 'BIIB', 'BKR', 'CDNS', 'COIN', 'CRM',
-    'CRWV', 'CVLT', 'DASH', 'ENPH', 'FIG', 'FTNT', 'GOOGL', 'GTLB', 'HAL', 'HIMS', 'HOOD', 'INTU',
-    'IREN', 'LRCX', 'MCK', 'MRK', 'META', 'MRVL', 'MSFT', 'NFLX', 'NOW', 'NVDA', 'ORCL', 'PANW',
-    'RCL', 'REGN', 'SLB', 'SNOW', 'TEAM', 'TSLA', 'UBER', 'UI', 'UNH', 'UPST', 'VEEV', 'VRT',
-    'ZS', 'UMAC', 'NOC', 'LMT', 'U', 'CRCL', 'TWLO', 'ACHR', 'ALAB', 'APLD', 'ARM', 'ASTS',
-    'CIFR', 'CVNA', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RDDT', 'RKLB', 'SHOP', 'SMCI', 'SOUN', 'TEM',
-    'TTWO', 'SPCX', 'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'BE', 'BA', 'URI',
-    'PH', 'FCX', 'LYB', 'CRDO', 'NBIS', 'LITE', 'CLS', 'RBRK', 'CORZ', 'HIMX', 'LUNR', 'NU',
+    'AAPL', 'AMZN', 'ANET', 'AMD', 'APP', 'AVGO', 'BIIB', 'BKR', 'CDNS', 'CRM', 'CVLT', 'DASH',
+    'ENPH', 'FTNT', 'GOOGL', 'HAL', 'HOOD', 'INTU', 'LRCX', 'MCK', 'MRK', 'META', 'MRVL', 'MSFT',
+    'NFLX', 'NOW', 'NVDA', 'ORCL', 'PANW', 'RCL', 'REGN', 'SLB', 'TSLA', 'UBER', 'UI', 'UNH',
+    'UPST', 'VEEV', 'VRT', 'NOC', 'LMT', 'CRCL', 'TWLO', 'ALAB', 'APLD', 'ARM', 'CVNA', 'RDDT',
+    'SHOP', 'SMCI', 'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'BE', 'BA', 'URI', 'PH', 'FCX',
+    'CRDO', 'CLS', 'HIMX', 'NU',
+    # Loss-making (negative net income, last 4 quarters, as of 2026-10-13); uncomment to re-add:
+    # 'AVAV', 'COIN', 'CRWV', 'FIG', 'GTLB', 'HIMS', 'IREN', 'SNOW', 'TEAM', 'ZS', 'UMAC', 'U',
+    # 'ACHR', 'ASTS', 'CIFR', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RKLB', 'SOUN', 'TEM', 'TTWO', 'SPCX',
+    # 'LYB', 'NBIS', 'LITE', 'RBRK', 'CORZ', 'LUNR',
     'QQQ'
 ]
 
@@ -26,7 +28,7 @@ stock_symbols = [
 # do_not_buy: never bought or topped up (on Friday its slot goes to the next eligible stock, down to rank 20).
 # do_not_sell: never sold or trimmed (the Mon/Wed rank-20 rule keeps it too). The earnings-day stop still sells.
 do_not_buy = ['SMCI', 'HOOD']
-do_not_sell = ['SNOW']
+do_not_sell = ['MSFT']
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
 sector_etfs = {
