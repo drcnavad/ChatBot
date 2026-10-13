@@ -14,13 +14,13 @@ stock_symbols = [
     'AAPL', 'AMZN', 'ANET', 'AMD', 'APP', 'AVGO', 'BIIB', 'BKR', 'CDNS', 'CRM', 'CVLT', 'DASH',
     'ENPH', 'FTNT', 'GOOGL', 'HAL', 'HOOD', 'INTU', 'LRCX', 'MCK', 'MRK', 'META', 'MRVL', 'MSFT',
     'NFLX', 'NOW', 'NVDA', 'ORCL', 'PANW', 'RCL', 'REGN', 'SLB', 'TSLA', 'UBER', 'UI', 'UNH',
-    'UPST', 'VEEV', 'VRT', 'NOC', 'LMT', 'CRCL', 'TWLO', 'ALAB', 'APLD', 'ARM', 'CVNA', 'RDDT',
+    'UPST', 'VEEV', 'VRT', 'NOC', 'LMT', 'CRCL', 'TWLO', 'ALAB', 'ARM', 'CVNA', 'RDDT',
     'SHOP', 'SMCI', 'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'BE', 'BA', 'URI', 'PH', 'FCX',
     'CRDO', 'CLS', 'HIMX', 'NU',
     # Loss-making (negative net income, last 4 quarters, as of 2026-10-13); uncomment to re-add:
     # 'AVAV', 'COIN', 'CRWV', 'FIG', 'GTLB', 'HIMS', 'IREN', 'SNOW', 'TEAM', 'ZS', 'UMAC', 'U',
     # 'ACHR', 'ASTS', 'CIFR', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RKLB', 'SOUN', 'TEM', 'TTWO', 'SPCX',
-    # 'LYB', 'NBIS', 'LITE', 'RBRK', 'CORZ', 'LUNR',
+    # 'LYB', 'NBIS', 'LITE', 'RBRK', 'CORZ', 'LUNR', 'APLD',
     'QQQ'
 ]
 
