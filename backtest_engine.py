@@ -68,7 +68,7 @@ RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 # Change a rule here, then run `python run_all.py`.
 WINNER = {
     "n": 10,                # stocks held
-    "w_tech": 0.5,          # score = 0.5 x technical score + 0.5 x relative strength
+    "w_tech": 0.0,          # score = relative strength only (Chirag 2026-10-13; was 0.5 x technical + 0.5 x RS)
     "use_regime": True,     # soft market regime (below)
     "regime_symbol": "QQQ", # regime is on while QQQ closes above its 200-day average
     "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
