@@ -160,8 +160,8 @@ try:
     check("strategy REPLACE S22 -> S03 kept as is (one SELL S22, one BUY S03); the account rule adds only S24, no refill left",
           side(o, "S22") == ["SELL"] and side(o, "S03") == ["BUY"] and [s for s, *_ in ex["sold"]] == ["S24"]
           and ex["replaced"] == [] and list(o["Symbol"]).count("S24") == 1, o[["Symbol", "Side", "Shares"]].values.tolist())
-    check("S24's $4,000 goes to the spare-cash step: buys unheld S11 (rank 11); source midweek+exits+cash",
-          meta["source"] == "midweek+exits+cash" and meta["cash_deploy"]["buys"] == [("S11", 11, 40.0, 4_000.0)],
+    check("S24's $4,000 stays cash: S11 (rank 11) has no rank history, so it is not a climber; source midweek+exits",
+          meta["source"] == "midweek+exits" and meta["cash_deploy"]["buys"] == [],
           (meta["source"], meta["cash_deploy"]))
     # not a check day (Tue): nothing sold by the account rule
     pd.DataFrame([{**pd.read_csv(picks).iloc[0].to_dict(), "As_Of": "2026-10-06"}]).to_csv(picks, index=False)

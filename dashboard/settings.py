@@ -72,7 +72,7 @@ def rules_text():
             + (f"- **{days} spare cash:** after the sells, the account's cash above {1 - LIVE_INVESTED:.0%} of equity "
                f"(e.g. a deposit, an exit or an earnings-day stop sale) buys the top-{DEPLOY_MAX_RANK} stocks the account does "
                "not hold, in rank order, each at its current rule weight; what is left buys the next stocks not held from "
-               f"rank {DEPLOY_MAX_RANK + 1} down (positive score only), at most {EXTRA_MAX_WEIGHT:.0%} of equity each"
+               f"rank {DEPLOY_MAX_RANK + 1} down (positive score and climbing: rank better than 15 sessions ago), at most {EXTRA_MAX_WEIGHT:.0%} of equity each"
                + (f" (max {MAX_WEIGHT * LIVE_INVESTED:.1%} of equity per stock)" if MAX_WEIGHT else "")
                + ("; earnings rule" if EARNINGS else "") + ", no buy back after an earnings-day stop sale. Cash no stock can "
                f"take, and any order under ${DEPLOY_MIN_USD:,.0f} or {DEPLOY_MIN_PCT:.0%} of equity (whichever is larger), "

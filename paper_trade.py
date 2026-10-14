@@ -60,6 +60,7 @@ CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills
 FRIDAY_SUB_MAX_RANK = 20
 DEPLOY_MAX_RANK = 10     # spare-cash buys of stocks not held: top 10 only
 EXTRA_MAX_WEIGHT = 0.10  # the leftover buys unheld ranks 11, 12, ... (score > 0), at most 10% of equity each
+CLIMB_DAYS = 15   # ranks 11+ are bought only if their rank improved over this many sessions (Chirag, 2026-10-13)
 DEPLOY_MIN_PCT = 0.01    # a spare-cash buy must be worth at least 1% of equity (a smaller rest stays in cash) ...
 DEPLOY_MIN_USD = 100.0   # ... and at least $100
 # LIVE order pricing (auto_trade and the 9 AM fill check): every order is a LIMIT priced from the latest quote, never a
@@ -648,6 +649,9 @@ def latest_ranking(as_of, signal_csv=SIGNAL_CSV):
     except Exception:
         min_score = 0.0
     day = day[day["Strategy_Rank"].notna() & (pd.to_numeric(day["Strategy_Score"], errors="coerce") > min_score)]
+    dates = sorted(df["Date"].astype(str).str[:10].unique()); i = dates.index(str(as_of)[:10]) if str(as_of)[:10] in dates else -1
+    prev = df[df["Date"].astype(str).str[:10] == dates[i - CLIMB_DAYS]] if i >= CLIMB_DAYS else df.iloc[:0]
+    day["Rank_Prev"] = day["Symbol"].map(prev.set_index("Symbol")["Strategy_Rank"])   # rank CLIMB_DAYS sessions ago
     day = day.rename(columns={"Strategy_Rank": "Rank", "Strategy_Score": "Score"}).sort_values("Rank", kind="stable")
     for c in ("Provisional_Weight", "Regime_On", "Midweek_Check"):
         if c not in day.columns:
@@ -843,6 +847,9 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
         if left < floor_usd:
             break
         if str(r.Symbol).upper() in held or str(r.Symbol).upper() in new:
+            continue
+        prev = getattr(r, "Rank_Prev", r.Rank + 1)      # only climbers: rank better now than CLIMB_DAYS sessions ago
+        if not (prev == prev and prev > r.Rank):
             continue
         sym, px = usable(r)
         d = min(extra_max_weight * equity, cap, left)

@@ -399,13 +399,10 @@ exit_row = [{"As_Of": "2026-10-05", "Event": "mid-week check", "Event_Date": "20
 orders, meta, results, broker3, eq3 = run_day("2026-10-05", "2026-10-02", pos_mon, broker.cash, midweek_rows=exit_row)
 sent = [(r.symbol, "SELL" if r.side == OrderSide.SELL else "BUY") for r in broker3.submitted]
 ftnt = broker3.pos.get("FTNT", 0) * PX["FTNT"] / eq3 * 100
-check("Mon 10/5 exit: the exited name is sold first, then the spare cash buys unheld AAPL (rank 11, max 10%); held "
-      "names are not topped up", sent and sent[0] == (victim, "SELL") and set(sent[1:]) == {("AAPL", "BUY")}
-      and meta["source"] == "midweek+cash" and broker3.pos.get("AAPL", 0) * PX["AAPL"] / eq3 * 100 <= 10.0 + 1e-6,
-      (sent, meta["source"], ftnt))
+check("Mon 10/5 exit: the exited name is sold; AAPL (rank 11) has no rank history so it is not a climber and the cash "
+      "stays; held names are not topped up", sent == [(victim, "SELL")] and meta["source"] == "midweek", (sent, meta["source"], ftnt))
 inv3 = sum(q * PX[s] for s, q in broker3.pos.items()) / eq3 * 100
-check("Mon 10/5 exit: the account ends ~99% invested (<= 99%, >= 97%; the fractional rest goes at 9 AM)",
-      97.0 <= inv3 <= 99.0 + 1e-6 and broker3.cash >= 0, (inv3, broker3.cash))
+check("Mon 10/5 exit: the sale goes to cash (no climber to buy)", inv3 < 97.0 and broker3.cash >= 0, (inv3, broker3.cash))
 
 # do-not-sell stock outside the targets: its planned sale is skipped BEFORE the trim fix, so no cash is counted from it
 tg = pd.DataFrame({"Symbol": ["P1", "P2", "P3", "P4", "P5"], "Weight": [0.178] * 5, "Price": 100.0})
