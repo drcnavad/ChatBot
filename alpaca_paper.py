@@ -334,7 +334,9 @@ def account_vs_etfs(history, snap, closes, prices_now, start):
         ret = (px_now / p0 - 1) * 100
         rows.append({"Compared with": f"{sym} ({name})", "Return %": ret, "Value now": units * px_now,
                      "Gain $": units * px_now - put_in, "Account ahead by (pts)": acct_ret * 100 - ret})
-    return pd.DataFrame(rows), start, put_in
+    out = pd.DataFrame(rows)
+    out.insert(2, "Money return %", out["Gain $"] / put_in * 100)   # gain on the money put in (deposit timing counts)
+    return out, start, put_in
 
 # --- files for the rest of the pipeline --------------------------------------------------------------------------------
 def write_positions_csv(positions, path=POSITIONS_CSV):
