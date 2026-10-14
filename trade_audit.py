@@ -414,6 +414,7 @@ def write_files(rep, ledger_csv=None, trips_csv=None):
         os.replace(path + ".tmp", path)
 
 def main(argv=None):
+    os.spawnlp(os.P_NOWAIT, "caffeinate", "caffeinate", "-i", "-w", str(os.getpid()))  # keep the Mac awake until this run ends (lid closed / sleeping)
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--write", action="store_true", help="write the ledger and round-trip CSVs")
     p.add_argument("--log", action="store_true", help="write new alerts to Reports/run_log.csv")

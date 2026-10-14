@@ -459,6 +459,7 @@ def _print_dry(now, session, table, held):
         print(f"  {sym:<6} no upcoming earnings date on file")
 
 def main(argv=None):
+    os.spawnlp(os.P_NOWAIT, "caffeinate", "caffeinate", "-i", "-w", str(os.getpid()))  # keep the Mac awake until this run ends (lid closed / sleeping)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--dry-run", action="store_true", help="read-only: show held stocks on an earnings day and their triggers")

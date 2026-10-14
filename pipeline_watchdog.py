@@ -300,6 +300,7 @@ def handle_failure(tail, checkpoint):
 
 def main(argv=None):
     """Entry point: run the pipeline, heal what is safe to heal, diagnose the rest."""
+    os.spawnlp(os.P_NOWAIT, "caffeinate", "caffeinate", "-i", "-w", str(os.getpid()))  # keep the Mac awake until this run ends (lid closed / sleeping)
     args = list(argv) if argv is not None else list(sys.argv[1:])
     if "--help" in args or "-h" in args:
         print(__doc__)
