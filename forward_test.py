@@ -166,6 +166,9 @@ STRATEGIES = [
               "the pre-2026-10-05 exit). The Oct 2 rules refill from the best non-held top-10."),
     dict(name="Risk parity", reweight="risk_parity",
          rule="The live picks, weighted so each stock adds the same risk (63-day volatility and correlation)."),
+    dict(name="Top 20 rank-weighted (70/30)", score="rs", select={"n": 20}, reweight="rank_tier",
+         rule="Relative strength top 20 weighted by rank: ranks 1-10 share 70% (8.5% down to 5.5%), ranks 11-20 share "
+              "30% (5.0% down to 1.0%). Half size while QQQ is below its 200-day average."),
 ]
 for _c in STRATEGIES:                                     # the limits the plain rankings keep (said once, here)
     if (_c.get("select") is PLAIN or _c.get("select") is EQ) and not _c["rule"].startswith("The live rules"):
@@ -266,6 +269,22 @@ def earnings_drift(c, spy, earnings, hold=60):
             j = pos[sym]
             out[k:k + hold, j] = (c.iat[k, j] / c.iat[k - 1, j] - spy.iat[k] / spy.iat[k - 1]) * 100
     return pd.DataFrame(out, index=idx, columns=c.columns)
+
+RANK_WEIGHTS = np.r_[np.linspace(8.5, 5.5, 10), np.linspace(5.0, 1.0, 10)] / 100   # ranks 1-10: 70%, 11-20: 30%
+
+def rank_tier(tgt, score, weights=RANK_WEIGHTS):
+    """The same picks reweighted by rank (best score first): rank k gets weights[k-1], always less than rank k-1;
+    scaled to the day's total exposure (e.g. half size). Weights change only when the picks change."""
+    out, prev, last = tgt.copy() * 0.0, None, None
+    for d, row in tgt.iterrows():
+        names = frozenset(row.index[row > 0])
+        if names != prev:
+            order = score.loc[d, list(names)].sort_values(ascending=False).index[:len(weights)] if names else []
+            w = pd.Series(0.0, index=tgt.columns)
+            w[list(order)] = weights[:len(order)]
+            last, prev = w / w.sum() if w.sum() else w, names
+        out.loc[d] = last * row.sum()
+    return out
 
 def risk_parity(tgt, close, days, window=63):
     """Same picks and total weight, re-split for equal risk contributions (63-day covariance; cyclical coordinate descent),
@@ -502,6 +521,8 @@ def strategy_targets(cfg, inp):
                                    exit_all_below=EXIT_BELOW, exit_to_top=EXIT_TO_TOP)
         if cfg.get("reweight") == "risk_parity":
             tgt = risk_parity(tgt, inp["close"][tgt.columns], inp["weekly"])
+        if cfg.get("reweight") == "rank_tier":
+            tgt = rank_tier(tgt, inp["scores"][cfg.get("score", "live")][tgt.columns])
         if cfg.get("spare_dips"):                         # the cash the live rules leave unused buys ATR dips (10% each)
             tgt = tgt + atr_dip_weights(inp["dip_spare"][tgt.columns], inp["scores"]["live"], taken=(tgt > 0).to_numpy(),
                                         room=np.floor((1 - tgt.sum(axis=1)).to_numpy() * 10 + 1e-9).astype(int))
