@@ -69,7 +69,7 @@ RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 WINNER = {
     "n": 10,                # stocks held
     "w_tech": 0.0,          # score = relative strength only (Chirag 2026-10-13; was 0.5 x technical + 0.5 x RS)
-    "climb_days": 15,       # rank 1-20 = the RS top 20 ordered by rank gain over 15 sessions, then the rest by RS
+    "climb_days": None,     # climbers off (Chirag 2026-10-13 11 PM: back to RS only); 15 = rank 1-20 by 15-session RS-rank gain
     "climb_top": 20,        # (climb_score; Chirag 2026-10-13, from the Wed Oct 14 run)
     "use_regime": True,     # soft market regime (below)
     "regime_symbol": "QQQ", # regime is on while QQQ closes above its 200-day average
