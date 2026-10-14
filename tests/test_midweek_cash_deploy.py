@@ -1,6 +1,6 @@
 """Mon/Wed spare-cash rule (live only, approved 2026-10-06; leftover rule 2026-10-07): after the mid-week replacements/exits, the
 account's cash above 1% of equity buys the top-10 stocks NOT held (latest ranking, rank order) at their rule weights; what
-is left tops up ranks 1-3 (held or not), rank 1 to the 19.8% cap first, then 2, then 3; ranks 11-20 are never bought; other
+is left buys unheld ranks 11, 12, ... (score > 0) at most 10% of equity each; held stocks are never topped up; other
 held stocks get no order; earnings / earnings-day-stop blocks; an order under max($100, 1% of equity) is not made; cash no
 stock can take stays cash. Friday's rebalance (exactly the top-10 targets, every other stock sold) is unchanged.
 Hand-worked cases with fake CSVs; no network, no orders.
@@ -37,29 +37,25 @@ def buys(orders):
     b = orders[orders["Side"] == "BUY"]
     return dict(zip(b["Symbol"], b["Est_Value"]))
 
-# 1) unheld top-10 names in rank order at their weights; the leftover tops up rank 1 (held) - never rank 11+
+# 1) unheld top-10 names in rank order at their weights; the leftover buys unheld rank 11+ names (<= 10% each)
 o, info = pt.build_cash_deploy_orders(pt.build_hold_orders({"AAA": 100, "BBB": 200}, {"AAA": 100.0, "BBB": 50.0}),
                                       {"AAA": 100, "BBB": 200}, EQ, cash=30_000, ranking=R, fractional=True)
 b = buys(o)
 check("spare = cash - 1% of equity = $29,000", abs(info["spare"] - 29_000) < 0.01, info["spare"])
 check("CCC (rank 3) gets its 12% weight, DDD (rank 4) its 8%",
       abs(b.get("CCC", 0) - 12_000) < 1 and abs(b.get("DDD", 0) - 8_000) < 1, b)
-check("rest $9,000 tops up held AAA (rank 1, $10,000 -> $19,000, under the $19,800 cap); EEE / FFF (ranks 11-12) get nothing",
-      abs(b.get("AAA", 0) - 9_000) < 1 and "EEE" not in b and "FFF" not in b and "GGG" not in b
-      and info["topups"] == [("AAA", 1, 90.0, 9_000.0)], (b, info["topups"]))
+check("rest $9,000 buys unheld EEE (rank 11, under the 10% cap); held AAA is not topped up",
+      b == {"CCC": 12_000.0, "DDD": 8_000.0, "EEE": 9_000.0} and info["topups"] == [], (b, info["topups"]))
 a_row = o[o["Symbol"] == "AAA"]
-check("the top-up turns AAA's HOLD row into one BUY row (100 -> 190 shares); BBB (rank 2) stays HOLD",
-      len(a_row) == 1 and a_row["Side"].iloc[0] == "BUY" and a_row["Current_Shares"].iloc[0] == 100
-      and a_row["Target_Shares"].iloc[0] == 190 and o.loc[o.Symbol == "BBB", "Side"].tolist() == ["HOLD"], o.values.tolist())
+check("held AAA and BBB stay HOLD (no top-up)",
+      o.loc[o.Symbol.isin(["AAA", "BBB"]), "Side"].tolist() == ["HOLD", "HOLD"], o.values.tolist())
 check("account ends ~99% invested (total buys = spare)", abs(sum(b.values()) - 29_000) < 1, sum(b.values()))
 
-# 2) every top-10 name held: the cash tops up rank 1 to the cap, then rank 2, then rank 3; never ranks 11+
+# 2) everything up to rank 12 held: the cash buys the next unheld name at 10%
 o, info = pt.build_cash_deploy_orders(EMPTY, {s: 1 for s in ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"]}, EQ,
                                       cash=50_000, ranking=R, fractional=True)
 b = buys(o)
-check("all top 10 held: AAA to $19,800 (+$19,700), BBB (+$19,750), CCC gets the last $9,550; EEE/FFF/GGG nothing",
-      abs(b.get("AAA", 0) - 19_700) < 1 and abs(b.get("BBB", 0) - 19_750) < 1 and abs(b.get("CCC", 0) - 9_550) < 1
-      and set(b) == {"AAA", "BBB", "CCC"}, b)
+check("all top 10 and ranks 11-12 held: GGG (rank 25) gets 10% ($10,000), the rest stays cash", b == {"GGG": 10_000.0}, b)
 
 # 3) small leftover stays in cash (below max($100, 1% of equity) = $1,000)
 o, info = pt.build_cash_deploy_orders(EMPTY, {}, EQ, cash=1_900, ranking=R, fractional=True)
@@ -72,28 +68,26 @@ b = buys(o)
 check("earnings-blocked CCC skipped (not bought, not topped up), DDD bought instead", "CCC" not in b and "DDD" in b
       and [s for s, _ in info["skipped"]] == ["CCC"], (b, info["skipped"]))
 
-# 5) ranks 1-3 at the cap or blocked: the leftover stays in cash (no rank 4+ top-up, no rank 11+ buy)
+# 5) top 10 held: the leftover buys ranks 11, 12, ... at 10% each; held names are never topped up
 full = {"AAA": 198, "BBB": 396, "CCC": 990}                      # each $19,800 = the cap
 o, info = pt.build_cash_deploy_orders(pt.build_hold_orders(full, {"AAA": 100.0, "BBB": 50.0, "CCC": 20.0}), {**full, "DDD": 1},
                                       EQ, cash=20_000, ranking=R, fractional=True)
-check("ranks 1-3 already at 19.8% and DDD held: nothing bought, the $19,000 stays in cash", buys(o) == {}, buys(o))
+check("top 10 held: EEE (rank 11) $10,000, FFF (rank 12) the last $9,000", buys(o) == {"EEE": 10_000.0, "FFF": 9_000.0}, buys(o))
 o, info = pt.build_cash_deploy_orders(EMPTY, {"AAA": 1, "BBB": 1, "CCC": 1, "DDD": 1}, EQ, cash=30_000, ranking=R,
                                       fractional=True, blocked={"AAA": "earnings Fri Oct 09, in 2 days"})
 b = buys(o)
-check("rank 1 blocked by earnings: rank 2 filled to the cap first, then rank 3; AAA untouched",
-      "AAA" not in b and abs(b.get("BBB", 0) - 19_750) < 1 and abs(b.get("CCC", 0) - 9_250) < 1, b)
+check("held names never topped up: EEE, FFF at 10% each, GGG the last $9,000", b == {"EEE": 10_000.0, "FFF": 10_000.0, "GGG": 9_000.0}, b)
 near = {"AAA": 193, "BBB": 1, "CCC": 1, "DDD": 1}                # AAA $19,300: room $500 < the $1,000 minimum
 o, info = pt.build_cash_deploy_orders(EMPTY, near, EQ, cash=5_000, ranking=R, fractional=True)
-check("a top-up under the minimum order is not made: AAA skipped (room $500), BBB takes the $4,000",
-      "AAA" not in buys(o) and abs(buys(o).get("BBB", 0) - 4_000) < 1, buys(o))
+check("all top 10 held: the $4,000 goes to EEE (rank 11)", buys(o) == {"EEE": 4_000.0}, buys(o))
 
 # 5b) per-stock cap 19.8% for a new name; an unheld rank-1-3 name gets its weight, then the top-up on top (one row)
 R2 = ranking([("AAA", 1, 0.10, 100.0), ("BBB", 2, 0.30, 100.0)])
 o, info = pt.build_cash_deploy_orders(EMPTY, {}, EQ, cash=60_000, ranking=R2, fractional=True)
 b = buys(o)
 check("BBB weight 30% capped at 19.8% of equity", abs(b.get("BBB", 0) - 19_800) < 0.01, b)
-check("leftover tops AAA (rank 1) up to the 19.8% cap: one AAA row, the rest ($19,400) stays cash",
-      abs(b.get("AAA", 0) - 19_800) < 0.01 and list(o["Symbol"]).count("AAA") == 1 and abs(info["spent"] - 39_600) < 0.01, b)
+check("no rank 11+ in the ranking: AAA gets its 10% weight, no top-up, the rest stays cash",
+      b == {"AAA": 10_000.0, "BBB": 19_800.0} and abs(info["spent"] - 29_800) < 0.01, b)
 
 # 6) replacements run first: a name sold today is not bought back or topped up; the replacement buy counts as held; proceeds count as cash
 sw = pd.DataFrame([{"Symbol": "AAA", "Side": "SELL", "Shares": 100, "Price": 100.0, "Est_Value": 10_000.0,
@@ -107,11 +101,9 @@ check("sold-today AAA not bought back; replacement buy BBB not doubled; CCC gets
       list(o["Symbol"]).count("BBB") == 1 and list(o["Symbol"]).count("AAA") == 1 and abs(b.get("CCC", 0) - 12_000) < 1, b)
 o, info = pt.build_cash_deploy_orders(sw, {"AAA": 100, "CCC": 1, "DDD": 1}, EQ, cash=13_000, ranking=R, fractional=True)
 bb = o[o["Symbol"] == "BBB"]
-check("leftover skips sold-today AAA (rank 1), grows the replacement's BBB buy (rank 2: $10,000 -> $19,800) in its own row, "
-      "then rank 3 CCC gets the last $2,200",
-      len(bb) == 1 and abs(bb["Est_Value"].iloc[0] - 19_800) < 1 and bb["Target_Shares"].iloc[0] == 396
-      and list(o["Symbol"]).count("AAA") == 1 and o.loc[o.Symbol == "AAA", "Side"].tolist() == ["SELL"]
-      and abs(buys(o).get("CCC", 0) - 2_200) < 1, o.values.tolist())
+check("leftover skips sold-today AAA, leaves the replacement BBB buy at $10,000, then EEE $10,000 and FFF the last $2,000",
+      len(bb) == 1 and abs(bb["Est_Value"].iloc[0] - 10_000) < 1 and o.loc[o.Symbol == "AAA", "Side"].tolist() == ["SELL"]
+      and buys(o) == {"BBB": 10_000.0, "EEE": 10_000.0, "FFF": 2_000.0}, o.values.tolist())
 
 # 7) QQQ below its 200-day (Regime_On 0): invested level 49.5%, so less spare cash
 o, info = pt.build_cash_deploy_orders(EMPTY, {}, EQ, cash=60_000, ranking=ranking([("AAA", 1, 0.05, 100.0)], regime=0),
@@ -143,15 +135,13 @@ check("is_midweek_check_day: Wed yes, Tue no",
 o, meta, _ = pt.plan_orders("auto", EQ, {"AAA": 500}, picks_csv=picks, signal_csv=sig, midweek_csv=mid,
                             fractional=True, cash=40_000)
 b = buys(o)
-check("plan_orders on a quiet Wed check: HOLD AAA (50%, over the cap), buy BBB and CCC (10% each), the $19,000 rest "
-      "tops up rank 2 BBB to $19,800 then rank 3 CCC (+$9,200), source hold+cash",
-      meta["source"] == "hold+cash" and set(b) == {"BBB", "CCC"} and o.loc[o.Symbol == "AAA", "Side"].tolist() == ["HOLD"]
-      and abs(b["BBB"] - 19_800) < 1 and abs(b["CCC"] - 19_200) < 1, (meta["source"], b))
+check("plan_orders on a quiet Wed check: HOLD AAA, buy BBB and CCC (10% each), no top-up, source hold+cash",
+      meta["source"] == "hold+cash" and b == {"BBB": 10_000.0, "CCC": 10_000.0}
+      and o.loc[o.Symbol == "AAA", "Side"].tolist() == ["HOLD"], (meta["source"], b))
 o, meta, _ = pt.plan_orders("auto", EQ, {"AAA": 100, "BBB": 200, "CCC": 500}, picks_csv=picks, signal_csv=sig,
                             midweek_csv=mid, fractional=True, cash=12_000)
-check("plan_orders, everything held: the spare $11,000 tops up held AAA (rank 1) to the cap (+$9,800), then BBB "
-      "(rank 2) +$1,200; source hold+cash",
-      meta["source"] == "hold+cash" and buys(o) == {"AAA": 9_800.0, "BBB": 1_200.0} and len(o) == 3, (meta["source"], buys(o)))
+check("plan_orders, everything held and no rank 11+: nothing bought, the cash stays",
+      buys(o) == {} and len(o) == 3, (meta["source"], buys(o)))
 o, meta, _ = pt.plan_orders("auto", EQ, {"AAA": 500}, picks_csv=picks, signal_csv=sig, midweek_csv=mid, fractional=True)
 check("no cash given -> unchanged hold behaviour (no buys)", meta["source"] == "hold" and buys(o) == {}, meta["source"])
 pd.DataFrame([{**pd.read_csv(picks).iloc[0].to_dict(), "As_Of": "2026-10-06"}]).to_csv(picks, index=False)

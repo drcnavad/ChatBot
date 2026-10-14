@@ -10,8 +10,8 @@ Strategy_Weight, provisional = Provisional_Weight (the Friday rebalance), midwee
 a holding worse than rank 20, buy the best eligible top-10 stock not held, same dollars; SELL: no refill left), auto =
 provisional on a rebalance day, midweek on a check day with a change, else hold.
 Live-only rules: Mon/Wed every account position worse than rank 20 (or unranked) is sold and replaced 1-for-1
-(build_account_exit_orders); then cash above 1% of equity buys top-10 stocks not held, the rest tops up ranks 1-3 to the
-19.8% cap (build_cash_deploy_orders). No new buy / top-up with earnings within 5 days; on Friday a blocked NEW pick gives
+(build_account_exit_orders); then cash above 1% of equity buys top-10 stocks not held, the rest buys unheld ranks 11+ at max 10% each
+(build_cash_deploy_orders). No new buy / top-up with earnings within 5 days; on Friday a blocked NEW pick gives
 its weight to the next eligible stock down to rank 20 (substitute_blocked_picks). A stock sold by the earnings-day stop
 (earnings_stop.py) is not bought back until after its earnings sessions.
 auto_trade() (run_all.py --trade) checks the signal files are fresh, then sends sells first and whole-share limit orders at
@@ -53,13 +53,13 @@ INVESTED_CAP = 0.99   # trim fix: a rebalance with new buys ends at <= 99% inves
 CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills a bit above the estimate still fit.
 # Mon/Wed spare-cash rule (Chirag, 2026-10-06; leftover rule 2026-10-07): after the mid-week sells / refills, the cash
 # above 1% of equity buys the top-10 stocks the account does NOT hold (latest ranking, pure rank), each at its latest rule
-# weight (Provisional_Weight), and what is left tops up ranks 1-3 (held or not): rank 1 up to the 19.8% cap first, then 2,
-# then 3. Ranks 11-20 are not bought; cash no stock can take stays cash. Other held stocks are never traded by it.
+# weight (Provisional_Weight), and what is left buys the next unheld stocks from rank 11 down (score above 0), at most
+# 10% of equity each (Chirag, 2026-10-13; was: top up ranks 1-3). Held stocks are never topped up or trimmed by it.
 # Friday replacement (Chirag, t191u, 2026-10-07): a new pick blocked by earnings / an earnings-day stop sale gives its
 # weight to the next best-ranked eligible stock not already picked, never worse than this rank (else that weight is cash).
 FRIDAY_SUB_MAX_RANK = 20
 DEPLOY_MAX_RANK = 10     # spare-cash buys of stocks not held: top 10 only
-TOPUP_RANKS = 3          # the leftover tops up ranks 1-3, in rank order, each to the per-stock cap
+EXTRA_MAX_WEIGHT = 0.10  # the leftover buys unheld ranks 11, 12, ... (score > 0), at most 10% of equity each
 DEPLOY_MIN_PCT = 0.01    # a spare-cash buy must be worth at least 1% of equity (a smaller rest stays in cash) ...
 DEPLOY_MIN_USD = 100.0   # ... and at least $100
 # LIVE order pricing (auto_trade and the 9 AM fill check): every order is a LIMIT priced from the latest quote, never a
@@ -623,7 +623,7 @@ def build_hold_orders(positions, prices=None):
 
     The backtest holds positions unchanged on mid-week days with no replacement/exit (no drift
     rebalance) - live matches it with HOLD rows (nothing submitted for them). Live then
-    invests the account's spare cash (build_cash_deploy_orders: top-10 stocks not held, then ranks 1-3).
+    invests the account's spare cash (build_cash_deploy_orders: top-10 stocks not held, then unheld ranks 11+ at <= 10%).
     """
     positions = _clean_positions(positions)
     prices = prices or {}
@@ -770,7 +770,7 @@ def build_account_exit_orders(orders, positions, equity, ranking, listed=None, b
     return orders.reset_index(drop=True), info
 
 def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=None, fractional=False, prices=None,
-                             max_rank=DEPLOY_MAX_RANK, topup_ranks=TOPUP_RANKS, min_pct=DEPLOY_MIN_PCT, min_usd=DEPLOY_MIN_USD):
+                             max_rank=DEPLOY_MAX_RANK, extra_max_weight=EXTRA_MAX_WEIGHT, min_pct=DEPLOY_MIN_PCT, min_usd=DEPLOY_MIN_USD):
     """Mon/Wed spare-cash rule, run AFTER the mid-week replacements/exits (`orders`): returns (orders + new rows, info).
 
     Spare cash = Alpaca cash + the planned sells - the planned buys - (1 - invested level) x equity, where the invested level
@@ -779,12 +779,12 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
       1. Stocks the account does NOT hold after the replacements (actual Alpaca positions, not the pipeline's view) ranked
          1-`max_rank` (the top 10) are bought, each at its latest rule weight x equity (Provisional_Weight; none -> the
          median positive Provisional_Weight, a typical top-10 slot), until the spare cash is used.
-      2. What is left tops up ranks 1-`topup_ranks` (1-3), held or not: rank 1 is filled up to the cap first, then rank 2,
-         then rank 3 (a held stock counts at shares after today's orders x price). Ranks 11-20 are never bought.
+      2. What is left buys the next stocks NOT held from rank `max_rank` + 1 down (11, 12, ...; the ranking only has
+         scores above 0), each at most `extra_max_weight` (10%) x equity, until the spare cash is used.
     Cap: WINNER['max_weight'] x 99% of equity (19.8%) per stock, including what is already held. Names sold by today's
     replacements/exits and names in `blocked` (earnings within 5 days, earnings-day stop sale) are skipped. An order below
-    max(min_pct x equity, min_usd) is not made; whatever no stock can take stays in cash. Stocks outside ranks 1-3 that
-    are held get no order (no top-up, no trim). Shares are rounded DOWN (2 decimals when fractional, else whole shares).
+    max(min_pct x equity, min_usd) is not made; whatever no stock can take stays in cash. Held stocks
+    get no order (no top-up, no trim). Shares are rounded DOWN (2 decimals when fractional, else whole shares).
     A top-up of a stock with a HOLD row (or today's replacement BUY row) changes that row, so each symbol has one order."""
     import backtest_engine as be
     blocked, prices = blocked or {}, prices or {}
@@ -839,22 +839,16 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
         if px and d >= floor_usd:
             new[sym] = [int(r.Rank), px, d]
             left -= d
-    for r in ranking[rank <= topup_ranks].itertuples():                    # 2. the rest: rank 1, then 2, then 3
+    for r in ranking[rank > max_rank].itertuples():                        # 2. the rest: unheld ranks 11, 12, ...
         if left < floor_usd:
             break
+        if str(r.Symbol).upper() in held or str(r.Symbol).upper() in new:
+            continue
         sym, px = usable(r)
-        if not px:
-            continue
-        row = orders.index[sym_col == sym]
-        if len(row) and str(orders.at[row[0], "Side"]) not in ("BUY", "HOLD"):
-            continue                                # e.g. a replacement capped it at its weight: no top-up today
-        shares = _safe_number(orders.at[row[0], "Target_Shares"], 0.0) if len(row) else positions.get(sym, 0.0)
-        have = shares * px + (new[sym][2] if sym in new else 0.0)
-        add = min(cap - have, left)
-        if add < floor_usd:
-            continue
-        new.setdefault(sym, [int(r.Rank), px, 0.0])[2] += add
-        left -= add
+        d = min(extra_max_weight * equity, cap, left)
+        if px and d >= floor_usd:
+            new[sym] = [int(r.Rank), px, d]
+            left -= d
     rows = []
     for sym, (rk, px, d) in sorted(new.items(), key=lambda kv: kv[1][0]):
         q = _floor2(d / px) if fractional else math.floor(d / px)
@@ -918,7 +912,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     On a Mon/Wed check (source hold / midweek) every actual position ranked worse than 20 / not ranked is then sold and
     refilled 1-for-1 from the top 10 not held (build_account_exit_orders; meta['account_exits'], source + '+exits').
     cash (the account's actual cash): on a Mon/Wed check the spare cash is then invested in
-    top-10 stocks the account does not hold, the rest in ranks 1-3 (build_cash_deploy_orders); meta['source'] becomes 'hold+cash' / 'midweek+cash'
+    top-10 stocks the account does not hold, the rest in unheld ranks 11+ (build_cash_deploy_orders); meta['source'] becomes 'hold+cash' / 'midweek+cash'
     when it buys something. None = no spare-cash step. force_deploy: run it even if the data's day is not a Mon/Wed
     check (dry-run preview only)."""
     targets, meta = load_targets(source, picks_csv, midweek_csv, decision=decision)
@@ -2542,7 +2536,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
       (substitute_blocked_picks, also for an earnings-day stop sale). Non-target stocks are sold entirely (the exact shares held).
       Mon/Wed (auto -> 'midweek' or 'hold') trade the strategy's replacements/exits, then sell every other account position
       ranked worse than 20 or not ranked, refilled 1-for-1 from the top 10 not held (build_account_exit_orders), then invest the spare cash
-      (cash above 1% of equity) in the top-10 stocks NOT held, the rest topping up ranks 1-3 to the 19.8% cap
+      (cash above 1% of equity) in the top-10 stocks NOT held, the rest in unheld ranks 11+ at max 10% each
       (build_cash_deploy_orders); other held stocks are not topped up or trimmed. Friday is unchanged.
     - Caps total BUY spending at Alpaca's BUYING POWER less a 1% cushion via
       apply_buying_power_guard(): buys are scaled down to the part that fits instead of being
