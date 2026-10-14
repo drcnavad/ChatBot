@@ -29,7 +29,7 @@ stock_symbols = [
 # Your manual overrides for the live Mon/Wed/Fri trades and the 9 AM fill check (paper_trade.py), e.g. ['TSLA', 'NVDA'].
 # do_not_buy: never bought or topped up (on Friday its slot goes to the next eligible stock, down to rank 20).
 # do_not_sell: never sold or trimmed (the Mon/Wed rank-20 rule keeps it too). The earnings-day stop still sells.
-do_not_buy = ['AMD']
+do_not_buy = ['AMD', 'TSLA']
 do_not_sell = []
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
@@ -269,7 +269,7 @@ tradable_symbols = [s for s in stock_symbols if s not in BENCHMARK_SYMBOLS]
 fundamentals_extra = [
     'ABNB', 'ASML', 'AXON', 'BAC', 'BBAI', 'CDW', 'CELH', 'CRSP', 'CRWD', 'CVX', 'DDOG', 'DUOL',
     'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'IT', 'KLAC', 'KVYO', 'LIN', 'LLY', 'MA',
-    'MELI', 'MNDY', 'NEE', 'NEM', 'NET', 'NKE', 'NUE', 'NVO', 'PATH', 'PAYX', 'PCTY',
+    'MELI', 'MNDY', 'NEE', 'NEM', 'NET', 'NKE', 'NVO', 'PATH', 'PAYX', 'PCTY',
     'PLTR', 'POOL', 'RTX', 'SYM', 'TMO', 'TOST', 'TTD', 'WDAY', 'XOM', 'ZBRA', 'ZENA',
 ]
 fundamentals_symbols = sorted(set(tradable_symbols) | set(fundamentals_extra))
