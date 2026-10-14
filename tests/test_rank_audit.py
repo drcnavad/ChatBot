@@ -63,12 +63,14 @@ if _missing:   # stop here with a clear message (the audit below needs every sto
     sys.exit(f"FAIL backtest bar cache has no bars for {_missing} (new in sector_mapping.py): the next pipeline run fetches "
              f"them (be.ensure_long_cache in main_signal_analysis.ipynb), or run python -c \"import backtest_engine as be; "
              f"print(be.ensure_long_cache())\"")
+_WT = be.WINNER.get("w_tech", 0.5)
 etf_of = {s: dict((n, e) for e, n in sm.sector_etfs.items()).get(sm.symbol_sector.get(s)) for s in tradable}
 
 # raw closes agree with the pipeline's closes?
 m = sa.merge(bars[["Symbol", "Date", "Close"]], on=["Symbol", "Date"], suffixes=("", "_raw"))
-print(f"Close check: {len(m)} rows, max |diff| {np.nanmax(np.abs(m.Close - m.Close_raw)):.4f}")
-expect(np.nanmax(np.abs(m.Close - m.Close_raw)) < 0.01, "closes differ from the bar cache")
+_rel = np.nanmax(np.abs(m.Close / m.Close_raw - 1))   # relative: a dividend adjustment shifts old closes by < 1%
+print(f"Close check: {len(m)} rows, max relative diff {_rel:.4%}")
+expect(_rel < 0.01, "closes differ from the bar cache by 1% or more")
 
 CACHE_MAX = close.index.max().date()
 uncovered = sorted({pd.Timestamp(d).date() for d in sa.Date.unique()} - set(close.index.date))
@@ -137,9 +139,9 @@ def check_scores(D, title=""):
     print(f"(b) RS_Score recomputed: {d_rs.notna().sum()} symbols, max |diff| {d_rs.max():.4f}")
     expect(d_rs.max() < 0.01, f"RS_Score mismatch on {D.date()}")
     # (a) Strategy score
-    exp = 0.5 * t.Technical_Score + 0.5 * t.RS_Score
+    exp = _WT * t.Technical_Score + (1 - _WT) * t.RS_Score   # live weights (w_tech 0.0 = RS only since 2026-10-13)
     d_ss = (t.Strategy_Score - exp).abs()
-    print(f"(a) Strategy_Score = 0.5*Tech + 0.5*RS: max |diff| {d_ss.max():.4f}; NaN scores (ineligible): {sorted(t.index[t.Strategy_Score.isna()])}")
+    print(f"(a) Strategy_Score = {_WT}*Tech + {1 - _WT}*RS: max |diff| {d_ss.max():.4f}; NaN scores (ineligible): {sorted(t.index[t.Strategy_Score.isna()])}")
     expect(d_ss.max() < 0.01, f"Strategy_Score mismatch on {D.date()}")
     print(f"    eligible (>=200 bars): {int(elig.sum())} of {len(tradable)}; Strategy_Score non-null: {int(t.Strategy_Score.notna().sum())}; "
           f"mismatch: {sorted(set(elig.index[elig]) ^ set(t.index[t.Strategy_Score.notna()]))}")

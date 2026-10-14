@@ -29,6 +29,9 @@ from alpaca.trading.requests import LimitOrderRequest
 
 import fake_quotes
 import paper_trade as pt
+import sector_mapping
+
+sector_mapping.do_not_buy, sector_mapping.do_not_sell = [], []   # the tests' orders never depend on Chirag's live lists
 
 CT = ZoneInfo("America/Chicago")
 PASS, FAIL, ROWS = [], [], []

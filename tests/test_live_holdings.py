@@ -152,13 +152,14 @@ try:
     check("app: no exceptions, holdings table on the Details tab", not at.exception and len(frames) == 1, [str(e) for e in at.exception])
     check("app: 3 stocks + Total rows", len(frames) == 1 and len(frames[0]) == 4 and frames[0]["Stock"].iloc[-1] == "Total (3 stocks)")
     bm = [d.value for d in at.dataframe if "Compared with" in d.value.columns]
-    check("app: the account vs QQQ / SPY / IWM / DIA table, each ETF +10% (110 vs the Oct 2 close 100)",
+    check("app: the account vs QQQ / SPY / IWM / DIA table, each ETF's Return % = Gain $ / money put in",
           len(bm) == 1 and list(bm[0]["Compared with"]) == ["Your account"] + [f"{s} ({n})" for s, n in ap.BENCHMARK_ETFS.items()]
-          and all(math.isclose(r, 10) for r in bm[0]["Return %"].iloc[1:]), bm)
+          and all(math.isclose(r.Return, r.Gain / (r.Value - r.Gain) * 100) for r in bm[0].iloc[1:].rename(
+              columns={"Return %": "Return", "Gain $": "Gain", "Value now": "Value"}).itertuples()), bm)
     check("app: the account's return nets out the $100 Oct 5 deposit ((980 - 100) / 880 = +0%, then 990 / 980, 1000 / 990)",
           len(bm) == 1 and math.isclose(bm[0]["Return %"].iloc[0], (990 / 980 * 1000 / 990 - 1) * 100), bm)
-    check("app: the comparison caption explains the same deposits and time-weighting",
-          any("each deposit or withdrawal bought or sold at the close of its date" in c.value and "time-weighted" in c.value
+    check("app: the comparison caption explains the same deposits and the money return",
+          any("each deposit or withdrawal bought or sold at the close of its date" in c.value and "Return % = Gain" in c.value
               for c in at.caption))
     check("app: as-of time and how-to-read note", any(c.value.startswith("As of ") and "every hour otherwise" in c.value for c in at.caption))
     check("app: only read-only GET paths used", FakeAccount.calls and all(p in ("/positions", "/account", "/account/activities", "/orders", "/clock", "/account/portfolio/history")
