@@ -17,6 +17,7 @@ stock_symbols = [
     'UPST', 'VEEV', 'VRT', 'NOC', 'LMT', 'CRCL', 'TWLO', 'ALAB', 'ARM', 'CVNA', 'RDDT',
     'SHOP', 'SMCI', 'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'BE', 'BA', 'URI', 'PH', 'FCX',
     'CRDO', 'CLS', 'HIMX', 'NU',
+    'PWR', 'GEV', 'CAT', 'CMI', 'EMR', 'ROK', 'MS', 'GS', 'ETN', 'HWM',   # high-beta industrials / financials (2026-10-13)
     # Loss-making (negative net income, last 4 quarters, as of 2026-10-13); uncomment to re-add:
     # 'AVAV', 'COIN', 'CRWV', 'FIG', 'GTLB', 'HIMS', 'IREN', 'SNOW', 'TEAM', 'ZS', 'UMAC', 'U',
     # 'ACHR', 'ASTS', 'CIFR', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RKLB', 'SOUN', 'TEM', 'TTWO', 'SPCX',
@@ -39,6 +40,8 @@ sector_etfs = {
 
 # Sector of every stock (also the stocks only used for the fundamentals list below).
 symbol_sector = {
+    'GEV': 'Industrials', 'CMI': 'Industrials', 'EMR': 'Industrials', 'ROK': 'Industrials', 'GS': 'Financials',
+    'ETN': 'Industrials', 'HWM': 'Industrials',
     'AAPL': 'Technology', 'ADBE': 'Technology', 'ADSK': 'Technology',
     'AFRM': 'Financials', 'AMD': 'Technology', 'AMZN': 'Consumer Discretionary',
     'ANET': 'Technology', 'APH': 'Technology', 'APP': 'Communication Services',
@@ -120,6 +123,8 @@ symbol_sector = {
 
 # Company names (dashboard and news search).
 symbol_name = {
+    'GEV': 'GE Vernova Inc.', 'CMI': 'Cummins Inc.', 'EMR': 'Emerson Electric Co.', 'ROK': 'Rockwell Automation, Inc.',
+    'GS': 'The Goldman Sachs Group, Inc.', 'ETN': 'Eaton Corporation plc', 'HWM': 'Howmet Aerospace Inc.',
     'AAPL': 'Apple Inc.', 'AFRM': 'Affirm Holdings, Inc.',
     'QQQ': 'Invesco QQQ Trust Series 1', 'BKR': 'Baker Hughes Company',
     'HG=F': 'Gold', 'SI=F': 'Silver',
