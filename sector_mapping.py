@@ -18,6 +18,7 @@ stock_symbols = [
     'SHOP', 'SMCI', 'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'BE', 'BA', 'URI', 'PH', 'FCX',
     'CRDO', 'CLS', 'HIMX', 'NU',
     'PWR', 'GEV', 'CAT', 'CMI', 'EMR', 'ROK', 'MS', 'GS', 'ETN', 'HWM',   # high-beta industrials / financials (2026-10-13)
+    'ANF', 'NUE', 'JCI', 'DAL', 'WSM', 'IBKR', 'GRMN',   # high-beta non-tech (2026-10-14)
     # Loss-making (negative net income, last 4 quarters, as of 2026-10-13); uncomment to re-add:
     # 'AVAV', 'COIN', 'CRWV', 'FIG', 'GTLB', 'HIMS', 'IREN', 'SNOW', 'TEAM', 'ZS', 'UMAC', 'U',
     # 'ACHR', 'ASTS', 'CIFR', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RKLB', 'SOUN', 'TEM', 'TTWO', 'SPCX',
@@ -40,6 +41,12 @@ sector_etfs = {
 
 # Sector of every stock (also the stocks only used for the fundamentals list below).
 symbol_sector = {
+    'ANF': 'Consumer Discretionary',
+    'JCI': 'Industrials',
+    'DAL': 'Industrials',
+    'WSM': 'Consumer Discretionary',
+    'IBKR': 'Financials',
+    'GRMN': 'Consumer Discretionary',
     'GEV': 'Industrials', 'CMI': 'Industrials', 'EMR': 'Industrials', 'ROK': 'Industrials', 'GS': 'Financials',
     'ETN': 'Industrials', 'HWM': 'Industrials',
     'AAPL': 'Technology', 'ADBE': 'Technology', 'ADSK': 'Technology',
@@ -123,6 +130,12 @@ symbol_sector = {
 
 # Company names (dashboard and news search).
 symbol_name = {
+    'ANF': 'Abercrombie & Fitch Co.',
+    'JCI': 'Johnson Controls International plc',
+    'DAL': 'Delta Air Lines, Inc.',
+    'WSM': 'Williams-Sonoma, Inc.',
+    'IBKR': 'Interactive Brokers Group, Inc.',
+    'GRMN': 'Garmin Ltd.',
     'GEV': 'GE Vernova Inc.', 'CMI': 'Cummins Inc.', 'EMR': 'Emerson Electric Co.', 'ROK': 'Rockwell Automation, Inc.',
     'GS': 'The Goldman Sachs Group, Inc.', 'ETN': 'Eaton Corporation plc', 'HWM': 'Howmet Aerospace Inc.',
     'AAPL': 'Apple Inc.', 'AFRM': 'Affirm Holdings, Inc.',
