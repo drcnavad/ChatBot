@@ -27,7 +27,7 @@ stock_symbols = [
 # Your manual overrides for the live Mon/Wed/Fri trades and the 9 AM fill check (paper_trade.py), e.g. ['TSLA', 'NVDA'].
 # do_not_buy: never bought or topped up (on Friday its slot goes to the next eligible stock, down to rank 20).
 # do_not_sell: never sold or trimmed (the Mon/Wed rank-20 rule keeps it too). The earnings-day stop still sells.
-do_not_buy = ['SMCI', 'HOOD', 'AMD']
+do_not_buy = ['AMD']
 do_not_sell = []
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
