@@ -96,14 +96,12 @@ def render_benchmarks(data):
     table, start, put_in = out
     section(f"Your account vs index ETFs since {start:%a %b %-d, %Y}")
     pct, money = st.column_config.NumberColumn(format="%+.2f%%"), st.column_config.NumberColumn(format="dollar")
-    sty = live_row(toned(table, ["Return %", "Money return %", "Gain $", "Account ahead by (pts)"]), "Compared with", "Your account")
+    sty = live_row(toned(table, ["Return %", "Gain $", "Account ahead by (pts)"]), "Compared with", "Your account")
     st.dataframe(sty, hide_index=True, width="stretch", height=35 * (len(table) + 1) + 3,
-                 column_config={"Return %": pct, "Money return %": pct, "Value now": money, "Gain $": money,
+                 column_config={"Return %": pct, "Value now": money, "Gain $": money,
                                 "Account ahead by (pts)": st.column_config.NumberColumn(format="%+.2f")})
     st.caption(f"The same money in each ETF instead: your {start:%b %-d} closing balance plus every later deposit "
                f"(\\${put_in:,.2f} in total), each deposit or withdrawal bought or sold at the close of its date, valued at "
-               "the latest price (ETF closes adjusted for dividends, from yfinance; display only). Return % is "
-               "time-weighted, so deposits never count as gains: for an ETF it is its price change; for your account each "
-               "day's growth from Alpaca's daily account history, with a deposit counted from the session after it arrives "
-               "(Alpaca books deposits around 4:15 PM CT, after the close). Gain \\$ = value now - money put in; Money return % = Gain \\$ / money put in, so a loss on a bigger balance weighs more. Account "
+               "the latest price (ETF closes adjusted for dividends, from yfinance; display only). Gain \\$ = value now - "
+               "money put in; Return % = Gain \\$ / money put in, so a loss on a bigger balance weighs more. Account "
                "ahead by: green = your account beats that ETF, red = it trails.")

@@ -2,8 +2,7 @@
   - one source: Alpaca's daily account history + one live read (balance first, then only the deposits already in it)
   - each ETF gets the same money on the same days: the start balance at the start close, every later deposit (withdrawal)
     bought (sold) at the close of its date (next session's close on a weekend, the latest price when not closed yet)
-  - Return % is time-weighted: deposits book after the close (about 4:15 PM CT), so a day's growth leaves out that day's
-    deposit, and a deposit never changes an ETF's or the account's return
+  - Return % = Gain $ / money put in (money return)
   - deposits read from Alpaca's CSD / CSW / JNLC activities (paged, canceled left out)
 Pure functions and a fake client: no network. Run: python tests/run_tests.py  (or python tests/test_benchmark_compare.py)"""
 import math
@@ -39,7 +38,7 @@ CLOSES = pd.DataFrame({"QQQ": [99.0, 100.0, 110.0, 105.0], "SPY": [49.0, 50.0, 5
 NOW = {"QQQ": 120.0, "SPY": 60.0, "IWM": 30.0, "DIA": 2.5}
 EQ_NOW = 1700.0
 START = "2026-10-02"
-ACCT = 1100 / 1000 * 1650 / 1600 * EQ_NOW / 1650 - 1        # Oct 5 growth before its deposit, Oct 6, today (live)
+ACCT = EQ_NOW / 1500 - 1                                   # money return on $1,500 put in
 
 check("four index ETFs: QQQ, SPY, IWM, DIA", list(ap.BENCHMARK_ETFS) == ["QQQ", "SPY", "IWM", "DIA"])
 t, start, put_in = ap.account_vs_etfs(HIST, snap(EQ_NOW, FLOWS), CLOSES, NOW, START)
@@ -52,18 +51,17 @@ q = t.loc["QQQ (Nasdaq 100)"]
 units = 1000 / 100 + 500 / 110                         # start close Oct 2, the deposit at the Oct 5 close
 check("QQQ: start balance at the Oct 2 close, the Oct 5 deposit at the Oct 5 close, valued at the latest price",
       math.isclose(q["Value now"], units * 120) and math.isclose(q["Gain $"], units * 120 - 1500), q.to_dict())
-check("QQQ return = its price change since the start close (time-weighted)", math.isclose(q["Return %"], 20), q["Return %"])
+QR = (units * 120 / 1500 - 1) * 100
+check("QQQ return = its gain / money put in", math.isclose(q["Return %"], QR), q["Return %"])
 a = t.loc["Your account"]
-check("account return: each day's growth leaves out that day's after-close deposit; live step from the last bar",
+check("account return = gain / money put in",
       math.isclose(a["Return %"], ACCT * 100) and math.isclose(a["Gain $"], EQ_NOW - 1500) and a["Value now"] == EQ_NOW, a.to_dict())
-check("account ahead by = account return - ETF return (pts)", math.isclose(q["Account ahead by (pts)"], ACCT * 100 - 20)
-      and math.isclose(t.loc["SPY (S&P 500)", "Account ahead by (pts)"], ACCT * 100 - 20) and pd.isna(a["Account ahead by (pts)"]))
+check("account ahead by = account return - ETF return (pts)", math.isclose(q["Account ahead by (pts)"], ACCT * 100 - QR) and pd.isna(a["Account ahead by (pts)"]))
 
 # A deposit changes no return: one big extra deposit on Oct 5 that only adds cash.
 h2 = HIST.assign(Equity=[690.0, 1000.0, 11600.0, 11650.0], Cashflow=[0.0, 300.0, 10500.0, 0.0])
 big = [flow("2026-10-05", "21:15:38", 10500.0)] + FLOWS[1:]
 t2 = ap.account_vs_etfs(h2, snap(11700.0, big), CLOSES, NOW, START)[0].set_index("Compared with")
-check("deposit: every ETF's return unchanged", (t2["Return %"].drop("Your account") == t["Return %"].drop("Your account")).all())
 check("deposit: its value adds exactly deposit x the ETF's growth since that day's close",
       math.isclose(t2.loc["QQQ (Nasdaq 100)", "Value now"] - q["Value now"], 10000 * 120 / 110))
 flat = HIST.assign(Equity=[690.0, 1000.0, 1500.0, 1500.0])                  # $500 deposited, nothing earned
@@ -74,20 +72,20 @@ check("account: a deposit alone is no return (flat account = 0%)",
 today = flow("2026-10-07", "21:15:13", 3000.0)
 before = ap.account_vs_etfs(HIST, snap(EQ_NOW, FLOWS, "2026-10-07 16:10"), CLOSES, NOW, START)
 after = ap.account_vs_etfs(HIST, snap(EQ_NOW + 3000.0, [today] + FLOWS, "2026-10-07 16:20"), CLOSES, NOW, START)
-check("today's after-close deposit: same account return before and after it books, put-in grows by it",
-      math.isclose(before[0]["Return %"].iloc[0], after[0]["Return %"].iloc[0]) and math.isclose(after[2] - before[2], 3000),
+check("today's deposit: put-in grows by it once the balance has it",
+      math.isclose(after[2] - before[2], 3000),
       (before[0]["Return %"].iloc[0], after[0]["Return %"].iloc[0]))
 check("today's deposit buys each ETF at the latest price (no close yet): its value adds the deposit exactly",
       math.isclose(after[0].set_index("Compared with").loc["QQQ (Nasdaq 100)", "Value now"] - q["Value now"], 3000))
 # A bar for today (partial / before the deposit booked) is left out: the live read replaces it.
 h3 = pd.concat([HIST, pd.DataFrame({"Date": [pd.Timestamp("2026-10-07")], "Equity": [1690.0], "Cashflow": [0.0]})])
-check("a daily bar for today is ignored (the live read is today's step)",
+check("a daily bar for today is ignored (the live read is today's value)",
       math.isclose(ap.account_vs_etfs(h3, snap(EQ_NOW, FLOWS), CLOSES, NOW, START)[0]["Return %"].iloc[0], ACCT * 100))
 # History lag: yesterday's bar not out yet -> yesterday's deposit was in today's session (start-of-step money).
 lag = HIST.iloc[:3]
 r_lag = ap.account_vs_etfs(lag, snap(EQ_NOW, FLOWS + [flow("2026-10-06", "21:15:00", 50.0)]), CLOSES, NOW, START)
-check("missing bar: a deposit dated after the last bar but before today is start money for the live step",
-      math.isclose(r_lag[0]["Return %"].iloc[0], (1100 / 1000 * EQ_NOW / (1600 + 50) - 1) * 100) and math.isclose(r_lag[2], 1550))
+check("missing bar: a deposit dated after the last bar still counts as money put in",
+      math.isclose(r_lag[2], 1550))
 check("history not reaching the start -> None (the table is left out)",
       ap.account_vs_etfs(HIST.iloc[2:], snap(EQ_NOW, FLOWS), CLOSES, NOW, START) is None)
 check("a flow without a time counts at the end of its date",

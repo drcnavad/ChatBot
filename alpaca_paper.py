@@ -297,46 +297,34 @@ def _flow_time(f):
     return pd.Timestamp(f"{f['date']} 23:59", tz=CT) if pd.isna(t) else (t.tz_localize("UTC") if t.tz is None else t).tz_convert(CT)
 
 def account_vs_etfs(history, snap, closes, prices_now, start):
-    """The account vs each BENCHMARK_ETFS fund since the `start` close, from one source: Alpaca's daily history
-    (PaperAccount.daily_history) plus one live read (PaperAccount.snapshot). Deposits book after the close, so each day's
-    account growth = (that day's end equity - that day's deposits) / the previous day's end equity; today's step uses the
-    live equity less the deposits already in it that came after the last daily bar (a bar for today, if any, is left out:
-    the live read replaces it). Each ETF buys the start balance at the start close and every later deposit (withdrawal)
-    at the close of its date (the latest price when that close does not exist yet), valued at the latest price.
-    Return % is time-weighted (for an ETF its price change since the start close); Gain $ = value - money put in.
-    Returns (table, start date, money put in), or None when the history does not reach back to `start`."""
+    """The account vs each BENCHMARK_ETFS fund since the `start` close, from Alpaca's daily history
+    (PaperAccount.daily_history) plus one live read (PaperAccount.snapshot). Money put in = the start day's end balance
+    plus every later deposit (withdrawal); each ETF buys the same money at the close of each date (the latest price when
+    that close does not exist yet), valued at the latest price. Return % = Gain $ / money put in (money return, Chirag
+    2026-10-13). Returns (table, start date, money put in), or None when the history does not reach back to `start`."""
     start = pd.Timestamp(start).normalize()
     today = pd.Timestamp(snap["at"]).tz_convert(CT).tz_localize(None).normalize()
     h = history.assign(Date=pd.to_datetime(history["Date"]).dt.normalize()).sort_values("Date")
     h = h[(h["Date"] >= start) & (h["Date"] < today)].reset_index(drop=True)
     if h.empty or h["Date"].iloc[0] != start:
         return None
-    eq, cash = h["Equity"].astype(float), h["Cashflow"].astype(float)
-    last = h["Date"].iloc[-1]
-    since = [f for f in snap["flows"] if pd.Timestamp(f["date"]).normalize() > last]
-    before_today = sum(f["amount"] for f in since if pd.Timestamp(f["date"]).normalize() < today)   # in today's session
-    today_in = sum(f["amount"] for f in since if pd.Timestamp(f["date"]).normalize() >= today)      # booked after it
-    equity_now = float(snap["equity"])
-    growth = ((eq - cash) / eq.shift(1)).iloc[1:].prod() * (equity_now - today_in) / (eq.iloc[-1] + before_today)
-    acct_ret = growth - 1.0
-    deposits = [(d, c) for d, c in zip(h["Date"].iloc[1:], cash.iloc[1:]) if c] + [(f["date"], f["amount"]) for f in since]
-    put_in = float(eq.iloc[0]) + sum(c for _, c in deposits)
-    rows = [{"Compared with": "Your account", "Return %": acct_ret * 100, "Value now": equity_now, "Gain $": equity_now - put_in,
-             "Account ahead by (pts)": float("nan")}]
+    eq, cash, last = h["Equity"].astype(float), h["Cashflow"].astype(float), h["Date"].iloc[-1]
+    deposits = [(d, c) for d, c in zip(h["Date"].iloc[1:], cash.iloc[1:]) if c]
+    deposits += [(f["date"], f["amount"]) for f in snap["flows"] if pd.Timestamp(f["date"]).normalize() > last]
+    put_in, equity_now = float(eq.iloc[0]) + sum(c for _, c in deposits), float(snap["equity"])
+    rows = [("Your account", equity_now)]
     for sym, name in BENCHMARK_ETFS.items():
         px_now = prices_now.get(sym)
         col = closes[sym] if closes is not None and sym in closes else pd.Series(dtype=float)
         if not px_now or col.dropna().empty:
             continue
         col = col.set_axis(pd.to_datetime(col.index).normalize())
-        p0 = _close_on(col, start, px_now)
-        units = float(eq.iloc[0]) / p0 + sum(c / _close_on(col, d, px_now) for d, c in deposits)
-        ret = (px_now / p0 - 1) * 100
-        rows.append({"Compared with": f"{sym} ({name})", "Return %": ret, "Value now": units * px_now,
-                     "Gain $": units * px_now - put_in, "Account ahead by (pts)": acct_ret * 100 - ret})
-    out = pd.DataFrame(rows)
-    out.insert(2, "Money return %", out["Gain $"] / put_in * 100)   # gain on the money put in (deposit timing counts)
-    return out, start, put_in
+        units = float(eq.iloc[0]) / _close_on(col, start, px_now) + sum(c / _close_on(col, d, px_now) for d, c in deposits)
+        rows.append((f"{sym} ({name})", units * px_now))
+    out = pd.DataFrame(rows, columns=["Compared with", "Value now"])
+    out["Return %"], out["Gain $"] = (out["Value now"] / put_in - 1) * 100, out["Value now"] - put_in
+    out["Account ahead by (pts)"] = (out["Return %"].iloc[0] - out["Return %"]).where(out.index > 0)
+    return out[["Compared with", "Return %", "Value now", "Gain $", "Account ahead by (pts)"]], start, put_in
 
 # --- files for the rest of the pipeline --------------------------------------------------------------------------------
 def write_positions_csv(positions, path=POSITIONS_CSV):
