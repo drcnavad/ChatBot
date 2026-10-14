@@ -76,6 +76,15 @@ STRATEGIES = [
     dict(name="Technical score only", score="tech", rule="Live rules ranking on the technical score alone."),
     dict(name="Relative strength only", score="rs",
          rule="Live rules ranking on relative strength (vs sector ETF and SPY) alone."),
+    dict(name="Top 10 climbers (15 days)", score="climb",
+         rule="Live rules ranking the relative-strength top 20 by how far their rank climbed over 15 sessions."),
+    dict(name="Climbers (10 days)", score="climb10", rule="Climbers with a 10-session rank gain."),
+    dict(name="Climbers (20 days)", score="climb20", rule="Climbers with a 20-session rank gain."),
+    dict(name="Climbers (30 days)", score="climb30", rule="Climbers with a 30-session rank gain."),
+    dict(name="Climbers from top 30 (15 days)", score="climb15_top30",
+         rule="Climbers picked from the relative-strength top 30 instead of the top 20."),
+    dict(name="Climbers, 50/50 tech + RS (15 days)", score="climb15_mix",
+         rule="Climbers on the old 50% technical + 50% relative strength ranking."),
     dict(name="Quant Score", score="quant", tiebreak=None,
          rule="Live rules ranking on the copy folder's Quant Score (trend, MAs, VWAP, RSI, MACD, Bollinger); needs a score above 50."),
     dict(name="Quant Score top 5", score="quant", tiebreak=None, select={"n": 5},
@@ -426,7 +435,10 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     ret = lambda n: c / c.shift(n) - 1
     mom_12_1, etf_3m = (c.shift(21) / c.shift(252) - 1) * 100, by_etf(b / b.shift(63) - 1)
     scores = {
-        "live": live, "tech": tech, "rs": rs,
+        "live": live, "tech": tech, "rs": rs, "climb": be.climb_score(rs, eligible, 15, 20),
+        "climb10": be.climb_score(rs, eligible, 10, 20), "climb20": be.climb_score(rs, eligible, 20, 20),
+        "climb30": be.climb_score(rs, eligible, 30, 20), "climb15_top30": be.climb_score(rs, eligible, 15, 30),
+        "climb15_mix": be.climb_score(100 * (0.5 * _pct(tech) + 0.5 * _pct(rs)), eligible, 15, 20),
         "quant": quant - 50,                                  # > 0 = Quant Score above 50 (the copy's min score)
         "quant_rs": 100 * (0.5 * _pct(quant) + 0.5 * _pct(rs)),
         "sentiment": (100 * (0.8 * _pct(live) + 0.2 * _pct(snap["SentimentScore"].fillna(0.0)))).where(live > 0),

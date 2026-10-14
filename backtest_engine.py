@@ -69,6 +69,8 @@ RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 WINNER = {
     "n": 10,                # stocks held
     "w_tech": 0.0,          # score = relative strength only (Chirag 2026-10-13; was 0.5 x technical + 0.5 x RS)
+    "climb_days": 15,       # rank 1-20 = the RS top 20 ordered by rank gain over 15 sessions, then the rest by RS
+    "climb_top": 20,        # (climb_score; Chirag 2026-10-13, from the Wed Oct 14 run)
     "use_regime": True,     # soft market regime (below)
     "regime_symbol": "QQQ", # regime is on while QQQ closes above its 200-day average
     "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
@@ -1178,6 +1180,13 @@ def deterministic_rank(score_w, eligible_w=None, tiebreak_w=None):
         o = ranking_order(np.flatnonzero(~np.isnan(S[t])), S[t], None if TB is None else TB[t], name_pos)
         out[t, o] = np.arange(1, len(o) + 1)
     return pd.DataFrame(out, index=score_w.index, columns=score_w.columns)
+
+def climb_score(rs_w, eligible_w=None, days=15, top=20):
+    """Climbers score: the RS top `top` (RS > 0) score 1000 + their RS-rank gain over `days` sessions (a stock new to the
+    ranking counts as no gain), so they rank first by how far they climbed; every other stock keeps its RS score."""
+    r = deterministic_rank(rs_w, eligible_w)
+    gain = (r.shift(days).fillna(r) - r)
+    return (1000 + gain).where((r <= top) & (rs_w > 0), rs_w)
 
 def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=None, min_score=0.0,
                  sector_cap=0.4, vol_sizing=True, buffer_rank=None, regime_scale=None, decision_log=None,
