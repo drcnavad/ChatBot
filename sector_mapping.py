@@ -282,3 +282,6 @@ def sector_etf_for(symbol):
 if __name__ == "__main__":
     for s in stock_symbols:
         print(f"{s:6s} {symbol_sector.get(s, '?'):24s} {symbol_name.get(s, '')}")
+
+# TEMPORARY (Chirag, Wed 2026-10-14): no buys at all - sells still run. Remove this line when Chirag says to buy again.
+do_not_buy = do_not_buy + [s for s in list(tradable_symbols) + ['QQQ'] if s not in do_not_buy]
