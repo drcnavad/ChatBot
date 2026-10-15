@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install (or refresh after editing) the Stock Analysis launchd jobs:  bash launchd/install_schedule.sh
+# Install (or refresh after editing) the launchd jobs:  bash launchd/install_schedule.sh   [--check = render + lint only]
 #   com.stockanalysis.evening         the ONE daily run, Mon-Fri 2:30 PM + 3:05 PM CT, at login, on wake, every 30 min:
 #                                     pipeline_watchdog.py --trade --scheduled. The decision on Mon/Wed/Fri at 2:30 PM
 #                                     (holiday-shifted), then from 3:05 PM CT once per trading day the after-close step:
@@ -13,34 +13,66 @@
 #   com.stockanalysis.tradeaudit      Mon-Fri 9:45 AM + 3:45 PM CT: trade_audit.py --write --log (read-only ledger, round
 #                                     trips, reconciliation + alerts to the run log; GET only, never orders)
 #   com.stockanalysis.dashboard-8502  always on (restarted if it stops): the app on http://localhost:8502
-# run_all.py decides whether anything is due (a decision after its 2:30 PM slot, or a missed one caught up at the next
-# regular session until the next slot); idle starts print one "idle:" line. run_state last_decision and lock files
-# stop double runs, so extra starts are harmless.
+#   com.unicorn.voice                 Voice Genie (Unicorn), only when ../Voice Genie/main.py exists next to this folder
+# The plists in this folder are templates written on the old Mac: their paths (/Users/drcnavad/Desktop/..., /opt/anaconda3)
+# are rewritten to this folder's real location and the python in $PYTHON (default: /opt/anaconda3/bin/python3, else
+# python3 on PATH) before they are copied to ~/Library/LaunchAgents. run_all.py decides whether anything is due; run_state
+# last_decision and lock files stop double runs, so extra starts are harmless.
 # Uninstall: launchctl bootout gui/$(id -u)/<label>  and delete ~/Library/LaunchAgents/<label>.plist
-# Retired on 2026-10-07 (folded into com.stockanalysis.evening): com.stockanalysis.refresh and com.stockanalysis.forwardtest.
-# This script unloads and deletes them if they are still installed.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$HERE")"
+VG="$(dirname "$ROOT")/Voice Genie"
+PY="${PYTHON:-}"
+[ -z "$PY" ] && { [ -x /opt/anaconda3/bin/python3 ] && PY=/opt/anaconda3/bin/python3 || PY="$(command -v python3)"; }
 AGENTS="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
-mkdir -p "$AGENTS" "$HERE/../Reports/logs"
+OUT="$AGENTS"
+[ "${1:-}" = "--check" ] && OUT="$(mktemp -d)"
+mkdir -p "$OUT" "$ROOT/Reports/logs"
 
-for label in com.stockanalysis.refresh com.stockanalysis.forwardtest; do      # retired jobs
-    launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
-    rm -f "$AGENTS/$label.plist"
-done
+render() {   # template -> $OUT/<label>.plist with this Mac's paths
+    "$PY" - "$1" "$OUT/$(basename "$1")" "$ROOT" "$VG" "$PY" <<'PYEOF'
+import os, plistlib, re, sys
+src, dst, root, vg, py = sys.argv[1:]
+subs = [("/Users/drcnavad/Desktop/Stock Analysis", root), ("/Users/drcnavad/Desktop/Voice Genie", vg),
+        ("/opt/anaconda3/bin", os.path.dirname(py))]
+def fix(x):
+    if isinstance(x, str):
+        if x in ("/opt/anaconda3/bin/python", "/opt/anaconda3/bin/python3"):
+            return py
+        for a, b in subs:
+            x = x.replace(a, b)
+        return x
+    if isinstance(x, list):
+        return [fix(v) for v in x]
+    if isinstance(x, dict):
+        return {k: fix(v) for k, v in x.items()}
+    return x
+p = fix(plistlib.loads(re.sub(rb"<!--.*?-->", b"", open(src, "rb").read(), flags=re.S)))   # comments: launchd-only
+env = p.setdefault("EnvironmentVariables", {})
+env["STOCK_ANALYSIS_PYTHON"] = py                 # run_dashboard_8502.sh
+if p["Label"] == "com.unicorn.voice":
+    env["VOICE_GENIE_STOCK_DIR"] = root           # Voice Genie's own setting (config.py), no code change
+plistlib.dump(p, open(dst, "wb"))
+PYEOF
+    plutil -lint "$OUT/$(basename "$1")" >/dev/null
+}
 
-for f in "$HERE"/com.stockanalysis.*.plist; do
+templates=("$HERE"/com.stockanalysis.*.plist)
+[ -f "$VG/main.py" ] && templates+=("$HERE/com.unicorn.voice.plist")
+for f in "${templates[@]}"; do
     label="$(basename "$f" .plist)"
-    plutil -lint "$f" >/dev/null
+    if [ "$OUT" != "$AGENTS" ]; then render "$f"; echo "ok  $OUT/$label.plist"; continue; fi
     launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
-    cp "$f" "$AGENTS/"
+    render "$f"
     for try in 1 2 3 4 5; do         # bootout finishes asynchronously; retry briefly
         launchctl bootstrap "$DOMAIN" "$AGENTS/$label.plist" 2>/dev/null && break
         sleep 1
     done
     launchctl print "$DOMAIN/$label" >/dev/null && echo "loaded  $label"
 done
+[ "$OUT" != "$AGENTS" ] && exit 0
 
 echo
 echo "To wake the Mac for the 2:30 PM run, paste this once in Terminal (asks for your password):"

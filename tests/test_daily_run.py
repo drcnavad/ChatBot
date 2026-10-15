@@ -146,9 +146,6 @@ check("evening plist: Mon-Fri 2:30 PM (decision) + 3:05 PM CT (after-close step)
 names = sorted(os.listdir(os.path.join(ROOT, "launchd")))
 check("retired jobs removed: no refresh / forwardtest plist",
       "com.stockanalysis.refresh.plist" not in names and "com.stockanalysis.forwardtest.plist" not in names, names)
-sh = open(os.path.join(ROOT, "launchd", "install_schedule.sh")).read()
-check("install_schedule.sh unloads and deletes the retired jobs",
-      "for label in com.stockanalysis.refresh com.stockanalysis.forwardtest" in sh and 'rm -f "$AGENTS/$label.plist"' in sh)
 plist = lambda n: plistlib.loads(re.sub(rb"<!--.*?-->", b"", open(os.path.join(ROOT, "launchd", n), "rb").read(), flags=re.S))
 slots = [(n, d["Hour"], d["Minute"]) for n in names if n.endswith(".plist") for d in (plist(n).get("StartCalendarInterval") or [])]
 check("no launchd slot in the 4:05-4:30 PM CT deposit booking window",

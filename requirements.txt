@@ -25,3 +25,6 @@ finnhub-python==2.4.26        # next earnings dates + company news
 newsapi-python==0.2.7         # news
 transformers==4.57.3          # FinBERT news sentiment
 torch==2.9.1
+
+# Git: notebook outputs are stripped on commit (.gitattributes)
+nbstripout==0.9.1

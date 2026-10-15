@@ -4,11 +4,14 @@ An automated stock strategy that trades a real-money Alpaca account, plus a Stre
 All code lives in this folder. Everything the pipeline writes goes to `Reports/`, which is not committed.
 
 ## Strategy (live rules: `backtest_engine.WINNER`)
-- **Stock list:** `sector_mapping.py` is the only stock list (96 tradable stocks + QQQ as the benchmark). Stocks with
+- **Stock list:** `sector_mapping.py` is the only stock list (83 tradable stocks + QQQ as the benchmark). Stocks with
   less than 200 trading days of history are shown but never traded.
-- **Score:** 50% technical score + 50% relative strength (stock vs its sector ETF, sector ETF vs SPY), ranked every day.
+- **Score:** relative strength only (stock vs its sector ETF, sector ETF vs SPY), ranked every day.
 - **Friday rebalance** (the week's last session), decided on the 2:30 PM CT bar: hold the top 10, weighted by inverse
-  volatility, max 20% per stock, 99% invested. When QQQ is below its 200-day average every weight is halved. A holding
+  volatility, max 20% per stock, 99% invested. Plus the **defensive sleeve** (`defensive` in `sector_mapping.py`: LMT,
+  NOC, ABBV, PFE, KO, from Oct 16, 2026): always held next to the top 10 (15 stocks share the same 1/volatility weights);
+  a sleeve stock that is also in the top 10 frees its slot for rank 11. The sleeve is on `do_not_sell` and the Mon/Wed
+  rank-20 rule never sells it. When QQQ is below its 200-day average every weight is halved. A holding
   within 1 point of its target is left alone.
 - **Monday / Wednesday check** (2:30 PM CT): a holding ranked worse than 20 is sold and replaced, same dollars, by the
   best-ranked top-10 stock not held (cash until Friday only if none is left). On the live account this applies to every
@@ -69,8 +72,8 @@ uses only Alpaca market data.
 
 ## Setup
 ```
-/opt/anaconda3/bin/python -m pip install -r requirements.txt
-cp .env.example .env            # then fill in the keys
-bash launchd/install_schedule.sh
+cp .env.example .env            # then fill in the keys (a moved folder keeps its .env)
+bash setup_mac_mini.sh          # packages + git notebook filter + the launchd jobs, paths from this folder's location
 python tests/run_tests.py
 ```
+Moving to another Mac: see `MOVE.md`.
