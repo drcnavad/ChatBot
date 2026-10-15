@@ -8,14 +8,16 @@ All code lives in this folder. Everything the pipeline writes goes to `Reports/`
   less than 200 trading days of history are shown but never traded.
 - **Score:** relative strength only (stock vs its sector ETF, sector ETF vs SPY), ranked every day.
 - **Friday rebalance** (the week's last session), decided on the 2:30 PM CT bar: hold the top 10, weighted by inverse
-  volatility, max 20% per stock, 99% invested. Plus the **defensive sleeve** (`defensive` in `sector_mapping.py`: LMT,
+  volatility, max 15% per stock (20% until Oct 15, 2026), 99% invested. Plus the **defensive sleeve** (`defensive` in `sector_mapping.py`: LMT,
   NOC, ABBV, PFE, KO, from Oct 16, 2026): always held next to the top 10 (15 stocks share the same 1/volatility weights);
   a sleeve stock that is also in the top 10 frees its slot for rank 11. The sleeve is on `do_not_sell` and the Mon-Thu
   rank-20 rule never sells it. When QQQ is below its 200-day average every weight is halved. A holding
   within 1 point of its target is left alone.
 - **Monday-Thursday check** (2:30 PM CT): a holding ranked worse than 20 is sold and replaced, same dollars, by the
   best-ranked top-10 stock not held (cash until Friday only if none is left). On the live account this applies to every
-  position. Then cash above 1% of equity buys top-10 stocks not held, and what is left buys unheld ranks 11, 12, ... (positive score, rank better than 15 sessions ago), max 10% each.
+  position. Then cash above 1% of equity buys top-10 stocks not held, and what is left is split equally over the held stocks at or above their
+  average entry price (none in profit: all held; earnings-blocked / sold-today ones skipped; a stock at its cap passes its
+  share on; sleeve stocks stay at 5%).
 - **Earnings:** no new buy or top-up of a stock with earnings within 5 days (including a report after that day's close). On Friday a new pick blocked this way is
   replaced by the next eligible stock (down to rank 20). On a held stock's earnings day, a drop of 5% or more below the
   previous close sells it (`earnings_stop.py`), and it is not bought back until its earnings sessions are over.

@@ -38,9 +38,9 @@ SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else N
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
 MAX_WEIGHT = WINNER.get("max_weight")                                # no stock above this weight; the extra stays cash
 try:                                                                 # Mon-Thu spare-cash rule (live account)
-    from paper_trade import DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK, EXTRA_MAX_WEIGHT
+    from paper_trade import DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK
 except Exception:
-    DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK, EXTRA_MAX_WEIGHT = 10, 0.01, 100.0, 20, 0.10
+    DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK = 10, 0.01, 100.0, 20
 
 def rules_text():
     """The live trading rules in plain words, in one place (numbers from backtest_engine.WINNER)."""
@@ -71,8 +71,10 @@ def rules_text():
                   "and the cash goes to the spare-cash rule below.\n") if EXIT_BELOW else "")
             + (f"- **{days} spare cash:** after the sells, the account's cash above {1 - LIVE_INVESTED:.0%} of equity "
                f"(e.g. a deposit, an exit or an earnings-day stop sale) buys the top-{DEPLOY_MAX_RANK} stocks the account does "
-               "not hold, in rank order, each at its current rule weight; what is left buys the next stocks not held from "
-               f"rank {DEPLOY_MAX_RANK + 1} down (positive score and climbing: rank better than 15 sessions ago), at most {EXTRA_MAX_WEIGHT:.0%} of equity each"
+               "not hold, in rank order, each at its current rule weight; what is left is split equally over the "
+               "stocks already held that are at or above break-even (their Alpaca average entry price; if none is, over all "
+               "held stocks; a blocked stock or one being sold today is skipped; a stock at its cap passes its share to "
+               "the others; sleeve stocks stay at their cap)"
                + (f" (max {MAX_WEIGHT * LIVE_INVESTED:.1%} of equity per stock)" if MAX_WEIGHT else "")
                + ("; earnings rule" if EARNINGS else "") + ", no buy back after an earnings-day stop sale. Cash no stock can "
                f"take, and any order under ${DEPLOY_MIN_USD:,.0f} or {DEPLOY_MIN_PCT:.0%} of equity (whichever is larger), "

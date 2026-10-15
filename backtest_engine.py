@@ -77,7 +77,7 @@ WINNER = {
     "min_score": 0.0,       # only stocks with a score above 0 can be picked
     "sector_cap": 1.0,      # no sector limit: Friday = pure top-10 by rank (Chirag 2026-10-05; was 0.4 = max 4)
     "vol_sizing": True,     # weights proportional to 1 / 63-day volatility
-    "max_weight": 0.20,     # no stock above 20% (after the vol weights and the regime halving); the extra stays in cash
+    "max_weight": 0.15,     # no stock above 15% (after the vol weights and the regime halving); the extra stays in cash (Chirag, Oct 15, 2026: was 20%)
     "buffer_rank": None,    # no rank buffer (tested, did not help)
     "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF ('sector_median' / 'median_all': tested, not live)
     # Mon-Thu close checks (the days come from this dict; Mon/Wed until 2026-10-15, Chirag). No top-3 swap live (enter_top / exit_below None since

@@ -390,19 +390,22 @@ pos_mon = dict(broker.pos)
 orders, meta, results, broker2, _ = run_day("2026-10-05", "2026-10-02", pos_mon, broker.cash)
 check("Mon 10/5 quiet check: source = hold, no order sent", meta["source"] == "hold" and not broker2.submitted, (meta["source"], len(broker2.submitted)))
 
-# Mon 10/5: a cash exit (no top-10 refill) -> the exited name is sold, then the Mon/Wed spare-cash rule (2026-10-06; leftover
-# rule 2026-10-13): no top-10 stock is left unheld (the exited AMZN is not bought back), so the cash buys the next unheld
-# stock, AAPL (rank 11), at most 10% of equity; held names get no order
+# Mon 10/5: a cash exit (no top-10 refill) -> the exited name is sold, then the Mon-Thu spare-cash rule (2026-10-06; leftover
+# rule Chirag 2026-10-15): no top-10 stock is left unheld (the exited name is not bought back), so the cash is split equally
+# over the held stocks in profit (no entry prices here: all held; top-ups, max 14.85% each)
 victim = names[0]
 exit_row = [{"As_Of": "2026-10-05", "Event": "mid-week check", "Event_Date": "2026-10-05", "Action": "SELL", "Sell": victim,
              "Buy": None, "Message": f"exit {victim}", "Sell_Rank": 35, "Buy_Rank": None, "Weight_%": round(end_pct[victim], 2)}]
 orders, meta, results, broker3, eq3 = run_day("2026-10-05", "2026-10-02", pos_mon, broker.cash, midweek_rows=exit_row)
 sent = [(r.symbol, "SELL" if r.side == OrderSide.SELL else "BUY") for r in broker3.submitted]
 ftnt = broker3.pos.get("FTNT", 0) * PX["FTNT"] / eq3 * 100
-check("Mon 10/5 exit: the exited name is sold; AAPL (rank 11) has no rank history so it is not a climber and the cash "
-      "stays; held names are not topped up", sent == [(victim, "SELL")] and meta["source"] == "midweek", (sent, meta["source"], ftnt))
+_top3 = sorted(s for s, side in sent if side == "BUY")
+check("Mon 10/5 exit: the exited name is sold, its cash tops up the other held stocks (no entry prices: all held; none above 14.85%)",
+      sent[0] == (victim, "SELL") and len(_top3) >= 5 and set(_top3) <= {k for k, q in pos_mon.items() if q > 0} - {victim}
+      and meta["source"] == "midweek+cash"
+      and all(broker3.pos.get(s, 0) * PX[s] / eq3 <= 0.1485 + 1e-6 for s in _top3), (sent, meta["source"], ftnt))
 inv3 = sum(q * PX[s] for s, q in broker3.pos.items()) / eq3 * 100
-check("Mon 10/5 exit: the sale goes to cash (no climber to buy)", inv3 < 97.0 and broker3.cash >= 0, (inv3, broker3.cash))
+check("Mon 10/5 exit: the sale is reinvested (account back near 99%), no margin", inv3 > 97.0 and broker3.cash >= 0, (inv3, broker3.cash))
 
 # do-not-sell stock outside the targets: its planned sale is skipped BEFORE the trim fix, so no cash is counted from it
 tg = pd.DataFrame({"Symbol": ["P1", "P2", "P3", "P4", "P5"], "Weight": [0.178] * 5, "Price": 100.0})

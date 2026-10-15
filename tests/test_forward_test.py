@@ -232,7 +232,8 @@ check("Now: cash if QQQ < 50-day: a Friday with QQQ below its 50-day goes all to
 check("registry: WINNER untouched", be.WINNER == w0)
 # Forward-test safety (t187u): the strategies keep their own Mon/Wed rules (ft.MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, the Oct 2
 # rules); a change of the live WINNER Mon/Wed keys must not move any of them.
-FT_PINS = dict(midweek=ft.MIDWEEK, exit_all_below=ft.EXIT_BELOW, exit_to_top=ft.EXIT_TO_TOP, selection={"sleeve": ()})
+FT_PINS = dict(midweek=ft.MIDWEEK, exit_all_below=ft.EXIT_BELOW, exit_to_top=ft.EXIT_TO_TOP,
+               selection={"sleeve": (), "max_weight": ft.MAX_WEIGHT})   # the paper strategies keep the 20% cap
 check("forward-test pins = the Oct 2 mid-week rules (top-3 swap below 15, exit below 30, refill from the top 10), Mon-Thu",
       ft.MIDWEEK == {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Tue", "Wed", "Thu"]} and (ft.EXIT_BELOW, ft.EXIT_TO_TOP) == (30, 10)
       and ft.NOW["midweek"] == {"enter_top": None, "exit_below": None, "days": ft.MON_THU} and ft.NOW["exit"] == (20, 10))
@@ -439,8 +440,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
 # the live Mon-Thu spare-cash rule (paper_trade.build_cash_deploy_orders) on target weights
 import paper_trade  # noqa: E402
-check("spare cash: same settings as paper_trade", (ft.DEPLOY_MAX_RANK, ft.EXTRA_MAX_WEIGHT, ft.CLIMB_DAYS, ft.DEPLOY_MIN_PCT)
-      == (paper_trade.DEPLOY_MAX_RANK, paper_trade.EXTRA_MAX_WEIGHT, paper_trade.CLIMB_DAYS, paper_trade.DEPLOY_MIN_PCT))
+check("spare cash: same settings as paper_trade", (ft.DEPLOY_MAX_RANK, ft.DEPLOY_MIN_PCT)
+      == (paper_trade.DEPLOY_MAX_RANK, paper_trade.DEPLOY_MIN_PCT))
 sd = pd.bdate_range("2026-10-05", periods=5)                                   # Mon..Fri
 sc = [f"S{k:02d}" for k in range(1, 9)] + ["AMD"] + [f"S{k:02d}" for k in range(9, 14)]   # AMD rank 9 (do_not_buy)
 sS = pd.DataFrame([list(range(14, 0, -1))] * 5, index=sd, columns=sc, dtype=float)
@@ -448,13 +449,40 @@ st0 = pd.DataFrame(0.0, index=sd, columns=sc)
 st0.loc[:, sc[:8]] = 0.1                                                       # 80% held: 20% spare
 st0.loc[sd[4], :] = 0.0
 st0.loc[sd[4], sc[:10]] = 0.1                                                  # Friday: a new top 10
+
+def closes(up):
+    """Mon close 100 everywhere; from Tue the `up` stocks close at 101 (above their entry), the rest at 99."""
+    c = pd.DataFrame(100.0, index=sd, columns=sc)
+    c.loc[sd[1]:, :] = 99.0
+    c.loc[sd[1]:, up] = 101.0
+    return c
+
 sinp = {"scores": {"now": sS, "rs": sS}, "eligible": sS.notna(), "vol": sS * 0 + 0.2, "soon": st0 > 1,
-        "regime": pd.Series(True, index=sd), "weekly": pd.Series(sd.dayofweek == 4, index=sd)}
-sp_ = ft.spare_cash(st0, pd.Series(sd.dayofweek < 4, index=sd), sinp)
-check("spare cash: Mon-Thu the spare 20% buys the unheld top 10 at the Friday-rule weight (do_not_buy AMD skipped); rank 11 "
-      "only if it climbed (no rank history here: cash); kept to Friday",
-      abs(sp_.iloc[0]["S09"] - 0.1) < 1e-12 and sp_.iloc[0][["AMD", "S10"]].sum() == 0 and abs(sp_.iloc[0].sum() - 0.9) < 1e-12
-      and sp_.iloc[1:4].equals(pd.DataFrame([sp_.iloc[0]] * 3, index=sd[1:4])) and sp_.iloc[4].equals(st0.iloc[4]), sp_.round(3).to_dict("index"))
+        "regime": pd.Series(True, index=sd), "weekly": pd.Series(sd.dayofweek == 4, index=sd), "close": closes(["S01", "S02"])}
+tue_thu = pd.Series((sd.dayofweek >= 1) & (sd.dayofweek < 4), index=sd)
+sp_ = ft.spare_cash(st0, tue_thu, sinp)
+check("spare cash: on Tue the spare 20% buys the unheld top 10 at the Friday-rule weight (do_not_buy AMD skipped), the "
+      "last 10% is split over the holdings above their entry close (S01, S02: 10% -> 15%); losers untouched; kept to Friday",
+      abs(sp_.iloc[1]["S09"] - 0.1) < 1e-12 and sp_.iloc[1][["AMD", "S10"]].sum() == 0 and abs(sp_.iloc[1].sum() - 1.0) < 1e-12
+      and np.allclose(sp_.iloc[1][["S01", "S02"]], 0.15, rtol=0, atol=1e-12)
+      and np.allclose(sp_.iloc[1][sc[2:8]], 0.1, rtol=0, atol=1e-12) and sp_.iloc[0].equals(st0.iloc[0])
+      and sp_.iloc[2:4].equals(pd.DataFrame([sp_.iloc[1]] * 2, index=sd[2:4])) and sp_.iloc[4].equals(st0.iloc[4]),
+      sp_.round(3).to_dict("index"))
+st1 = st0.copy()
+st1.loc[sd[:4], sc[:3]] = 0.145                                               # S01-S03 within 1 point of the 15% cap
+st1.loc[sd[:4], sc[3:8]] = 0.08
+st1.loc[sd[:4], "S09"] = 0.1                                                  # (rank 10 held: no unheld top-10 buy)
+sp1 = ft.spare_cash(st1, tue_thu, {**sinp, "close": closes(["S01", "S02", "S03", "S04"])})
+check("spare cash: in-profit S01-S03 too close to the 15% cap for a 1% buy, so the spare 6.5% goes to in-profit S04 "
+      "(8% -> 14.5%); losers S05-S08 none; never above 15%, 100% invested",
+      abs(sp1.iloc[1].sum() - 1.0) < 1e-12 and sp1.iloc[1].max() <= 0.15 + 1e-12 and abs(sp1.iloc[1]["S04"] - 0.145) < 1e-12
+      and sp1.iloc[1][sc[:3]].eq(0.145).all() and sp1.iloc[1][sc[4:8]].eq(0.08).all()
+      and sp1.iloc[1][["AMD", "S10"]].sum() == 0, sp1.iloc[1].round(4).to_dict())
+sp2 = ft.spare_cash(st1, tue_thu, {**sinp, "close": closes([])})
+check("spare cash: no holding above its entry -> the 6.5% is split over all held stocks with room (S04-S08, S09: +6.5%/6 each)",
+      abs(sp2.iloc[1].sum() - 1.0) < 1e-12 and np.allclose(sp2.iloc[1][sc[3:8]], 0.08 + 0.065 / 6, rtol=0, atol=1e-12)
+      and abs(sp2.iloc[1]["S09"] - (0.1 + 0.065 / 6)) < 1e-12
+      and sp2.iloc[1][sc[:3]].eq(0.145).all(), sp2.iloc[1].round(4).to_dict())
 
 # the rules that are not rankings, on tiny hand-made data
 ud = pd.bdate_range("2026-01-05", periods=8)

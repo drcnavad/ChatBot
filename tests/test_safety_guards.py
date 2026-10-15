@@ -1,8 +1,8 @@
 """Live-bot safety guards (mocks and temp files only: no broker, no network; the real run log / run_state are never
 written):
-  * backtest_engine WINNER["max_weight"]: each target weight is clipped to 20% after the vol weights and the regime halving;
-    the extra stays in cash (19.8% live after the 99% round-down)
-  * paper_trade.MAX_ORDER_PCT (backstop): a BUY worth more than 20% of equity is refused - not sent, not staged for 9 AM, one
+  * backtest_engine WINNER["max_weight"]: each target weight is clipped to 15% (Chirag, Oct 15, 2026; was 20%) after the
+    vol weights and the regime halving; the extra stays in cash (14.85% live after the 99% round-down)
+  * paper_trade.MAX_ORDER_PCT (backstop): a BUY worth more than 15% of equity is refused - not sent, not staged for 9 AM, one
     plain run-log row; sells are never capped; today's plans stay under it
   * run_all: a scheduled decision that missed its 2:30 PM slot and waits for the market gets ONE run-log warning row
     (then the launchd runs stay quiet; the watchdog still sees 'idle:' as the last line); --dry-run writes nothing
@@ -42,8 +42,8 @@ def t(s):
 
 # ------------------------------------------------------------------ 20% max weight per stock (engine)
 import backtest_engine as be
-check("max weight: WINNER says 20% and the rank args pass it on",
-      be.WINNER["max_weight"] == 0.20 and be.winner_rank_args(None)["max_weight"] == 0.20)
+check("max weight: WINNER says 15% and the rank args pass it on",
+      be.WINNER["max_weight"] == 0.15 and be.winner_rank_args(None)["max_weight"] == 0.15)
 d, cols = pd.bdate_range("2026-01-05", periods=2), [f"S{i}" for i in range(10)]
 score = pd.DataFrame([[10.0 - i for i in range(10)]] * 2, index=d, columns=cols)
 vol = pd.DataFrame([[0.005] + [0.02] * 9] * 2, index=d, columns=cols)   # S0: 1/4 the vol -> 4/13 = 30.8% unclipped
@@ -60,12 +60,12 @@ check("max weight: after the 99% round-down the biggest live weight is 19.8% and
       live.max() <= 0.198 and live.sum() <= 0.99, live.tolist())
 
 # ------------------------------------------------------------------ order cap (pure backstop)
-check("cap constant is 20% of equity", pt.MAX_ORDER_PCT == 0.20)
-o = pd.DataFrame([{"Symbol": "OK", "Side": "BUY", "Shares": 19.0, "Price": 100.0},
+check("cap constant is 15% of equity (= WINNER max_weight)", pt.MAX_ORDER_PCT == 0.15 == be.WINNER["max_weight"])
+o = pd.DataFrame([{"Symbol": "OK", "Side": "BUY", "Shares": 14.0, "Price": 100.0},
                   {"Symbol": "BIG", "Side": "BUY", "Shares": 21.0, "Price": 100.0},
                   {"Symbol": "OUT", "Side": "SELL", "Shares": 50.0, "Price": 100.0}], columns=pt.ORDER_COLUMNS)
 capped, refused = pt.apply_order_cap(o, 10000.0)
-check("cap: a 19% buy passes, a 21% buy is refused, a 50% sell is never capped",
+check("cap: a 14% buy passes, a 21% buy is refused, a 50% sell is never capped",
       list(capped["Side"]) == ["BUY", "SKIP (over order cap)", "SELL"] and list(refused["Symbol"]) == ["BIG"]
       and refused["Est_Value"].iloc[0] == 2100.0, capped.to_dict("records"))
 check("cap: unusable equity refuses every buy (fail closed), sells untouched",
@@ -97,7 +97,7 @@ try:
     staged = [x["symbol"] for x in json.load(open(pend))["orders"]]
     big = res[res["Symbol"] == "BIG"]
     check("auto_trade: the 40% buy is not staged / sent (not carried to 9 AM), the normal one is",
-          staged == ["AAA"] and len(big) == 1 and big["Status"].iloc[0].startswith("SKIPPED: over the 20%"), (staged, res.to_dict("records")))
+          staged == ["AAA"] and len(big) == 1 and big["Status"].iloc[0].startswith("SKIPPED: over the 15%"), (staged, res.to_dict("records")))
     cap_rows = [a for a in seen if "Order cap" in a[3]]
     check("auto_trade: one plain run-log warning row for the refused order",
           len(cap_rows) == 1 and cap_rows[0][:3] == ("Trade", "warning", "no") and "BIG 40 shares" in cap_rows[0][3], seen)

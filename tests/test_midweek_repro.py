@@ -49,8 +49,9 @@ def check(exit_all, t20=False, e5=False):
     kw = {"exit_all_below": exit_all, "exit_to_top": None,  # pin the cash-until-Friday variant (live now refills)
           "earnings_block_days": 5 if e5 else None,
           # sector_cap must be pinned: live is now 1.0 (pure top-10); these EXPECTED numbers are the 0.4-cap era
-          "selection": (dict(max_pick_rank=20, cap_soft=True, sector_cap=0.4, sleeve=()) if t20
-                        else dict(max_pick_rank=None, cap_soft=False, sector_cap=0.4, sleeve=()))}   # no defensive sleeve (pins)
+          "selection": (dict(max_pick_rank=20, cap_soft=True, sector_cap=0.4, sleeve=(), max_weight=g.MAX_W) if t20
+                        else dict(max_pick_rank=None, cap_soft=False, sector_cap=0.4, sleeve=(), max_weight=g.MAX_W))}
+    # no defensive sleeve and the 20% cap of the pins (live is 15% from Oct 15, 2026)
     t_live, checks = be.winner_targets(g.sc, g.el, g.vol, g.reg, g.weekly, tiebreak_w=g.rs, check_log=chk, midweek=MW, **kw)
     t_test, swaps_test, sells_test = g.buffered_midweek(3, 15, exit_all, t20=t20, block=g.block_matrix(5) if e5 else None)
     assert (checks.to_numpy(bool) == g.midweek.to_numpy(bool)).all(), "check-day calendars differ"
@@ -72,7 +73,7 @@ def check(exit_all, t20=False, e5=False):
     print(f"[{label}] total {m['Total Return %']:.2f}%  Sharpe {m['Sharpe']:.4f}  max DD {m['Max DD %']:.2f}%  "
           f"never-seen Sharpe {ns['Sharpe']:.4f}")
     assert diff < (1e-12 if t20 else 1e-300) and same_swaps and same_sells, (diff, same_swaps, same_sells)
-    assert t_live.to_numpy().max() <= be.WINNER["max_weight"] + 1e-12, "a target above the 20% max weight (swaps included)"
+    assert t_live.to_numpy().max() <= g.MAX_W + 1e-12, "a target above the pinned 20% max weight (swaps included)"
     if e5:
         skips = [c for c in chk if "earnings in" in str(c.get("Note", ""))]
         print(f"[{label}] mid-week checks where an earnings block stopped a swap: {len(skips)}")

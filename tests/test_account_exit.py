@@ -1,6 +1,6 @@
 """Mon/Wed sell rule on EVERY actual account position (Chirag, t188u, 2026-10-07): after the strategy's own mid-week orders,
 any Alpaca position ranked worse than 20 - or with no rank (score 0 or below, or not in the stock list) - is sold in full,
-worst first, and replaced 1-for-1 (same dollars, 19.8% cap) by the best top-10 stock the account does not hold (earnings /
+worst first, and replaced 1-for-1 (same dollars, 14.85% cap) by the best top-10 stock the account does not hold (earnings /
 earnings-day-stop blocks apply); no refill -> the cash goes to the spare-cash step. One SELL row per stock. Friday and
 non-check days are unchanged. Hand-worked cases with fake CSVs; no network, no orders.
 Run: python tests/run_tests.py  (or python tests/test_account_exit.py)"""
@@ -97,11 +97,11 @@ check("S24 partial strategy SELL (10 of 40) becomes one full SELL of 40, refille
       and info["replaced"] == [("S24", 24, "S01", 1, 4_000.0)] and side(o, "S03") == ["BUY"]
       and o.loc[o.Symbol == "S03", "Shares"].iloc[0] == 30, (s24.values.tolist(), info["replaced"]))
 
-# 6) cap and small sales: a refill never exceeds 19.8% of equity; under max($100, 1% of equity) -> no refill
+# 6) cap and small sales: a refill never exceeds 14.85% of equity (15% cap); under max($100, 1% of equity) -> no refill
 pos = {**{f"S{i:02d}": 1 for i in (2, 4, 5, 6, 7, 8, 9, 10)}, "S21": 300, "S25": 5}   # $30,000 and $500
 o, info = pt.build_account_exit_orders(pt.build_hold_orders(pos, PX), pos, EQ, R, prices=PX, fractional=True)
-check("$30,000 sale -> S01 refill capped at $19,800; the $500 sale (under $1,000) gets no refill, S03 stays unbought",
-      info["replaced"] == [("S21", 21, "S01", 1, 19_800.0)] and "S03" not in set(o["Symbol"]), info["replaced"])
+check("$30,000 sale -> S01 refill capped at $14,850; the $500 sale (under $1,000) gets no refill, S03 stays unbought",
+      info["replaced"] == [("S21", 21, "S01", 1, 14_850.0)] and "S03" not in set(o["Symbol"]), info["replaced"])
 o, info = pt.build_account_exit_orders(pt.build_hold_orders(pos, PX), pos, EQ, R.iloc[:0], prices=PX, fractional=True)
 check("no ranking for the day -> nothing sold (never a sell-everything on missing data)",
       info["sold"] == [] and (o["Side"] == "HOLD").all() and "no ranking" in info["note"], info)
@@ -160,9 +160,11 @@ try:
     check("strategy REPLACE S22 -> S03 kept as is (one SELL S22, one BUY S03); the account rule adds only S24, no refill left",
           side(o, "S22") == ["SELL"] and side(o, "S03") == ["BUY"] and [s for s, *_ in ex["sold"]] == ["S24"]
           and ex["replaced"] == [] and list(o["Symbol"]).count("S24") == 1, o[["Symbol", "Side", "Shares"]].values.tolist())
-    check("S24's $4,000 stays cash: S11 (rank 11) has no rank history, so it is not a climber; source midweek+exits",
-          meta["source"] == "midweek+exits" and meta["cash_deploy"]["buys"] == [],
-          (meta["source"], meta["cash_deploy"]))
+    dep = meta["cash_deploy"]
+    check("S24's $4,000 (+ $1,000 cash - 1% kept) goes to the held stocks (no entry prices: all held), too little for 9 "
+          "$1,000 orders so the 3 best ranks (S01, S02, S04; S03 is today's buy, not held); source midweek+exits+cash",
+          meta["source"] == "midweek+exits+cash" and dep["buys"] == [] and [t[0] for t in dep["topups"]] == ["S01", "S02", "S04"]
+          and abs(dep["spent"] - 3_999) < 2, (meta["source"], dep))
     # not a check day (Tue): nothing sold by the account rule
     pd.DataFrame([{**pd.read_csv(picks).iloc[0].to_dict(), "As_Of": "2026-10-06"}]).to_csv(picks, index=False)
     o, meta, _ = pt.plan_orders("auto", EQ, {"S01": 100, "S24": 50}, picks_csv=picks, signal_csv=sig, midweek_csv=mid,
