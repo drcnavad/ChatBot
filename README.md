@@ -4,7 +4,7 @@ An automated stock strategy that trades a real-money Alpaca account, plus a Stre
 All code lives in this folder. Everything the pipeline writes goes to `Reports/`, which is not committed.
 
 ## Strategy (live rules: `backtest_engine.WINNER`)
-- **Stock list:** `sector_mapping.py` is the only stock list (83 tradable stocks + QQQ as the benchmark). Stocks with
+- **Stock list:** `sector_mapping.py` is the only stock list (84 tradable stocks + QQQ as the benchmark). Stocks with
   less than 200 trading days of history are shown but never traded.
 - **Score:** relative strength only (stock vs its sector ETF, sector ETF vs SPY), ranked every day.
 - **Friday rebalance** (the week's last session), decided on the 2:30 PM CT bar: hold the top 10, weighted by inverse

@@ -20,6 +20,7 @@ stock_symbols = [
     'PWR', 'GEV', 'CAT', 'CMI', 'EMR', 'ROK', 'MS', 'GS', 'ETN', 'HWM',   # high-beta industrials / financials (2026-10-13)
     'ANF', 'NUE', 'JCI', 'DAL', 'WSM', 'IBKR', 'GRMN',   # high-beta non-tech (2026-10-14)
     'ABBV', 'PFE', 'KO',   # defensive sleeve (2026-10-15)
+    'WULF',   # TeraWulf (Chirag, 2026-10-15)
     # Loss-making (negative net income, last 4 quarters, as of 2026-10-13); uncomment to re-add:
     # 'AVAV', 'COIN', 'CRWV', 'FIG', 'GTLB', 'HIMS', 'IREN', 'SNOW', 'TEAM', 'ZS', 'UMAC', 'U',
     # 'ACHR', 'ASTS', 'CIFR', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RKLB', 'SOUN', 'TEM', 'TTWO', 'SPCX',
@@ -130,7 +131,7 @@ symbol_sector = {
     'AXP': 'Financials', 'BE': 'Industrials', 'BA': 'Industrials',
     'URI': 'Industrials', 'PH': 'Industrials', 'TDG': 'Industrials',
     'LYB': 'Materials', 'MOS': 'Materials', 'SW': 'Materials',
-    'CORZ': 'Technology', 'HIMX': 'Technology', 'LUNR': 'Industrials',
+    'WULF': 'Technology', 'CORZ': 'Technology', 'HIMX': 'Technology', 'LUNR': 'Industrials',
 }
 
 # Company names (dashboard and news search).
@@ -257,7 +258,7 @@ symbol_name = {
     'URI': 'United Rentals, Inc.', 'PH': 'Parker-Hannifin Corporation',
     'TDG': 'TransDigm Group Incorporated', 'LYB': 'LyondellBasell Industries N.V.',
     'MOS': 'The Mosaic Company', 'SW': 'Smurfit Westrock plc',
-    'CORZ': 'Core Scientific, Inc.', 'HIMX': 'Himax Technologies, Inc.', 'LUNR': 'Intuitive Machines, Inc.',
+    'WULF': 'TeraWulf Inc.', 'CORZ': 'Core Scientific, Inc.', 'HIMX': 'Himax Technologies, Inc.', 'LUNR': 'Intuitive Machines, Inc.',
 }
 
 # First usable bar date per symbol (earlier vendor bars belong to a different business or a trading halt).
