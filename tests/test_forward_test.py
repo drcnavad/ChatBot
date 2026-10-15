@@ -2,7 +2,7 @@
 before it is ignored, a position held into it starts at the start close), trades fill at the decision-day close with COST
 per side, and the empty state is None (the panel then says no closed trades yet). 2) forward_test.py (the live account):
 picks start from a flat position on/after the start, trading cost vs the decision price, deposits are not returns, weekly
-median / drawdown, and record() saves one row per trading day (idle on holidays) through a FAKE account - no requests,
+columns / drawdown, and record() saves one row per trading day (idle on holidays) through a FAKE account - no requests,
 temporary files only. 3) The paper strategies on fake bars / benchmarks / earnings (never a download)."""
 import os
 import sys
@@ -90,8 +90,21 @@ st_ = sm.loc[ft.ACCOUNT]
 # time-weighted: the deposit day is flat (105k on 100k + 5k), then 105k -> 108k -> 105k -> 111k
 check("leaderboard: deposits are not returns, time-weighted (total 111/105 = +5.71%)",
       abs(st_["Total return %"] - (111 / 105 - 1) * 100) < 1e-9, st_.to_dict())
-check("leaderboard: median weekly return Friday to Friday (108/105 = +2.86%, 111/108 = +2.78%), 2 weeks",
-      abs(st_["Median weekly return %"] - ((108 / 105 - 1) + (111 / 108 - 1)) * 50) < 1e-9 and st_["Weeks"] == 2, st_.to_dict())
+check("leaderboard: one column per week Friday to Friday after the daily return (Week 1 % = Oct 2-9 = 108/105, Week 2 % = "
+      "Oct 9-16 = 111/108), every row; no median column",
+      [c for c in sm.columns if c.startswith("Week ")] == [f"Week {k} %" for k in range(1, 13)]
+      and list(sm.columns).index("Week 1 %") == list(sm.columns).index("Daily return %") + 1
+      and sm.filter(like="Week ").iloc[:, 2:].isna().all().all() and not any(c in sm for c in ("Weeks", "Median weekly return %"))
+      and abs(st_["Week 1 %"] - (108 / 105 - 1) * 100) < 1e-9 and abs(st_["Week 2 %"] - (111 / 108 - 1) * 100) < 1e-9
+      and abs(sm.at["QQQ (comparison)", "Week 1 %"] - 10) < 1e-9
+      and sm.loc[[ft.ACCOUNT, "QQQ (comparison)", "SPY (comparison)"], ["Week 1 %", "Week 2 %"]].notna().all().all(),
+      sm.filter(like="Week ").to_dict())
+_wk = ft.leaderboard(daily.iloc[:5], bench.iloc[:5], pd.DataFrame(columns=["Date", "Strategy", "Value"])).set_index("Strategy")
+check("leaderboard: the unfinished week is its own 'so far' column (Fri Oct 2 close -> Thu Oct 8), not a finished week",
+      [c for c in _wk.columns if c.startswith("Week ")][:2] == ["Week 1 (so far) %", "Week 2 %"]
+      and abs(_wk.at[ft.ACCOUNT, "Week 1 (so far) %"] - 0.0) < 1e-9
+      and "Week 1 %" in ft.leaderboard(daily.iloc[:1], bench.iloc[:1], pd.DataFrame(columns=["Date", "Strategy", "Value"])).columns,
+      _wk.filter(like="Week").to_dict())
 check("leaderboard: max drawdown (108k -> 105k on Oct 12)", abs(st_["Max drawdown %"] - (105 / 108 - 1) * 100) < 1e-9,
       st_["Max drawdown %"])
 q = sm.loc["QQQ (comparison)"]
@@ -101,18 +114,16 @@ check("leaderboard: the account and QQQ / SPY are not ranked", sm.loc[[ft.ACCOUN
 vals = pd.DataFrame([{"Date": d, "Strategy": c["name"], "Value": 1.0} for d in days for c in ft.STRATEGIES])
 vals.loc[(vals["Strategy"] == "Top 5") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02   # +2% then flat
 vals.loc[(vals["Strategy"] == "Top 20") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02
-vals.loc[(vals["Strategy"] == "Top 20") & (vals["Date"] == pd.Timestamp("2026-10-05")), "Value"] = 0.95  # same median, deeper drop
+vals.loc[(vals["Strategy"] == "Top 20") & (vals["Date"] == pd.Timestamp("2026-10-05")), "Value"] = 0.95  # same total, deeper drop
 lb = ft.leaderboard(daily, bench, vals)
-check("leaderboard: ranked by median weekly return, a tie goes to the smaller drawdown; Rank counts strategies only",
+check("leaderboard: ranked by total return since Oct 2, a tie goes to the smaller drawdown; Rank counts strategies only",
       list(lb.dropna(subset=["Rank"])["Strategy"][:2]) == ["Top 5", "Top 20"] and list(lb.dropna(subset=["Rank"])["Rank"][:2]) == [1, 2]
       and sorted(lb["Rank"].dropna()) == list(range(1, len(ft.STRATEGIES) + 1)), lb.head(4).to_dict("records"))
 check("leaderboard: the live row is marked", (lb["Strategy"] == ft.LIVE + ft.LIVE_MARK).sum() == 1, list(lb["Strategy"]))
-check("leaderboard: no rank before the first full week", ft.leaderboard(daily.iloc[:1], bench, vals[vals["Date"] == "2026-10-02"])["Rank"].isna().all())
-_early = ft.leaderboard(daily.iloc[:1], bench, vals[vals["Date"] == "2026-10-02"])
-_early = _early[_early["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False).isin([c["name"] for c in ft.STRATEGIES])]
-check("leaderboard: before the first full week, order is total return (tie: smaller drawdown)",
-      list(_early["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False))
-      == list(_early.sort_values(["Total return %", "Max drawdown %"], ascending=False, kind="stable")["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)))
+_early = ft.leaderboard(daily.iloc[:3], bench.iloc[:3], vals[vals["Date"] <= "2026-10-06"])
+check("leaderboard: ranked from day one (no wait for a full week)",
+      sorted(_early["Rank"].dropna()) == list(range(1, len(ft.STRATEGIES) + 1)) and _early.dropna(subset=["Rank"])["Strategy"].iloc[-1] == "Top 20",
+      _early.head(3).to_dict("records"))
 check("verdict: too early before 12 weeks", ft.verdict(lb) == "Week 2 of 12: too early to name a winner.", ft.verdict(lb))
 long_days = pd.bdate_range("2026-10-02", periods=70)
 lv = pd.DataFrame([{"Date": d, "Strategy": c["name"], "Value": 1.0 + i * (0.002 if c["name"] == "Top 5" else 0.0)}
@@ -206,18 +217,25 @@ full = {c["name"]: ft.strategy_targets(c, inp) for c in ft.STRATEGIES}
 tg = {k: t.loc["2026-10-02":] for k, t in full.items()}
 check(f"registry: {len(ft.STRATEGIES)} strategies with unique names, each with a one-line rule",
       len({c["name"] for c in ft.STRATEGIES}) == len(ft.STRATEGIES) >= 28 and all(c.get("rule") for c in ft.STRATEGIES))
+_q = "Now: cash if QQQ < 50-day"                       # the fake QQQ is below its 50-day from Oct 2: all cash
 check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%), at most 99% invested",
       all((t.to_numpy() >= 0).all() and t.to_numpy().max() <= 0.198 + 1e-12 and t.sum(axis=1).max() <= 0.99 + 1e-9
-          and t.sum(axis=1).max() > 0 for t in tg.values()),
+          and (t.sum(axis=1).max() > 0 or k == _q) for k, t in tg.items()),
       {k: (round(t.to_numpy().max(), 4), round(t.sum(axis=1).max(), 4)) for k, t in tg.items()})
 check("registry: the strategies are not copies of each other (distinct weights over the fake history)",
-      len({t.round(4).to_numpy().tobytes() for t in full.values()}) >= len(ft.STRATEGIES) - 4)   # the small fake history makes a few coincide
+      len({t.round(4).to_numpy().tobytes() for t in full.values()}) >= len(ft.STRATEGIES) - 5)   # the small fake history makes a few
+#                                                    coincide; the sleeve stocks are not in it (no sleeve = live now)
+_fri = inp["weekly"] & (full[_q].index >= full[_q].index[260])
+check("Now: cash if QQQ < 50-day: a Friday with QQQ below its 50-day goes all to cash, above it invests",
+      (full[_q][_fri & ~inp["qqq50"]].sum(axis=1) == 0).all() and (full[_q][_fri & inp["qqq50"]].sum(axis=1) > 0.4).all()
+      and (_fri & inp["qqq50"]).any() and (_fri & ~inp["qqq50"]).any())
 check("registry: WINNER untouched", be.WINNER == w0)
 # Forward-test safety (t187u): the strategies keep their own Mon/Wed rules (ft.MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, the Oct 2
 # rules); a change of the live WINNER Mon/Wed keys must not move any of them.
 FT_PINS = dict(midweek=ft.MIDWEEK, exit_all_below=ft.EXIT_BELOW, exit_to_top=ft.EXIT_TO_TOP, selection={"sleeve": ()})
-check("forward-test pins = the Oct 2 Mon/Wed rules (top-3 swap below 15, exit below 30, refill from the top 10)",
-      ft.MIDWEEK == {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]} and (ft.EXIT_BELOW, ft.EXIT_TO_TOP) == (30, 10))
+check("forward-test pins = the Oct 2 mid-week rules (top-3 swap below 15, exit below 30, refill from the top 10), Mon-Thu",
+      ft.MIDWEEK == {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Tue", "Wed", "Thu"]} and (ft.EXIT_BELOW, ft.EXIT_TO_TOP) == (30, 10)
+      and ft.NOW["midweek"] == {"enter_top": None, "exit_below": None, "days": ft.MON_THU} and ft.NOW["exit"] == (20, 10))
 _keys = ("midweek_swap", "midweek_exit_below", "midweek_exit_to_top")
 _saved = {k: be.WINNER.get(k) for k in _keys}
 try:
@@ -226,10 +244,10 @@ try:
     full_alt = {c["name"]: ft.strategy_targets(c, inp) for c in ft.STRATEGIES}
 finally:
     be.WINNER.update(_saved)
-check("forward-test safety: other WINNER Mon/Wed settings change no strategy (every strategy, every day)",
-      all(full_alt[k].equals(full[k]) for k in full) and be.WINNER == w0,
-      [k for k in full if not full_alt[k].equals(full[k])])
-lv, sp = full[ft.LIVE], full["Live + ATR dip buys in spare cash"]
+check("forward-test safety: other WINNER mid-week settings change every pinned strategy not at all, and the live one does",
+      all(full_alt[k].equals(full[k]) for k in full if k != ft.LIVE) and not full_alt[ft.LIVE].equals(full[ft.LIVE])
+      and be.WINNER == w0, [k for k in full if not full_alt[k].equals(full[k])])
+lv, sp = full[ft.C6], full["C6 + ATR dip buys in spare cash"]
 check("live + ATR dips in spare cash: exactly the live weights, plus 10% dip positions in other stocks only with spare cash",
       np.allclose(sp.where(lv > 0, 0), lv) and (sp.where(lv == 0, 0).isin([0, ft.be.live_weights(0.1)])).all().all()
       and (sp.sum(axis=1) <= 0.99 + 1e-9).all() and (sp.where(lv == 0, 0).to_numpy() > 0).any(), (lv > 0).sum(axis=1).min())
@@ -240,12 +258,22 @@ check("ATR stops: with no stop the day-by-day replay = be.winner_targets exactly
 # mid-week variants: swap-threshold ones differ from live at a Mon/Wed check; cash-until-Friday differs when a
 # rank>30 exit has a top-10 refill under live (Chirag 2026-10-05: live refills; this variant still cashes out).
 chk_days = be.midweek_check_days(live_raw.index, ft.MIDWEEK.get("days", ("Mon", "Wed")), inp["weekly"])
-tg_live_full = full[ft.LIVE]
-mid_swap = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c.get("midweek")}
+tg_live_full = full[ft.C6]
+mid_swap = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c["name"].startswith("C6, swap")}
 first_swap = {k: int((~np.isclose(v, tg_live_full).all(axis=1)).argmax()) for k, v in mid_swap.items()}
-check("mid-week variants: swap below 20 / 25 = live until a Mon/Wed check, then differ there",
-      all(chk_days.iloc[first_swap[k]] and first_swap[k] > 0 for k in mid_swap), first_swap)
-cash = full["Live, exit to cash until Friday"]
+check("mid-week variants: swap below 20 / 25 = C6 until a Mon-Thu check, then differ there",
+      len(mid_swap) == 2 and all(chk_days.iloc[first_swap[k]] and first_swap[k] > 0 for k in mid_swap), first_swap)
+cash = full["C6, exit to cash until Friday"]
+# the "Now" strategies (live rules of Oct 15): do_not_buy never held, checks also on Tue / Thu, one change each
+now = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c.get("score") in ("rs", "rs_short", "rs_long", "tech30", "rs_calm")
+       and c.get("exit")}
+_nb = [s_ for s_ in sector_mapping.do_not_buy if s_ in full[ft.LIVE]]
+_chg = lambda t: set(t.index[(t.diff().abs().sum(axis=1) > 1e-12).to_numpy()].dayofweek)
+check("Now strategies: 11, do_not_buy never held, trades on Tue / Thu checks too, all different from each other",
+      len(now) == 11 and all((t[_nb].to_numpy() == 0).all() for t in now.values())
+      and {1, 3} <= set().union(*(_chg(t) for t in now.values()))
+      and len({t.round(6).to_numpy().tobytes() for t in now.values()}) >= 10,     # fake data: no sleeve stocks
+      (_nb, sorted(set().union(*(_chg(t) for t in now.values())))))
 check("exit to cash until Friday: differs from live (live refills from top-10; this variant does not)",
       not np.allclose(cash.to_numpy(), tg_live_full.to_numpy()), (float(np.abs(cash - tg_live_full).to_numpy().max()),))
 # stop scenarios: each stock held over a Friday reports (after the close) 2 sessions after that Friday
@@ -271,7 +299,7 @@ def in_window(m, t, j):
                for jj, day, r in ev)
 
 stops = {}
-for m, kk in (("pre", 0.5), ("post", 1.0)):           # small k: the fake random walks rarely fall 3.5 ATR in a few days
+for m, kk in (("pre", 0.5), ("post", 0.5)):           # small k: the fake random walks rarely fall 3.5 ATR in a few days
     st_w, st_open = stops[m] = ft.atr_stop_targets(inp2, **{**ft.STOPS[m], "k": kk})
     diff = ~np.isclose(st_w, live_raw).all(axis=1)
     t = int(np.argmax(diff)) if diff.any() else None
@@ -296,6 +324,7 @@ with tempfile.TemporaryDirectory() as tmp:
     P = lambda n: dict(path=os.path.join(tmp, n + ".csv"), hold_path=os.path.join(tmp, n + "_h.csv"))
     n1 = ft.update_strategies(SIG, FACTS, NO_EARN, BENCH, BARS, **P("a"))
     v = pd.read_csv(P("a")["path"], parse_dates=["Date"])
+    check("no margin: no strategy's cash is ever below 0", v["Cash"].min() >= -1e-12, v.loc[v["Cash"].idxmin()].to_dict())
     n_days = (sdays >= pd.Timestamp(be.FORWARD_START)).sum()
     check("update: one row per strategy and trading day from the Oct 2 close, each at 1.0 on Oct 2",
           n1 == len(ft.STRATEGIES) * n_days and (v.loc[v["Date"] == "2026-10-02", "Value"] == 1.0).sum() == len(ft.STRATEGIES), n1)
@@ -327,15 +356,16 @@ with tempfile.TemporaryDirectory() as tmp:
     for k in ("path", "hold_path"):
         d_ = rd(P("a")[k]); d_[d_["Date"] <= "2026-10-05"].to_csv(P("c")[k], index=False)
     hc = rd(P("c")["hold_path"])
-    L = (hc["Strategy"] == ft.LIVE) & (hc["Date"] == "2026-10-05") & (hc["Shares"] > 0)
-    alien = next(s for s in sorted(SIG["Symbol"].unique()) if s not in set(hc.loc[hc["Strategy"] == ft.LIVE, "Symbol"]))
+    FO = "Friday only"                                               # no decision on Tue Oct 6 (Mon-Thu checks would)
+    L = (hc["Strategy"] == FO) & (hc["Date"] == "2026-10-05") & (hc["Shares"] > 0)
+    alien = next(s for s in sorted(SIG["Symbol"].unique()) if s not in set(hc.loc[hc["Strategy"] == FO, "Symbol"]))
     gone = hc.loc[L, "Symbol"].iloc[0]
     hc.loc[L & (hc["Symbol"] == gone), "Symbol"] = alien
     hc.to_csv(P("c")["hold_path"], index=False)
     ft.update_strategies(SIG[SIG["Date"] <= "2026-10-06"], FACTS, NO_EARN, BENCH, BARS, **P("c"))
-    h6 = rd(P("c")["hold_path"]); h6 = h6[(h6["Strategy"] == ft.LIVE) & (h6["Shares"] > 0)]
+    h6 = rd(P("c")["hold_path"]); h6 = h6[(h6["Strategy"] == FO) & (h6["Shares"] > 0)]
     s5, s6 = (h6[h6["Date"] == x].set_index("Symbol")["Shares"].sort_index() for x in ("2026-10-05", "2026-10-06"))
-    ha_ = ha[(ha["Strategy"] == ft.LIVE) & (ha["Shares"] > 0)]
+    ha_ = ha[(ha["Strategy"] == FO) & (ha["Shares"] > 0)]
     pre = set(ha_.loc[ha_["Date"] == "2026-10-05", "Symbol"]) == set(ha_.loc[ha_["Date"] == "2026-10-06", "Symbol"])
     check("rewritten past: a saved holding the new targets no longer have is kept on a day without a decision (no trade)",
           pre and alien in s6.index and gone not in s6.index and s5.equals(s6), (alien, gone, list(s6.index)))
@@ -407,6 +437,25 @@ with tempfile.TemporaryDirectory() as tmp:
           rd[ft.LIVE] == rd["Friday only"] == rd["Short-term reversal"] == "W" and rd["Monthly"] == "M"
           and rd["Dual momentum"] == "M" and rd["Buy the dip"] is None and set(rd.values()) <= {"W", "M", None}, rd)
 
+# the live Mon-Thu spare-cash rule (paper_trade.build_cash_deploy_orders) on target weights
+import paper_trade  # noqa: E402
+check("spare cash: same settings as paper_trade", (ft.DEPLOY_MAX_RANK, ft.EXTRA_MAX_WEIGHT, ft.CLIMB_DAYS, ft.DEPLOY_MIN_PCT)
+      == (paper_trade.DEPLOY_MAX_RANK, paper_trade.EXTRA_MAX_WEIGHT, paper_trade.CLIMB_DAYS, paper_trade.DEPLOY_MIN_PCT))
+sd = pd.bdate_range("2026-10-05", periods=5)                                   # Mon..Fri
+sc = [f"S{k:02d}" for k in range(1, 9)] + ["AMD"] + [f"S{k:02d}" for k in range(9, 14)]   # AMD rank 9 (do_not_buy)
+sS = pd.DataFrame([list(range(14, 0, -1))] * 5, index=sd, columns=sc, dtype=float)
+st0 = pd.DataFrame(0.0, index=sd, columns=sc)
+st0.loc[:, sc[:8]] = 0.1                                                       # 80% held: 20% spare
+st0.loc[sd[4], :] = 0.0
+st0.loc[sd[4], sc[:10]] = 0.1                                                  # Friday: a new top 10
+sinp = {"scores": {"now": sS, "rs": sS}, "eligible": sS.notna(), "vol": sS * 0 + 0.2, "soon": st0 > 1,
+        "regime": pd.Series(True, index=sd), "weekly": pd.Series(sd.dayofweek == 4, index=sd)}
+sp_ = ft.spare_cash(st0, pd.Series(sd.dayofweek < 4, index=sd), sinp)
+check("spare cash: Mon-Thu the spare 20% buys the unheld top 10 at the Friday-rule weight (do_not_buy AMD skipped); rank 11 "
+      "only if it climbed (no rank history here: cash); kept to Friday",
+      abs(sp_.iloc[0]["S09"] - 0.1) < 1e-12 and sp_.iloc[0][["AMD", "S10"]].sum() == 0 and abs(sp_.iloc[0].sum() - 0.9) < 1e-12
+      and sp_.iloc[1:4].equals(pd.DataFrame([sp_.iloc[0]] * 3, index=sd[1:4])) and sp_.iloc[4].equals(st0.iloc[4]), sp_.round(3).to_dict("index"))
+
 # the rules that are not rankings, on tiny hand-made data
 ud = pd.bdate_range("2026-01-05", periods=8)
 uc = pd.DataFrame({"A": [100, 91, 90, 95, 100, 101, 90, 89.0], "B": [100, 100, 100, 100, 100, 100, 100, 91.0]}, index=ud)
@@ -473,25 +522,19 @@ if os.path.exists(ft.SIGNAL_CSV):
           all(ft.atr_stop_targets(real_inp, **{**ft.STOPS[m], "k": np.inf})[0].equals(real_live) for m in ft.STOPS))
     check("exit replaced by top-N on the real data: with N = the pinned EXIT_TO_TOP the replay = the pinned live targets",
           ft.atr_stop_targets(real_inp, k=np.inf, exit_to_top=ft.EXIT_TO_TOP)[0].equals(real_live))
-    # Oct 2 CSV was written under T20 soft-cap + cash-until-Friday. Recompute with those pins for apples-to-apples.
-    old_sel = dict(max_pick_rank=20, cap_soft=True, sector_cap=0.4)
-    mine_old, _ = be.winner_targets(real_inp["scores"]["live"], real_inp["eligible"], real_inp["vol"], real_inp["regime"],
-                                    real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"],
-                                    selection=old_sel, midweek=ft.MIDWEEK, exit_all_below=ft.EXIT_BELOW, exit_to_top=None)
-    mine = be.live_weights(mine_old.loc[d0])  # CSV stores live (x99% floored) weights
-    mine = mine[mine > 0].sort_index()
-    # Every pipeline run after 8f57015 rewrites the whole history with the current WINNER (pure top-10), so the file
-    # holds either the T20 pins (written before that) or the current rules (written after); both must match exactly.
-    cur = be.live_weights(real_live.loc[d0])
-    cur = cur[cur > 0].sort_index()
-    sl, _ = be.winner_targets(real_inp["scores"]["live"], real_inp["eligible"], real_inp["vol"], real_inp["regime"],
-                              real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"],
-                              **{**FT_PINS, "selection": None})   # the current rules incl. the defensive sleeve (2026-10-15)
-    sl = be.live_weights(sl.loc[d0])
-    sl = sl[sl > 0].sort_index()
-    same = lambda x: list(live.index) == list(x.index) and np.allclose(live, x, atol=1e-9)
-    check("Oct 2 Strategy_Weight = the rules that wrote the file (T20 soft-cap pins, the pure top-10, or top-10 + sleeve)",
-          same(mine) or same(cur) or same(sl), (live.to_dict(), mine.to_dict(), cur.to_dict(), sl.to_dict()))
+    # the live strategy's rule weights (before do_not_buy and the spare cash, order-time rules) = the pipeline's own
+    # Strategy_Weight on every forward-test day (a file written before Oct 15, 2:30 PM still has Mon/Wed checks)
+    pipe = real.pivot(index="Date", columns="Symbol", values="Strategy_Weight").fillna(0.0).loc[d0:]
+    fits = [float((be.live_weights(be.winner_targets(real_inp["scores"]["now"], real_inp["eligible"], real_inp["vol"],
+                   real_inp["regime"], real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"],
+                   midweek={**be.WINNER["midweek_swap"], "days": dd})[0])
+                   .reindex(index=pipe.index, columns=pipe.columns).fillna(0.0) - pipe).abs().max().max())
+            for dd in (be.WINNER["midweek_swap"]["days"], ["Mon", "Wed"])]
+    check("live strategy = the pipeline's Strategy_Weight on every day since Oct 2 (same be.WINNER rules)", min(fits) < 1e-9, fits)
+    cfg_now = next(c for c in ft.STRATEGIES if c["name"] == ft.LIVE)
+    lnow = ft.strategy_targets(cfg_now, real_inp).loc[d0:, list(sector_mapping.defensive)]
+    check("live strategy: the 5 defensive stocks held every day, at most 5% each (x 99%)",
+          (lnow > 0).all().all() and lnow.to_numpy().max() <= be.live_weights(sector_mapping.defensive_cap) + 1e-12, lnow.max().to_dict())
     check("no live file changed (signal_analysis, picks, run_state, pending orders, orders log); WINNER untouched",
           digest() == before and be.WINNER == w0)
 # provisional marks (display only): Tue / Thu have no signal rows until the next decision run
@@ -533,14 +576,17 @@ _hd = pd.DataFrame([("2026-10-05", _N[1], "OLD", 0.5),                          
                     ("2026-10-06", _N[0], "AAA", 0.2), ("2026-10-06", _N[0], "DDD", 0.2),
                     ("2026-10-06", _N[4], "EEE", 0.5)], columns=["Date", "Strategy", "Symbol", "Weight"])
 _c = ft.consensus(_bd, _hd, {"AAA": 5, "BBB": 1, "CCC": 2, "DDD": 3}, n_strategies=3)
-check("Top 5 consensus: no full week -> by total return; benchmarks out; twins once (better-placed kept); n best only",
-      _c["by_return"] and [n for n, _ in _c["strategies"]] == [_N[1], _N[2], _N[0]] and _c["strategies"][0][1] == [_N[3]],
+check("Top 5 consensus: no week column -> by total return; benchmarks out; twins once (better-placed kept); n best only",
+      _c["by"] == "Total return %" and [n for n, _ in _c["strategies"]] == [_N[1], _N[2], _N[0]] and _c["strategies"][0][1] == [_N[3]],
       _c["strategies"])
 check("Top 5 consensus: stocks by count, then summed weight, then latest rank; weight 0 and older days ignored",
       list(_c["stocks"]["Symbol"]) == ["AAA", "BBB", "CCC", "DDD"] and list(_c["stocks"]["Count"]) == [2, 2, 1, 1],
       _c["stocks"].to_dict("list"))
-_c2 = ft.consensus(_bd.assign(Rank=pd.array([2, 1, 3, pd.NA, pd.NA, 4], dtype="Int64")), _hd, None, n_strategies=2)
-check("Top 5 consensus: once ranked -> leaderboard rank order", [n for n, _ in _c2["strategies"]] == [_N[1], _N[0]], _c2["strategies"])
+_c2 = ft.consensus(_bd.assign(Rank=pd.array([2, 1, 3, pd.NA, pd.NA, 4], dtype="Int64"), **{"Week 1 %": [5.0, 1.0, 1.0, 1.0, 9.0, 0.0],
+                                "Week 2 (so far) %": [0.5, 0.1, 2.0, 3.0, 9.0, 0.0]}), _hd, None, n_strategies=2)
+check("Top 5 consensus: by the latest week column (the week so far), not Rank; twins once",
+      _c2["by"] == "Week 2 (so far) %" and [n for n, _ in _c2["strategies"]] == [_N[3], _N[2]] and _c2["strategies"][0][1] == [_N[1]],
+      _c2["strategies"])
 import inspect
 _sig = inspect.signature(ft.consensus)
 check("Top 5 consensus: defaults are 5 strategies and 10 stocks",

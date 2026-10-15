@@ -2,13 +2,14 @@
   1. the real Alpaca account (read-only GETs through alpaca_paper, never orders) -> Reports/forward_test_daily.csv, one
      row per trading day: equity, cash, net deposits (a deposit booked after the close, ~4:15 PM CT, counts from the next
      row), positions, closed / winning picks, $ traded and its cost vs the decision price;
-  2. STRATEGIES: 39 paper-only strategies (the live rules recomputed + 38 others, never traded), built from the saved
+  2. STRATEGIES: 52 paper-only strategies (the current live rules, the pinned Oct 2 rules and variants; never traded), built from the saved
      Reports files (signal_analysis, factor_history, earnings_date, benchmark_prices) + Alpaca daily volume
      (forward_bars) -> Reports/forward_strategies.csv (Value, 1.0 at the start; Cash) + forward_strategies_holdings.csv.
-leaderboard(): every strategy + the account + QQQ / SPY, ranked by RANK_RULE (fixed before any result).
+leaderboard(): every strategy + the account + QQQ / SPY, ranked by RANK_RULE, with one column per week.
 Same accounting for all: decide at the day's close (the 2:30 PM bar on decision days), trade only names whose target
 changed (all back to target on the strategy's rebalance day, 1-point band, earnings rule), be.COST per side, max 20% per
-stock, 99% invested, cash earns 0. Saved days are never redone; missed days are caught up from the saved bars.
+stock, 99% invested, buys never exceed the cash (no margin), cash earns 0. Saved days are never redone; missed days are
+caught up from the saved bars. On Oct 15, 2026 all but the live one were recomputed from Oct 2 (Mon-Thu checks, 11 new).
 
     python forward_test.py --record   # run_all.daily_step (Mon-Fri from 3:05 PM CT): strategies + today's account row
     python forward_test.py            # strategies only (no account request) + the leaderboard
@@ -42,57 +43,62 @@ SIG_COLS = ["Date", "Symbol", "Close", "ma_50", "ma_10", "ma_30", "ma_100", "ma_
 MAX_WEIGHT = 0.20            # no stock above 20% (the live max_weight rule); the extra stays cash
 BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
-LIVE = "Live rules (C6)"
-LIVE_MARK = " (simulated, not your account)"  # C6 is a paper copy of the Oct 2 rules; real account is its own row
+LIVE = "Live rules (C6)"    # always the CURRENT live rules (be.WINNER + sector_mapping, not pinned); saved days kept as recorded
+C6 = "Oct 2 rules (pinned)" # the rules the forward test started with (pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, 50/50 score)
+# paper_trade's Mon-Thu spare-cash rule (forward_test never imports paper_trade; tests check these equal its constants)
+DEPLOY_MAX_RANK, EXTRA_MAX_WEIGHT, CLIMB_DAYS, DEPLOY_MIN_PCT = 10, 0.10, 15, 0.01
+LIVE_MARK = " (simulated, not your account)"
 ACCOUNT = "Your Alpaca account (real)"
-RANK_RULE = ("Ranked by median weekly return (Friday to Friday); a tie goes to the smaller max drawdown. Chosen on Oct 2, "
-             f"2026, before any result. After {WEEKS_TO_WIN} full weeks the top strategy is the winner only if its total "
-             f"return also beats {LIVE} and QQQ; otherwise the live rules stay. Nothing switches on its own: the live "
+RANK_RULE = ("Ranked by total return since Oct 2, 2026; a tie goes to the smaller max drawdown (Chirag, Oct 15; was the "
+             f"median weekly return). After {WEEKS_TO_WIN} full weeks the top strategy is the winner only if its total "
+             f"return beats both {LIVE} and QQQ; otherwise the live rules stay. Nothing switches on its own: the live "
              "rules change only when you ask.")
 
 # ---------------------------------------------------------------------------------------------------- the strategies
 # One dict per strategy. Ranked strategies go through the engine's own selection (be.winner_targets); their defaults = the
-# live rules: score "live" (0.5 x technical + 0.5 x relative strength), relative strength tiebreak, Friday rebalance +
-# Mon/Wed swaps and exits ("mwf", pinned to the Oct 2 rules: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP below); live Friday = pure top-10 by rank (no sector / no rank-20 gate), 1/volatility
+# Oct 2 rules (C6): score "live" (0.5 x technical + 0.5 x relative strength), relative strength tiebreak, Friday rebalance +
+# Mon-Thu swaps and exits ("mwf": MIDWEEK / EXIT_BELOW / EXIT_TO_TOP below); Friday = pure top-10 by rank (no sector / no rank-20 gate), 1/volatility
 # weights, half size when QQQ is below its 200-day average, no buys 5 days before earnings. "select" changes rank_targets
 # keys (n, sector_cap, vol_sizing, regime, ...), "earnings" None drops the earnings skip, "calendar" is "mwf" / "weekly"
 # (Friday only) / "monthly" (last session of the month). "weights" = a rule that is not a ranking (its own weights below);
 # "reweight" = the same picks with other weights; "stop" = the live rules + an ATR stop around earnings (STOPS);
 # "spare_dips" = the live rules + ATR dip buys with the cash they leave unused; "midweek" = other Mon/Wed swap settings;
-# "replay" = the live rules replayed day by day with a changed Mon/Wed exit (atr_stop_targets).
+# "replay" = the live rules replayed day by day with a changed Mon/Wed exit (atr_stop_targets). "live" = LIVE: whatever
+# be.WINNER / sector_mapping say now (score = the pipeline's Strategy_Score) + the Mon-Thu spare-cash buys (spare_cash).
+# The "Now" strategies (**NOW) = one change each to the live rules of Oct 15 (pinned): relative strength only, top 10 +
+# the defensive sleeve (sector_mapping.defensive, 5% cap), Mon-Thu sell worse than rank 20 refilled from the top 10,
+# do_not_buy never bought; "exit" = (sell below, refill from top), "regime" = another market filter; no spare-cash buys.
 PLAIN = {"max_pick_rank": None, "cap_soft": False, "sector_cap": 0.4}  # walk every rank, strict max 4/sector (pinned; live is now 1.0)
-# The Mon/Wed rules every "mwf" strategy started with on Oct 2, 2026 (live until 2026-10-07), pinned here so a later
+# The mid-week rules every C6 "mwf" strategy started with on Oct 2, 2026 (live until 2026-10-07), pinned here so a later
 # live change (t187u: no top-3 swap, exit below 20) never alters a forward-test strategy: top-3 swap below rank 15,
-# exit below rank 30 refilled from the best non-held top 10.
-MIDWEEK = {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]}
+# exit below rank 30 refilled from the best non-held top 10. Days Mon-Thu like live (Chirag, Oct 15; Mon/Wed before).
+MON_THU = ["Mon", "Tue", "Wed", "Thu"]
+MIDWEEK = {"enter_top": 3, "exit_below": 15, "days": MON_THU}
 EXIT_BELOW, EXIT_TO_TOP = 30, 10
+NOW = dict(score="rs", midweek={"enter_top": None, "exit_below": None, "days": MON_THU}, exit=(20, 10), sleeve=True,
+           never_buy=True)
 EQ = {**PLAIN, "vol_sizing": False}                      # ... and an equal weight per stock
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
 STRATEGIES = [
-    dict(name=LIVE, rule="What the bot traded Oct 2-7 (pinned): 50% technical + 50% relative strength, top 10, Fri rebalance + "
-              "Mon/Wed top-3 swap (below rank 15) and exit below rank 30. Since Oct 7 the bot only sells worse than 20 on Mon/Wed."),
-    dict(name="Live without rank-20 limit / earnings skip", select=PLAIN, earnings=None,   # name kept: saved-data key
-         rule="The live rules with at most 4 per sector and no earnings skip (earnings never block a buy)."),
-    dict(name="Technical score only", score="tech", rule="Live rules ranking on the technical score alone."),
+    dict(name=LIVE, live=True, rule="Always the current live rules, as the account trades them (Oct 15: relative strength only, "
+         "top 10 + LMT NOC ABBV PFE KO at 5% max, 1/volatility weights, Fri rebalance, Mon-Thu sell worse than rank 20 -> "
+         "best top-10 not held, spare cash -> unheld top 10 then rank 11+ climbers at 10% max; do_not_buy never bought). "
+         "Oct 2-14 as recorded then (the Oct 2 rules, Mon/Wed)."),
+    dict(name=C6, rule="What the bot traded Oct 2-7 (pinned): 50% technical + 50% relative strength, top 10, Fri rebalance + "
+                       "Mon-Thu top-3 swap (below rank 15) and exit below rank 30 (checks Mon/Wed until Oct 15)."),
+    dict(name="C6, 4 per sector, no earnings skip", select=PLAIN, earnings=None,
+         rule="The Oct 2 rules with at most 4 per sector and no earnings skip (earnings never block a buy)."),
+    dict(name="Technical score only", score="tech", rule="Oct 2 rules ranking on the technical score alone."),
     dict(name="Relative strength only", score="rs",
-         rule="Live rules ranking on relative strength (vs sector ETF and SPY) alone."),
-    dict(name="Top 10 climbers (15 days)", score="climb",
-         rule="Live rules ranking the relative-strength top 20 by how far their rank climbed over 15 sessions."),
-    dict(name="Climbers (10 days)", score="climb10", rule="Climbers with a 10-session rank gain."),
-    dict(name="Climbers (20 days)", score="climb20", rule="Climbers with a 20-session rank gain."),
-    dict(name="Climbers (30 days)", score="climb30", rule="Climbers with a 30-session rank gain."),
-    dict(name="Climbers from top 30 (15 days)", score="climb15_top30",
-         rule="Climbers picked from the relative-strength top 30 instead of the top 20."),
-    dict(name="Climbers, 50/50 tech + RS (15 days)", score="climb15_mix",
-         rule="Climbers on the old 50% technical + 50% relative strength ranking."),
+         rule="Oct 2 rules ranking on relative strength (vs sector ETF and SPY) alone."),
     dict(name="Quant Score", score="quant", tiebreak=None,
-         rule="Live rules ranking on the copy folder's Quant Score (trend, MAs, VWAP, RSI, MACD, Bollinger); needs a score above 50."),
+         rule="Oct 2 rules ranking on the copy folder's Quant Score (trend, MAs, VWAP, RSI, MACD, Bollinger); needs a score above 50."),
     dict(name="Quant Score top 5", score="quant", tiebreak=None, select={"n": 5},
          rule="The copy folder's main Quant leg: the Quant Score rules with 5 stocks."),
     dict(name="Quant + relative strength", score="quant_rs",
-         rule="Live rules ranking on a 50/50 blend of Quant Score rank and relative strength rank."),
-    dict(name="Live + news sentiment", score="sentiment",
-         rule="Live rules, ranking 80% on the live score and 20% on the latest news sentiment."),
+         rule="Oct 2 rules ranking on a 50/50 blend of Quant Score rank and relative strength rank."),
+    dict(name="C6 + news sentiment", score="sentiment",
+         rule="Oct 2 rules, ranking 80% on the C6 score and 20% on the latest news sentiment."),
     dict(name="Company fundamentals", score="fundamental", calendar="monthly", select=EQ, earnings=None,
          rule="Top 10 by the company-report score (Fundamental_Weight), equal weight, monthly."),
     dict(name="12-1 month momentum", score="mom_12_1", calendar="monthly", **SIMPLE,
@@ -107,11 +113,11 @@ STRATEGIES = [
     dict(name="Legacy BUY/SELL signals", weights="legacy",
          rule="The Legacy folder's rule: 60% technical + 25% fundamentals + 10% sector week + 5% news; hold from BUY (above "
               "20) to SELL (below -25), an equal slice of the money per stock, checked daily."),
-    dict(name="Top 5", select={"n": 5}, rule="The live rules with 5 stocks."),
-    dict(name="Top 20", select={"n": 20}, rule="The live rules with 20 stocks (= ranks 1-20)."),
-    dict(name="Equal weight", select={"vol_sizing": False}, rule="The live rules with an equal weight per stock."),
-    dict(name="Friday only", calendar="weekly", rule="The live rules without the Mon/Wed swaps and exits."),
-    dict(name="Monthly", calendar="monthly", rule="The live rules, rebalanced on the last trading day of each month only."),
+    dict(name="Top 5", select={"n": 5}, rule="The Oct 2 rules with 5 stocks."),
+    dict(name="Top 20", select={"n": 20}, rule="The Oct 2 rules with 20 stocks (= ranks 1-20)."),
+    dict(name="Equal weight", select={"vol_sizing": False}, rule="The Oct 2 rules with an equal weight per stock."),
+    dict(name="Friday only", calendar="weekly", rule="The Oct 2 rules without the Mon-Thu swaps and exits."),
+    dict(name="Monthly", calendar="monthly", rule="The Oct 2 rules, rebalanced on the last trading day of each month only."),
     dict(name="No sector limit", select={"sector_cap": 1.0, "cap_soft": True, "max_pick_rank": 20},
          rule="Ranks 1-20 only, no sector cap (live is now pure top-10 with no rank-20 gate)."),
     dict(name="Dual momentum", score="dual", calendar="monthly", select={**EQ, "regime": None, "regime_scale": None},
@@ -131,17 +137,17 @@ STRATEGIES = [
          rule="Stocks that beat the market on their last earnings day (within 60 trading days), biggest jump first; top 10, "
               "every Friday. (No free EPS-surprise data, so the price jump stands in for the beat.)"),
     dict(name="Sector rotation", score="sector_rot", calendar="weekly", **SIMPLE,
-         rule="The 3 sector ETFs with the best 3-month return, then the best live-score stocks in those sectors; top 10, Fridays."),
+         rule="The 3 sector ETFs with the best 3-month return, then the best C6-score stocks in those sectors; top 10, Fridays."),
     dict(name="Breakout with volume", score="breakout", calendar="weekly", select=EQ, earnings=None,
          rule="Stocks that closed within 2% of their 55-day high on 1.3x+ normal volume (5-day vs 50-day average) in the "
               "last 20 trading days and are still above their 50-day average; top 10 by that volume jump, equal weight, Fridays."),
-    dict(name="Live + pre-earnings 3.5x ATR stop", stop="pre",
-         rule="The live rules + a stop for a stock kept at the Friday rebalance with earnings in the next 7 days, from that "
+    dict(name="C6 + pre-earnings 3.5x ATR stop", stop="pre",
+         rule="The Oct 2 rules + a stop for a stock kept at the Friday rebalance with earnings in the next 7 days, from that "
               "Friday through its first trading day after the report: sold in full at the close at or below its highest "
               "close since bought minus 3.5x ATR(14), or at the open if that day opens below it; the best stock the live "
               "rules would buy takes the slot."),
-    dict(name="Live + post-earnings ATR stop", stop="post",
-         rule="The live rules + the same stop from a holding's first trading day after earnings through 10 trading days "
+    dict(name="C6 + post-earnings ATR stop", stop="post",
+         rule="The Oct 2 rules + the same stop from a holding's first trading day after earnings through 10 trading days "
               "later: sold at the close at or below its highest close since bought minus 3x ATR(14); the best stock the "
               "live rules would buy takes the slot."),
     dict(name="ATR dip buy (top 30)", weights="atr_dip",
@@ -152,26 +158,44 @@ STRATEGIES = [
     dict(name="ATR dip buy, sell on signal", weights="atr_dip_signal",
          rule="Buy a stock that closes 3x ATR(14) or more below its 20-day high close (live top 30, not a SELL); 10% each "
               "(at most 10, best rank first), held until the signal analysis says SELL (score below 0) or its live rank "
-              "falls below 30 (the Oct 2 Mon/Wed exit rank); no fixed hold."),
-    dict(name="Live + ATR dip buys in spare cash", spare_dips=True,
-         rule="The live rules; cash they leave unused (empty slots, half size when QQQ is weak) buys the not-after-earnings "
+              "falls below 30 (the Oct 2 mid-week exit rank); no fixed hold."),
+    dict(name="C6 + ATR dip buys in spare cash", spare_dips=True,
+         rule="The Oct 2 rules; cash they leave unused (empty slots, half size when QQQ is weak) buys the not-after-earnings "
               "ATR dips at 10% each (not within 5 days before earnings either), sold after 10 trading days or when the "
               "live rules buy that stock or need the cash."),
-    dict(name="Live, swap below 20", midweek={**MIDWEEK, "exit_below": 20},
-         rule="The live rules, but the Mon/Wed top-3 swap replaces a holding ranked worse than 20 (Oct 2 rules: 15)."),
-    dict(name="Live, swap below 25", midweek={**MIDWEEK, "exit_below": 25},
-         rule="The live rules, but the Mon/Wed top-3 swap replaces a holding ranked worse than 25 (Oct 2 rules: 15)."),
-    dict(name="Live, exit to cash until Friday", replay={"exit_to_top": None},
-         rule="Like live, but a Mon/Wed holding ranked worse than 30 is sold to cash until Friday (no top-10 refill; "
+    dict(name="C6, swap below 20", midweek={**MIDWEEK, "exit_below": 20},
+         rule="The Oct 2 rules, but the Mon-Thu top-3 swap replaces a holding ranked worse than 20 (Oct 2 rules: 15)."),
+    dict(name="C6, swap below 25", midweek={**MIDWEEK, "exit_below": 25},
+         rule="The Oct 2 rules, but the Mon-Thu top-3 swap replaces a holding ranked worse than 25 (Oct 2 rules: 15)."),
+    dict(name="C6, exit to cash until Friday", replay={"exit_to_top": None},
+         rule="Like C6, but a Mon-Thu holding ranked worse than 30 is sold to cash until Friday (no top-10 refill; "
               "the pre-2026-10-05 exit). The Oct 2 rules refill from the best non-held top-10."),
     dict(name="Risk parity", reweight="risk_parity",
          rule="The live picks, weighted so each stock adds the same risk (63-day volatility and correlation)."),
     dict(name="Top 20 rank-weighted (70/30)", score="rs", select={"n": 20}, reweight="rank_tier",
          rule="Relative strength top 20 weighted by rank: ranks 1-10 share 70% (8.5% down to 5.5%), ranks 11-20 share "
               "30% (5.0% down to 1.0%). Half size while QQQ is below its 200-day average."),
+    # ---- the live rules of Oct 15, 2026 (pinned) with one change each (added Oct 15, computed from Oct 2)
+    dict(name="Now: Friday only", **NOW, calendar="weekly", rule="Live rules of Oct 15 without the Mon-Thu checks."),
+    dict(name="Now: no defensive sleeve", **{**NOW, "sleeve": False}, rule="Live rules of Oct 15 without the 5 defensive stocks."),
+    dict(name="Now: equal weight", **NOW, select={"vol_sizing": False}, rule="Live rules of Oct 15, an equal weight per stock."),
+    dict(name="Now: top 15", **NOW, select={"n": 15}, rule="Live rules of Oct 15 with 15 stocks (+ the sleeve)."),
+    dict(name="Now: top 5", **NOW, select={"n": 5}, rule="Live rules of Oct 15 with 5 stocks (+ the sleeve), 20% max each."),
+    dict(name="Now: exit below 15", **{**NOW, "exit": (15, 10)}, rule="Live rules of Oct 15, Mon-Thu sell worse than rank 15."),
+    dict(name="Now: RS 10/21/63 days", **{**NOW, "score": "rs_short"},
+         rule="Live rules of Oct 15, relative strength over 10/21/63 days (live: 21/63/126)."),
+    dict(name="Now: RS 63/126/252 days", **{**NOW, "score": "rs_long"},
+         rule="Live rules of Oct 15, relative strength over 63/126/252 days (live: 21/63/126)."),
+    dict(name="Now: 30% technical", **{**NOW, "score": "tech30"},
+         rule="Live rules of Oct 15, ranking 30% technical + 70% relative strength."),
+    dict(name="Now: calmer half", **{**NOW, "score": "rs_calm"},
+         rule="Live rules of Oct 15, only stocks with 63-day volatility at or below the list's median (others sold Mon-Thu)."),
+    dict(name="Now: cash if QQQ < 50-day", **NOW, regime="qqq50", select={"regime_scale": 0.0},
+         rule="Live rules of Oct 15, but a Friday with QQQ below its 50-day average goes all to cash (live: half size below "
+              "the 200-day)."),
 ]
 for _c in STRATEGIES:                                     # the limits the plain rankings keep (said once, here)
-    if (_c.get("select") is PLAIN or _c.get("select") is EQ) and not _c["rule"].startswith("The live rules"):
+    if (_c.get("select") is PLAIN or _c.get("select") is EQ) and not _c["rule"].startswith("The Oct 2 rules"):
         _c["rule"] += " At most 4 per sector; like live: half size while QQQ is below its 200-day average, score above 0."
 STOPS = {"pre": dict(k=3.5, arm_days=7, gap_open=True), "post": dict(k=3.0, after=10)}   # atr_stop_targets settings
 FWD_BARS = os.path.join(REPORTS, "cache", "forward_bars.pkl")
@@ -433,7 +457,8 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     forward_bars() (volume). "through" = the last day the bars cover (later days wait for the bars)."""
     sig = sig[sig["Symbol"].isin(sig.loc[sig["Strategy_Score"].notna(), "Symbol"].unique())]   # scored stocks (no QQQ)
     f = {col: _wide(sig, col) for col in SIG_COLS[2:] if col not in ("Regime_On", "final_trade")}
-    dates, c, live, rs, tech = f["Close"].index, f["Close"], f["Strategy_Score"], f["RS_Score"], f["Technical_Score"]
+    dates, c, rs, tech = f["Close"].index, f["Close"], f["RS_Score"], f["Technical_Score"]
+    live = (0.5 * tech + 0.5 * rs).where(f["Strategy_Score"].notna())   # the Oct 2 score (C6); live is RS only since Oct 13
     cols, eligible, earnings = c.columns, f["Strategy_Score"].notna(), be.load_earnings() if earnings is None else earnings
     snap = {}
     for col in ("SentimentScore", "Fundamental_Weight"):
@@ -452,12 +477,13 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     regime = sig.groupby("Date")["Regime_On"].first().reindex(dates).fillna(0).astype(bool)
     weekly = be.weekly_rebalance_days(dates, live=True)
     ret = lambda n: c / c.shift(n) - 1
+    rs_w = lambda w: (be.relative_strength(pd.concat([c, b], axis=1), list(cols), eligible_w=eligible, windows=w)
+                      if "SPY" in b else rs)                            # RS over other windows (the decision-day closes)
+    calm = vol.le(vol.where(eligible).median(axis=1), axis=0)
     mom_12_1, etf_3m = (c.shift(21) / c.shift(252) - 1) * 100, by_etf(b / b.shift(63) - 1)
     scores = {
-        "live": live, "tech": tech, "rs": rs, "climb": be.climb_score(rs, eligible, 15, 20),
-        "climb10": be.climb_score(rs, eligible, 10, 20), "climb20": be.climb_score(rs, eligible, 20, 20),
-        "climb30": be.climb_score(rs, eligible, 30, 20), "climb15_top30": be.climb_score(rs, eligible, 15, 30),
-        "climb15_mix": be.climb_score(100 * (0.5 * _pct(tech) + 0.5 * _pct(rs)), eligible, 15, 20),
+        "live": live, "now": f["Strategy_Score"], "tech": tech, "rs": rs, "rs_short": rs_w((10, 21, 63)), "rs_long": rs_w((63, 126, 252)),
+        "tech30": 0.3 * tech + 0.7 * rs, "rs_calm": rs.where(calm | rs.isna(), -1.0),   # -1: not picked, sleeve kept
         "quant": quant - 50,                                  # > 0 = Quant Score above 50 (the copy's min score)
         "quant_rs": 100 * (0.5 * _pct(quant) + 0.5 * _pct(rs)),
         "sentiment": (100 * (0.8 * _pct(live) + 0.2 * _pct(snap["SentimentScore"].fillna(0.0)))).where(live > 0),
@@ -496,29 +522,72 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
                "dip": dip_weights(c, f["ma_50"], eligible),
                "trend": _carry(((f["ma_50"] > f["ma_200"]) & eligible).astype(float).div(n, axis=0), weekly)}
     have = bx["vwap_ratio"].notna().any(axis=1)
+    qqq = b["QQQ"] if "QQQ" in b else pd.Series(np.nan, index=dates)
     return {"close": c.ffill(), "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
+            "qqq50": (qqq > qqq.rolling(50).mean()).reindex(dates).fillna(False),
             "weekly": weekly, "earnings": earnings, "atr": atr,
             "dip_spare": dip_b & ~soon.reindex(index=dates, columns=cols).fillna(False), "open": bx["open_ratio"] * c,
             "soon": soon.reindex(index=dates, columns=cols).fillna(False),          # earnings within 5 days (E5)
             "monthly": pd.Series([be.next_sessions(d, 1)[0].month != d.month for d in dates], index=dates),
             "through": have[have].index.max() if have.any() else pd.Timestamp(0)}
 
+def spare_cash(tgt, chk, inp):
+    """paper_trade's Mon-Thu spare-cash rule on target weights: on a check day, the weight above the invested level
+    (1, or the regime scale while QQQ is weak) beyond 1% buys the unheld top-10 stocks at their Friday-rule weight, then
+    unheld ranks 11+ that climbed over CLIMB_DAYS sessions at most 10% each (score > 0, no earnings within 5 days, not
+    do_not_buy, 20% max). Those buys are held until the next Friday rebalance."""
+    W, score = be.WINNER, inp["scores"]["now"]
+    ok = inp["eligible"] & inp["vol"].reindex_like(inp["eligible"]).gt(0) & score.gt(W["min_score"])
+    rank = be.deterministic_rank(score, ok, inp["scores"]["rs"]).reindex(columns=tgt.columns)
+    prev = rank.shift(CLIMB_DAYS)
+    no = (inp["soon"].reindex_like(tgt).fillna(False) | tgt.columns.isin(be.sector_mapping.do_not_buy)).to_numpy(bool)
+    T, R, P, cols = tgt.to_numpy(float).copy(), rank.to_numpy(float), prev.to_numpy(float), list(tgt.columns)
+    reg, reb, ck = (x.reindex(tgt.index).fillna(False).to_numpy(bool) for x in (inp["regime"], inp["weekly"], chk))
+    extra = np.zeros(len(cols))
+    for t in range(len(T)):
+        extra = np.where(reb[t] | (T[t] > 0), 0.0, extra)    # Friday sells them; a rule buy takes the stock over
+        if ck[t]:
+            left = (1.0 if reg[t] else W["regime_scale"]) - T[t].sum() - extra.sum()
+            free = lambda j: T[t, j] == 0 and extra[j] == 0 and not no[t, j]
+            if left >= DEPLOY_MIN_PCT:
+                day = tgt.index[[t]]
+                fri = be.rank_targets(score.loc[day, cols], inp["eligible"], inp["vol"], rebalance_days=pd.Series(True, index=day),
+                                      tiebreak_w=inp["scores"]["rs"], **be.winner_rank_args(inp["regime"])).iloc[0].to_numpy(float)
+                for j in np.argsort(np.nan_to_num(R[t], nan=1e9), kind="stable"):
+                    r = R[t, j]
+                    if not r == r or left < DEPLOY_MIN_PCT:
+                        break
+                    if free(j) and (r <= DEPLOY_MAX_RANK or P[t, j] > r):       # top 10, or a climber from rank 11 on
+                        w = min(fri[j] if r <= DEPLOY_MAX_RANK and fri[j] > 0 else EXTRA_MAX_WEIGHT, W["max_weight"], left)
+                        extra[j], left = w, left - w
+        T[t] += extra
+    return pd.DataFrame(T, index=tgt.index, columns=cols)
+
 def strategy_targets(cfg, inp):
     """Daily live target weights of one STRATEGIES entry (Date x Symbol). Ranked ones go through the engine's own selection
     code (be.winner_targets): only overrides are passed, WINNER itself is never changed. A "stop" strategy also leaves its
     open-sale prices in inp["open_sells"][name]."""
-    if cfg.get("weights"):
+    if cfg.get("live"):                                # the current live rules (be.WINNER), not pinned
+        tgt, chk = be.winner_targets(inp["scores"]["now"], inp["eligible"], inp["vol"], inp["regime"], inp["weekly"],
+                                     tiebreak_w=inp["scores"]["rs"], earnings=inp["earnings"],
+                                     never_buy=be.sector_mapping.do_not_buy)
+        tgt = spare_cash(tgt, chk, inp)
+    elif cfg.get("weights"):
         tgt = inp["weights"][cfg["weights"]]
     elif cfg.get("stop") or cfg.get("replay"):          # the live rules replayed day by day + a stop / a mid-week change
         tgt, inp.setdefault("open_sells", {})[cfg["name"]] = atr_stop_targets(
             inp, **STOPS.get(cfg.get("stop"), {"k": np.inf}), **cfg.get("replay", {}))
     else:
         cal, tb = cfg.get("calendar", "mwf"), cfg.get("tiebreak", "rs")
-        tgt, _ = be.winner_targets(inp["scores"][cfg.get("score", "live")], inp["eligible"], inp["vol"], inp["regime"],
-                                   inp["weekly" if cal == "mwf" else cal], tiebreak_w=inp["scores"].get(tb),
-                                   midweek=cfg.get("midweek", MIDWEEK) if cal == "mwf" else False, selection={**(cfg.get("select") or {}), "sleeve": ()},   # pinned: no sleeve
+        below, top = cfg.get("exit", (EXIT_BELOW, EXIT_TO_TOP))
+        sleeve = list(be.sector_mapping.defensive) if cfg.get("sleeve") else ()     # C6 rules: no sleeve
+        tgt, _ = be.winner_targets(inp["scores"][cfg.get("score", "live")], inp["eligible"], inp["vol"],
+                                   inp[cfg.get("regime", "regime")], inp["weekly" if cal == "mwf" else cal],
+                                   tiebreak_w=inp["scores"].get(tb), midweek=cfg.get("midweek", MIDWEEK) if cal == "mwf" else False,
+                                   selection={**(cfg.get("select") or {}), "sleeve": sleeve},
                                    earnings_block_days=cfg.get("earnings", "winner"), earnings=inp["earnings"],
-                                   exit_all_below=EXIT_BELOW, exit_to_top=EXIT_TO_TOP)
+                                   exit_all_below=below, exit_to_top=top,
+                                   never_buy=be.sector_mapping.do_not_buy if cfg.get("never_buy") else ())
         if cfg.get("reweight") == "risk_parity":
             tgt = risk_parity(tgt, inp["close"][tgt.columns], inp["weekly"])
         if cfg.get("reweight") == "rank_tier":
@@ -604,6 +673,11 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
                     new = shares.where(~m, (wd * (value - cost) / px.where(px > 0)).fillna(0.0))
                     if value - cost - (new * px).sum() >= -1e-12:
                         break
+                gap = value - cost - (new * px).sum()
+                if gap < -1e-12:              # still short of cash: the buys shrink to fit (like live: no margin)
+                    up = (new - shares).clip(lower=0)
+                    new = new - up * min(1.0, -gap / ((1 + be.COST) * float((up * px).sum())))
+                    cost = be.COST * float(((new - shares) * px).abs().sum())
                 value, shares = value - cost, new
                 cash, prev = value - (shares * px).sum(), wd
             if last is None and d == todo[0]:                 # 1.0 at the start close, after its buys
@@ -705,16 +779,17 @@ def record(account=None, now=None, path=DAILY_CSV):
 
 # ---------------------------------------------------------------------------------------------------- leaderboard
 def _stats(v):
-    """Total return %, daily return % (last day vs the day before), median weekly return % (week end to week end:
-    the last session of each finished week, from the start close), max drawdown % and finished weeks of a value series
-    by date."""
+    """Total return %, daily return % (last day vs the day before), max drawdown %, finished weeks and each week's
+    return % (week end to week end: the last session of each week, from the start close; list, week 1 first; the last
+    one is the unfinished week so far when the latest day is not a week end)."""
     v = v.dropna().sort_index()
     if len(v) < 1:
-        return np.nan, np.nan, np.nan, np.nan, 0
-    weekly = v[be.weekly_rebalance_days(v.index, live=True).to_numpy() | (v.index == v.index[0])].pct_change().dropna()
+        return np.nan, np.nan, np.nan, 0, []
+    ends = v[be.weekly_rebalance_days(v.index, live=True).to_numpy() | (v.index == v.index[0])]
+    weekly, now = ends.pct_change().dropna(), [] if ends.index[-1] == v.index[-1] else [v.iloc[-1] / ends.iloc[-1] - 1]
     daily = (v.iloc[-1] / v.iloc[-2] - 1) * 100 if len(v) >= 2 else np.nan
-    return ((v.iloc[-1] / v.iloc[0] - 1) * 100, daily, weekly.median() * 100 if len(weekly) else np.nan,
-            (v / v.cummax() - 1).min() * 100, len(weekly))
+    return ((v.iloc[-1] / v.iloc[0] - 1) * 100, daily, (v / v.cummax() - 1).min() * 100, len(weekly),
+            [x * 100 for x in list(weekly) + now])
 
 def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
     """One row per strategy (STRATEGIES order) + the real account (time-weighted, alpaca_paper.account_twr_index:
@@ -738,22 +813,23 @@ def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
     if bench is not None:
         b = since(bench)
         series += [(f"{s} (comparison)", False, b[s]) for s in ("QQQ", "SPY") if s in b]
-    cols = ["Total return %", "Daily return %", "Median weekly return %", "Max drawdown %", "Weeks"]
-    t = pd.DataFrame([{"Strategy": n, "ranked": r, **dict(zip(cols, _stats(v)))} for n, r, v in series])
-    if t.empty:
-        return pd.DataFrame(columns=["Rank", "Strategy"] + cols)
-    # RANK_RULE once any strategy has a full week; until then: total return since the start (tie: smaller max drawdown),
-    # same fallback as Top 5 consensus, so the table / rules / card stay in one order.
-    keys = (["Median weekly return %", "Max drawdown %"] if (t["ranked"] & (t["Weeks"] > 0)).any()
-            else ["Total return %", "Max drawdown %"])
-    t = t.sort_values(keys, ascending=False, na_position="last", kind="stable")
-    t["Rank"] = t["ranked"].cumsum().where(t["ranked"] & (t["Weeks"] > 0)).astype("Int64")   # no rank before a full week
-    return t[["Rank", "Strategy"] + cols].reset_index(drop=True)
+    cols = ["Total return %", "Daily return %", "Max drawdown %"]
+    stats = [(n, r, _stats(v)) for n, r, v in series]
+    done = max((x[3] for *_, x in stats), default=0)                    # finished weeks; the next one is in progress
+    so_far = any(len(x[4]) > x[3] for *_, x in stats)
+    weeks = [f"Week {k}" + (" (so far)" if so_far and k == done + 1 else "") + " %" for k in range(1, WEEKS_TO_WIN + 1)]
+    t = pd.DataFrame([{"Strategy": n, "ranked": r, **dict(zip(cols, x)), **dict(zip(weeks, x[4]))} for n, r, x in stats],
+                     columns=["Strategy", "ranked"] + cols + weeks)        # Week k % = the k-th Friday-to-Friday week
+    t = t.sort_values(["Total return %", "Max drawdown %"], ascending=False, na_position="last", kind="stable")   # RANK_RULE
+    ok = t["ranked"] & t["Total return %"].notna()
+    t["Rank"] = ok.cumsum().where(ok).astype("Int64")
+    return t[["Rank", "Strategy"] + cols[:2] + weeks + cols[2:]].reset_index(drop=True)
 
 def verdict(board):
     """One plain line: too early / the winner / no winner (RANK_RULE)."""
     by = board.set_index(board["Strategy"].str.replace(LIVE_MARK, "", regex=False))
-    weeks = int(by["Weeks"].get(LIVE, 0) or 0)
+    weeks = int(by.loc[LIVE, [c for c in by.columns if c.startswith("Week ") and "so far" not in c]].notna().sum()) \
+        if LIVE in by.index else 0                                    # finished weeks of the live row
     if weeks < WEEKS_TO_WIN:
         return f"Week {weeks} of {WEEKS_TO_WIN}: too early to name a winner."
     top = by[board["Rank"].notna().to_numpy()].index[0]
@@ -811,23 +887,21 @@ def consensus(board, hold, ranks=None, n_strategies=5, n_stocks=10):
     """Display only (never saved, never traded): the stocks most held by the best forward-test strategies.
 
     board = leaderboard() as the dashboard shows it (incl. provisional rows); hold = saved holdings rows (Date, Strategy,
-    Symbol, Weight); ranks = {symbol: latest Strategy_Rank} (tie-break). The strategies are taken in leaderboard order
-    (RANK_RULE); while no strategy has a rank yet (no full week) they are ordered by total return since the start
-    (a tie: smaller drawdown). Twins (same stocks at the same target weights on the holdings day) count once: the
+    Symbol, Weight); ranks = {symbol: latest Strategy_Rank} (tie-break). The strategies are taken by the most recent
+    week's return: the board's last Week column (the unfinished week so far, else the latest finished week; Chirag,
+    Oct 15), total return since the start before any week column; a tie: smaller drawdown. Not RANK_RULE (the table). Twins (same stocks at the same target weights on the holdings day) count once: the
     better-placed one stays. Each strategy's holdings = its latest saved day (what the board's values come from; a
     provisional close keeps them, so nothing past the shown day is used). Stocks: held (target weight > 0) by the most of those strategies; ties -> larger summed weight, then the
-    better latest rank. Returns dict(day, by_return, strategies=[(name, [twins])], stocks=DataFrame(Symbol, Count, Weight,
-    Rank)); None when there is nothing to show."""
+    better latest rank. Returns dict(day, by, strategies=[(name, [twins])], stocks=DataFrame(Symbol, Count, Weight,
+    Rank), by = the column used); None when there is nothing to show."""
     if board is None or board.empty or hold is None or hold.empty:
         return None
     names = {c["name"] for c in STRATEGIES}
     b = board.assign(Strategy=board["Strategy"].str.replace(LIVE_MARK, "", regex=False))
     b = b[b["Strategy"].isin(names)]
-    by_return = not b["Rank"].notna().any()
-    if by_return:
-        b = b.sort_values(["Total return %", "Max drawdown %"], ascending=False, na_position="last", kind="stable")
-    else:
-        b = b.assign(_r=b["Rank"].astype(float)).sort_values("_r", na_position="last", kind="stable")
+    wk = [c for c in b.columns if str(c).startswith("Week ") and ("so far" in c or b[c].notna().any())]
+    by = ([c for c in wk if "so far" in c] or wk or ["Total return %"])[-1]
+    b = b.sort_values([by, "Max drawdown %"], ascending=False, na_position="last", kind="stable")
     h = hold.assign(Date=pd.to_datetime(hold["Date"]))
     h = h[h["Strategy"].isin(names)]
     if h.empty:
@@ -855,7 +929,7 @@ def consensus(board, hold, ranks=None, n_strategies=5, n_stocks=10):
     st = pd.DataFrame([{"Symbol": s, "Count": c, "Weight": sw, "Rank": ranks.get(s, np.nan)} for s, (c, sw) in rows.items()],
                       columns=["Symbol", "Count", "Weight", "Rank"])
     st = st.assign(_r=st["Rank"].fillna(1e9)).sort_values(["Count", "Weight", "_r", "Symbol"], ascending=[False, False, True, True])
-    return {"day": day, "by_return": by_return, "strategies": [(nm, tw) for nm, tw in picked],
+    return {"day": day, "by": by, "strategies": [(nm, tw) for nm, tw in picked],
             "stocks": st.drop(columns="_r").head(n_stocks).reset_index(drop=True)}
 
 def _log_problem(message, error):

@@ -880,7 +880,7 @@ def _peer_median(r, symbols, sector_of, min_peers=3, leave_one_out=True):
             out[s] = med.where(peers.notna().sum(axis=1) >= min_peers)
     return pd.DataFrame(out, index=r.index)[symbols]
 
-def relative_strength(close_w, symbols=None, benchmark=None, eligible_w=None):
+def relative_strength(close_w, symbols=None, benchmark=None, eligible_w=None, windows=None):
     """Point-in-time relative strength, all -100..100 cross-sectional scores.
 
     benchmark (default WINNER['rs_benchmark'], live = 'etf'):
@@ -904,7 +904,7 @@ def relative_strength(close_w, symbols=None, benchmark=None, eligible_w=None):
     ok = (eligible_w.reindex(index=close_w.index, columns=symbols).astype("boolean").fillna(False).astype(bool)
           if eligible_w is not None else close_w[symbols].notna())
     parts_sv, parts_ss = [], []
-    for w in RS_WINDOWS:
+    for w in windows or RS_WINDOWS:   # windows: other return windows (forward-test variants)
         r = close_w / close_w.shift(w) - 1
         stock = r[symbols]
         sector = pd.DataFrame({s: r[etf_of[s]] if etf_of[s] in r else r["SPY"] for s in symbols})
@@ -1627,7 +1627,7 @@ def _rebase_weekly_log(decision_log, date, idx, held_before, new, cols, sectors,
 
 def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_w=None, decision_log=None,
                    check_log=None, midweek=None, exit_all_below="winner", selection=None, earnings_block_days="winner",
-                   earnings=None, exit_to_top="winner"):
+                   earnings=None, exit_to_top="winner", never_buy=()):
     """Live WINNER targets: weekly rank_targets + (if WINNER['midweek_swap']) mid-week swaps + (if
     WINNER['midweek_exit_below']) mid-week exits, replaced from the top WINNER['midweek_exit_to_top'] when set.
 
@@ -1650,6 +1650,9 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
     if earnings_block_days:
         block = earnings_days_ahead(score_w.index, list(score_w.columns),
                                     load_earnings() if earnings is None else earnings, earnings_block_days)
+    if never_buy:                 # never bought (sector_mapping.do_not_buy; forward test): blocked like earnings, rank kept
+        block = block if block is not None else pd.DataFrame(np.nan, index=score_w.index, columns=score_w.columns)
+        block.loc[:, [x for x in never_buy if x in block]] = 999.0
     base = rank_targets(score_w, eligible_w, vol_w, rebalance_days=rebalance_days, decision_log=decision_log,
                         tiebreak_w=tiebreak_w, buy_block=block, **args)
     if not mw:

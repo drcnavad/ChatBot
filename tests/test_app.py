@@ -212,11 +212,11 @@ labels = [e.label for e in at.expander if e.label != "My notes"]   # the notes t
 expect(len(labels) >= 3 and labels[0].startswith(exp_titles[0]) and labels[1:3] == exp_titles[1:3]
        and set(exp_titles[3:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
 expect(sum("forward test" in l.lower() for l in labels) == 1, f"the forward test is in one place only: {labels}")
-_ft = [d.value for d in at.dataframe if "Median weekly return %" in d.value.columns]
+_ft = [d.value for d in at.dataframe if "Total return since Oct 2 %" in d.value.columns]
 expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Strategy"]} if _ft else
        any("Forward test started Oct 2, 2026" in i.value for i in at.info), "forward test leaderboard (QQQ + SPY rows) or empty state")
-expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Total return since Oct 2 %", "Daily return %", "Median weekly return %",
-                                            "Max drawdown %", "Weeks"]
+_wk = [c for c in _ft[0].columns if c.startswith("Week ")] if _ft else []
+expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Total return since Oct 2 %", "Daily return %", *_wk, "Max drawdown %"] and [w.replace(" (so far)", "") for w in _wk] == [f"Week {k} %" for k in range(1, 13)]
                    and (_ft[0]["Strategy"] == ft.LIVE + ft.LIVE_MARK).sum() == 1 and (_ft[0]["Rank"] != "–").sum() in (0, len(ft.STRATEGIES))),
        f"leaderboard: columns, one marked live row, every strategy ranked: {_ft[0].to_dict('list') if _ft else None}")
 expect(not _ft or sum(ft.RANK_RULE in c.value for c in at.caption) == 1, "the ranking rule is written once in the caption")

@@ -28,8 +28,9 @@ def render_forward_test():
         marked = (f" {pd.Timestamp(values['Date'].max()):%a %b %-d}: each strategy's holdings from the last saved day marked "
                   "to that day's close (provisional, no trades yet); the daily run's 3:05 PM CT step saves that day with its trades.")
     board = board.rename(columns={"Total return %": f"Total return since {start[:-6]} %"}).assign(
-        Rank=lambda b: b["Rank"].map(lambda r: "–" if pd.isna(r) else str(r)))   # – = not ranked (comparison / no full week yet)
-    sty = toned(toned(board, [c for c in board.columns if "return" in c]), ["Max drawdown %"], fn=drawdown_tone)
+        Rank=lambda b: b["Rank"].map(lambda r: "–" if pd.isna(r) else str(r)))   # – = not ranked (comparison)
+    sty = toned(toned(board, [c for c in board.columns if "return" in c or c.startswith("Week ")]), ["Max drawdown %"],
+                fn=drawdown_tone)
     st.dataframe(live_row(sty, "Strategy", ft.LIVE), hide_index=True, width="stretch",
                  height=35 * (len(board) + 1) + 3,                                                # every row, no scrolling
                  column_config={c: PCT_COL for c in board.columns if c.endswith("%")})
@@ -44,7 +45,8 @@ def render_forward_test():
     st.caption(f"**{ft.verdict(board)}** {ft.RANK_RULE} Every strategy is paper only (never traded): it decides at the "
                "day's close, pays 0.1% per trade side, holds no stock above 20%, invests at most 99% and earns nothing on cash; each "
                f"starts at 1.0 on the {start} close. Your account = time-weighted (deposits and withdrawals are not returns); QQQ / SPY = closes, "
-               "comparison only (not ranked). Weekly = Friday to Friday; None / – = no full week yet." + acct
+               "comparison only (not ranked). Week k = Friday close to Friday close (week 1 = Oct 2-9); '(so far)' = the week in "
+               "progress, Friday's close to the latest close; later weeks are blank." + acct
                + marked + " Saved daily by the daily run's 3:05 PM CT step after the signal refresh (no orders); each strategy's rule and holdings are in the next section.")
 
 CONSENSUS_GOOD, CONSENSUS_WARN, EXIT_RANK = 3, 2, 30   # chip colors: held by 3+ / 2 of the 5; ranked worse than 30
@@ -70,20 +72,21 @@ def render_top10(ranks=None):
                 f'{symbol_link(r.Symbol, cls)} {r.Count}/{n} strategies</span>')
     strats = " ".join(f'<span>{i}. {esc(nm)}' + (f' <i title="{esc(", ".join(tw))}">(+{len(tw)} same holdings)</i>' if tw else "")
                       + "</span>" for i, (nm, tw) in enumerate(c["strategies"], 1))
-    order = "total return since Oct 2" if c["by_return"] else "leaderboard rank"
+    order = "total return since Oct 2" if c["by"] == "Total return %" else c["by"].replace(" %", " return")
     show_html(f'<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>the {len(c["stocks"])} stocks most held by the '
               f'{n} best strategies ({order}) · holdings at the {c["day"]:%a %b %-d} close</span></div>'
               f'<div class="sa-tier"><b>Stocks</b><div class="sa-tier-syms">{" ".join(chip(r) for r in c["stocks"].itertuples())}</div></div>'
               f'<div class="sa-tier"><b>Strategies</b><div class="sa-tier-syms">{strats}</div></div></div>')
-    st.caption(("No strategy has a full week yet, so the 5 strategies are the best by total return since Oct 2; from the "
-                "first full week they follow the leaderboard rank. " if c["by_return"] else "")
+    st.caption("The 5 strategies are the best by the most recent week's return: the week in progress (Friday's close to the "
+               "latest close) once it has a day, else the latest finished week; a tie goes to the smaller drawdown. The "
+               "leaderboard's Rank (total return since Oct 2) is not used here. "
                + "Strategies with the same stocks at the same weights count once (the better-placed one). Order: most "
                "strategies, then summed weight, then latest rank. Green = held by 3+ of them, yellow = 2, red = ranked "
                f"worse than {EXIT_RANK} at the latest close. Display only: updated with the leaderboard, never traded.")
 
 def render_forward_rules(p=None):
     """Strategy tab: the Top 5 consensus card, then each forward-test strategy's one-line rule and its holdings,
-    ordered like the leaderboard above (rank, or total return since Oct 2 until the first full week)."""
+    ordered like the leaderboard above (total return since Oct 2)."""
     import forward_test as ft
     ranks = p.by_symbol["Strategy_Rank"].to_dict() if p is not None and "Strategy_Rank" in p.by_symbol else None
     render_top10(ranks)
