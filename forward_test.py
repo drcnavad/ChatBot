@@ -43,7 +43,7 @@ MAX_WEIGHT = 0.20            # no stock above 20% (the live max_weight rule); th
 BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
 LIVE = "Live rules (C6)"
-LIVE_MARK = " ◀ LIVE"          # the leaderboard row of the live rules
+LIVE_MARK = " (simulated, not your account)"  # C6 is a paper copy of the Oct 2 rules; real account is its own row
 ACCOUNT = "Your Alpaca account (real)"
 RANK_RULE = ("Ranked by median weekly return (Friday to Friday); a tie goes to the smaller max drawdown. Chosen on Oct 2, "
              f"2026, before any result. After {WEEKS_TO_WIN} full weeks the top strategy is the winner only if its total "
