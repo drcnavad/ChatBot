@@ -19,6 +19,7 @@ stock_symbols = [
     'CRDO', 'CLS', 'HIMX', 'NU',
     'PWR', 'GEV', 'CAT', 'CMI', 'EMR', 'ROK', 'MS', 'GS', 'ETN', 'HWM',   # high-beta industrials / financials (2026-10-13)
     'ANF', 'NUE', 'JCI', 'DAL', 'WSM', 'IBKR', 'GRMN',   # high-beta non-tech (2026-10-14)
+    'ABBV', 'PFE', 'KO',   # defensive sleeve (2026-10-15)
     # Loss-making (negative net income, last 4 quarters, as of 2026-10-13); uncomment to re-add:
     # 'AVAV', 'COIN', 'CRWV', 'FIG', 'GTLB', 'HIMS', 'IREN', 'SNOW', 'TEAM', 'ZS', 'UMAC', 'U',
     # 'ACHR', 'ASTS', 'CIFR', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RKLB', 'SOUN', 'TEM', 'TTWO', 'SPCX',
@@ -30,7 +31,10 @@ stock_symbols = [
 # do_not_buy: never bought or topped up (on Friday its slot goes to the next eligible stock, down to rank 20).
 # do_not_sell: never sold or trimmed (the Mon/Wed rank-20 rule keeps it too). The earnings-day stop still sells.
 do_not_buy = ['AMD', 'TSLA', 'PANW', 'ARM', 'SHOP']
-do_not_sell = []
+do_not_sell = ['LMT', 'NOC', 'ABBV', 'PFE', 'KO']   # the defensive sleeve: never sold until Chirag says (2026-10-15)
+# Defensive sleeve (Chirag, 2026-10-15): always bought on Friday next to the top 10 (15 stocks, same 1/volatility weights).
+# A sleeve stock that is also in the top 10 frees its slot for the next rank.
+defensive = ['LMT', 'NOC', 'ABBV', 'PFE', 'KO']
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
 sector_etfs = {
@@ -78,7 +82,7 @@ symbol_sector = {
     'NKE': 'Consumer Discretionary', 'NOC': 'Industrials', 'NOW': 'Technology',
     'NSC': 'Industrials', 'NUE': 'Materials', 'NVDA': 'Technology',
     'NVO': 'Health Care', 'ORCL': 'Technology', 'PA=F': 'Commodities',
-    'PANW': 'Technology', 'PATH': 'Technology', 'PAYX': 'Industrials',
+    'PANW': 'Technology', 'PFE': 'Health Care', 'PATH': 'Technology', 'PAYX': 'Industrials',
     'PCTY': 'Technology', 'PLTR': 'Technology', 'POOL': 'Consumer Discretionary',
     'PWR': 'Industrials', 'QQQ': 'Technology', 'RCL': 'Consumer Discretionary',
     'REGN': 'Health Care', 'RTX': 'Industrials', 'SHOP': 'Consumer Discretionary',
@@ -183,7 +187,7 @@ symbol_name = {
     'NOW': 'ServiceNow, Inc.', 'NOC': 'Northrop Grumman Corporation',
     'NSC': 'Norfolk Southern Corporation', 'NUE': 'Nucor Corporation',
     'NVDA': 'NVIDIA Corporation', 'ORCL': 'Oracle Corporation',
-    'PANW': 'Palo Alto Networks, Inc.', 'PAYX': 'Paychex, Inc.',
+    'PANW': 'Palo Alto Networks, Inc.', 'PFE': 'Pfizer Inc.', 'PAYX': 'Paychex, Inc.',
     'PATH': 'UiPath, Inc.', 'PCTY': 'Paylocity Holding Corporation',
     'PLTR': 'Palantir Technologies Inc.', 'POOL': 'Pool Corporation',
     'PWR': 'Quanta Services, Inc.', 'RCL': 'Royal Caribbean Cruises Ltd.',

@@ -155,7 +155,8 @@ def winner_rank_args(regime):
     return dict(n=S["n"], regime=regime if S["use_regime"] else None, min_score=S["min_score"],
                 sector_cap=S["sector_cap"], vol_sizing=S["vol_sizing"], buffer_rank=S["buffer_rank"],
                 regime_scale=S["regime_scale"] if S["use_regime"] else None,
-                max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"))
+                max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"),
+                sleeve=list(sector_mapping.defensive))
 
 WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
 
@@ -1191,7 +1192,7 @@ def climb_score(rs_w, eligible_w=None, days=15, top=20):
 def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=None, min_score=0.0,
                  sector_cap=0.4, vol_sizing=True, buffer_rank=None, regime_scale=None, decision_log=None,
                  tiebreak_w=None, max_pick_rank=None, cap_soft=False, buy_block=None, held_w=None, start_holdings=None,
-                 max_weight=None):
+                 max_weight=None, sleeve=()):
     """Weekly top-N by score with sector cap and inverse-volatility weights.
 
     On rebalance days: candidates = eligible & score > min_score, best first, at most floor(sector_cap*n)
@@ -1211,6 +1212,7 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
                already held; its slot goes to the next candidate. held_w: holdings that count as "already held" (default:
                this function's own carried holdings). start_holdings: holdings before the first date (default: none).
     max_weight: if given, each weight is clipped to it after the vol weights and the regime scaling; the extra stays cash.
+    sleeve: symbols always picked when they have data (score / vol), on top of the n best; weights are split over all picks.
     """
     dates, cols = score_w.index, list(score_w.columns)
     S = score_w.to_numpy(float)
@@ -1226,6 +1228,7 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
     H = held_w.reindex(index=dates, columns=cols).fillna(0.0).to_numpy(float) if held_w is not None else None
     out = np.zeros((len(dates), len(cols)))
     current = np.zeros(len(cols)) if start_holdings is None else np.asarray(start_holdings, float).copy()
+    sleeve_j = [cols.index(s) for s in sleeve if s in cols]
     for t in range(len(dates)):
         if reb[t]:
             blocked = set()
@@ -1240,16 +1243,21 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
             order = ranking_order(np.where(ok)[0], S[t], None if TB is None else TB[t], name_pos)
             rank_of = {j: r + 1 for r, j in enumerate(order)}
             picked, per_sector, reason = [], {}, {}
+            for j in sleeve_j:                 # defensive sleeve: always held (no earnings / score rule), on top of n
+                if base_ok[j]:
+                    picked.append(j)
+                    reason[j] = f"defensive sleeve (rank {rank_of.get(j, '-')})"
+            n_all = n + len(picked)
             if buffer_rank is not None:  # keep holdings still within the buffer first
                 for j in order:
-                    if current[j] > 0 and rank_of[j] <= buffer_rank and len(picked) < n \
+                    if current[j] > 0 and rank_of[j] <= buffer_rank and len(picked) < n_all \
                             and per_sector.get(sectors[j], 0) < max_per_sector:
                         picked.append(j)
                         per_sector[sectors[j]] = per_sector.get(sectors[j], 0) + 1
                         reason[j] = f"kept (rank {rank_of[j]} <= buffer {buffer_rank})"
             cands = order if max_pick_rank is None else order[:max_pick_rank]
             for j in cands:
-                if len(picked) >= n:
+                if len(picked) >= n_all:
                     break
                 if j in reason:
                     continue
@@ -1264,7 +1272,7 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
                 reason[j] = f"selected (rank {rank_of[j]})"
             if cap_soft:                   # free slots left: unused candidates in rank order, sector cap ignored
                 for j in cands:
-                    if len(picked) >= n:
+                    if len(picked) >= n_all:
                         break
                     if j in picked or j in blocked:
                         continue
@@ -1279,7 +1287,7 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
             new = np.zeros(len(cols))
             if picked:
                 inv = 1 / Vv[t, picked] if vol_sizing else np.ones(len(picked))
-                new[picked] = inv / inv.sum() * (len(picked) / n)
+                new[picked] = inv / inv.sum() * (len(picked) / n_all)
                 if soft and not R[t]:
                     new *= regime_scale
                 if max_weight:
@@ -1409,7 +1417,7 @@ def midweek_exit_sells(cur, rank, exit_all_below):
 
 def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_days, enter_top=3, exit_below=15,
                         sector_cap=0.4, n=10, min_score=0.0, tiebreak_w=None, decision_log=None, check_log=None,
-                        exit_all_below=None, cap_soft=False, buy_block=None, reselect=None, exit_to_top=None):
+                        exit_all_below=None, cap_soft=False, buy_block=None, reselect=None, exit_to_top=None, keep=()):
     """Weekly targets (``base`` from rank_targets) + mid-week swaps on ``check_days``.
 
     On a check day: rank = position among qualifying names (eligible, score > min_score, valid vol), same order as
@@ -1471,8 +1479,9 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
             # Exit replacements use the full top-N earnings skip (not only enter_top), matching forward_test.
             skip_exit = ({j for j in order[:exit_to_top] if cur[j] == 0 and not np.isnan(BB[t, j])}
                          if BB is not None and exit_to_top else set())
-            reps = midweek_exit_replacements(cur, order, rank, exit_all_below, exit_to_top, skip=skip_exit)
-            exits = midweek_exit_sells(cur, rank, exit_all_below)
+            xrank = {**rank, **{cols.index(s): 0 for s in keep if s in cols}}   # keep (defensive sleeve): never exited
+            reps = midweek_exit_replacements(cur, order, xrank, exit_all_below, exit_to_top, skip=skip_exit)
+            exits = midweek_exit_sells(cur, xrank, exit_all_below)
             if check_log is not None:
                 if swaps or reps or exits:
                     for e, h, w in swaps:
@@ -1650,7 +1659,8 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
                               args["sector_cap"], args["n"], args["min_score"], tiebreak_w=tiebreak_w,
                               decision_log=decision_log, check_log=check_log, exit_all_below=exit_all_below,
                               cap_soft=args["cap_soft"], buy_block=block,
-                              reselect=reselect if block is not None else None, exit_to_top=exit_to_top)
+                              reselect=reselect if block is not None else None, exit_to_top=exit_to_top,
+                              keep=args.get("sleeve") or ())
     return tgt, checks
 
 def next_decision(latest, days=None):

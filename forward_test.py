@@ -330,7 +330,7 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit
     rank (30) is swapped for the best non-held stock in the top exit_to_top (same weight, earnings rule) and only sold to
     cash when none is left. Default "winner" = the pinned EXIT_TO_TOP (10); pass None for cash-until-Friday.
     Returns (raw weights, open-sale prices)."""
-    W, args = be.WINNER, be.winner_rank_args(inp["regime"])
+    W, args = be.WINNER, {**be.winner_rank_args(inp["regime"]), "sleeve": ()}   # pinned Oct 2 rules: no defensive sleeve
     if exit_to_top == "winner":
         exit_to_top = EXIT_TO_TOP                         # pinned Mon/Wed rules (MIDWEEK / EXIT_BELOW / EXIT_TO_TOP)
     score, elig, vol, tb = inp["scores"]["live"], inp["eligible"], inp["vol"], inp["scores"]["rs"]
@@ -516,7 +516,7 @@ def strategy_targets(cfg, inp):
         cal, tb = cfg.get("calendar", "mwf"), cfg.get("tiebreak", "rs")
         tgt, _ = be.winner_targets(inp["scores"][cfg.get("score", "live")], inp["eligible"], inp["vol"], inp["regime"],
                                    inp["weekly" if cal == "mwf" else cal], tiebreak_w=inp["scores"].get(tb),
-                                   midweek=cfg.get("midweek", MIDWEEK) if cal == "mwf" else False, selection=cfg.get("select"),
+                                   midweek=cfg.get("midweek", MIDWEEK) if cal == "mwf" else False, selection={**(cfg.get("select") or {}), "sleeve": ()},   # pinned: no sleeve
                                    earnings_block_days=cfg.get("earnings", "winner"), earnings=inp["earnings"],
                                    exit_all_below=EXIT_BELOW, exit_to_top=EXIT_TO_TOP)
         if cfg.get("reweight") == "risk_parity":

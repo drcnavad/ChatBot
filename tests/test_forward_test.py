@@ -215,7 +215,7 @@ check("registry: the strategies are not copies of each other (distinct weights o
 check("registry: WINNER untouched", be.WINNER == w0)
 # Forward-test safety (t187u): the strategies keep their own Mon/Wed rules (ft.MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, the Oct 2
 # rules); a change of the live WINNER Mon/Wed keys must not move any of them.
-FT_PINS = dict(midweek=ft.MIDWEEK, exit_all_below=ft.EXIT_BELOW, exit_to_top=ft.EXIT_TO_TOP)
+FT_PINS = dict(midweek=ft.MIDWEEK, exit_all_below=ft.EXIT_BELOW, exit_to_top=ft.EXIT_TO_TOP, selection={"sleeve": ()})
 check("forward-test pins = the Oct 2 Mon/Wed rules (top-3 swap below 15, exit below 30, refill from the top 10)",
       ft.MIDWEEK == {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Wed"]} and (ft.EXIT_BELOW, ft.EXIT_TO_TOP) == (30, 10))
 _keys = ("midweek_swap", "midweek_exit_below", "midweek_exit_to_top")
@@ -484,9 +484,14 @@ if os.path.exists(ft.SIGNAL_CSV):
     # holds either the T20 pins (written before that) or the current rules (written after); both must match exactly.
     cur = be.live_weights(real_live.loc[d0])
     cur = cur[cur > 0].sort_index()
+    sl, _ = be.winner_targets(real_inp["scores"]["live"], real_inp["eligible"], real_inp["vol"], real_inp["regime"],
+                              real_inp["weekly"], tiebreak_w=real_inp["scores"]["rs"], earnings=real_inp["earnings"],
+                              **{**FT_PINS, "selection": None})   # the current rules incl. the defensive sleeve (2026-10-15)
+    sl = be.live_weights(sl.loc[d0])
+    sl = sl[sl > 0].sort_index()
     same = lambda x: list(live.index) == list(x.index) and np.allclose(live, x, atol=1e-9)
-    check("Oct 2 Strategy_Weight = the rules that wrote the file (T20 soft-cap pins, or the current pure top-10)",
-          same(mine) or same(cur), (live.to_dict(), mine.to_dict(), cur.to_dict()))
+    check("Oct 2 Strategy_Weight = the rules that wrote the file (T20 soft-cap pins, the pure top-10, or top-10 + sleeve)",
+          same(mine) or same(cur) or same(sl), (live.to_dict(), mine.to_dict(), cur.to_dict(), sl.to_dict()))
     check("no live file changed (signal_analysis, picks, run_state, pending orders, orders log); WINNER untouched",
           digest() == before and be.WINNER == w0)
 # provisional marks (display only): Tue / Thu have no signal rows until the next decision run
