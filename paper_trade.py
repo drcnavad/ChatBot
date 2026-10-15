@@ -39,26 +39,19 @@ ORDER_LOG_CSV = os.path.join(PROJECT_ROOT, "Reports", "live_orders_log.csv")
 PENDING_ORDERS_JSON = os.path.join(PROJECT_ROOT, "Reports", "live_pending_orders.json")
 EARNINGS_STOP_STATE = (os.environ.get("STOCK_ANALYSIS_EARNINGS_STOP_STATE")      # the earnings-day stop's sales (earnings_stop.py);
                        or os.path.join(PROJECT_ROOT, "Reports", "earnings_stop_state.json"))   # the tests point it elsewhere
-# NOTE (2026-09-28): LIVE account (real money). paper_* names are historical, kept so the
-# pipeline keeps working unchanged. paper=False, ALPACA_LIVE_* keys, live- order ids,
-# live_* ledgers. The paper version was retired; no paper rollback is kept.
+# LIVE account (real money): the paper_* names are historical (ALPACA_LIVE_* keys, live- order ids, live_* ledgers).
 ORDER_COLUMNS = ["Symbol", "Side", "Shares", "Price", "Est_Value", "Current_Shares", "Target_Shares",
                  "Target_Weight_%", "Target_Value"]
 NO_TRADE_BAND = 0.01   # Friday rebalance: a target holding within 1 percentage point of its weight is not traded
 MAX_ORDER_PCT = 0.15   # backstop: a BUY worth more than 15% of equity is refused (not sent, not carried to 9 AM).
-                       # Normal buys stay under it: each target weight is clipped to 15% (WINNER["max_weight"], 14.85% live;
-                       # Chirag, Oct 15, 2026: was 20%). Tests check it equals WINNER["max_weight"].
+                       # Target weights are clipped to WINNER["max_weight"] x 99% (tests check it equals max_weight).
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
-INVESTED_CAP = 0.99   # trim fix: a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED, tests check)
-                      # A cap, not a second scale-down: weights already sum to <= 99% (backtest_engine.LIVE_INVESTED),
-                      # and 99% of equity always fits under it, so the account ends ~99% invested, not ~98%.
+INVESTED_CAP = 0.99   # a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED; a cap, not a scale-down)
 CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills a bit above the estimate still fit.
-# Mon-Thu spare-cash rule (Chirag, 2026-10-06; leftover rule 2026-10-07): after the mid-week sells / refills, the cash
-# above 1% of equity buys the top-10 stocks the account does NOT hold (latest ranking, pure rank), each at its latest rule
-# weight (Provisional_Weight), and what is left is split equally over the held stocks at or above break-even (Alpaca avg
-# entry price; none in profit -> all held), skipping blocked / sold-today ones; a stock at its cap passes its share on
-# (Chirag, 2026-10-15; was: ranks 1-3, before that unheld rank 11+ climbers at 10% each).
-# Friday replacement (Chirag, t191u, 2026-10-07): a new pick blocked by earnings / an earnings-day stop sale gives its
+# Mon-Thu spare cash (Chirag, 2026-10-15): after the mid-week sells / refills, the cash above 1% of equity buys the
+# unheld top-10 at their rule weights (Provisional_Weight); the rest is split equally over the held stocks at or above
+# their Alpaca entry price (none -> all held), skipping blocked / sold-today ones; a capped stock passes its share on.
+# Friday replacement: a new pick blocked by earnings / an earnings-day stop sale gives its
 # weight to the next best-ranked eligible stock not already picked, never worse than this rank (else that weight is cash).
 FRIDAY_SUB_MAX_RANK = 20
 DEPLOY_MAX_RANK = 10     # spare-cash buys of stocks not held: top 10 only

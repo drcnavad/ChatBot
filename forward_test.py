@@ -62,8 +62,8 @@ RANK_RULE = ("Ranked by total return since Oct 2, 2026; a tie goes to the smalle
 # keys (n, sector_cap, vol_sizing, regime, ...), "earnings" None drops the earnings skip, "calendar" is "mwf" / "weekly"
 # (Friday only) / "monthly" (last session of the month). "weights" = a rule that is not a ranking (its own weights below);
 # "reweight" = the same picks with other weights; "stop" = the live rules + an ATR stop around earnings (STOPS);
-# "spare_dips" = the live rules + ATR dip buys with the cash they leave unused; "midweek" = other Mon/Wed swap settings;
-# "replay" = the live rules replayed day by day with a changed Mon/Wed exit (atr_stop_targets). "live" = LIVE: whatever
+# "spare_dips" = the live rules + ATR dip buys with the cash they leave unused; "midweek" = other Mon-Thu swap settings;
+# "replay" = the live rules replayed day by day with a changed Mon-Thu exit (atr_stop_targets). "live" = LIVE: whatever
 # be.WINNER / sector_mapping say now (score = the pipeline's Strategy_Score) + the Mon-Thu spare-cash buys (spare_cash).
 # The "Now" strategies (**NOW) = one change each to the live rules of Oct 15 (pinned): relative strength only, top 10 +
 # the defensive sleeve (sector_mapping.defensive, 5% cap), Mon-Thu sell worse than rank 20 refilled from the top 10,
@@ -344,20 +344,20 @@ def earnings_events(dates, cols, earnings):
     return ev
 
 def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit_to_top="winner"):
-    """The Oct 2 live rules (Mon/Wed rules pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP) + an ATR trailing stop around earnings. They are replayed day by day with the engine's own
-    pieces, exactly as be.winner_targets does (Friday selection with the real holdings, Mon/Wed swaps and exits). Stop
+    """The Oct 2 live rules (mid-week rules pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP) + an ATR trailing stop around earnings. They are replayed day by day with the engine's own
+    pieces, exactly as be.winner_targets does (Friday selection with the real holdings, Mon-Thu swaps and exits). Stop
     window: after = from the reaction day through `after` sessions later; arm_days = a stock kept (HOLD) at a Friday
     rebalance with earnings within the next arm_days calendar days, from that Friday through its reaction day. Inside it
     a holding whose close is at or below its highest close since it was bought - k x ATR(14) is sold in full at that close
     (gap_open: on the reaction day an open already below the stop sells at the open); its weight goes to the best stock
     the live rules would buy (same selection as WINNER: pure top-10 when sector_cap is 1.0 / max_pick_rank None),
-    no buy within 5 days of earnings, and not a stock stopped out in its window. exit_to_top: on Mon/Wed, after the top-3 swaps, a holding ranked worse than the exit
+    no buy within 5 days of earnings, and not a stock stopped out in its window. exit_to_top: on Mon-Thu, after the top-3 swaps, a holding ranked worse than the exit
     rank (30) is swapped for the best non-held stock in the top exit_to_top (same weight, earnings rule) and only sold to
     cash when none is left. Default "winner" = the pinned EXIT_TO_TOP (10); pass None for cash-until-Friday.
     Returns (raw weights, open-sale prices)."""
     W, args = be.WINNER, {**be.winner_rank_args(inp["regime"]), "sleeve": (), "max_weight": MAX_WEIGHT}   # pinned Oct 2 rules
     if exit_to_top == "winner":
-        exit_to_top = EXIT_TO_TOP                         # pinned Mon/Wed rules (MIDWEEK / EXIT_BELOW / EXIT_TO_TOP)
+        exit_to_top = EXIT_TO_TOP                         # pinned mid-week rules (MIDWEEK / EXIT_BELOW / EXIT_TO_TOP)
     score, elig, vol, tb = inp["scores"]["live"], inp["eligible"], inp["vol"], inp["scores"]["rs"]
     dates, cols = score.index, list(score.columns)
     arr = lambda x: x.reindex(index=dates, columns=cols).to_numpy(float)
@@ -366,7 +366,7 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit
     BB = arr(be.earnings_days_ahead(dates, cols, inp["earnings"], W["earnings_block_days"]))   # not NaN = not bought
     mw, n, min_score = MIDWEEK, W["n"], W["min_score"]
     reb = inp["weekly"].reindex(dates).fillna(False).to_numpy(bool)
-    chk = be.midweek_check_days(dates, mw.get("days", ("Mon", "Wed")), inp["weekly"]).to_numpy(bool)
+    chk = be.midweek_check_days(dates, mw["days"], inp["weekly"]).to_numpy(bool)
     name_pos, sectors = be._name_positions(cols), np.array([be.sector_mapping.symbol_sector.get(c, "Other") for c in cols])
     per_sector = max(1, int(np.floor(W["sector_cap"] * n)))
     win, react, reports = np.zeros((len(dates), len(cols)), bool), np.zeros((len(dates), len(cols)), bool), {}

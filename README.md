@@ -8,7 +8,7 @@ All code lives in this folder. Everything the pipeline writes goes to `Reports/`
   less than 200 trading days of history are shown but never traded.
 - **Score:** relative strength only (stock vs its sector ETF, sector ETF vs SPY), ranked every day.
 - **Friday rebalance** (the week's last session), decided on the 2:30 PM CT bar: hold the top 10, weighted by inverse
-  volatility, max 15% per stock (20% until Oct 15, 2026), 99% invested. Plus the **defensive sleeve** (`defensive` in `sector_mapping.py`: LMT,
+  volatility, max 15% per stock, 99% invested. Plus the **defensive sleeve** (`defensive` in `sector_mapping.py`: LMT,
   NOC, ABBV, PFE, KO, from Oct 16, 2026): always held next to the top 10 (15 stocks share the same 1/volatility weights);
   a sleeve stock that is also in the top 10 frees its slot for rank 11. The sleeve is on `do_not_sell` and the Mon-Thu
   rank-20 rule never sells it. When QQQ is below its 200-day average every weight is halved. A holding

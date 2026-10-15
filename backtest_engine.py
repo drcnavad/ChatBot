@@ -68,26 +68,23 @@ RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 # Change a rule here, then run `python run_all.py`.
 WINNER = {
     "n": 10,                # stocks held
-    "w_tech": 0.0,          # score = relative strength only (Chirag 2026-10-13; was 0.5 x technical + 0.5 x RS)
-    "climb_days": None,     # climbers off (Chirag 2026-10-13 11 PM: back to RS only); 15 = rank 1-20 by 15-session RS-rank gain
-    "climb_top": 20,        # (climb_score; Chirag 2026-10-13, from the Wed Oct 14 run)
+    "w_tech": 0.0,          # score = relative strength only
     "use_regime": True,     # soft market regime (below)
     "regime_symbol": "QQQ", # regime is on while QQQ closes above its 200-day average
     "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
     "min_score": 0.0,       # only stocks with a score above 0 can be picked
-    "sector_cap": 1.0,      # no sector limit: Friday = pure top-10 by rank (Chirag 2026-10-05; was 0.4 = max 4)
+    "sector_cap": 1.0,      # no sector limit: Friday = pure top-10 by rank
     "vol_sizing": True,     # weights proportional to 1 / 63-day volatility
-    "max_weight": 0.15,     # no stock above 15% (after the vol weights and the regime halving); the extra stays in cash (Chirag, Oct 15, 2026: was 20%)
+    "max_weight": 0.15,     # no stock above 15% (after the vol weights and the regime halving); the extra stays in cash
     "buffer_rank": None,    # no rank buffer (tested, did not help)
     "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF ('sector_median' / 'median_all': tested, not live)
-    # Mon-Thu close checks (the days come from this dict; Mon/Wed until 2026-10-15, Chirag). No top-3 swap live (enter_top / exit_below None since
-    # 2026-10-07, t187u); the swap code in apply_midweek_swaps is kept only for the forward test's pinned strategies.
+    # Mon-Thu close checks (days from this dict). No top-3 swap live; apply_midweek_swaps serves the forward test's pinned strategies.
     "midweek_swap": {"enter_top": None, "exit_below": None, "days": ["Mon", "Tue", "Wed", "Thu"]},
-    "midweek_exit_below": 20,   # Mon-Thu: a holding ranked worse than 20 is always sold (was 30 until 2026-10-07) ...
+    "midweek_exit_below": 20,   # Mon-Thu: a holding ranked worse than 20 is always sold ...
     "midweek_exit_to_top": 10,  # ... and replaced 1-for-1 by the best non-held top-10 (same weight, earnings rule);
-                                # cash until Friday only when no eligible refill is left (Chirag, 2026-10-05)
-    "max_pick_rank": None,      # no ranks 1-20 gate: every ranked name may be picked (Chirag 2026-10-05; was 20)
-    "cap_soft": False,          # unused while sector_cap is 1.0 (was True soft-fill under a 4-per-sector cap)
+                                # cash until Friday only when no eligible refill is left
+    "max_pick_rank": None,      # no ranks 1-20 gate: every ranked name may be picked
+    "cap_soft": False,          # unused while sector_cap is 1.0
     "earnings_block_days": 5,   # no new buy (or top-up) when earnings are due within 5 days (Reports/earnings_date.csv)
     # Friday: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).
     "rebalance_band": 0.01,
@@ -1181,13 +1178,6 @@ def deterministic_rank(score_w, eligible_w=None, tiebreak_w=None):
         o = ranking_order(np.flatnonzero(~np.isnan(S[t])), S[t], None if TB is None else TB[t], name_pos)
         out[t, o] = np.arange(1, len(o) + 1)
     return pd.DataFrame(out, index=score_w.index, columns=score_w.columns)
-
-def climb_score(rs_w, eligible_w=None, days=15, top=20):
-    """Climbers score: the RS top `top` (RS > 0) score 1000 + their RS-rank gain over `days` sessions (a stock new to the
-    ranking counts as no gain), so they rank first by how far they climbed; every other stock keeps its RS score."""
-    r = deterministic_rank(rs_w, eligible_w)
-    gain = (r.shift(days).fillna(r) - r)
-    return (1000 + gain).where((r <= top) & (rs_w > 0), rs_w)
 
 def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=None, min_score=0.0,
                  sector_cap=0.4, vol_sizing=True, buffer_rank=None, regime_scale=None, decision_log=None,
