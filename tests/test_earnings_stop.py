@@ -309,6 +309,18 @@ check("loop: a check every 30 s while watched; stops after the sale (4 checks: 9
 setup(client=Client({"XYZ": 10.4}), earnings=E.assign(**{"Earnings Date": E["Earnings Date"] + pd.Timedelta(days=60)}))
 naps = []
 check("loop on a quiet day: one check, no sleep, exits", es.loop(now_fn=lambda: REG, sleep_fn=naps.append) == 1 and naps == [])
+c = Client({"XYZ": 10.4})
+setup(client=c, quote=(90.0, 90.04))
+fails = [2]
+def flaky():                                                                   # positions read times out twice, then works
+    if fails[0]:
+        fails[0] -= 1
+        raise RuntimeError("_ssl.c:989: The handshake operation timed out")
+    return Account({"XYZ": 10.4})
+es.account, naps = flaky, []
+n = es.loop(now_fn=lambda: REG, sleep_fn=naps.append, max_checks=10)
+check("loop: a failed read is retried every 30 s (2 timeouts, then the 10% drop is sold), not dropped to the 5-min restart",
+      n == 3 and naps == [30, 30] and len(c.sent) == 1, (n, naps, len(c.sent)))
 open(es.LOOP_LOCK, "w").write(json.dumps({"pid": os.getpid()}))
 check("a second loop exits at once while one is running (pid lock)", es.loop(now_fn=lambda: REG, sleep_fn=naps.append) == 0)
 os.remove(es.LOOP_LOCK)

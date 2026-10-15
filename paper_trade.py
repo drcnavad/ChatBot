@@ -990,7 +990,10 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     check = set(targets["Symbol"].astype(str))
     if ranking is not None:                         # Friday: also check the possible replacements (ranks up to 20)
         check |= set(ranking.loc[pd.to_numeric(ranking["Rank"], errors="coerce") <= FRIDAY_SUB_MAX_RANK, "Symbol"].astype(str))
-    blocked = {**earnings_blocked(sorted(check), meta["as_of"]), **earnings_stop_blocked(meta["as_of"]), **no_buy}
+    import sector_mapping as sm                     # the defensive sleeve is bought on Friday even before earnings (Chirag, Oct 15)
+    sleeve = {str(x).upper() for x in sm.defensive}
+    earn = {k: v for k, v in earnings_blocked(sorted(check), meta["as_of"]).items() if k.upper() not in sleeve}
+    blocked = {**earn, **earnings_stop_blocked(meta["as_of"]), **no_buy}
     if ranking is not None:
         # A new pick blocked by earnings / an earnings-day stop sale: the next eligible stock (rank <= 20) takes its weight.
         targets, statuses, blocked, subs = substitute_blocked_picks(targets, positions, ranking, blocked, statuses,

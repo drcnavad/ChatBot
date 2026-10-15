@@ -345,10 +345,13 @@ def _sell_safe(c, q, session, now, state, pending_path):
               f"The {c['symbol']} earnings-day stop check failed ({str(err)[:150]}). Check Alpaca; next check in 30 seconds.")
         return "at trigger - error, retrying"
 
+RETRY = [False]   # set by run_check when a read failed during a session (inputs, a reference close): the loop retries
+
 def run_check(now=None, dry_run=False, pending_path=None):
     """One check. Dry run: prints the watched stocks, sends and writes nothing, never makes a trading client.
     Returns the status rows (one per watched held stock)."""
     import paper_trade as pt
+    RETRY[0] = False
     now = now or datetime.now(be.EASTERN)
     session = session_now(now)
     if not dry_run and session is None:
@@ -365,10 +368,12 @@ def run_check(now=None, dry_run=False, pending_path=None):
         _once(state, "inputs", today, "failed", "no", f"The earnings-day stop check could not read its inputs ({str(err)[:150]}). "
               "No stop was checked; next check in 30 seconds.")
         _save_state(state)
+        RETRY[0] = True
         return []
     if not dry_run:
         for s, why in bad:
             _once(state, f"bad|{s}", today, "warning", "no", f"{s} is on its earnings day but has no earnings-day stop: {why}.")
+        RETRY[0] = bool(bad)
     rows, stamp = [], now.astimezone(be.CENTRAL).strftime("%Y-%m-%d %H:%M:%S")
     for c in cands:
         s, key = c["symbol"], f"{c['symbol']}|{c['e_date']:%Y-%m-%d}"
@@ -419,7 +424,8 @@ def watching(rows):
 
 def loop(interval=INTERVAL_S, now_fn=None, sleep_fn=time.sleep, max_checks=None):
     """The launchd job: one loop at a time (pid lock); a check every `interval` seconds while a held stock is in an
-    earnings-day session; exits when nothing is watched (launchd starts it again 5 minutes later). Returns the checks made."""
+    earnings-day session; a failed read is retried every `interval` seconds (until the session ends); exits when nothing
+    is watched (launchd starts it again 5 minutes later). Returns the checks made."""
     if _lock_busy(LOOP_LOCK):
         print("another earnings-day stop loop is running - nothing to do")
         return 0
@@ -428,9 +434,13 @@ def loop(interval=INTERVAL_S, now_fn=None, sleep_fn=time.sleep, max_checks=None)
     n = 0
     try:
         while max_checks is None or n < max_checks:
-            rows = run_check(now=now_fn() if now_fn else None)
+            try:
+                rows = run_check(now=now_fn() if now_fn else None)
+            except Exception as err:                # e.g. a broker timeout: retried in 30 seconds, the loop keeps going
+                print(f"earnings-day stop check failed ({str(err)[:150]}) - retrying in {interval} s")
+                rows, RETRY[0] = [], True
             n += 1
-            if not watching(rows):
+            if not (watching(rows) or RETRY[0]):
                 break
             sleep_fn(interval)
     finally:

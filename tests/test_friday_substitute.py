@@ -125,6 +125,13 @@ try:
     check("source provisional+subs; buys S10 and S13; the account ends with exactly 10 stocks",
           meta["source"] == "provisional+subs" and b == {"S10", "S13"}
           and len(set(HELD8) | b) == 10 and abs(meta["invested"] - 0.99) < 1e-9, (meta["source"], b, meta["invested"]))
+    import sector_mapping as sm                    # defensive sleeve: bought on Friday even with earnings soon (Oct 15)
+    saved_def, sm.defensive = sm.defensive, ["s09"]
+    o, meta, _ = pt.plan_orders("auto", EQ, HELD8, picks_csv=picks, signal_csv=sig, midweek_csv=mid, fractional=True,
+                                cash=EQ - 8 * 9_900)
+    sm.defensive = saved_def
+    check("sleeve stock with earnings soon (S09 in defensive): bought, not replaced",
+          "S09" in set(o.loc[o.Side == "BUY", "Symbol"]) and meta["substitutions"]["replaced"] == [], meta.get("substitutions"))
     rep, ok = pt.reconcile_positions("provisional+subs")
     check("reconcile_positions('provisional+subs') -> empty, ok (holdings differ from Provisional_Weight on purpose)",
           rep.empty and ok is True, (rep, ok))
