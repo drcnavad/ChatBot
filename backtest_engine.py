@@ -156,7 +156,7 @@ def winner_rank_args(regime):
                 sector_cap=S["sector_cap"], vol_sizing=S["vol_sizing"], buffer_rank=S["buffer_rank"],
                 regime_scale=S["regime_scale"] if S["use_regime"] else None,
                 max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"),
-                sleeve=list(sector_mapping.defensive))
+                sleeve=list(sector_mapping.defensive), sleeve_cap=sector_mapping.defensive_cap)
 
 WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
 
@@ -1192,7 +1192,7 @@ def climb_score(rs_w, eligible_w=None, days=15, top=20):
 def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=None, min_score=0.0,
                  sector_cap=0.4, vol_sizing=True, buffer_rank=None, regime_scale=None, decision_log=None,
                  tiebreak_w=None, max_pick_rank=None, cap_soft=False, buy_block=None, held_w=None, start_holdings=None,
-                 max_weight=None, sleeve=()):
+                 max_weight=None, sleeve=(), sleeve_cap=None):
     """Weekly top-N by score with sector cap and inverse-volatility weights.
 
     On rebalance days: candidates = eligible & score > min_score, best first, at most floor(sector_cap*n)
@@ -1213,6 +1213,7 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
                this function's own carried holdings). start_holdings: holdings before the first date (default: none).
     max_weight: if given, each weight is clipped to it after the vol weights and the regime scaling; the extra stays cash.
     sleeve: symbols always picked when they have data (score / vol), on top of the n best; weights are split over all picks.
+    sleeve_cap: max weight per sleeve stock (before the regime scaling); the trimmed weight goes to the other picks pro rata.
     """
     dates, cols = score_w.index, list(score_w.columns)
     S = score_w.to_numpy(float)
@@ -1288,6 +1289,13 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
             if picked:
                 inv = 1 / Vv[t, picked] if vol_sizing else np.ones(len(picked))
                 new[picked] = inv / inv.sum() * (len(picked) / n_all)
+                if sleeve_cap is not None:         # sleeve capped, the rest to the other picks by their weights
+                    sl = [j for j in picked if j in sleeve_j]
+                    rest = [j for j in picked if j not in sleeve_j]
+                    extra = np.clip(new[sl] - sleeve_cap, 0, None).sum()
+                    new[sl] = np.minimum(new[sl], sleeve_cap)
+                    if rest and new[rest].sum() > 0:
+                        new[rest] += extra * new[rest] / new[rest].sum()
                 if soft and not R[t]:
                     new *= regime_scale
                 if max_weight:

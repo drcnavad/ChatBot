@@ -35,6 +35,7 @@ do_not_sell = ['LMT', 'NOC', 'ABBV', 'PFE', 'KO']   # the defensive sleeve: neve
 # Defensive sleeve (Chirag, 2026-10-15): always bought on Friday next to the top 10 (15 stocks, same 1/volatility weights).
 # A sleeve stock that is also in the top 10 frees its slot for the next rank.
 defensive = ['LMT', 'NOC', 'ABBV', 'PFE', 'KO']
+defensive_cap = 0.05   # max weight per sleeve stock; the trimmed weight goes to the top-10 picks pro rata (Chirag, 2026-10-15)
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
 sector_etfs = {
