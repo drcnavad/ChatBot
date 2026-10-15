@@ -6,6 +6,9 @@
 #                                     main_signal_analysis.ipynb with the day's final bar on non-decision days (none while Mon-Fri all decide)
 #                                     and the forward test (Reports/forward_test_daily.csv + forward_strategies*.csv);
 #                                     never 4:05-4:30 PM CT (Alpaca books deposits about 4:15 PM CT)
+#   com.stockanalysis.support         Mon 1:00, Tue 1:07, Wed 1:14, Thu 1:21, Fri 1:28 PM CT: run_all.py --support --scheduled
+#                                     (company reports, news sentiment, earnings dates: the quota APIs, each run > 24 h
+#                                     after the last; trading days 12:30-2:00 PM only, never beside a trade run)
 #   com.stockanalysis.morning         Mon-Fri 9:00 AM CT, at login, on wake, every 30 min: pipeline_watchdog.py --fill-check --scheduled
 #   com.stockanalysis.earningsstop    every 5 min + at login: earnings_stop.py --loop (LIVE earnings-day 5% drop stop;
 #                                     30-second checks only while a held stock is in an earnings-day session, 3:00 AM-

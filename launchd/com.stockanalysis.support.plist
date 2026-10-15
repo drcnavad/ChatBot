@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Supporting data refresh (Chirag, Oct 15): company reports (Alpha Vantage), news sentiment (NewsAPI + Finnhub) and
+     earnings dates (Finnhub + yfinance), outside the 2:30 PM run. Mon 1:00 PM CT, then 7 min later each weekday (Fri
+     1:28 PM), so each NewsAPI run starts more than 24 h after the previous one (the 24 h guard stays as a safety net).
+     run_all.py --support --scheduled starts only on trading days between 12:30 and 2:00 PM CT and never beside a trade
+     run (a missed slot after a wake waits for the next day); one run at a time (Reports/.support.lock). No RunAtLoad:
+     loading it runs nothing. Installed by launchd/install_schedule.sh. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.stockanalysis.support</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/anaconda3/bin/python</string>
+        <string>/Users/drcnavad/Desktop/Stock Analysis/run_all.py</string>
+        <string>--support</string>
+        <string>--scheduled</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/anaconda3/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>13</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>13</integer><key>Minute</key><integer>7</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>13</integer><key>Minute</key><integer>14</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>13</integer><key>Minute</key><integer>21</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>13</integer><key>Minute</key><integer>28</integer></dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_support.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_support.err</string>
+</dict>
+</plist>

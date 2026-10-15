@@ -1,13 +1,16 @@
 """ONE command for the whole pipeline:   python run_all.py   (mode chosen by the US Central clock)
 
 FULL  on a decision day (Fri rebalance, Mon-Thu checks; holiday-shifted, backtest_engine.next_decision) after 2:30 PM CT,
-      once a day: fundamentals (company_report_autofetch.py, Alpha Vantage, max 24 calls) -> processing
-      (company_report_processing.ipynb) -> sentiment (sentiment_analysis.ipynb: NewsAPI + Finnhub, never twice in 24 h) ->
-      earnings (earnings_date.ipynb: Finnhub + yfinance) -> main (main_signal_analysis.ipynb: Alpaca bars, ranks, picks,
-      mid-week check) -> validate (the report files). An upstream failure only warns (main reuses the last good tables).
+      once a day: main (main_signal_analysis.ipynb: Alpaca bars, ranks, picks, mid-week check) -> validate (the report
+      files), reading the latest supporting tables.
+SUPPORT (--support, launchd com.stockanalysis.support, Mon 1:00 PM CT +7 min each weekday): fundamentals
+      (company_report_autofetch.py, Alpha Vantage, max 24 calls, once a day) -> processing (company_report_processing.ipynb)
+      -> sentiment (sentiment_analysis.ipynb: NewsAPI + Finnhub, never twice in 24 h) -> earnings (earnings_date.ipynb:
+      Finnhub + yfinance). A failure only warns: the 2:30 PM run reuses the last good tables.
 QUICK any other time: main + validate (no quota APIs).
 
-    python run_all.py --full [--force-news] | --quick | --dry-run | --list | --only STEP | --from STEP | --keep-going
+    python run_all.py --full | --quick | --dry-run | --list | --only STEP | --from STEP | --keep-going
+    python run_all.py --support [--force-news]   # the supporting data refresh (quota APIs) alone
     python run_all.py --sync-live            # refresh my_positions.csv + Reports/live_*.csv from the LIVE account (GET)
     python run_all.py --trade [--scheduled]  # trade the due decision on the LIVE account (REAL MONEY), see below
     python run_all.py --fill-check [--scheduled]   # send Reports/live_pending_orders.json (regular hours, 9 AM CT on)
@@ -57,12 +60,16 @@ DEPOSIT_QUIET_CT = ((16, 5), (16, 30)) # 4:05-4:30 PM CT: Alpaca books deposits 
 NB_TIMEOUT = 3600
 KEEP_LOGS = 30
 
-# (name, kind, target, when): when = "full" (full mode only), "always", or an opt-in flag name
+# (name, kind, target, when): when = "full" (full mode only), "always", or an opt-in flag name. The supporting data steps
+# (quota APIs) run only in the separate --support job (launchd com.stockanalysis.support, Mon 1:00 PM CT, +7 min each
+# weekday to Fri 1:28 PM, so NewsAPI is always more than 24 h after its last run); the 2:30 PM run reads their last files.
+SUPPORT_WINDOW = ((12, 30), (14, 0))   # --support --scheduled starts only in this CT window (a late wake: next day)
+SUPPORT_LOCK = os.path.join(REPORTS, ".support.lock")
 STEPS = [
-    ("fundamentals", "script", "company_report_autofetch.py", "full"),
-    ("processing", "notebook", "company_report_processing.ipynb", "full"),
-    ("sentiment", "notebook", "sentiment_analysis.ipynb", "full"),
-    ("earnings", "notebook", "earnings_date.ipynb", "full"),
+    ("fundamentals", "script", "company_report_autofetch.py", "support"),   # "support": only the --support job (1 PM CT)
+    ("processing", "notebook", "company_report_processing.ipynb", "support"),
+    ("sentiment", "notebook", "sentiment_analysis.ipynb", "support"),
+    ("earnings", "notebook", "earnings_date.ipynb", "support"),
     ("main", "notebook", "main_signal_analysis.ipynb", "always"),
     ("validate", "check", None, "always"),
 ]
@@ -305,6 +312,21 @@ def choose_mode(now_ct, state, force_full=False, force_quick=False, decision=Non
     if state.get("last_full_date") == now_ct.date().isoformat():
         return "quick", f"the full update already ran today ({state.get('last_full_at', '')})"
     return "full", why
+
+def support_idle(now_ct, real=True):
+    """None when the scheduled --support job may run now, else the plain reason it waits for its next slot: trading days
+    only, inside SUPPORT_WINDOW (never near the 2:30 PM run), and never while a trade run holds its lock."""
+    if not is_trading_day(now_ct.date()):
+        return f"{now_ct:%a %b %d} is not a trading day"
+    lo, hi = SUPPORT_WINDOW
+    if not lo <= (now_ct.hour, now_ct.minute) < hi:
+        return f"outside the support window ({lo[0] - 12}:{lo[1]:02d}-{hi[0] - 12}:{hi[1]:02d} PM CT) - next scheduled slot"
+    if real:
+        free, held_by = acquire_trade_lock()
+        if not free:
+            return f"a trade run is in progress ({held_by})"
+        release_trade_lock()
+    return None
 
 def news_allowed(now_ct, state, force_news=False):
     """(allowed, reason). NewsAPI runs at most once per NEWS_MIN_GAP_H hours unless forced."""
@@ -749,6 +771,8 @@ def plan_steps(a, mode):
             continue
         if a.start and i < names.index(a.start):
             continue
+        if getattr(a, "support", False) != (when == "support"):
+            continue                                        # --support runs only its steps; other runs never do
         if when == "full" and mode != "full":
             continue
         if when not in ("full", "always") and not getattr(a, when):
@@ -800,6 +824,9 @@ def main(argv=None):
                    help="launchd runs: nothing due -> one 'idle:' line (no log); --trade retries a failed decision <= 3 times "
                         "and from 3:05 PM CT runs the after-close step (refresh + forward test) once a day; alone (with "
                         "--quick) = that step's signal refresh on non-decision days")
+    p.add_argument("--support", action="store_true",
+                   help="only the supporting data refresh (fundamentals, processing, sentiment, earnings; quota APIs with "
+                        "their guards); the launchd com.stockanalysis.support job. Never trades")
     p.add_argument("--now", help=argparse.SUPPRESS)          # tests: pretend it is this CT time ("2026-09-28 15:40")
     p.add_argument("--no-resume", action="store_true", help="do not resume from a previous failed run's checkpoint")
     a = p.parse_args(argv)
@@ -807,6 +834,8 @@ def main(argv=None):
         p.error("--full and --quick exclude each other")
     if a.trade and a.fill_check:
         p.error("--trade and --fill-check exclude each other")
+    if a.support and (a.trade or a.fill_check or a.quick or a.only or a.start):
+        p.error("--support runs the supporting data steps alone (no --trade / --fill-check / --quick / --only / --from)")
     if a.list:
         for name, kind, target, when in STEPS:
             print(f"{name:14s} {kind:9s} {target or 'report checks':40s} {when if when in ('full', 'always') else '--' + when}")
@@ -844,7 +873,12 @@ def main(argv=None):
             if a.now is None and not a.start and daily_idle(now, state) is None:   # the after-close step (real clock)
                 return daily_step(now)
             return 0
-    if a.scheduled and not a.trade and not a.fill_check:       # the signal refresh (daily_step): no orders, ever
+    if a.support and a.scheduled and not a.dry_run:
+        idle = support_idle(now, a.now is None)
+        if idle:
+            print(f"idle: {now:%a %b %d %I:%M %p} CT - {idle}", flush=True)
+            return 0
+    if a.scheduled and not a.trade and not a.fill_check and not a.support:   # the signal refresh (daily_step): no orders
         idle = refresh_idle(now)
         if idle is None:                                       # the notebook takes today's bar from 4:05 PM ET
             import backtest_engine as be
@@ -864,6 +898,8 @@ def main(argv=None):
             print(f"idle: {now:%a %b %d %I:%M %p} CT - {idle}", flush=True)
             return 0
     mode, why = choose_mode(now, state, a.full, a.quick, decision=D if how == "session" else None)
+    if a.support:
+        mode, why = "full", "--support: supporting data refresh"
     if a.only in {"fundamentals", "sentiment", "earnings"}:
         if a.quick:
             p.error(f"--only {a.only} needs quota APIs, which --quick forbids - drop --quick or pick a non-quota step")
@@ -955,6 +991,15 @@ def main(argv=None):
         finally:
             release_trade_lock(FILL_LOCK)
 
+    if a.support:
+        if not acquire_trade_lock(SUPPORT_LOCK)[0]:
+            logging.info("SUPPORT LOCK: another --support run is in progress; exiting.")
+            return 0
+        try:
+            return _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_path, ckpt_write, ckpt_clear,
+                             clock, D, how)
+        finally:
+            release_trade_lock(SUPPORT_LOCK)
     rc = _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_path, ckpt_write, ckpt_clear, clock,
                    D, how)
     if a.trade and a.scheduled and a.now is None and not a.start:   # a decision run that ends after 3:05 PM CT
@@ -1089,7 +1134,7 @@ def _wait_for_lock(path, minutes=10):
 def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_path, ckpt_write, ckpt_clear, clock,
               D=None, how=None):
     """The notebook steps, the optional live sync and the --trade phase, then the summary. Returns the exit code."""
-    label, errors = run_label(D, how, now), []
+    label, errors = ("Support data refresh" if getattr(a, "support", False) else run_label(D, how, now)), []
     if a.now is None:  # real runs only - the tests' fake clock never holds a sleep assertion
         _hold_sleep_assertion()
     env = dict(os.environ)
@@ -1107,7 +1152,7 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
             wait_for_final_bar("full" if how == "evening" else mode)
         if name == "fundamentals":
             state.update(update_state(last_fundamentals_date=now.date().isoformat()))
-        t0 = time.time()
+        t0, started = time.time(), clock()
         logging.info("=== %s (%s)", name, target or "report checks")
         out, problems = "", []
         try:
@@ -1130,7 +1175,8 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
             # Stamp the NewsAPI 24 h guard on success. The notebook only stamps when run by hand
             # (PIPELINE_NEWS_APPROVED=1 under the pipeline, so it never stamps there) - without this,
             # last_news_at goes stale and the guard can't skip a same-day retry, burning 97 NewsAPI calls.
-            state.update(update_state(last_news_at=clock()))
+            # The step's START time: the daily support slots are 24 h 07 min apart, so tomorrow's guard sees > 24 h.
+            state.update(update_state(last_news_at=started))
         logging.info("--- %s %s (%.0fs)", name, "OK" if rc == 0 else f"FAILED (exit {rc})", time.time() - t0)
         if rc != 0:
             failures.append(name)
@@ -1143,7 +1189,7 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
     # A full update counts when its critical steps (main/validate) succeeded, even if
     # optional upstream steps failed - the main signals are fresh.
     done = {"last_run_at": clock(), "last_mode": mode}
-    if mode == "full" and not _critical_failures(failures) and not a.only and not a.start:
+    if mode == "full" and not _critical_failures(failures) and not a.only and not a.start and not getattr(a, "support", False):
         done.update(last_full_date=now.date().isoformat(), last_full_at=clock())
     state.update(update_state(**done))
     live_synced = False

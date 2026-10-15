@@ -1,7 +1,7 @@
 #!/bin/bash
 # One-step setup after copying "Stock Analysis" (and "Voice Genie" next to it) to a new Mac:   bash setup_mac_mini.sh
 # Installs the packages, points git's notebook filter at this Mac's python, and installs the launchd jobs
-# (launchd/install_schedule.sh: the 5 com.stockanalysis.* jobs + com.unicorn.voice when ../Voice Genie exists).
+# (launchd/install_schedule.sh: the 6 com.stockanalysis.* jobs + com.unicorn.voice when ../Voice Genie exists).
 # Python: $PYTHON, else /opt/anaconda3/bin/python3 (same as the old Mac, recommended), else python3 on PATH.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"

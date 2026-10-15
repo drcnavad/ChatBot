@@ -152,6 +152,24 @@ plist = lambda n: plistlib.loads(re.sub(rb"<!--.*?-->", b"", open(os.path.join(R
 slots = [(n, d["Hour"], d["Minute"]) for n in names if n.endswith(".plist") for d in (plist(n).get("StartCalendarInterval") or [])]
 check("no launchd slot in the 4:05-4:30 PM CT deposit booking window",
       not [x for x in slots if (16, 5) <= (x[1], x[2]) < (16, 30)], slots)
+sup = plist("com.stockanalysis.support.plist")
+check("support plist: run_all.py --support --scheduled, Mon 1:00 PM CT +7 min each weekday (Fri 1:28), no RunAtLoad",
+      sup["ProgramArguments"][1].endswith("/run_all.py") and sup["ProgramArguments"][2:] == ["--support", "--scheduled"]
+      and sorted((d["Weekday"], d["Hour"], d["Minute"]) for d in sup["StartCalendarInterval"])
+      == [(1, 13, 0), (2, 13, 7), (3, 13, 14), (4, 13, 21), (5, 13, 28)] and not sup.get("RunAtLoad") and "StartInterval" not in sup, sup)
+_slots = sorted((d["Weekday"], d["Hour"] * 60 + d["Minute"]) for d in sup["StartCalendarInterval"])
+check("support slots: each NewsAPI run more than 24 h after the previous one, and done well before 2:30 PM",
+      all(b[1] - a[1] > 0 for a, b in zip(_slots, _slots[1:])) and all(m <= 13 * 60 + 30 for _, m in _slots), _slots)
+from types import SimpleNamespace  # noqa: E402
+_a = lambda **k: SimpleNamespace(**{"only": None, "start": None, "support": False, "sync_live": False, **k})
+check("the 2:30 PM full run no longer calls the quota steps; --support runs only them",
+      [s_[0] for s_ in ra.plan_steps(_a(), "full")] == ["main", "validate"]
+      and [s_[0] for s_ in ra.plan_steps(_a(support=True), "full")] == ["fundamentals", "processing", "sentiment", "earnings"]
+      and [s_[0] for s_ in ra.plan_steps(_a(only="sentiment"), "full")] == ["sentiment"])
+_t = lambda s_: datetime.fromisoformat(s_).replace(tzinfo=ra.CT)
+check("support window: a trading day 12:30-2:00 PM CT only (a late wake at 2:29 PM or a weekend waits)",
+      ra.support_idle(_t("2026-10-16 13:28"), real=False) is None and ra.support_idle(_t("2026-10-16 14:29"), real=False)
+      and ra.support_idle(_t("2026-10-17 13:00"), real=False) and ra.support_idle(_t("2026-10-16 12:29"), real=False))
 morning = plist("com.stockanalysis.morning.plist")
 check("9 AM fill check unchanged (Mon-Fri 9:00 AM CT, --fill-check --scheduled)",
       morning["ProgramArguments"][2:] == ["--fill-check", "--scheduled"]

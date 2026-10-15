@@ -31,7 +31,8 @@ All code lives in this folder. Everything the pipeline writes goes to `Reports/`
 ## Schedule (launchd, `launchd/install_schedule.sh`, US Central time)
 | Job | When | What |
 |---|---|---|
-| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled`: the Mon-Fri decision at 2:30 PM (full data update + trade), then once per trading day from 3:05 PM the after-close step: signal refresh with the day's final bar on non-decision days + `forward_test.py --record`. Nothing runs 4:05-4:30 PM (Alpaca books deposits around 4:15 PM). |
+| `com.stockanalysis.support` | Mon 1:00, Tue 1:07, Wed 1:14, Thu 1:21, Fri 1:28 PM | `run_all.py --support --scheduled`: company reports (Alpha Vantage), news sentiment (NewsAPI + Finnhub), earnings dates (Finnhub + yfinance). 7 min later each day, so NewsAPI always runs more than 24 h after its last run; only on trading days 12:30-2:00 PM, never beside a trade run. |
+| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled`: the Mon-Fri decision at 2:30 PM (signals from the latest support files + trade), then once per trading day from 3:05 PM the after-close step: signal refresh with the day's final bar on non-decision days + `forward_test.py --record`. Nothing runs 4:05-4:30 PM (Alpaca books deposits around 4:15 PM). |
 | `com.stockanalysis.morning` | Mon-Fri 9:00 AM | `pipeline_watchdog.py --fill-check --scheduled`: sends the rest of the previous decision's orders. |
 | `com.stockanalysis.earningsstop` | every 5 min | `earnings_stop.py --loop`: the earnings-day 5% stop. It only watches during a held stock's earnings sessions. |
 | `com.stockanalysis.tradeaudit` | Mon-Fri 9:45 AM + 3:45 PM | `trade_audit.py --write --log`: order ledger, round trips, reconciliation and alerts. Read-only. |
@@ -55,8 +56,8 @@ forward_test.py (daily)  → forward_test_daily.csv, forward_strategies.csv, for
 trade_audit.py           → live_trade_ledger.csv, live_round_trips.csv
 app.py (dashboard)       ← reads all of the above + the Alpaca account (read-only)
 ```
-Quota APIs (Alpha Vantage, NewsAPI, Finnhub) run only in the 2:30 PM full update on decision days. Every other run
-uses only Alpaca market data.
+Quota APIs (Alpha Vantage, NewsAPI, Finnhub) run only in the `--support` job (about 1 PM CT on trading days); the 2:30 PM
+run reads their latest files. Every other run uses only Alpaca market data.
 
 ## Files
 | File | Role |

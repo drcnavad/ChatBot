@@ -4,7 +4,7 @@
 The old MacBook's jobs were removed on Oct 15, 2026 (copies of the plists are in `launchd/`), so nothing trades from
 two Macs at once. If you ever need to do it again, paste this in Terminal:
 ```
-for l in com.stockanalysis.evening com.stockanalysis.morning com.stockanalysis.tradeaudit \
+for l in com.stockanalysis.evening com.stockanalysis.morning com.stockanalysis.tradeaudit com.stockanalysis.support \
          com.stockanalysis.earningsstop com.stockanalysis.dashboard-8502 com.unicorn.voice; do
   launchctl bootout gui/$(id -u)/$l 2>/dev/null; rm -f ~/Library/LaunchAgents/$l.plist
 done
@@ -25,10 +25,10 @@ Format the USB as APFS or Mac OS Extended (exFAT is OK too, but FAT32 can break 
    cd ~/Desktop/"Stock Analysis" && bash setup_mac_mini.sh
    ```
    It installs the packages (both requirements.txt files), points git's notebook filter at that python, and installs the
-   5 `com.stockanalysis.*` jobs + `com.unicorn.voice`, with paths taken from where the folders really are.
+   6 `com.stockanalysis.*` jobs + `com.unicorn.voice`, with paths taken from where the folders really are.
 3. Check:
    ```
-   launchctl list | grep -E 'stockanalysis|unicorn'      # 6 lines
+   launchctl list | grep -E 'stockanalysis|unicorn'      # 7 lines
    /opt/anaconda3/bin/python3 run_all.py --dry-run        # plan only, nothing runs
    /opt/anaconda3/bin/python3 tests/run_tests.py
    ```

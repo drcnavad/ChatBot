@@ -72,7 +72,12 @@ expect(r.fundamentals_allowed(t("2026-09-30 16:00"), {"last_fundamentals_date": 
 env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
 out = subprocess.run([sys.executable, "run_all.py", "--dry-run", "--full", "--now", "2026-09-28 15:40"], cwd=ROOT, env=env,
                      capture_output=True, text=True).stdout
-expect("mode FULL" in out and "sentiment" in out and "DRY RUN" in out, "--dry-run --full prints the full plan")
+expect("mode FULL" in out and "sentiment" not in out and "main" in out and "DRY RUN" in out,
+       "--dry-run --full prints the full plan (main + validate; the quota steps are the --support job's)")
+out = subprocess.run([sys.executable, "run_all.py", "--dry-run", "--support", "--now", "2026-09-28 13:00"], cwd=ROOT, env=env,
+                     capture_output=True, text=True).stdout
+expect("--support" in out and "sentiment" in out and "earnings" in out and "main_signal" not in out and "DRY RUN" in out,
+       "--dry-run --support plans only the supporting data steps")
 out = subprocess.run([sys.executable, "run_all.py", "--dry-run", "--now", "2026-09-29 11:00"], cwd=ROOT, env=env,
                      capture_output=True, text=True).stdout
 expect("mode QUICK" in out and "sentiment" not in out and "main" in out, "--dry-run on a Tuesday = quick plan (no quota steps)")
