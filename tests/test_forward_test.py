@@ -626,5 +626,8 @@ check("forward_test.py has no order code and never writes the live files or WINN
       not any(w in src for w in ("submit_order", "cancel_order", "OrderRequest", "TradingClient", "import paper_trade",
                                  "requests.post", "run_state", "live_pending_orders", "WINNER.update"))
       and "WINNER[" not in _src_wo_get)
+_t = pd.DataFrame([[0.3, 0.3, 0.3]], index=pd.to_datetime(["2026-10-02"]), columns=["ZZZ", "AAA", "MMM"])
+check("rank_tier: tied scores keep column order (not set order, which changes per process)",
+      ft.rank_tier(_t, _t * 0 + 1.0, np.array([0.5, 0.3, 0.2])).iloc[0].round(6).tolist() == [0.45, 0.27, 0.18])
 print(f"\n{len(FAIL)} failed" if FAIL else "\nFORWARD TEST OK")
 sys.exit(1 if FAIL else 0)

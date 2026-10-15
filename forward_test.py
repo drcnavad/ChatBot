@@ -304,7 +304,7 @@ def rank_tier(tgt, score, weights=RANK_WEIGHTS):
     for d, row in tgt.iterrows():
         names = frozenset(row.index[row > 0])
         if names != prev:
-            order = score.loc[d, list(names)].sort_values(ascending=False).index[:len(weights)] if names else []
+            order = score.loc[d, [c for c in tgt.columns if c in names]].sort_values(ascending=False, kind="stable").index[:len(weights)] if names else []
             w = pd.Series(0.0, index=tgt.columns)
             w[list(order)] = weights[:len(order)]
             last, prev = w / w.sum() if w.sum() else w, names
