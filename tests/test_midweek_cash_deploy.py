@@ -59,6 +59,10 @@ for ent, name in (({"AAA": 110.0, "BBB": 60.0}, "both below entry"), (None, "no 
     check(f"fallback ({name}): the $9,000 rest is split over AAA and BBB ($4,500 each)",
           buys(o) == {"AAA": 4_500.0, "BBB": 4_500.0, "CCC": 12_000.0, "DDD": 8_000.0} and info["in_profit"] == [], buys(o))
 
+o, info = pt.build_cash_deploy_orders(HOLD2, {"AAA": 100, "BBB": 200}, EQ, cash=1_500, ranking=R, entry={"AAA": 90.0})
+check("spare under the minimum: no step 2, so in_profit is None (the preview prints no 'held in profit')",
+      buys(o) == {} and info["in_profit"] is None, info)
+
 # 2b) cap spill among the in-profit holdings; a loser and a stock with room under the minimum get nothing
 pos = {"AAA": 140, "BBB": 250, "CCC": 500, "DDD": 100}               # $14,000 (room $850 < $1,000), $12,500, $10,000, $1,000
 o, info = pt.build_cash_deploy_orders(EMPTY, pos, EQ, cash=8_000, ranking=R, fractional=True,

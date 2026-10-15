@@ -807,7 +807,7 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
     level = be.LIVE_INVESTED * (1.0 if regime_on else float(be.WINNER.get("regime_scale") or 1.0))
     equity, cash = _safe_number(equity, 0.0), _safe_number(cash, float("nan"))
     info = {"cash": cash, "equity": equity, "invested_level": level, "regime_on": regime_on, "spare": 0.0,
-            "spent": 0.0, "buys": [], "topups": [], "skipped": [], "in_profit": []}
+            "spent": 0.0, "buys": [], "topups": [], "skipped": [], "in_profit": None}   # None: step 2 had no cash to split
     if not (equity > 0) or not math.isfinite(cash):
         info["skipped"].append(("-", "no usable equity / cash number: nothing bought"))
         return orders, info
@@ -869,7 +869,8 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
         pool.append(g)
         if _safe_number(entry.get(sym), default=None) and px >= float(entry[sym]):
             gain.append(g)
-    info["in_profit"] = [g[0] for g in gain]
+    if left > 0.005:
+        info["in_profit"] = [g[0] for g in gain]
 
     def room(g):
         return g[4] - g[3] > 0.005 and (g[0] in new or g[4] - g[3] >= floor_usd)
@@ -2670,7 +2671,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
               + (", ".join(f"{s} rank {r} ${v:,.0f}" for s, r, _, v in dep["buys"]) or "no new stock")
               + (f"; top-up: {', '.join(f'{s} rank {r} +${v:,.0f}' for s, r, _, v in dep['topups'])}" if dep["topups"] else "")
               + (f"; skipped: {', '.join(f'{s} ({w})' for s, w in dep['skipped'])}" if dep["skipped"] else "")
-              + f"; held in profit: {', '.join(dep['in_profit']) or 'none'}")
+              + (f"; held in profit: {', '.join(dep['in_profit']) or 'none'}" if dep["in_profit"] is not None else ""))
     meta.update(decision=pd.Timestamp(decision).date().isoformat() if decision is not None else None, session=session)
     n_buy = int((orders["Side"] == "BUY").sum())
     n_sell = int((orders["Side"] == "SELL").sum())
@@ -2855,7 +2856,8 @@ def main(argv=None):
               + (", ".join(f"{s_} (rank {r}) {_fmt_shares(q)} sh ${v:,.2f}" for s_, r, q, v in dep["buys"]) or "no new stock")
               + (f"; top-up: {', '.join(f'{s_} (rank {r}) +{_fmt_shares(q)} sh ${v:,.2f}' for s_, r, q, v in dep['topups'])}"
                  if dep["topups"] else "")
-              + f"; held in profit: {', '.join(dep['in_profit']) or 'none (split over all held)'}")
+              + (f"; held in profit: {', '.join(dep['in_profit']) or 'none (split over all held)'}"
+                 if dep["in_profit"] is not None else ""))
         for s_, why in dep["skipped"]:
             print(f"  not bought: {s_} - {why}")
         mw = meta.get("midweek")
