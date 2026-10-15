@@ -22,6 +22,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 import run_all as ra
+import backtest_engine as be  # noqa: E402
+be.WINNER["midweek_swap"] = {**be.WINNER["midweek_swap"], "days": ["Mon", "Wed"]}   # mechanics on the Mon/Wed calendar (live Mon-Thu: test_runner)
 
 FAIL = []
 
@@ -157,7 +159,6 @@ check("9 AM fill check unchanged (Mon-Fri 9:00 AM CT, --fill-check --scheduled)"
 
 # the bar acceptance: default 30 min after the close for every job; 5 min (4:05 PM ET) only where a job asks for it
 import pandas as pd  # noqa: E402
-import backtest_engine as be  # noqa: E402
 bars = pd.DataFrame({"Date": pd.to_datetime(["2026-10-05", "2026-10-06"]), "Symbol": "AAPL", "Close": [1.0, 2.0]})
 et = lambda s: datetime.fromisoformat(s).replace(tzinfo=be.EASTERN)
 old_env = os.environ.pop(be.BAR_FINAL_ENV, None)

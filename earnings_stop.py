@@ -4,7 +4,7 @@ pre-earnings 3x ATR stop of Oct 3, 2026 - the forward test keeps its own ATR var
 Rule: on a held stock's earnings day, its price is checked every 30 seconds in the pre-market (4:00-9:30 AM ET),
 regular hours and after hours (until 8 PM ET, 5 PM ET on early-close days). If the price is ever 5% or more below the
 PREVIOUS trading day's regular close, every whole share is sold once with a bid-based limit order (extended-hours
-eligible).
+eligible). A stock on sector_mapping.do_not_sell is never sold by this stop (Chirag, 2026-10-15).
 "Earnings day" covers the session where the reaction happens (Reports/earnings_date.csv, Time column):
   - before-open report (AM) on a trading day: that day, all three sessions; the reference is the previous day's close.
   - after-close report (PM) or unknown time: the report day (all three sessions, reference = the previous day's close)
@@ -44,6 +44,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 import backtest_engine as be
+import sector_mapping
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
@@ -229,7 +230,8 @@ def candidates(now, session, acct=None, earnings=None, quick=True, stand_in=Fals
         return [], [], {}                       # no report near: no broker call at all
     acct = acct or account()
     held = {str(p["symbol"]).upper(): float(p.get("qty") or 0) for p in acct.position_dicts()}
-    events = {s: ev for s in held if held[s] > 0 and (ev := active_event(s, earnings, today, session))}
+    keep = {str(x).upper() for x in sector_mapping.do_not_sell}   # never sold, not even by this stop (Chirag, 2026-10-15)
+    events = {s: ev for s in held if held[s] > 0 and s not in keep and (ev := active_event(s, earnings, today, session))}
     if not events:
         return [], [], held
     bars = daily_bars(sorted(events), now)

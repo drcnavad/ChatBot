@@ -27,6 +27,8 @@ import paper_trade as pt
 import fake_quotes
 fake_quotes.install(pt)   # never a real quote
 import run_all as ra
+import backtest_engine as be  # noqa: E402
+be.WINNER["midweek_swap"] = {**be.WINNER["midweek_swap"], "days": ["Mon", "Wed"]}   # mechanics on the Mon/Wed calendar (live Mon-Thu: test_runner)
 
 CT = ra.CT
 PASS, FAIL = [], []

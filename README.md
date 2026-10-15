@@ -10,26 +10,26 @@ All code lives in this folder. Everything the pipeline writes goes to `Reports/`
 - **Friday rebalance** (the week's last session), decided on the 2:30 PM CT bar: hold the top 10, weighted by inverse
   volatility, max 20% per stock, 99% invested. Plus the **defensive sleeve** (`defensive` in `sector_mapping.py`: LMT,
   NOC, ABBV, PFE, KO, from Oct 16, 2026): always held next to the top 10 (15 stocks share the same 1/volatility weights);
-  a sleeve stock that is also in the top 10 frees its slot for rank 11. The sleeve is on `do_not_sell` and the Mon/Wed
+  a sleeve stock that is also in the top 10 frees its slot for rank 11. The sleeve is on `do_not_sell` and the Mon-Thu
   rank-20 rule never sells it. When QQQ is below its 200-day average every weight is halved. A holding
   within 1 point of its target is left alone.
-- **Monday / Wednesday check** (2:30 PM CT): a holding ranked worse than 20 is sold and replaced, same dollars, by the
+- **Monday-Thursday check** (2:30 PM CT): a holding ranked worse than 20 is sold and replaced, same dollars, by the
   best-ranked top-10 stock not held (cash until Friday only if none is left). On the live account this applies to every
   position. Then cash above 1% of equity buys top-10 stocks not held, and what is left buys unheld ranks 11, 12, ... (positive score, rank better than 15 sessions ago), max 10% each.
 - **Earnings:** no new buy or top-up of a stock with earnings within 5 days (including a report after that day's close). On Friday a new pick blocked this way is
   replaced by the next eligible stock (down to rank 20). On a held stock's earnings day, a drop of 5% or more below the
   previous close sells it (`earnings_stop.py`), and it is not bought back until its earnings sessions are over.
-- **Your overrides:** `do_not_buy` and `do_not_sell` in `sector_mapping.py` (e.g. `do_not_buy = ['TSLA']`). The Mon/Wed/Fri
+- **Your overrides:** `do_not_buy` and `do_not_sell` in `sector_mapping.py` (e.g. `do_not_buy = ['TSLA']`). The Mon-Fri
   runs and the 9 AM fill check never buy or top up a do-not-buy stock (on Friday its slot goes to the next eligible stock,
-  down to rank 20) and never sell or trim a do-not-sell stock (a Mon/Wed replacement out of it is dropped with its buy).
+  down to rank 20) and never sell or trim a do-not-sell stock (a Mon-Thu replacement out of it is dropped with its buy).
   These show as `SKIP (on your do-not-... list)` rows. On Friday a held do-not-sell stock outside the picks stays
   invested, so the picks share the rest (99% invested, SNOW kept at 10% -> picks scaled to 89%). The earnings-day stop
-  still sells do-not-sell stocks.
+  never sells a do-not-sell stock either.
 
 ## Schedule (launchd, `launchd/install_schedule.sh`, US Central time)
 | Job | When | What |
 |---|---|---|
-| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled`: the Mon/Wed/Fri decision at 2:30 PM (full data update + trade), then once per trading day from 3:05 PM the after-close step: signal refresh with the day's final bar on non-decision days + `forward_test.py --record`. Nothing runs 4:05-4:30 PM (Alpaca books deposits around 4:15 PM). |
+| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled`: the Mon-Fri decision at 2:30 PM (full data update + trade), then once per trading day from 3:05 PM the after-close step: signal refresh with the day's final bar on non-decision days + `forward_test.py --record`. Nothing runs 4:05-4:30 PM (Alpaca books deposits around 4:15 PM). |
 | `com.stockanalysis.morning` | Mon-Fri 9:00 AM | `pipeline_watchdog.py --fill-check --scheduled`: sends the rest of the previous decision's orders. |
 | `com.stockanalysis.earningsstop` | every 5 min | `earnings_stop.py --loop`: the earnings-day 5% stop. It only watches during a held stock's earnings sessions. |
 | `com.stockanalysis.tradeaudit` | Mon-Fri 9:45 AM + 3:45 PM | `trade_audit.py --write --log`: order ledger, round trips, reconciliation and alerts. Read-only. |
@@ -48,7 +48,7 @@ main_signal_analysis.ipynb (Alpaca daily bars) → signal_analysis.csv  (the one
     + strategy_picks / strategy_changes / strategy_decisions / strategy_midweek_check / strategy_holdings.csv,
       benchmark_prices.csv, factor_history.csv, decision_bars.csv, short_history_reference.csv
              ↓
-paper_trade.py (Mon/Wed/Fri, live orders) → live_orders_log.csv, live_pending_orders.json, run_log.csv
+paper_trade.py (Mon-Fri, live orders) → live_orders_log.csv, live_pending_orders.json, run_log.csv
 forward_test.py (daily)  → forward_test_daily.csv, forward_strategies.csv, forward_strategies_holdings.csv
 trade_audit.py           → live_trade_ledger.csv, live_round_trips.csv
 app.py (dashboard)       ← reads all of the above + the Alpaca account (read-only)

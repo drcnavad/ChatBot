@@ -1,6 +1,6 @@
 """ONE command for the whole pipeline:   python run_all.py   (mode chosen by the US Central clock)
 
-FULL  on a decision day (Fri rebalance, Mon/Wed checks; holiday-shifted, backtest_engine.next_decision) after 2:30 PM CT,
+FULL  on a decision day (Fri rebalance, Mon-Thu checks; holiday-shifted, backtest_engine.next_decision) after 2:30 PM CT,
       once a day: fundamentals (company_report_autofetch.py, Alpha Vantage, max 24 calls) -> processing
       (company_report_processing.ipynb) -> sentiment (sentiment_analysis.ipynb: NewsAPI + Finnhub, never twice in 24 h) ->
       earnings (earnings_date.ipynb: Finnhub + yfinance) -> main (main_signal_analysis.ipynb: Alpaca bars, ranks, picks,
@@ -16,7 +16,7 @@ QUICK any other time: main + validate (no quota APIs).
 market hours: regular-hours orders at once (sells first, buys from the buying power after the sells); later that day
 (until 7 PM CT): whole-share extended-hours DAY limits, the rest at the 9 AM fill check; missed (Mac asleep): caught up at
 the next regular session with that decision's picks; superseded once the next decision slot arrives (one run-log row).
-Friday = full rebalance to Weight x equity (1-point no-trade band, no new buy with earnings within 5 days); Mon/Wed =
+Friday = full rebalance to Weight x equity (1-point no-trade band, no new buy with earnings within 5 days); Mon-Thu =
 replacements / exits + the live sell rule and spare cash (paper_trade.py). --scheduled (launchd): idle starts print one
 "idle:" line; a failed decision is retried at most 3 times, 60+ min apart.
 Schedule (launchd/install_schedule.sh): evening job Mon-Fri 2:30 + 3:05 PM CT (+ login, wake, every 30 min) = --trade
@@ -270,7 +270,7 @@ def decision_day(d):
     """'full rebalance' / 'mid-week check' when date d is a strategy decision session, else None.
 
     Same calendar as the strategy (backtest_engine.next_decision): the rebalance is the week's last session (Thursday
-    when Friday is a holiday) and a check is the first session on/after each Mon/Wed (Tuesday after a Monday holiday)."""
+    when Friday is a holiday) and a check is the first session Mon-Thu that is not the week's last."""
     import backtest_engine as be
     return be.decision_kind(d)
 
@@ -570,7 +570,7 @@ def daily_idle(now_ct, state):
 def daily_step(now_ct, run=subprocess.run):
     """The after-close part of the one daily run (the evening job: Mon-Fri 3:05 PM CT, plus its wake / 30-min starts):
       1. the signal refresh, run_all.py --quick --scheduled: main_signal_analysis.ipynb with today's final bar on a
-         trading day that is not a decision day (normally Tue/Thu; no paid APIs, never orders). On a decision day the
+         trading day that is not a decision day (none while Mon-Fri are all decision days; no paid APIs, never orders). On a decision day the
          2:30 PM run already wrote the day's rows, so it idles;
       2. the forward test, forward_test.py --record: the paper strategies' day + the account row (read-only GETs, never
          orders), after the refresh, so both read the same Reports/signal_analysis.csv.

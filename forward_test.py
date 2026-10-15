@@ -766,7 +766,7 @@ def verdict(board):
 
 def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
     """Display only, never saved. A trading day is saved by the daily run's after-close step (from 3:05 PM CT) once it
-    has signal rows (the 2:30 PM decision run on Mon/Wed/Fri, the step's own refresh on Tue/Thu, which runs first); until
+    has signal rows (the 2:30 PM decision run Mon-Fri, or the step's own refresh on a non-decision day, which runs first); until
     then, or when a run failed, the board would show the previous day's numbers again. This marks each strategy's saved
     holdings (shares + cash of its last saved day, no trades) to the close of every later day the saved daily bars cover
     (complete days only: a bar is taken from 3:05 PM CT), and QQQ / SPY to

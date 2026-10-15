@@ -49,7 +49,7 @@ REPORTS_DIR = PROJECT_ROOT / "Reports"
 CACHE_DIR = REPORTS_DIR / "cache"
 EASTERN = ZoneInfo("America/New_York")
 # The daily bar counts as final 30 min after the 4 PM ET close (4:30 PM ET = 3:30 PM CT) for every job by default. The two
-# after-close jobs that run at 3:00 PM CT (the Tue/Thu dashboard refresh and the forward test) take it 5 min after the
+# after-close jobs that run at 3:00 PM CT (the non-decision-day refresh and the forward test) take it 5 min after the
 # close instead (4:05 PM ET = 3:05 PM CT: the closing auction has printed): run_all.py sets BAR_FINAL_ENV for the
 # refresh's notebook, forward_test.py passes AFTER_CLOSE_BAR_MIN. Decision days keep their 2:30 PM bar either way.
 BAR_FINAL_MIN = 30
@@ -80,10 +80,10 @@ WINNER = {
     "max_weight": 0.20,     # no stock above 20% (after the vol weights and the regime halving); the extra stays in cash
     "buffer_rank": None,    # no rank buffer (tested, did not help)
     "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF ('sector_median' / 'median_all': tested, not live)
-    # Mon/Wed close checks (the days come from this dict). No top-3 swap live (enter_top / exit_below None since
+    # Mon-Thu close checks (the days come from this dict; Mon/Wed until 2026-10-15, Chirag). No top-3 swap live (enter_top / exit_below None since
     # 2026-10-07, t187u); the swap code in apply_midweek_swaps is kept only for the forward test's pinned strategies.
-    "midweek_swap": {"enter_top": None, "exit_below": None, "days": ["Mon", "Wed"]},
-    "midweek_exit_below": 20,   # Mon/Wed: a holding ranked worse than 20 is always sold (was 30 until 2026-10-07) ...
+    "midweek_swap": {"enter_top": None, "exit_below": None, "days": ["Mon", "Tue", "Wed", "Thu"]},
+    "midweek_exit_below": 20,   # Mon-Thu: a holding ranked worse than 20 is always sold (was 30 until 2026-10-07) ...
     "midweek_exit_to_top": 10,  # ... and replaced 1-for-1 by the best non-held top-10 (same weight, earnings rule);
                                 # cash until Friday only when no eligible refill is left (Chirag, 2026-10-05)
     "max_pick_rank": None,      # no ranks 1-20 gate: every ranked name may be picked (Chirag 2026-10-05; was 20)
@@ -124,7 +124,7 @@ def winner_label(n_stocks):
         tag += (f'-T{S["max_pick_rank"]}' + ("" if S.get("cap_soft") else "H")) if S.get("max_pick_rank") else "-SC"
         name += ((f' [picks from ranks 1-{S["max_pick_rank"]} only' if S.get("max_pick_rank") else " [")
                  + ("; sector cap relaxed to fill the 10 slots]" if S.get("cap_soft") else "]"))
-    if mw and S.get("midweek_exit_below"):              # Mon/Wed exit rule (the only mid-week rule live)
+    if mw and S.get("midweek_exit_below"):              # mid-week exit rule (the only mid-week rule live)
         top = S.get("midweek_exit_to_top")
         tag += f'-X{S["midweek_exit_below"]}' + (f"R{top}" if top else "")
         name += (f' + {"/".join(mw["days"])} exit (worse than rank {S["midweek_exit_below"]}: '
@@ -163,7 +163,7 @@ WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
 def rules_version():
     """Rules version stored in signal_analysis.csv (older rows of the same version keep their BUY/SELL/HOLD)."""
     S, mw = WINNER, WINNER.get("midweek_swap")
-    v = f"v5-x{S.get('midweek_exit_below') or 0}" if mw else "v3"      # v5-x20r10-ns-e5: Mon/Wed exit rule, no swap
+    v = f"v5-x{S.get('midweek_exit_below') or 0}" if mw else "v3"      # v5-x20r10-ns-e5: Mon-Thu exit rule, no swap
     if S.get("midweek_exit_below") and S.get("midweek_exit_to_top"):
         v += f"r{S['midweek_exit_to_top']}"
     if S.get("sector_cap", 0.4) >= 1.0 - 1e-12:
@@ -1348,7 +1348,7 @@ WEEKDAY_CODES = {"Mon": 0, "Tue": 1, "Wed": 2, "Thu": 3, "Fri": 4}
 def midweek_check_days(dates, days=("Mon", "Wed"), rebalance_days=None):
     """Sessions with a mid-week swap check (decision at that close, fill next open).
 
-    Each calendar Mon / Wed (``days``) maps to the first session on or after it, so a Monday holiday moves the check to
+    Each calendar check day (``days``, e.g. Mon / Wed) maps to the first session on or after it, so a Monday holiday moves the check to
     Tuesday. Sessions that are also a weekly rebalance day are excluded (the full rebalance wins). Same mapping as
     the tested variant D (Reports/rebalance_frequency_test.csv; reproduced by tests/test_midweek_repro.py).
     """
@@ -1674,8 +1674,8 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
 def next_decision(latest, days=None):
     """Next decision session after ``latest``: (date, 'full rebalance' | 'mid-week check', fill_date).
 
-    Weekly rebalance = last session of an ISO week; mid-week check = first session on/after each Mon / Wed that is not
-    the week's last session (same rules as weekly_rebalance_days / midweek_check_days)."""
+    Weekly rebalance = last session of an ISO week; mid-week check = first session on/after each check day (live: Mon-Thu)
+    that is not the week's last session (same rules as weekly_rebalance_days / midweek_check_days)."""
     mw = WINNER.get("midweek_swap")
     if days is None:
         days = mw.get("days", ("Mon", "Wed")) if mw else ()

@@ -198,6 +198,14 @@ c = Client({"XYZ": 10.4})
 setup(client=c, quote=(90.0, 90.04))
 run(at("2026-10-28 11:00"))
 check("the day before a PM report: not watched (no order even 10% down)", c.sent == [])
+import sector_mapping as sm  # noqa: E402
+saved_keep, sm.do_not_sell = sm.do_not_sell, ["xyz"]                           # do_not_sell (lower case is fine)
+c = Client({"XYZ": 10.4})
+_, _, made = setup(client=c, quote=(90.0, 90.04))
+run(REG)
+sm.do_not_sell = saved_keep
+check("a do_not_sell stock is never sold by the stop (10% down on its earnings day: no order, no trading client)",
+      c.sent == [] and made == [])
 ev_day = None
 c = Client({"XYZ": 10.4})
 setup(client=c, quote=(85.4, 85.44), age=300)

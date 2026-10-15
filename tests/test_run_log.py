@@ -200,7 +200,7 @@ end = datetime(2026, 9, 30, 15, 31, tzinfo=CT)
 moved, m = run_all.finished_text("Wed check", end, ran7, [], True, "evening", table())
 check("Wed, quiet check: done + all OK + no money moved + next + nothing to do",
       moved == "no" and m == ("Wed check done 3:31 PM. All 7 steps OK. No trades needed - no orders, no money "
-                              "moved. Next: Fri Oct 2 rebalance at 2:30 PM. Nothing to do."), m)
+                              "moved. Next: Thu Oct 1 check at 2:30 PM. Nothing to do."), m)
 sent = table(("ENPH", "SELL", 4, "1", "submitted (accepted)"), ("FIG", "SELL", 6, "2", "submitted (new)"),
              ("AMD", "BUY", 3, "3", "submitted (new) + 0.58 fractional rest next morning"),
              ("TEM", "BUY", 0.8, None, "STAGED for morning market (<1 whole share after hours)"))

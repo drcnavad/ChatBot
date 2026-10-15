@@ -45,7 +45,7 @@ def load_benchmarks():
     return b.set_index("Date")
 
 def load_midweek_rows():
-    """Reports/strategy_midweek_check.csv (this week's Friday rebalance + Mon/Wed checks) or None."""
+    """Reports/strategy_midweek_check.csv (this week's Friday rebalance + Mon-Thu checks) or None."""
     m = read_report_csv(MIDWEEK_CSV)
     return None if m is None or m.empty or "Message" not in m.columns else m
 
@@ -79,7 +79,7 @@ def data_freshness(latest_bar):
                      "Status": "✅ fresh" if age_d <= max_days else f"⚠️ stale (> {max_days} d)"})
     return pd.DataFrame(rows)
 
-# --- Decision-day ranks (Fri rebalance + Mon/Wed checks, holiday-shifted): rank change compares the last two decision days, not calendar days ---
+# --- Decision-day ranks (Fri rebalance + Mon-Thu checks, holiday-shifted): rank change compares the last two decision days, not calendar days ---
 def _decision_days(df):
     """Sorted decision dates (Rebalance_Day or Midweek_Check) present in the signal data."""
     mask = (df["Rebalance_Day"] == 1) | (df["Midweek_Check"] == 1)

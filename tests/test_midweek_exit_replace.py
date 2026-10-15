@@ -50,9 +50,9 @@ check("live tag / name / rules version: exit-only (X20R10), no swap",
       "-X20R10-" in be.WINNER["tag"] and "MW" not in be.WINNER["tag"] and "worse than rank 20" in be.WINNER["name"]
       and "replace with best top-10" in be.WINNER["name"] and "swap" not in be.WINNER["name"]
       and be.rules_version() == "v5-x20r10-ns-e5", (be.WINNER["tag"], be.rules_version()))
-check("Fri pure top-10 (no sector / no rank-20 gate); 20% / earnings kept; Mon/Wed checks kept, top-3 swap off",
+check("Fri pure top-10 (no sector / no rank-20 gate); 20% / earnings kept; Mon-Thu checks (2026-10-15), top-3 swap off",
       be.WINNER["max_weight"] == 0.2 and be.WINNER["earnings_block_days"] == 5
-      and be.WINNER["midweek_swap"] == {"enter_top": None, "exit_below": None, "days": ["Mon", "Wed"]}
+      and be.WINNER["midweek_swap"] == {"enter_top": None, "exit_below": None, "days": ["Mon", "Tue", "Wed", "Thu"]}
       and be.WINNER.get("max_pick_rank") is None and be.WINNER["sector_cap"] >= 1.0 - 1e-12
       and "NS" in be.WINNER["tag"] and "no sector limit" in be.WINNER["name"])
 check("exit_to_top=None still means cash-until-Friday (midweek_exit_replacements no-ops)",

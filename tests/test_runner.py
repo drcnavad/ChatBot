@@ -22,17 +22,17 @@ def expect(ok, what):
 
 cases = [("2026-09-28 15:40", {}, "full"),        # Monday after 2:30 PM CT
          ("2026-09-28 14:20", {}, "quick"),       # Monday before 2:30 PM CT
-         ("2026-09-29 16:00", {}, "quick"),       # Tuesday
+         ("2026-09-29 16:00", {}, "full"),        # Tuesday check (Mon-Thu since 2026-10-15)
          ("2026-09-30 17:00", {}, "full"),        # Wednesday evening
          ("2026-10-02 14:30", {}, "full"),        # Friday exactly 2:30 PM CT
          ("2026-09-26 16:00", {}, "quick"),       # Saturday
-         ("2026-11-26 16:00", {}, "quick"),       # Thanksgiving (Thursday anyway)
+         ("2026-11-26 16:00", {}, "quick"),       # Thanksgiving (holiday)
          ("2026-12-25 16:00", {}, "quick"),       # Christmas Friday = holiday
          ("2026-09-07 16:00", {}, "quick"),       # Labor Day Monday = holiday
          ("2026-12-24 16:00", {}, "full"),        # Thursday = the week's rebalance (Friday Christmas is a holiday)
          ("2026-07-02 16:00", {}, "full"),        # Thursday = rebalance (Fri Jul 3 2026 is the Independence Day holiday)
          ("2026-09-08 16:00", {}, "full"),        # Tuesday = the Monday check moved by the Labor Day holiday
-         ("2026-10-01 16:00", {}, "quick"),       # a normal Thursday: no decision
+         ("2026-10-01 16:00", {}, "full"),        # a normal Thursday: check
          ("2026-09-28 18:00", {"last_full_date": "2026-09-28"}, "quick"),   # full update already done today
          ("2026-09-30 15:30", {"last_full_date": "2026-09-28"}, "full")]
 for when, state, want in cases:
@@ -43,7 +43,7 @@ expect(r.choose_mode(t("2026-09-28 16:00"), {}, force_quick=True)[0] == "quick",
 
 # decision days follow the strategy calendar (backtest_engine.next_decision), not fixed weekdays
 for d, want in [("2026-10-02", "full rebalance"), ("2026-09-30", "mid-week check"), ("2026-09-28", "mid-week check"),
-                ("2026-09-29", None), ("2026-12-24", "full rebalance"), ("2026-12-25", None), ("2026-09-08", "mid-week check"),
+                ("2026-09-29", "mid-week check"), ("2026-10-01", "mid-week check"), ("2026-12-24", "full rebalance"), ("2026-12-25", None), ("2026-09-08", "mid-week check"),
                 ("2026-09-07", None)]:
     got = r.decision_day(datetime.fromisoformat(d).date())
     expect(got == want, f"decision_day {d} -> {got}")
@@ -51,8 +51,8 @@ for d, want in [("2026-10-02", "full rebalance"), ("2026-09-30", "mid-week check
 expect(r.decision_gate(t("2026-10-02 16:30"), {})[1] == "evening", "trade gate: Friday after 2:30 PM with nothing on record -> trade")
 expect(r.decision_gate(t("2026-10-02 14:30"), {"last_decision": "2026-09-30"})[1] == "session",
        "trade gate: Friday 2:30 PM -> trade now in regular hours")
-expect(r.decision_gate(t("2026-10-02 14:00"), {"last_decision": "2026-09-30"})[1] is None,
-       "trade gate: before 2:30 PM with Wednesday done -> nothing (login at 2 PM does not trade)")
+expect(r.decision_gate(t("2026-10-02 14:00"), {"last_decision": "2026-10-01"})[1] is None,
+       "trade gate: before 2:30 PM with Thursday done -> nothing (login at 2 PM does not trade)")
 expect(r.decision_gate(t("2026-10-02 18:00"), {"last_decision": "2026-10-02"})[1] is None,
        "trade gate: this decision already ran -> nothing")
 att = {"decision_attempts": {"decision": "2026-10-02", "n": 1, "at": "2026-10-02T15:15:07-05:00"}}

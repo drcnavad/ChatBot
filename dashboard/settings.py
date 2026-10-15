@@ -26,7 +26,7 @@ RS_LABEL = {"etf": "vs sector ETF and SPY",
             "sector_median": "vs the median of its sector peers, and sector ETF vs SPY",
             "median_all": "vs the median of its sector peers, and sector median vs the universe median",
             }.get(WINNER.get("rs_benchmark", "etf"), "vs sector ETF and SPY")
-MIDWEEK = WINNER.get("midweek_swap")                                 # Mon/Wed checks (None = weekly only)
+MIDWEEK = WINNER.get("midweek_swap")                                 # Mon-Thu checks (None = weekly only)
 EXIT_BELOW = WINNER.get("midweek_exit_below") if MIDWEEK else None   # mid-week exit below this rank
 EXIT_TO_TOP = WINNER.get("midweek_exit_to_top") if EXIT_BELOW else None  # refill an exit from the best non-held top-N
 EARNINGS = WINNER.get("earnings_block_days")                         # no new buys with earnings within N days (None = off)
@@ -37,7 +37,7 @@ REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day aver
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
 MAX_WEIGHT = WINNER.get("max_weight")                                # no stock above this weight; the extra stays cash
-try:                                                                 # Mon/Wed spare-cash rule (live account)
+try:                                                                 # Mon-Thu spare-cash rule (live account)
     from paper_trade import DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK, EXTRA_MAX_WEIGHT
 except Exception:
     DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK, EXTRA_MAX_WEIGHT = 10, 0.01, 100.0, 20, 0.10
@@ -124,7 +124,7 @@ FRESHNESS = {
     "signal_analysis.csv": ("prices, signals, strategy weights", 3),
     "strategy_picks.csv": ("current / provisional portfolio", 3),
     "strategy_decisions.csv": ("decision history: weekly rebalances + mid-week replacements/exits (chart markers)", 3),
-    "strategy_midweek_check.csv": ("this week's decisions: Friday rebalance + Mon/Wed checks", 3),
+    "strategy_midweek_check.csv": ("this week's decisions: Friday rebalance + Mon-Thu checks", 3),
     "benchmark_prices.csv": ("SPY / QQQ / sector ETF closes (RS lines)", 3),
     "weighted_sentiment.csv": ("news sentiment scores", 7),
     "news_cleaned_df.csv": ("news articles for AI summaries", 7),
