@@ -30,7 +30,7 @@ stock_symbols = [
 # do_not_buy: never bought or topped up (on Friday its slot goes to the next eligible stock, down to rank 20).
 # do_not_sell: never sold or trimmed (the Mon/Wed rank-20 rule keeps it too). The earnings-day stop still sells.
 do_not_buy = ['AMD', 'TSLA', 'PANW', 'ARM', 'SHOP']
-do_not_sell = []
+do_not_sell = ['LMT', 'RTX', 'NOC', 'GD', 'LHX', 'XOM', 'CVX', 'COP', 'OXY', 'KMI', 'XLE', 'JNJ', 'MRK', 'ABBV', 'UNH', 'PFE']  # Chirag's defensive basket, Thu 2026-10-15
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
 sector_etfs = {
