@@ -93,11 +93,11 @@ WINNER = {
     "sleeve": False,            # no defensive sleeve (sector_mapping.defensive is kept only for the pinned forward strategies)
     "keep_profit_at_rebalance": False,  # (tested, not live) keep a non-pick in profit + above its 200-day at a rebalance
     "earnings_day_stop": False, # earnings_stop.py places no orders (not in the backtest; no Mon-Thu trading)
-    # Friday check (Chirag, Oct 15, final; ON): every Friday that is not a rebalance day, sell each holding that is below its
+    # Friday check (tested; Chirag turned it OFF Oct 15, 8:28 PM -> live = plain monthly): every Friday that is not a rebalance day, sell each holding that is below its
     # Alpaca avg entry price, at/below its 200-day average, or no longer in the day's top-10 picks, and buy the best-ranked
     # pick not held with the same dollars (max 20% x 99%; do_not_buy skipped). No trims / top-ups. (paper_trade
     # friday_falling_orders.) False = monthly rebalances only.
-    "friday_falling_check": True,
+    "friday_falling_check": False,
     # Rebalance: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).
     "rebalance_band": 0.01,
 }

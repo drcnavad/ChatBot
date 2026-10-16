@@ -88,9 +88,7 @@ STRATEGIES = [
     dict(name=LIVE, live=True, rule="Always the current live rules, as the account trades them (from Oct 16, 2026: low volatility "
          "in uptrend, monthly = the 10 calmest stocks above their 200-day average, max 4 per sector, equal weight, rebalanced "
          "on Oct 16 and then the last trading day of each month, no Mon-Thu trading, no earnings rule, max 20% per stock; "
-         "do_not_buy never bought; the account also runs a Friday check between rebalances - sells a holding below its "
-         "average cost, below its 200-day or out of the top 10 and puts the same dollars in the best unheld pick - not "
-         "simulated here). "
+         "do_not_buy never bought). "
          "Oct 2-15 as recorded then (Oct 13-15: relative strength only + sleeve; before: the Oct 2 rules)."),
     dict(name=C6, rule="What the bot traded Oct 2-7 (pinned): 50% technical + 50% relative strength, top 10, Fri rebalance + "
                        "Mon-Thu top-3 swap (below rank 15) and exit below rank 30 (checks Mon/Wed until Oct 15)."),
