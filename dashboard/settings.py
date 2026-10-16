@@ -58,8 +58,10 @@ def rules_text():
             f"above {WINNER.get('min_score', 0):g} and at least {MIN_BARS} trading days of prices are ranked "
             "(newer stocks are listed as not traded yet).\n"
             f"- **Friday picks:** the {N_PICKS} best-ranked stocks by rank (no sector limit); fewer qualifying stocks = "
-            "the rest in cash. Stocks that are not picked are sold.\n"
-            + ("- **Size:** equal weights (the picks + the defensive sleeve LMT and NOC: 12 stocks), "
+            "the rest in cash. Stocks that are not picked are sold. Cash still left below the invested level (rounding, "
+            "band holds) buys the next best-ranked stock that is not a pick (earnings rule, do-not-buy, max per stock; "
+            "under $100: nothing).\n"
+            + ("- **Size:** equal weights, "
                if not WINNER.get("vol_sizing", True) else "- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger), ")
             + f"scaled to {LIVE_INVESTED:.0%} invested, "
             "each weight rounded down to 0.01%.\n"

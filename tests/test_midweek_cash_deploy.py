@@ -71,7 +71,7 @@ check("$7,000 over BBB and CCC (in profit): BBB to the cap (+$2,350), its spill 
       "(room under the minimum) none", buys(o) == {"BBB": 2_350.0, "CCC": 4_650.0}, buys(o))
 o, info = pt.build_cash_deploy_orders(EMPTY, {"LMT": 30}, EQ, cash=5_000, ranking=ranking([("ZZZ", 15, 0.0, 10.0)]),
                                       fractional=True, prices={"LMT": 100.0}, entry={"LMT": 90.0})
-check("defensive-sleeve LMT (no separate cap from Oct 16) takes the whole $4,000 spare like any stock",
+check("LMT (no sleeve cap from Oct 16) takes the whole $4,000 spare like any stock",
       buys(o) == {"LMT": 4_000.0}, buys(o))
 
 # 3) small leftover stays in cash (below max($100, 1% of equity) = $1,000)

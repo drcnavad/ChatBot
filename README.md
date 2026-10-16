@@ -9,11 +9,9 @@ All code lives in this folder. Everything the pipeline writes goes to `Reports/`
 - **Score (from Oct 16, 2026): low volatility in uptrend.** 1 / 63-day volatility, calmest first; only stocks above their
   200-day average (the others score -1). Ranked every day; ties by relative strength.
 - **Friday rebalance** (the week's last session), decided on the 2:30 PM CT bar: hold the top 10 at equal weights,
-  max 15% per stock, 99% invested. Plus the **defensive sleeve** (`defensive` in `sector_mapping.py`: LMT
-  and NOC from Oct 16, 2026): always held next to the top 10, all 12 at an equal weight (8.33% x 99%);
-  a sleeve stock that is also in the top 10 frees its slot for rank 11. The sleeve is on `do_not_sell` and the Mon-Thu
-  rank-20 rule never sells it. When QQQ is below its 200-day average every weight is halved. A holding
-  within 1 point of its target is left alone.
+  max 15% per stock, 99% invested (9.9% each; no defensive sleeve from Oct 16, 2026). When QQQ is below its 200-day average every weight is halved. A holding
+  within 1 point of its target is left alone. Cash still left below 99% (rounding, band holds) buys the next best-ranked
+  stock that is not a pick (skipping earnings-blocked / do-not-buy ones; max 15%; under $100: nothing).
 - **Monday-Thursday check** (2:30 PM CT): a holding at or below its 200-day average or ranked worse than 20 is sold, but only if it is below
   its Alpaca average entry price (at or above it: kept until Friday), and replaced, same dollars, by the best-ranked top-10 stock not held (cash until Friday only if none is left). On the live account this applies to every
   position. Then cash above 1% of equity buys top-10 stocks not held, and what is left is split equally over the held stocks at or above their

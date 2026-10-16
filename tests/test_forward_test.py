@@ -560,10 +560,10 @@ if os.path.exists(ft.SIGNAL_CSV):
             for dd in (be.WINNER["midweek_swap"]["days"], ["Mon", "Wed"])]
     check("live strategy = the pipeline's Strategy_Weight on every day since Oct 2 (same be.WINNER rules)", min(fits) < 1e-9, fits)
     cfg_now = next(c for c in ft.STRATEGIES if c["name"] == ft.LIVE)
-    lnow = ft.strategy_targets(cfg_now, real_inp).loc[d0:, list(sector_mapping.defensive)]
-    check("live strategy: the defensive stocks (LMT, NOC) held every day, an equal share of 12 at most (x 99%)",
-          sorted(lnow.columns) == ["LMT", "NOC"] and (lnow > 0).all().all()
-          and lnow.to_numpy().max() <= be.live_weights(1 / 12) + 1e-12, lnow.max().to_dict())
+    lnow = ft.strategy_targets(cfg_now, real_inp).loc[d0:]
+    check("live strategy: no defensive sleeve (Oct 16): at most 10 stocks a day before the spare-cash buys, max 15% x 99%",
+          be.winner_rank_args(real_inp["regime"])["n"] == 10 and "sleeve" not in be.winner_rank_args(real_inp["regime"])
+          and lnow.to_numpy().max() <= be.live_weights(be.WINNER["max_weight"]) + 1e-12, lnow.max().max())
     check("no live file changed (signal_analysis, picks, run_state, pending orders, orders log); WINNER untouched",
           digest() == before and be.WINNER == w0)
 # provisional marks (display only): Tue / Thu have no signal rows until the next decision run

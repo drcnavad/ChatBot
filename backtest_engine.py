@@ -74,7 +74,7 @@ WINNER = {
     "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
     "min_score": 0.0,       # only stocks with a score above 0 can be picked
     "sector_cap": 1.0,      # no sector limit: Friday = pure top-10 by rank
-    "vol_sizing": False,    # equal weights: the 10 picks + the defensive sleeve (LMT, NOC) = 12 x 8.33%
+    "vol_sizing": False,    # equal weights: 10 x 10% (x 99% invested)
     "max_weight": 0.15,     # no stock above 15% (after the vol weights and the regime halving); the extra stays in cash
     "buffer_rank": None,    # no rank buffer (tested, did not help)
     "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF ('sector_median' / 'median_all': tested, not live)
@@ -149,7 +149,7 @@ def winner_max_per_sector():
 
 def winner_score(rs, close, ma_200, vol):
     """The live score (WINNER["score"]). "low_vol": 1 / 63-day volatility (calmest first) while the close is above its
-    200-day average, else -1 (below min_score: never picked, no rank, so sold Mon-Thu; the sleeve is still held).
+    200-day average, else -1 (below min_score: never picked, no rank, so sold Mon-Thu).
     "rs": relative strength."""
     return rs if WINNER["score"] == "rs" else (1 / vol).where(close > ma_200, -1.0)
 
@@ -159,8 +159,7 @@ def winner_rank_args(regime):
     return dict(n=S["n"], regime=regime if S["use_regime"] else None, min_score=S["min_score"],
                 sector_cap=S["sector_cap"], vol_sizing=S["vol_sizing"], buffer_rank=S["buffer_rank"],
                 regime_scale=S["regime_scale"] if S["use_regime"] else None,
-                max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"),
-                sleeve=list(sector_mapping.defensive))
+                max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"))
 
 WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
 

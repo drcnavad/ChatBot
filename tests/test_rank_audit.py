@@ -214,7 +214,6 @@ def audit_midweek(D, exit_all, top_n=None):
     q = t[(t.Strategy_Score > 0) & (vol.reindex(t.index) > 0)]
     q = q.assign(k1=-q.Strategy_Score.round(4), k2=-q.RS_Score, k3=q.index).sort_values(["k1", "k2", "k3"])
     rank = {s: i + 1 for i, s in enumerate(q.index)}
-    rank.update({s: 0 for s in be.sector_mapping.defensive})   # defensive sleeve: never exited
     held, exits, refills = dict(before), [], []
     if exit_all and top_n:                         # rank-exit refill (8f57015): worst first -> best free top-N stock, same weight
         for s in sorted([s for s in held if rank.get(s, 10 ** 9) > exit_all], key=lambda s: -rank.get(s, 10 ** 9)):

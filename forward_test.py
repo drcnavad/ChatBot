@@ -75,7 +75,7 @@ PLAIN = {"max_pick_rank": None, "cap_soft": False, "sector_cap": 0.4}  # walk ev
 MON_THU = ["Mon", "Tue", "Wed", "Thu"]
 MIDWEEK = {"enter_top": 3, "exit_below": 15, "days": MON_THU}
 EXIT_BELOW, EXIT_TO_TOP = 30, 10
-NOW_SLEEVE = ["LMT", "NOC", "ABBV", "PFE", "KO"]   # the "Now" strategies keep the Oct 15 sleeve (live: LMT, NOC from Oct 16)
+NOW_SLEEVE = ["LMT", "NOC", "ABBV", "PFE", "KO"]   # the "Now" strategies keep the Oct 15 sleeve (live: none from Oct 16)
 NOW_SLEEVE_CAP = 0.05
 NOW = dict(score="rs", midweek={"enter_top": None, "exit_below": None, "days": MON_THU}, exit=(20, 10), sleeve=True,
            never_buy=True)
@@ -83,7 +83,7 @@ EQ = {**PLAIN, "vol_sizing": False}                      # ... and an equal weig
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
 STRATEGIES = [
     dict(name=LIVE, live=True, rule="Always the current live rules, as the account trades them (from Oct 16: low volatility in uptrend = the 10 "
-         "calmest stocks above their 200-day average, + LMT and NOC, all 12 at an equal weight, Fri rebalance, Mon-Thu "
+         "calmest stocks above their 200-day average, equal weight (no defensive sleeve), Fri rebalance + leftover cash to the next best rank, Mon-Thu "
          "sell below the 200-day or worse than rank 20 -> best top-10 not held (the account only sells below its entry price: not modeled here), spare cash -> unheld top 10 then the "
          "holdings in profit equally; do_not_buy never bought; max 15% per stock). Oct 2-15 as recorded then (Oct 13-15: "
          "relative strength only, 1/volatility weights; before: the Oct 2 rules)."),
