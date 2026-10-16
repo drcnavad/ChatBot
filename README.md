@@ -68,7 +68,7 @@ run reads their latest files. Every other run uses only Alpaca market data.
 | `backtest_engine.py` | Rules, scores, ranking, NYSE calendar, the shared engine. |
 | `alpaca_paper.py` | Read-only Alpaca account client (positions, orders, activities, daily history). |
 | `earnings_stop.py`, `trade_audit.py`, `tax_lots.py` | Earnings-day stop, trade audit, tax lots (dashboard). |
-| `forward_test.py` | Forward test of the account and 52 paper strategies from Fri Oct 2, 2026 (Fri rebalance, Mon-Thu checks). |
+| `forward_test.py` | Forward test of the account and 71 paper strategies from Fri Oct 2, 2026 (Fri rebalance, Mon-Thu checks). |
 | `app.py`, `dashboard/` | Streamlit dashboard. Home tab "My notes" = an editable table (Stock, Date, Time, Note, Action, Price) saved to `Reports/my_notes.csv` on every change. |
 | `sector_mapping.py` | The stock list, sectors and names. |
 | `tests/run_tests.py` | Runs every regression test (`--fast` skips the app tests). |
@@ -79,4 +79,8 @@ cp .env.example .env            # then fill in the keys (a moved folder keeps it
 bash setup_mac_mini.sh          # packages + git notebook filter + the launchd jobs, paths from this folder's location
 python tests/run_tests.py
 ```
-Moving to another Mac: see `MOVE.md`.
+Moving to another Mac (done Oct 15, 2026: MacBook -> Mac mini): stop the old Mac's jobs first (`launchctl bootout
+gui/$(id -u)/<label>` for each `com.stockanalysis.*` job), copy the whole folder (with the hidden `.env` and `.git`), then
+run `bash setup_mac_mini.sh` there. Mac settings: prevent sleep + start after a power failure (System Settings > Energy),
+`sudo pmset repeat wakeorpoweron MTWRF 14:31:00`, automatic login (LaunchAgents run only while logged in), allow
+python3 / bash file access when asked, time zone America/Chicago.

@@ -14,7 +14,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 os.environ["STOCK_ANALYSIS_SLEEVE_LEDGER"] = os.path.join(tempfile.mkdtemp(), "sleeve_ledger.json")   # never the real one
-import numpy as np
 import pandas as pd
 
 import backtest_engine as be

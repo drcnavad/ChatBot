@@ -27,6 +27,5 @@ my_positions.csv
 docs/
 *.md
 !README.md
-!MOVE.md
 *.bak-20*
 *Backup*/

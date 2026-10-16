@@ -38,7 +38,7 @@ def render_sleeves(p):
     if led is None:
         st.info("The two halves start at the Fri Oct 16, 2026 rebalance (2:30 PM CT); the ledger is written by that run.")
     else:
-        rows, vals = [], {}
+        rows = []
         for h in sleeves.HALVES:
             L = led["halves"][h]
             for s, q in sorted(L["shares"].items()):
