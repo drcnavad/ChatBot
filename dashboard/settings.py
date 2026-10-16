@@ -45,10 +45,10 @@ REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day aver
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
 MAX_WEIGHT = WINNER.get("max_weight")                                # no stock above this weight; the extra stays cash
-try:                                                                 # Mon-Thu spare-cash rule (live account)
-    from paper_trade import DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK
+try:                                                                 # Friday replacement down to this rank
+    from paper_trade import FRIDAY_SUB_MAX_RANK
 except Exception:
-    DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK = 10, 0.01, 100.0, 20
+    FRIDAY_SUB_MAX_RANK = 20
 
 def low_vol_rules_text():
     """The monthly low-volatility rules (live from Fri Oct 16, 2026) in plain words."""
@@ -93,16 +93,15 @@ def low_vol_rules_text():
             "check the next trading day sends any rest. A missed rebalance is caught up at the next market session.\n")
 
 def rules_text():
-    """The live trading rules in plain words, in one place (numbers from backtest_engine.WINNER)."""
+    """The live trading rules in plain words, in one place (numbers from backtest_engine.WINNER). The weekly C6 text is
+    the non-low-volatility fallback (a switch back); the Mon-Thu rules are gone from the live code (Oct 16, 2026)."""
     if LOW_VOL:
         return low_vol_rules_text()
     band = WINNER.get("rebalance_band")
-    days = " and ".join(MIDWEEK["days"]) if MIDWEEK else ""
     return (f"**Strategy rules ({STRATEGY_TAG})**\n"
             "- **When:** decisions use the prices at about 2:30 PM CT, 30 min before the close (the pipeline starts at 2:30 PM CT "
             "and trades in market hours: sells first, then buys sized from the cash free after the sells; any rest at 9 AM CT): "
-            "the Friday rebalance (the week's last trading day)"
-            + (f" and the {days} checks (the next trading day after a holiday)" if MIDWEEK else "") + ".\n"
+            "the Friday rebalance (the week's last trading day).\n"
             f"- **Score:** {W_TECH:g} × Technical + {1 - W_TECH:g} × Relative Strength {RS_LABEL}. Only stocks with a score "
             f"above {WINNER.get('min_score', 0):g} and at least {MIN_BARS} trading days of prices are ranked "
             "(newer stocks are listed as not traded yet).\n"
@@ -114,26 +113,8 @@ def rules_text():
             + (f"- **Max per stock:** No single stock gets more than {MAX_WEIGHT:.0%}; any extra stays in cash.\n" if MAX_WEIGHT else "")
             + (f"- **Rebalance:** every pick is brought back to its weight unless it is within {band * 100:g} percentage point "
                "of it; overweight holdings are trimmed so new buys get their full weight.\n" if band else "")
-            + (f"- **{days} sell rule:** every position in the account (the "
-               f"strategy's and any other) ranked worse than {EXIT_BELOW}, or with no rank (score 0 or below, or not in the "
-               "stock list), is always sold in full, worst rank first (one sell order per stock), "
-               + (f"and replaced 1-for-1 by the best-ranked top-{EXIT_TO_TOP} stock the account does not hold (same dollars; "
-                  "earnings rule, no buy back after an earnings-day stop sale); if none is left the cash goes to the "
-                  "spare-cash rule below.\n" if EXIT_TO_TOP else
-                  "and the cash goes to the spare-cash rule below.\n") if EXIT_BELOW else "")
-            + (f"- **{days} spare cash:** after the sells, the account's cash above {1 - LIVE_INVESTED:.0%} of equity "
-               f"(e.g. a deposit, an exit or an earnings-day stop sale) buys the top-{DEPLOY_MAX_RANK} stocks the account does "
-               "not hold, in rank order, each at its current rule weight; what is left is split equally over the "
-               "stocks already held that are at or above break-even (their Alpaca average entry price; if none is, over all "
-               "held stocks; a blocked stock or one being sold today is skipped; a stock at its cap passes its share to "
-               "the others; sleeve stocks stay at their cap)"
-               + (f" (max {MAX_WEIGHT * LIVE_INVESTED:.1%} of equity per stock)" if MAX_WEIGHT else "")
-               + ("; earnings rule" if EARNINGS else "") + ", no buy back after an earnings-day stop sale. Cash no stock can "
-               f"take, and any order under ${DEPLOY_MIN_USD:,.0f} or {DEPLOY_MIN_PCT:.0%} of equity (whichever is larger), "
-               f"stays in cash. Other held stocks are not topped up or trimmed; Friday rebalances everything as usual.\n"
-               if MIDWEEK else "")
             + (f"- **Earnings:** a stock that is not held is not bought when its next earnings date is within {EARNINGS} "
-               "calendar days; on Friday its slot goes to the next eligible stock, mid-week it is just not bought. "
+               "calendar days; on Friday its slot goes to the next eligible stock. "
                "A held stock is not topped up before them.\n" if EARNINGS else "")
             + (f"- **Friday replacement:** a new pick the account does not hold that is blocked (earnings within {EARNINGS} days, "
                "or no buy back after an earnings-day stop sale) gets no cash slot: the next best-ranked eligible stock that is not "

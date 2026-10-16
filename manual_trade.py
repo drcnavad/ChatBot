@@ -1,6 +1,6 @@
 """Manual orders on the LIVE Alpaca account, outside the pipeline (Chirag, Oct 16, 2026).
 
-  python manual_trade.py sell KO [--block-until-drop 10] [--dry-run]   # sell the whole position now
+  python manual_trade.py sell KO [--block-until-drop 10] [--no-replace] [--dry-run]   # sell the whole position now
   python manual_trade.py buy XYZ [--amount 1000] [--dry-run]           # buy $1000 now (default: 5% of equity = one slot)
   python manual_trade.py blocks                                        # list the active buy blocks
 
@@ -8,6 +8,11 @@ Orders go out at once as DAY limit orders in regular hours, priced like the pipe
 ask + 0.05%, sell at the bid - 0.05%, skipped on a stale / wide quote); outside market hours it refuses. Every action
 (also a dry run or a refusal) is appended to Reports/manual_orders.json.
 
+Sell + replace (Chirag, Oct 16): once the sell FILLS (waits up to FILL_WAIT_SECS), the freed cash buys the next-in-line
+stock of the same half (low volatility: best Strategy-ranked low_vol stock; sector rotation: best sector_rot stock in the
+top-3 sectors) that is not held, not blocked, not do-not-buy and not stopped out - a DAY limit at min(quote limit, ask),
+never above the ask - and the stock joins that half of the ledger. --no-replace keeps the cash. An unfilled sell buys
+nothing (logged).
 Sell: the symbol leaves the sleeve ledger (Reports/sleeve_ledger.json), so the pipeline neither rebuys nor "repairs" it.
 --block-until-drop N adds Reports/manual_block.json[SYMBOL] = {reference_close, block_until_price = close x (1 - N%),
 added}: the reference close is that day's close, filled in by the after-close step (run_all.daily_step ->
@@ -27,6 +32,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
 ORDERS_JSON = os.environ.get("STOCK_ANALYSIS_MANUAL_ORDERS") or os.path.join(REPORTS, "manual_orders.json")
 BLOCK_JSON = os.environ.get("STOCK_ANALYSIS_MANUAL_BLOCK") or os.path.join(REPORTS, "manual_block.json")
+FILL_WAIT_SECS = 30        # a manual sell is polled this long for its fill before the replacement buy
 DEFAULT_PCT = 0.05          # buy size without --amount: 5% of equity (a pipeline slot: 10 stocks per half x 50%, 99%)
 CT = ZoneInfo("America/Chicago")
 
@@ -111,13 +117,74 @@ def drop_from_ledger(sym, ledger=None, proceeds=None):
         sleeves.save_ledger(led)
     return was
 
+def next_in_line(half, exclude, rankings=None):
+    """The best-ranked stock of `half` ('lowvol' / 'sector') not in `exclude` (held, blocked, do-not-buy, ...), or None.
+    rankings: {half: [symbols best first]} (tests); default the latest close's rankings (dashboard.stock_groups)."""
+    if rankings is None:
+        from dashboard.stock_groups import _rankings
+        _lv_t, _sec_t, lv, sr = _rankings()
+        rankings = {"lowvol": lv, "sector": sr}
+    return next((s for s in rankings.get(half, []) if s.upper() not in exclude), None)
+
+def _wait_fill(client, order_id, secs=None, sleep=None):
+    """(filled qty, avg price) once the order is filled, else None after `secs`."""
+    import time
+    secs, sleep = FILL_WAIT_SECS if secs is None else secs, sleep or time.sleep
+    for _ in range(max(1, int(secs / 2))):
+        o = client.get_order_by_id(order_id)
+        st = str(getattr(o.status, "value", o.status)).lower()
+        if st == "filled":
+            return float(o.filled_qty), float(o.filled_avg_price)
+        if st in ("canceled", "cancelled", "expired", "rejected"):
+            return None
+        sleep(2)
+    return None
+
+def replace_buy(half, cash, client, quote, rankings=None, sold=None):
+    """Buy the next-in-line stock of `half` with `cash` (limit <= ask), add it to that half of the ledger. Returns the log entry."""
+    import paper_trade as pt
+    import sleeves
+    held = {str(p.symbol).upper() for p in client.get_all_positions()}
+    led = sleeves.load_ledger()
+    in_led = {s for h in sleeves.HALVES for s in (led["halves"][h].get("shares") or {})} if led else set()
+    stop = pt.earnings_stop_blocked(_now().date().isoformat())
+    excl = held | in_led | set(pt.manual_list("buy")) | set(stop) | {str(sold or "").upper()}
+    sym = next_in_line(half, excl, rankings)
+    base = {"action": "buy (replacement)", "replaces": sold, "half": half, "dry_run": False}
+    if not sym:
+        return log({**base, "symbol": None, "status": "no replacement: no next-in-line stock left (cash stays in the half)"})
+    q = quote(sym, "BUY")
+    if q.get("skip") or not q.get("limit") or not q.get("ask"):
+        return log({**base, "symbol": sym, "status": f"no replacement: {q.get('skip') or 'no quote'} (cash stays in the half)"})
+    limit = round(min(float(q["limit"]), float(q["ask"])), 2)
+    qty = math.floor(cash / limit * 100) / 100
+    if qty <= 0:
+        return log({**base, "symbol": sym, "status": f"no replacement: ${cash:,.2f} buys no share"})
+    from alpaca.trading.enums import OrderSide, TimeInForce
+    from alpaca.trading.requests import LimitOrderRequest
+    try:
+        o = client.submit_order(LimitOrderRequest(symbol=sym, qty=qty, limit_price=limit, time_in_force=TimeInForce.DAY,
+                                                  side=OrderSide.BUY, client_order_id=f"manual-{_now():%Y%m%d%H%M%S}-BUY-{sym}"[:48]))
+    except Exception as e:
+        return log({**base, "symbol": sym, "qty": qty, "limit": limit, "status": f"FAILED: {str(e)[:200]}"})
+    if led:
+        L = led["halves"][half]
+        L.setdefault("shares", {})[sym] = qty
+        L.setdefault("prices", {})[sym] = limit
+        L["cash"] = round(float(L.get("cash", 0.0)) - qty * limit, 2)
+        sleeves.save_ledger(led)
+    return log({**base, "symbol": sym, "qty": qty, "limit": limit, "bid": q.get("bid"), "ask": q.get("ask"),
+                "value": round(qty * limit, 2), "order_id": str(getattr(o, "id", "")),
+                "status": f"submitted ({getattr(o.status, 'value', o.status)})", "ledger_half_added": half})
+
 def _market_open(client):
     try:
         return bool(client.get_clock().is_open)
     except Exception as e:
         raise SystemExit(f"Could not read the market clock ({type(e).__name__}): nothing sent.") from None
 
-def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quote=None):
+def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quote=None, replace=True, rankings=None,
+        wait=None):
     """Place (or with dry_run only plan) one manual order. Returns the logged entry."""
     import paper_trade as pt
     sym = sym.upper()
@@ -127,7 +194,8 @@ def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quo
         return log({**base, "status": "refused: market closed (regular hours only, 8:30 AM-3:00 PM CT)"})
     if side == "BUY" and sym in blocked_notes():
         return log({**base, "status": f"refused: {blocked_notes()[sym]}"})
-    q = (quote or pt.smart_quote)(sym, side)
+    q_fn = quote or pt.smart_quote
+    q = q_fn(sym, side)
     if q.get("skip") or not q.get("limit"):
         return log({**base, "status": f"refused: {q.get('skip') or 'no limit price'}"})
     limit = float(q["limit"])
@@ -156,14 +224,31 @@ def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quo
             return log({**entry, "status": f"FAILED: {str(e)[:200]}"})
     else:
         entry["status"] = "dry run: not sent"
+    fill = None
+    if side == "SELL" and not dry_run and entry.get("order_id") is not None:
+        fill = (wait or _wait_fill)(client, entry["order_id"])
+        if fill:
+            entry.update(status="filled", filled_qty=fill[0], fill_price=fill[1])
     if side == "SELL" and not dry_run:
-        entry["ledger_half_removed"] = drop_from_ledger(sym, proceeds=round(qty * limit, 2))
+        proceeds = round(fill[0] * fill[1], 2) if fill else round(qty * limit, 2)
+        entry["ledger_half_removed"] = drop_from_ledger(sym, proceeds=proceeds)
     if side == "SELL" and block_drop:
         entry["block"] = add_block(sym, block_drop, _now().date().isoformat()) if not dry_run else \
             {"drop_pct": float(block_drop), "note": "dry run: not saved"}
     if side == "BUY":
         entry["note"] = "in no half of the ledger: the next pipeline trade run sells it"
-    return log(entry)
+    out = log(entry)
+    if side == "SELL" and not dry_run and replace:
+        half = entry.get("ledger_half_removed")
+        if not fill:
+            log({"action": "buy (replacement)", "replaces": sym, "symbol": None, "dry_run": False,
+                 "status": f"no replacement: the sell was not filled within {FILL_WAIT_SECS}s (buy by hand if wanted)"})
+        elif not half:
+            log({"action": "buy (replacement)", "replaces": sym, "symbol": None, "dry_run": False,
+                 "status": "no replacement: the sold stock was in no half of the ledger"})
+        else:
+            out = {**out, "replacement": replace_buy(half, round(fill[0] * fill[1], 2), client, q_fn, rankings, sold=sym)}
+    return out
 
 def latest_closes(symbols, now=None):
     """{SYMBOL: [(date, close), ...]}: official daily closes of the last 10 days (yfinance), oldest first. Today's bar
@@ -190,6 +275,7 @@ def main(argv=None):
     ap.add_argument("--block-until-drop", type=float, metavar="PCT", help="sell: no pipeline buy until the price is PCT%% "
                     "below that day's close")
     ap.add_argument("--dry-run", action="store_true", help="plan and log, send nothing")
+    ap.add_argument("--no-replace", action="store_true", help="sell: keep the cash (no next-in-line buy)")
     a = ap.parse_args(argv)
     if a.action == "blocks":
         print(json.dumps(load_blocks(), indent=1) if load_blocks() else "no active blocks")
@@ -201,7 +287,7 @@ def main(argv=None):
         return 0
     if not a.symbol:
         ap.error("a symbol is required")
-    e = run(a.action.upper(), a.symbol, a.amount, a.block_until_drop, a.dry_run)
+    e = run(a.action.upper(), a.symbol, a.amount, a.block_until_drop, a.dry_run, replace=not a.no_replace)
     print(json.dumps(e, indent=1))
     return 0 if not str(e.get("status", "")).startswith(("refused", "FAILED")) else 1
 

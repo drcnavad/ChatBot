@@ -1,86 +1,91 @@
 # Stock Analysis
 
-An automated stock strategy that trades a real-money Alpaca account, plus a Streamlit dashboard (http://localhost:8502).
-All code lives in this folder. Everything the pipeline writes goes to `Reports/`, which is not committed.
+An automated stock strategy that trades a **real-money Alpaca LIVE account**, plus a Streamlit dashboard
+(http://localhost:8502, launchd `com.stockanalysis.dashboard-8502`). Runs on Chirag's Mac mini (`~/Stock Analysis`,
+Python `/opt/anaconda3/bin/python`, times in US Central). Everything the pipeline writes goes to `Reports/` (not committed).
+Keys live in `.env` (`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY`, never print or commit them).
 
-## Strategy (live rules: `backtest_engine.WINNER`)
-- **Stock list:** `sector_mapping.py` is the only stock list (84 tradable stocks + QQQ as the benchmark). Stocks with
-  less than 200 trading days of history are shown but never traded.
-- **Score:** relative strength only (stock vs its sector ETF, sector ETF vs SPY), ranked every day.
-- **Friday rebalance** (the week's last session), decided on the 2:30 PM CT bar: hold the top 10, weighted by inverse
-  volatility, max 15% per stock, 99% invested. Plus the **defensive sleeve** (`defensive` in `sector_mapping.py`: LMT,
-  NOC, ABBV, PFE, KO, from Oct 16, 2026): always held next to the top 10 (15 stocks share the same 1/volatility weights);
-  a sleeve stock that is also in the top 10 frees its slot for rank 11. The sleeve is on `do_not_sell` and the Mon-Thu
-  rank-20 rule never sells it. When QQQ is below its 200-day average every weight is halved. A holding
-  within 1 point of its target is left alone.
-- **Monday-Thursday check** (2:30 PM CT): a holding ranked worse than 20 is sold and replaced, same dollars, by the
-  best-ranked top-10 stock not held (cash until Friday only if none is left). On the live account this applies to every
-  position. Then cash above 1% of equity buys top-10 stocks not held, and what is left is split equally over the held stocks at or above their
-  average entry price (none in profit: all held; earnings-blocked / sold-today ones skipped; a stock at its cap passes its
-  share on; sleeve stocks stay at 5%).
-- **Earnings:** no new buy or top-up of a stock with earnings within 5 days (including a report after that day's close). On Friday a new pick blocked this way is
-  replaced by the next eligible stock (down to rank 20). On a held stock's earnings day, a drop of 5% or more below the
-  previous close sells it (`earnings_stop.py`), and it is not bought back until its earnings sessions are over.
-- **Your overrides:** `do_not_buy` and `do_not_sell` in `sector_mapping.py` (e.g. `do_not_buy = ['TSLA']`). The Mon-Fri
-  runs and the 9 AM fill check never buy or top up a do-not-buy stock (on Friday its slot goes to the next eligible stock,
-  down to rank 20) and never sell or trim a do-not-sell stock (a Mon-Thu replacement out of it is dropped with its buy).
-  These show as `SKIP (on your do-not-... list)` rows. On Friday a held do-not-sell stock outside the picks stays
-  invested, so the picks share the rest (99% invested, SNOW kept at 10% -> picks scaled to 89%). The earnings-day stop
-  never sells a do-not-sell stock either.
+> **Never place orders when testing.** No `run_all.py --trade` / `--fill-check`, no `paper_trade.py --submit`, no
+> `manual_trade.py buy|sell` without `--dry-run`. Tests mock Alpaca (`tests/run_tests.py` sets
+> `STOCK_ANALYSIS_LIVE_HOLDINGS=off` and temp paths for every state file). Read-only checks are fine:
+> `paper_trade.py --from-account` (dry run), `run_all.py --sync-live`, `trade_audit.py`.
 
-## Schedule (launchd, `launchd/install_schedule.sh`, US Central time)
-| Job | When | What |
-|---|---|---|
-| `com.stockanalysis.support` | Mon 1:00, Tue 1:07, Wed 1:14, Thu 1:21, Fri 1:28 PM | `run_all.py --support --scheduled`: company reports (Alpha Vantage), news sentiment (NewsAPI + Finnhub), earnings dates (Finnhub + yfinance). 7 min later each day, so NewsAPI always runs more than 24 h after its last run; only on trading days 12:30-2:00 PM, never beside a trade run. |
-| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled`: the Mon-Fri decision at 2:30 PM (signals from the latest support files + trade), then once per trading day from 3:05 PM the after-close step: signal refresh with the day's final bar on non-decision days + `forward_test.py --record`. Nothing runs 4:05-4:30 PM (Alpaca books deposits around 4:15 PM). |
-| `com.stockanalysis.morning` | Mon-Fri 9:00 AM | `pipeline_watchdog.py --fill-check --scheduled`: sends the rest of the previous decision's orders. |
-| `com.stockanalysis.earningsstop` | every 5 min | `earnings_stop.py --loop`: the earnings-day 5% stop. It only watches during a held stock's earnings sessions. |
-| `com.stockanalysis.tradeaudit` | Mon-Fri 9:45 AM + 3:45 PM | `trade_audit.py --write --log`: order ledger, round trips, reconciliation and alerts. Read-only. |
-| `com.stockanalysis.dashboard-8502` | always on | `run_dashboard_8502.sh` → `streamlit run app.py`. |
+## Live strategy (`backtest_engine.WINNER`, from Fri Oct 16, 2026)
+Two independent halves, each with its own cash, tracked in `Reports/sleeve_ledger.json` (`sleeves.py`); no stock in both:
+- **50% Low volatility in uptrend (monthly):** the 10 calmest stocks (1 / 63-day volatility) whose close is above the
+  200-day average, equal weight, max 4 per sector, 20% cap; rebalanced on the **last trading day of the month**
+  (targets = `Provisional_Weight` in `Reports/strategy_picks.csv`). QQQ below its 200-day average: weights halved.
+- **50% Sector rotation (weekly):** top 10 by C6 score in the 3 sectors with the best 63-day ETF return (not held by
+  the low-vol half), rebalanced **every Friday** (the week's last session).
+- Decisions use the ~2:30 PM CT bar. A session that is no decision **holds everything** (no Mon-Thu trading, no Friday
+  falling check, no earnings rule). A holding within 1 point of its target is not traded. A position in no half of the
+  ledger is sold at the next trade run.
+- Never bought: `sector_mapping.do_not_buy`, manual sell blocks (`Reports/manual_block.json`), stocks sold by the
+  earnings-day stop. Never sold: `sector_mapping.do_not_sell`. `earnings_stop.py` is loaded but places no orders
+  (`WINNER['earnings_day_stop'] = False`).
+- Orders: sells first, every order a LIMIT at the live quote (buy ask + 0.05%, sell bid - 0.05%; stale / >0.5% spread
+  quotes skipped). Market hours: 2-decimal shares; after hours: whole-share extended-hours DAY limits until 7 PM CT. The
+  rest goes to `Reports/live_pending_orders.json` and the **9 AM CT fill check** sends it. Client order ids make every
+  send idempotent; a missed decision is caught up once at the next session.
 
-Missed decisions (Mac asleep) are caught up at the next regular session. Each decision runs only once
-(`Reports/run_state.json`, lock files, client order ids).
+## Schedule (launchd, `launchd/*.plist`, installed by `launchd/install_schedule.sh`; times CT)
+| Job | When | What | Trades? |
+|---|---|---|---|
+| `com.stockanalysis.support` | Mon 1:00, Tue 1:07, Wed 1:14, Thu 1:21, Fri 1:28 PM | `run_all.py --support --scheduled`: company reports, news sentiment, earnings dates (quota APIs) | no |
+| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled` → `run_all.py`: 2:30 PM signals + decision + orders; from 3:05 PM the after-close step (`run_all.daily_step`: signal refresh, `forward_test.py --record`, `manual_trade.py update-blocks`). Never 4:05-4:30 PM. | **yes** (2:30 PM) |
+| `com.stockanalysis.morning` | Mon-Fri 9:00 AM | `pipeline_watchdog.py --fill-check --scheduled`: sends the pending rests | **yes** |
+| `com.stockanalysis.tradeaudit` | Mon-Fri every 30 min 8:30 AM-3:00 PM + 3:45 PM | `refresh_dashboard_data.sh`: `run_all.sync_live()` (my_positions.csv, `Reports/live_*.csv`) + `trade_audit.py --write --log` (ledger, round trips, alerts) | no (GET only) |
+| `com.stockanalysis.earningsstop` | every 5 min + at login | `earnings_stop.py --loop` (no-op while the stop is off) | no (off) |
+| `com.stockanalysis.dashboard-8502` | always on | `run_dashboard_8502.sh` → `streamlit run app.py`. Restart: `launchctl kickstart -k gui/$(id -u)/com.stockanalysis.dashboard-8502` | no |
 
-## Data flow
+## Manual orders (`manual_trade.py`, separate from the pipeline)
 ```
-company_report_autofetch.py → balance_sheet.csv → company_report_processing.ipynb → balance_sheet_weights.csv, complete_company_analysis.xlsx
-sentiment_analysis.ipynb → weighted_sentiment.csv, news_cleaned_df.csv, sentiment_history.csv
-earnings_date.ipynb      → earnings_date.csv
-             ↓ (all read by)
-main_signal_analysis.ipynb (Alpaca daily bars) → signal_analysis.csv  (the one main output: prices, scores, ranks, weights)
-    + strategy_picks / strategy_changes / strategy_decisions / strategy_midweek_check / strategy_holdings.csv,
-      benchmark_prices.csv, factor_history.csv, decision_bars.csv, short_history_reference.csv
-             ↓
-paper_trade.py (Mon-Fri, live orders) → live_orders_log.csv, live_pending_orders.json, run_log.csv
-forward_test.py (daily)  → forward_test_daily.csv, forward_strategies.csv, forward_strategies_holdings.csv
-trade_audit.py           → live_trade_ledger.csv, live_round_trips.csv
-app.py (dashboard)       ← reads all of the above + the Alpaca account (read-only)
+python manual_trade.py sell KO [--block-until-drop 10] [--no-replace] [--dry-run]
+python manual_trade.py buy XYZ [--amount 1000] [--dry-run]     # default amount: 5% of equity (one slot)
+python manual_trade.py blocks                                   # list active blocks
 ```
-Quota APIs (Alpha Vantage, NewsAPI, Finnhub) run only in the `--support` job (about 1 PM CT on trading days); the 2:30 PM
-run reads their latest files. Every other run uses only Alpaca market data.
+- Places the order at once on the LIVE account (DAY limit, pipeline pricing); refuses outside market hours. Every
+  action (also dry runs / refusals) is appended to `Reports/manual_orders.json`.
+- **Sell:** the stock leaves the sleeve ledger. Once the sell fills, the freed cash buys the **next-in-line stock of the
+  same half** (best-ranked not held / blocked / do-not-buy), limit never above the ask, added to that half
+  (`--no-replace` keeps the cash).
+- **Block rule:** `--block-until-drop N` adds `Reports/manual_block.json[SYM] = {reference_close, block_until_price =
+  close x (1 - N%), added}`. The after-close step sets `reference_close` to that day's official close and removes the
+  block once a close is at or below `block_until_price`. The pipeline and the fill check never buy a blocked stock.
+- **Buy:** belongs to no half, so the next pipeline trade run sells it.
+- A pending row with `"at_ask": true` (manual replacement buys) is retried by the 9 AM check at a limit <= the ask.
 
-## Files
+## Key files
 | File | Role |
 |---|---|
-| `run_all.py` | The one pipeline command (mode, steps, trade gate, fill check, after-close step). |
-| `pipeline_watchdog.py` | Retries transient failures for the launchd jobs. Diagnose only: never edits code or retries orders. |
-| `paper_trade.py` | Order planning and live order sending (dry run by default). |
-| `backtest_engine.py` | Rules, scores, ranking, NYSE calendar, the shared engine. |
-| `alpaca_paper.py` | Read-only Alpaca account client (positions, orders, activities, daily history). |
-| `earnings_stop.py`, `trade_audit.py`, `tax_lots.py` | Earnings-day stop, trade audit, tax lots (dashboard). |
-| `forward_test.py` | Forward test of the account and 71 paper strategies from Fri Oct 2, 2026 (Fri rebalance, Mon-Thu checks). |
-| `app.py`, `dashboard/` | Streamlit dashboard. Home tab "My notes" = an editable table (Stock, Date, Time, Note, Action, Price) saved to `Reports/my_notes.csv` on every change. |
-| `sector_mapping.py` | The stock list, sectors and names. |
-| `tests/run_tests.py` | Runs every regression test (`--fast` skips the app tests). |
+| `run_all.py` | The pipeline command (support / trade / fill check / after-close step / `--sync-live`). |
+| `pipeline_watchdog.py` | Retries transient failures for launchd; never retries orders. |
+| `paper_trade.py` | Order planning (`plan_orders` → `plan_sleeve_orders`) and live sending, 9 AM fill check (`complete_unfilled_orders`). |
+| `sleeves.py` | The two halves: plan, ledger, sector rotation weights. |
+| `backtest_engine.py` | Rules (`WINNER`), scores, ranking, NYSE calendar; also the engine for the forward test. |
+| `manual_trade.py` | Manual orders, blocks, replacement buys. |
+| `decision_ranks.py` | Rank snapshot per decision (`Reports/decision_ranks.csv`, for the Last decision view). |
+| `alpaca_paper.py` | Read-only Alpaca client (GET only). |
+| `earnings_stop.py`, `trade_audit.py`, `tax_lots.py` | Earnings-day stop (off), trade audit, tax lots. |
+| `forward_test.py`, `forward_combos.py` | Forward test of the account and paper strategies since Oct 2, 2026. |
+| `sector_mapping.py` | The stock list (84 stocks + QQQ), sectors, `do_not_buy` / `do_not_sell`. |
+| `main_signal_analysis.ipynb` (+ 3 support notebooks) | Signals → `Reports/signal_analysis.csv`, `strategy_picks.csv`, ... (Chirag edits these; leave them alone). |
 
-## Setup
+State files in `Reports/`: `sleeve_ledger.json` (halves), `live_pending_orders.json` (9 AM rests), `manual_orders.json`,
+`manual_block.json`, `run_state.json` (decision done / last daily), `earnings_stop_state.json`, `trade_audit_state.json`;
+logs: `run_log.csv`, `live_orders_log.csv`, `logs/`.
+
+## Dashboard (`app.py`, `dashboard/`)
+- **Home:** My notes (`Reports/my_notes.csv`), stock list (Holdings / Next in line / Remaining, DNB tag;
+  `dashboard/stock_groups.py`), stock view (signal_analysis.csv + live quote), sector performance table.
+- **Strategy:** Last decision (Alpaca fills + ledger + decision_ranks.csv), Live vs benchmark (Alpaca portfolio history vs
+  QQQ/SPY), Forward test (forward_*.csv), Strategy rules and paper holdings, Manual orders and buy blocks, Data freshness.
+- **Trading Account:** Live holdings (Alpaca, read-only), Trade audit (live_trade_ledger.csv), Tax view (tax_lots), rules.
+
+## Tests and setup
 ```
-cp .env.example .env            # then fill in the keys (a moved folder keeps its .env)
-bash setup_mac_mini.sh          # packages + git notebook filter + the launchd jobs, paths from this folder's location
-python tests/run_tests.py
+python tests/run_tests.py          # every test file (~90 s); --fast skips the app tests
+bash setup_mac_mini.sh             # packages, notebook git filter, launchd jobs (paths from this folder)
 ```
-Moving to another Mac (done Oct 15, 2026: MacBook -> Mac mini): stop the old Mac's jobs first (`launchctl bootout
-gui/$(id -u)/<label>` for each `com.stockanalysis.*` job), copy the whole folder (with the hidden `.env` and `.git`), then
-run `bash setup_mac_mini.sh` there. Mac settings: prevent sleep + start after a power failure (System Settings > Energy),
-`sudo pmset repeat wakeorpoweron MTWRF 14:31:00`, automatic login (LaunchAgents run only while logged in), allow
-python3 / bash file access when asked, time zone America/Chicago.
+Tests that pin the Oct 15 weekly C6 rules import `tests/c6_rules.py`; the live rules are covered by
+`test_low_vol_monthly.py`, `test_sleeves.py`, `test_manual_trade.py`, `test_strategy_tab.py`.

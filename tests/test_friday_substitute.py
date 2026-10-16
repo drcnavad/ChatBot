@@ -116,8 +116,7 @@ pt.earnings_blocked = lambda syms, as_of, earnings_csv=None: {s: "earnings Tue O
 pt.latest_signal_status = lambda changes_csv=None, as_of=None: {s: "hold" if s in HELD8 else "add" for s in SYMS[:10]}
 pt.EARNINGS_STOP_STATE = stop
 try:
-    o, meta, tg = pt.plan_orders("auto", EQ, HELD8, picks_csv=picks, signal_csv=sig, midweek_csv=mid, fractional=True,
-                                 cash=EQ - 8 * 9_900)
+    o, meta, tg = pt.plan_orders("auto", EQ, HELD8, picks_csv=picks, signal_csv=sig, fractional=True)
     sub = meta["substitutions"]
     b = set(o.loc[o.Side == "BUY", "Symbol"])
     check("Friday plan: S09 (earnings) -> S13 (S11 earnings, S12 stop sale skipped; NEG score below 0 never a candidate)",
@@ -126,20 +125,13 @@ try:
     check("source provisional+subs; buys S10 and S13; the account ends with exactly 10 stocks",
           meta["source"] == "provisional+subs" and b == {"S10", "S13"}
           and len(set(HELD8) | b) == 10 and abs(meta["invested"] - 0.99) < 1e-9, (meta["source"], b, meta["invested"]))
-    import sector_mapping as sm                    # defensive sleeve: bought on Friday even with earnings soon (Oct 15)
-    saved_def, sm.defensive = sm.defensive, ["s09"]
-    o, meta, _ = pt.plan_orders("auto", EQ, HELD8, picks_csv=picks, signal_csv=sig, midweek_csv=mid, fractional=True,
-                                cash=EQ - 8 * 9_900)
-    sm.defensive = saved_def
-    check("sleeve stock with earnings soon (S09 in defensive): bought, not replaced",
-          "S09" in set(o.loc[o.Side == "BUY", "Symbol"]) and meta["substitutions"]["replaced"] == [], meta.get("substitutions"))
     rep, ok = pt.reconcile_positions("provisional+subs")
     check("reconcile_positions('provisional+subs') -> empty, ok (holdings differ from Provisional_Weight on purpose)",
           rep.empty and ok is True, (rep, ok))
     # mid-week: no Friday replacement step
     pd.DataFrame([{**r_, "As_Of": "2026-10-09", "Last_Rebalance": "2026-10-02"} for r_ in pd.read_csv(picks).to_dict("records")]
                  ).to_csv(picks, index=False)
-    o, meta, _ = pt.plan_orders("auto", EQ, HELD8, picks_csv=picks, signal_csv=sig, midweek_csv=mid, fractional=True)
+    o, meta, _ = pt.plan_orders("auto", EQ, HELD8, picks_csv=picks, signal_csv=sig, fractional=True)
     check("not a rebalance day (hold): no Friday replacement step", "substitutions" not in meta and meta["source"] == "hold",
           meta["source"])
 finally:

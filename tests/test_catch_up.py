@@ -124,19 +124,12 @@ def write(as_of, last_reb, mid_rows=(), chg_date=None):
     pd.DataFrame([{"Date": chg_date or as_of, "Symbol": "AAA", "Status": "hold"}]).to_csv(chg, index=False)
 
 write("2026-10-02", "2026-10-02")
-check("Mon morning catch-up of Friday: its rebalance weights", pt.load_targets("auto", picks, mid, decision="2026-10-02")[1]["source"] == "provisional")
-swap = ("mid-week check", "2026-09-28", "REPLACE", "BBB", "CCC", 10.0)
-write("2026-09-29", "2026-09-25", [swap])
-check("Tue catch-up of Monday: Monday's replacement", pt.load_targets("auto", picks, mid, decision="2026-09-28")[1]["source"] == "midweek")
-write("2026-09-29", "2026-09-25", [("mid-week check", "2026-09-28", "NO CHANGE", None, None, None)])
-check("Tue catch-up of a quiet Monday: hold (nothing to trade)",
-      pt.load_targets("auto", picks, mid, decision="2026-09-28")[1]["source"] == "hold")
-write("2026-09-30", "2026-09-25", [swap])
-check("Wed-morning catch-up of Monday (data as of Tue): still Monday's replacement",
-      len(pt.load_targets("auto", picks, mid, decision="2026-09-28")[1]["midweek"]) == 1)
+check("Mon morning catch-up of Friday: its rebalance weights", pt.load_targets("auto", picks, decision="2026-10-02")[1]["source"] == "provisional")
+write("2026-09-29", "2026-09-25")
+check("Tue catch-up of Monday: hold (no Mon-Thu trading)", pt.load_targets("auto", picks, decision="2026-09-28")[1]["source"] == "hold")
 write("2026-10-05", "2026-10-02")
 try:
-    pt.load_targets("auto", picks, mid, decision="2026-10-02")
+    pt.load_targets("auto", picks, decision="2026-10-02")
     check("a rebalance is never traded from later data", False)
 except ValueError:
     check("a rebalance is never traded from later data", True)

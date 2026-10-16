@@ -424,10 +424,7 @@ with tempfile.TemporaryDirectory() as tmp:
           rd[ft.LIVE] == rd["Friday only"] == rd["Short-term reversal"] == "W" and rd["Monthly"] == "M"
           and rd["Dual momentum"] == "M" and rd["Buy the dip"] is None and set(rd.values()) <= {"W", "M", None}, rd)
 
-# the live Mon-Thu spare-cash rule (paper_trade.build_cash_deploy_orders) on target weights
-import paper_trade  # noqa: E402
-check("spare cash: same settings as paper_trade", (ft.DEPLOY_MAX_RANK, ft.DEPLOY_MIN_PCT)
-      == (paper_trade.DEPLOY_MAX_RANK, paper_trade.DEPLOY_MIN_PCT))
+# the forward test's spare-cash rule on target weights
 sd = pd.bdate_range("2026-10-05", periods=5)                                   # Mon..Fri
 sc = [f"S{k:02d}" for k in range(1, 9)] + ["AMD"] + [f"S{k:02d}" for k in range(9, 14)]   # AMD rank 9 (do_not_buy)
 sS = pd.DataFrame([list(range(14, 0, -1))] * 5, index=sd, columns=sc, dtype=float)

@@ -171,28 +171,14 @@ def picks_csv(as_of, last_reb):
     pd.DataFrame([{"Date": as_of, "Symbol": "OWN", "Close": 50.0}]).to_csv(os.path.join(d, "sig.csv"), index=False)
     return d
 
-def midweek_csv(d, as_of, rows):
-    p = os.path.join(d, "mid.csv")
-    pd.DataFrame([{"Event": "mid-week check", "Event_Date": as_of, "Action": a, "Sell": s, "Buy": b,
-                   "Weight_%": 10.0, "Message": "m"} for a, s, b in rows] or
-                 [{"Event": "mid-week check", "Event_Date": as_of, "Action": "HOLD", "Sell": None, "Buy": None,
-                   "Weight_%": 0.0, "Message": "nothing to trade"}]).to_csv(p, index=False)
-    return p
-
 pt.latest_signal_status = lambda *a, **k: {f"S{i}": "hold" for i in range(10)}  # every pick 'hold'
 d = picks_csv("2026-09-30", "2026-09-25")
 kw = dict(picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)
-o, m = pt.plan_orders("auto", 10000, {"OWN": 5}, midweek_csv=midweek_csv(d, "2026-09-30", []), **kw)[:2]
+o, m = pt.plan_orders("auto", 10000, {"OWN": 5}, **kw)[:2]
 check("Wednesday quiet check: auto -> 'hold', nothing bought or sold",
       m["source"] == "hold" and set(o["Side"]) == {"HOLD"}, (m["source"], list(o["Side"])))
-o, m = pt.plan_orders("auto", 10000, {"OWN": 5}, midweek_csv=midweek_csv(d, "2026-09-30", [("REPLACE", "OWN", "S3")]), **kw)[:2]
-buys = list(o.loc[o.Side == "BUY", "Symbol"])
-check("Wednesday replacement: only it trades (sell OWN, buy S3), no other picks bought",
-      m["source"] == "midweek" and buys == ["S3"] and list(o.loc[o.Side == "SELL", "Symbol"]) == ["OWN"],
-      (m["source"], buys))
 d = picks_csv("2026-10-02", "2026-10-02")
-o, m = pt.plan_orders("auto", 10000, {}, midweek_csv=midweek_csv(d, "2026-10-02", []),
-                      picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[:2]
+o, m = pt.plan_orders("auto", 10000, {}, picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[:2]
 check("Friday rebalance: auto -> 'provisional', all 10 unowned 'hold' picks bought",
       m["source"] == "provisional" and (o["Side"] == "BUY").sum() == 10, (m["source"], list(o["Side"])))
 
@@ -387,20 +373,12 @@ saved_state, pt.EARNINGS_STOP_STATE = pt.EARNINGS_STOP_STATE, stop_state
 check("stop block: through the reaction day only", set(pt.earnings_stop_blocked("2026-10-02")) == {"S1", "S3", "ANET"}
       and set(pt.earnings_stop_blocked("2026-10-03")) == {"ANET"} and pt.earnings_stop_blocked("2026-10-02", "/nonexistent") == {})
 d = picks_csv("2026-10-02", "2026-10-02")
-o = pt.plan_orders("auto", 10000, {}, midweek_csv=midweek_csv(d, "2026-10-02", []),
-                   picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
+o = pt.plan_orders("auto", 10000, {}, picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
 check("Friday rebalance: the stopped S1 and S3 are not bought back (SKIP), the other 8 picks are",
       all(o.set_index("Symbol").Side[x].startswith("SKIP (sold by the earnings-day stop") for x in ("S1", "S3"))
       and (o["Side"] == "BUY").sum() == 8, list(o["Side"]))
-o = pt.plan_orders("auto", 10000, {"S1": 0.4}, midweek_csv=midweek_csv(d, "2026-10-02", []),
-                   picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
+o = pt.plan_orders("auto", 10000, {"S1": 0.4}, picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
 check("Friday rebalance: a leftover S1 fraction is not topped up", o.set_index("Symbol").Side["S1"] == "HOLD")
-d = picks_csv("2026-09-30", "2026-09-25")
-o = pt.plan_orders("auto", 10000, {"OWN": 5}, midweek_csv=midweek_csv(d, "2026-09-30", [("REPLACE", "OWN", "S3")]),
-                   picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
-check("Wednesday replacement into a stopped stock: no BUY (SKIP), its sell still goes",
-      not (o["Side"] == "BUY").any() and o.set_index("Symbol").Side["S3"].startswith("SKIP") and list(o.loc[o.Side == "SELL", "Symbol"]) == ["OWN"],
-      list(zip(o.Symbol, o.Side)))
 o, r = eve("ANET", "BUY", 3.58, 3, "expired", 0)
 b = Broker(orders=[o]); p = write_pending([r]); res = run(b, p)
 check("9 AM fill check: a BUY rest of a stopped stock is dropped, nothing sent", not b.submitted and "earnings-day stop" in status_of(res, "ANET"),
@@ -419,8 +397,7 @@ pt.EARNINGS_STOP_STATE = saved_state
 import sector_mapping as sm
 sm.do_not_buy, sm.do_not_sell = ["s2"], ["OWN", "S5"]   # lower case is fine
 d = picks_csv("2026-10-02", "2026-10-02")
-o, m = pt.plan_orders("auto", 10000, {"OWN": 20, "S5": 1}, midweek_csv=midweek_csv(d, "2026-10-02", []),
-                      picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[:2]
+o, m = pt.plan_orders("auto", 10000, {"OWN": 20, "S5": 1}, picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[:2]
 sd = o.set_index("Symbol").Side
 check("Friday: kept OWN ($1,000 = 10%) comes out of the picks: each 10% pick scaled to 9% ($900), source +kept",
       m["kept_outside"] == {"OWN": 0.1} and m["source"].endswith("+kept") and abs(m["invested"] - 0.9) < 1e-9
@@ -431,16 +408,6 @@ check("reconcile skips a +kept Friday (the account differs from Provisional_Weig
 check("Friday: do-not-buy S2 is a SKIP row; non-pick OWN (do-not-sell) is not sold; S5 (do-not-sell) can still be topped up",
       sd["S2"] == "SKIP (on your do-not-buy list)" and sd["OWN"] == "SKIP (on your do-not-sell list)" and sd["S5"] == "BUY"
       and not (o["Side"] == "SELL").any() and (o["Side"] == "BUY").sum() == 9, list(zip(o.Symbol, o.Side)))
-d = picks_csv("2026-09-30", "2026-09-25")
-o = pt.plan_orders("auto", 10000, {"OWN": 5}, midweek_csv=midweek_csv(d, "2026-09-30", [("REPLACE", "OWN", "S3")]),
-                   picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
-check("Wednesday replacement out of a do-not-sell stock: neither its sell nor its paired buy is sent",
-      not o["Side"].isin(["BUY", "SELL"]).any(), list(zip(o.Symbol, o.Side)))
-o = pt.plan_orders("auto", 10000, {"S9": 5}, midweek_csv=midweek_csv(d, "2026-09-30", [("REPLACE", "S9", "S2")]),
-                   picks_csv=os.path.join(d, "picks.csv"), signal_csv=os.path.join(d, "sig.csv"), fractional=True)[0]
-check("Wednesday replacement into a do-not-buy stock: its sell goes, the buy is a SKIP row",
-      list(o.loc[o.Side == "SELL", "Symbol"]) == ["S9"] and o.set_index("Symbol").Side["S2"] == "SKIP (on your do-not-buy list)",
-      list(zip(o.Symbol, o.Side)))
 o1, r1 = eve("S2", "BUY", 3.58, 3, "expired", 0)
 o2, r2 = eve("OWN", "SELL", 5, 5, "expired", 0)
 b = Broker(orders=[o1, o2], positions={"OWN": 5}); p = write_pending([r1, r2]); res = run(b, p)
