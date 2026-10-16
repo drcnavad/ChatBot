@@ -165,6 +165,15 @@ try:
           "$1,000 orders so the 3 best ranks (S01, S02, S04; S03 is today's buy, not held); source midweek+exits+cash",
           meta["source"] == "midweek+exits+cash" and dep["buys"] == [] and [t[0] for t in dep["topups"]] == ["S01", "S02", "S04"]
           and abs(dep["spent"] - 3_999) < 2, (meta["source"], dep))
+    # Mon-Thu, entry prices known (Chirag, Oct 15): a rule sale goes ahead only below the entry price
+    o, meta, _ = pt.plan_orders("auto", EQ, held, picks_csv=picks, signal_csv=sig, midweek_csv=mid, fractional=True,
+                                cash=1_000, entry={"S22": 90.0, "S24": 120.0})
+    ex = meta["account_exits"]
+    check("in profit S22 (close 100 >= entry 90) kept until Friday (its REPLACE dropped); S24 (below its 120 entry) sold "
+          "and refilled by S03",
+          side(o, "S22") == ["HOLD"] and side(o, "S24") == ["SELL"] and ex["replaced"] == [("S24", 24, "S03", 3, 4_000.0)]
+          and ex["kept_profit"] == ["S22"] and "kept until Friday (at/above entry price): S22" in pt.account_exit_text(ex),
+          (o[["Symbol", "Side"]].values.tolist(), ex))
     # not a check day (Tue): nothing sold by the account rule
     pd.DataFrame([{**pd.read_csv(picks).iloc[0].to_dict(), "As_Of": "2026-10-06"}]).to_csv(picks, index=False)
     o, meta, _ = pt.plan_orders("auto", EQ, {"S01": 100, "S24": 50}, picks_csv=picks, signal_csv=sig, midweek_csv=mid,

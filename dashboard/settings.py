@@ -69,7 +69,8 @@ def rules_text():
                "of it; overweight holdings are trimmed so new buys get their full weight.\n" if band else "")
             + (f"- **{days} sell rule:** every position in the account (the "
                f"strategy's and any other) ranked worse than {EXIT_BELOW}, or with no rank (score 0 or below, or not in the "
-               "stock list), is always sold in full, worst rank first (one sell order per stock), "
+               "stock list), is always sold in full if it is below its Alpaca average entry price (at or above it, it is kept until "
+               "Friday's rebalance, with no replacement), worst rank first (one sell order per stock), "
                + (f"and replaced 1-for-1 by the best-ranked top-{EXIT_TO_TOP} stock the account does not hold (same dollars; "
                   "earnings rule, no buy back after an earnings-day stop sale); if none is left the cash goes to the "
                   "spare-cash rule below.\n" if EXIT_TO_TOP else

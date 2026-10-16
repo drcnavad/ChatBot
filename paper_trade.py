@@ -935,7 +935,8 @@ def account_exit_text(ex):
             else f"no position is worse than rank {ex['exit_below']}") + f"; positions with no rank: {none_txt}" + (
         f"; not bought: {', '.join(f'{s_} ({w})' for s_, w in ex['skipped'])}" if ex["skipped"] and parts else "") + (
         f"; kept (do-not-sell list): {', '.join(f'{s_} (rank {rk})' for s_, rk in ex['kept'])}"
-        if ex.get("kept") else "")
+        if ex.get("kept") else "") + (
+        f"; kept until Friday (at/above entry price): {', '.join(ex['kept_profit'])}" if ex.get("kept_profit") else "")
 
 def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signal_csv=SIGNAL_CSV, midweek_csv=MIDWEEK_CSV,
                 min_value=1.0, fractional=False, decision=None, live_prices=None, cash=None, force_deploy=False, entry=None):
@@ -953,12 +954,20 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     live_prices = live_prices or {}
     targets = targets.assign(Price=targets["Symbol"].map(live_prices).fillna(targets["Price"]))
     if meta["source"] in ("hold", "midweek"):
+        # Mon-Thu (Chirag, Oct 15): a holding the sell rules would drop is sold only below its Alpaca entry price; at or
+        # above it, it stays (no replacement) until Friday's rebalance. Without entry prices every rule sale goes ahead.
+        px0 = {**latest_prices(sorted(positions), signal_csv), **live_prices}
+        profit = {s: "at/above entry: kept until Friday" for s in _clean_positions(positions) if s not in no_sell
+                  and _safe_number((entry or {}).get(s), default=None) and _safe_number(px0.get(s), 0.0) >= float(entry[s])}
+        keep = {**no_sell, **profit}
         if meta["source"] == "hold":
             # Quiet mid-week check: no replacement / exit, so every held position is left unchanged (HOLD rows).
             px = {**latest_prices(sorted(positions), signal_csv), **live_prices}
             orders = build_hold_orders(positions, px)
         else:
-            mw = meta["midweek"][~meta["midweek"]["Sell"].astype(str).str.upper().isin(list(no_sell))]   # kept: no paired buy
+            sells = meta["midweek"]["Sell"].astype(str).str.upper()
+            meta["kept_in_profit"] = sorted(set(sells) & set(profit))
+            mw = meta["midweek"][~sells.isin(list(keep))]   # kept: no paired buy
             syms = sorted(set(mw["Sell"].astype(str)) | set(mw["Buy"].dropna().astype(str)) | set(positions))
             px = latest_prices(syms, signal_csv)
             px.update(dict(zip(targets["Symbol"], targets["Price"])))
@@ -983,7 +992,9 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
         if missing and len(ranking):                # e.g. a stock no longer in the list: Alpaca market data (read-only)
             acct_px.update(current_prices(missing))
         orders, exits = build_account_exit_orders(orders, positions, account_size, ranking, listed=listed, blocked=blocked,
-                                                  fractional=fractional, prices=acct_px, keep=no_sell)
+                                                  fractional=fractional, prices=acct_px, keep=keep)
+        exits["kept_profit"] = sorted({s for s, _ in exits["kept"] if s in profit} | set(meta.get("kept_in_profit", [])))
+        exits["kept"] = [k for k in exits["kept"] if k[0] not in profit]
         meta["account_exits"] = exits
         if exits["sold"]:
             meta["source"] += "+exits"
@@ -995,7 +1006,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
             if info["buys"] or info["topups"]:
                 meta["source"] += "+cash"
                 meta["invested"] = None
-        return skip_orders(orders, no_sell, "SELL"), meta, targets
+        return skip_orders(orders, keep, "SELL"), meta, targets
     others = [s for s in positions if s not in set(targets["Symbol"])]
     prices = {**latest_prices(others, signal_csv), **live_prices}
     unpriced = sorted(s for s in others if _safe_number(prices.get(s), default=None) is None)

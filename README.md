@@ -14,8 +14,8 @@ All code lives in this folder. Everything the pipeline writes goes to `Reports/`
   a sleeve stock that is also in the top 10 frees its slot for rank 11. The sleeve is on `do_not_sell` and the Mon-Thu
   rank-20 rule never sells it. When QQQ is below its 200-day average every weight is halved. A holding
   within 1 point of its target is left alone.
-- **Monday-Thursday check** (2:30 PM CT): a holding at or below its 200-day average or ranked worse than 20 is sold and replaced, same dollars, by the
-  best-ranked top-10 stock not held (cash until Friday only if none is left). On the live account this applies to every
+- **Monday-Thursday check** (2:30 PM CT): a holding at or below its 200-day average or ranked worse than 20 is sold, but only if it is below
+  its Alpaca average entry price (at or above it: kept until Friday), and replaced, same dollars, by the best-ranked top-10 stock not held (cash until Friday only if none is left). On the live account this applies to every
   position. Then cash above 1% of equity buys top-10 stocks not held, and what is left is split equally over the held stocks at or above their
   average entry price (none in profit: all held; earnings-blocked / sold-today ones skipped; a stock at its cap passes its
   share on; sleeve stocks stay at 5%).
