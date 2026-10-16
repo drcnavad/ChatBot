@@ -561,8 +561,9 @@ if os.path.exists(ft.SIGNAL_CSV):
     check("live strategy = the pipeline's Strategy_Weight on every day since Oct 2 (same be.WINNER rules)", min(fits) < 1e-9, fits)
     cfg_now = next(c for c in ft.STRATEGIES if c["name"] == ft.LIVE)
     lnow = ft.strategy_targets(cfg_now, real_inp).loc[d0:, list(sector_mapping.defensive)]
-    check("live strategy: the 5 defensive stocks held every day, at most 5% each (x 99%)",
-          (lnow > 0).all().all() and lnow.to_numpy().max() <= be.live_weights(sector_mapping.defensive_cap) + 1e-12, lnow.max().to_dict())
+    check("live strategy: the defensive stocks (LMT, NOC) held every day, an equal share of 12 at most (x 99%)",
+          sorted(lnow.columns) == ["LMT", "NOC"] and (lnow > 0).all().all()
+          and lnow.to_numpy().max() <= be.live_weights(1 / 12) + 1e-12, lnow.max().to_dict())
     check("no live file changed (signal_analysis, picks, run_state, pending orders, orders log); WINNER untouched",
           digest() == before and be.WINNER == w0)
 # provisional marks (display only): Tue / Thu have no signal rows until the next decision run

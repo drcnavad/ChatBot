@@ -837,9 +837,6 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
         if px and d >= floor_usd:
             new[sym] = [int(r.Rank), px, d]
             left -= d
-    import sector_mapping as sm
-    sleeve = {str(x).upper() for x in getattr(sm, "defensive", ())}
-    sleeve_cap = float(getattr(sm, "defensive_cap", None) or 1.0) * be.LIVE_INVESTED * equity
     by_sym = {str(r.Symbol).upper(): r for r in ranking.itertuples()}
     pool, gain = [], []                             # 2. the rest: held stocks at/above break-even (else all held), equally
     for sym in sorted(set(positions) - sold, key=lambda x: _safe_number(getattr(by_sym.get(x), "Rank", None), 999.0)):
@@ -857,8 +854,7 @@ def build_cash_deploy_orders(orders, positions, equity, cash, ranking, blocked=N
                 info["skipped"].append((sym, f"held: {why}"))
             continue
         shares = _safe_number(orders.at[row[0], "Target_Shares"], 0.0) if len(row) else positions[sym]
-        g = [sym, rk, px, shares * px + (new[sym][2] if sym in new else 0.0),
-             min(cap, sleeve_cap) if sym in sleeve else cap]                  # a defensive-sleeve stock: its 5% cap
+        g = [sym, rk, px, shares * px + (new[sym][2] if sym in new else 0.0), cap]
         pool.append(g)
         if _safe_number(entry.get(sym), default=None) and px >= float(entry[sym]):
             gain.append(g)

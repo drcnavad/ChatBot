@@ -36,6 +36,7 @@ TICKERS = set(sm.tradable_symbols) | set(sm.fundamentals_symbols) | REMOVED_2026
 ALLOWED_NAMES = {
     ("sentiment_analysis.ipynb", "AMBIGUOUS_TICKERS"),     # tickers that are also English words (news search hygiene)
     ("sentiment_analysis.ipynb", "ALIASES"),               # curated news search names; fallback = sector_mapping.symbol_name
+    ("forward_test.py", "NOW_SLEEVE"),                     # the Oct 15 defensive sleeve, pinned for the "Now" strategies
 }
 SKIP_FILES = {"sector_mapping.py", os.path.join("tests", "test_single_universe.py")}
 

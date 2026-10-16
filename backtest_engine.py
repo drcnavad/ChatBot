@@ -74,7 +74,7 @@ WINNER = {
     "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
     "min_score": 0.0,       # only stocks with a score above 0 can be picked
     "sector_cap": 1.0,      # no sector limit: Friday = pure top-10 by rank
-    "vol_sizing": False,    # equal weights (the sleeve's 5% cap spills to the picks: 10 x 7.5% + 5 x 5%)
+    "vol_sizing": False,    # equal weights: the 10 picks + the defensive sleeve (LMT, NOC) = 12 x 8.33%
     "max_weight": 0.15,     # no stock above 15% (after the vol weights and the regime halving); the extra stays in cash
     "buffer_rank": None,    # no rank buffer (tested, did not help)
     "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF ('sector_median' / 'median_all': tested, not live)
@@ -160,7 +160,7 @@ def winner_rank_args(regime):
                 sector_cap=S["sector_cap"], vol_sizing=S["vol_sizing"], buffer_rank=S["buffer_rank"],
                 regime_scale=S["regime_scale"] if S["use_regime"] else None,
                 max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"),
-                sleeve=list(sector_mapping.defensive), sleeve_cap=sector_mapping.defensive_cap)
+                sleeve=list(sector_mapping.defensive))
 
 WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
 

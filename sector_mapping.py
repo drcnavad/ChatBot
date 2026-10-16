@@ -19,7 +19,7 @@ stock_symbols = [
     'CRDO', 'CLS', 'HIMX', 'NU',
     'PWR', 'GEV', 'CAT', 'CMI', 'EMR', 'ROK', 'MS', 'GS', 'ETN', 'HWM',   # high-beta industrials / financials (2026-10-13)
     'ANF', 'NUE', 'JCI', 'DAL', 'WSM', 'IBKR', 'GRMN',   # high-beta non-tech (2026-10-14)
-    'ABBV', 'PFE', 'KO',   # defensive sleeve (2026-10-15)
+    'ABBV', 'PFE', 'KO',   # added 2026-10-15 (ordinary stocks from Oct 16)
     'WULF',   # TeraWulf (Chirag, 2026-10-15)
     # Loss-making (negative net income, last 4 quarters, as of 2026-10-13); uncomment to re-add:
     # 'AVAV', 'COIN', 'CRWV', 'FIG', 'GTLB', 'HIMS', 'IREN', 'SNOW', 'TEAM', 'ZS', 'UMAC', 'U',
@@ -33,10 +33,9 @@ stock_symbols = [
 # do_not_sell: never sold or trimmed (the Mon-Thu rank-20 rule keeps it too). The earnings-day stop skips it too.
 do_not_buy = ['AMD', 'TSLA', 'PANW', 'ARM', 'SHOP']
 do_not_sell = ['LMT', 'NOC']   # never sold until Chirag says (2026-10-15; ABBV, PFE, KO removed Oct 15 evening)
-# Defensive sleeve (Chirag, 2026-10-15): always bought on Friday next to the top 10 (15 stocks, same 1/volatility weights).
-# A sleeve stock that is also in the top 10 frees its slot for the next rank.
-defensive = ['LMT', 'NOC', 'ABBV', 'PFE', 'KO']
-defensive_cap = 0.05   # max weight per sleeve stock; the trimmed weight goes to the top-10 picks pro rata (Chirag, 2026-10-15)
+# Defensive sleeve (Chirag, 2026-10-15; only LMT and NOC from Oct 16): always bought on Friday next to the top 10, all 12
+# at an equal weight. A sleeve stock that is also in the top 10 frees its slot for the next rank.
+defensive = ['LMT', 'NOC']
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
 sector_etfs = {

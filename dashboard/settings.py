@@ -59,7 +59,7 @@ def rules_text():
             "(newer stocks are listed as not traded yet).\n"
             f"- **Friday picks:** the {N_PICKS} best-ranked stocks by rank (no sector limit); fewer qualifying stocks = "
             "the rest in cash. Stocks that are not picked are sold.\n"
-            + ("- **Size:** equal weights (the defensive sleeve stocks at their 5% cap, the rest shared by the picks), "
+            + ("- **Size:** equal weights (the picks + the defensive sleeve LMT and NOC: 12 stocks), "
                if not WINNER.get("vol_sizing", True) else "- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger), ")
             + f"scaled to {LIVE_INVESTED:.0%} invested, "
             "each weight rounded down to 0.01%.\n"
@@ -80,7 +80,7 @@ def rules_text():
                "not hold, in rank order, each at its current rule weight; what is left is split equally over the "
                "stocks already held that are at or above break-even (their Alpaca average entry price; if none is, over all "
                "held stocks; a blocked stock or one being sold today is skipped; a stock at its cap passes its share to "
-               "the others; sleeve stocks stay at their cap)"
+               "the others)"
                + (f" (max {MAX_WEIGHT * LIVE_INVESTED:.1%} of equity per stock)" if MAX_WEIGHT else "")
                + ("; earnings rule" if EARNINGS else "") + ", no buy back after an earnings-day stop sale. Cash no stock can "
                f"take, and any order under ${DEPLOY_MIN_USD:,.0f} or {DEPLOY_MIN_PCT:.0%} of equity (whichever is larger), "
