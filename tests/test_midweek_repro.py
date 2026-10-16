@@ -49,8 +49,8 @@ def check(exit_all, t20=False, e5=False):
     kw = {"exit_all_below": exit_all, "exit_to_top": None,  # pin the cash-until-Friday variant (live now refills)
           "earnings_block_days": 5 if e5 else None,
           # sector_cap must be pinned: live is now 1.0 (pure top-10); these EXPECTED numbers are the 0.4-cap era
-          "selection": (dict(max_pick_rank=20, cap_soft=True, sector_cap=0.4, sleeve=(), max_weight=g.MAX_W) if t20
-                        else dict(max_pick_rank=None, cap_soft=False, sector_cap=0.4, sleeve=(), max_weight=g.MAX_W))}
+          "selection": (dict(max_pick_rank=20, cap_soft=True, sector_cap=0.4, sleeve=(), max_weight=g.MAX_W, vol_sizing=True) if t20
+                        else dict(max_pick_rank=None, cap_soft=False, sector_cap=0.4, sleeve=(), max_weight=g.MAX_W, vol_sizing=True))}
     # no defensive sleeve and the 20% cap of the pins (live is 15% from Oct 15, 2026)
     t_live, checks = be.winner_targets(g.sc, g.el, g.vol, g.reg, g.weekly, tiebreak_w=g.rs, check_log=chk, midweek=MW, **kw)
     t_test, swaps_test, sells_test = g.buffered_midweek(3, 15, exit_all, t20=t20, block=g.block_matrix(5) if e5 else None)

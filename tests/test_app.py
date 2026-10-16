@@ -199,7 +199,8 @@ for sym in dict.fromkeys(cases):
         ld = ld.set_index("Symbol")
         b = ld.loc[sym] if sym in ld.index else None          # the default filter shows the portfolio & changes only
         expect(b is None and word is None or b is not None and int(b["Rank today"]) == int(r) and b["Next rebalance plan"] == want_plan(sym) and b["Signal"] == word
-               and int(b[rank_then]) == int(CH.set_index("Symbol").Rank[sym]),
+               and (pd.isna(CH.set_index("Symbol").Rank[sym])   # score -1 (below the 200-day): no decision rank
+                    or int(b[rank_then]) == int(CH.set_index("Symbol").Rank[sym])),
                f"{sym}: Last decision row {b.to_dict() if b is not None else None} disagrees")
     print(f"   {sym}: {badges} · rank {rk} OK")
 import forward_test as ft  # noqa: E402
@@ -274,7 +275,7 @@ expect(not any(e.label.startswith("Rank history") for e in at.expander), "stale 
 W = be.WINNER
 rules = next((m.value for m in at.markdown if m.value.startswith("**Strategy rules")), "")
 _friday = f"the {W['n']} best-ranked stocks by rank (no sector limit)"
-_wants = [f"Strategy rules ({W['tag']})", f"{W['w_tech']:g} × Technical", f"at least {be.MIN_BARS} trading days",
+_wants = [f"Strategy rules ({W['tag']})", "low volatility in uptrend" if W["score"] == "low_vol" else "Relative Strength", f"at least {be.MIN_BARS} trading days",
           _friday, f"scaled to {be.LIVE_INVESTED:.0%} invested", f"{W['regime_symbol']} at or below its 200-day average",
           "every weight is halved" if W["regime_scale"] == 0.5 else "every weight is multiplied",
           f"within {W['rebalance_band'] * 100:g} percentage point", "sell rule:",

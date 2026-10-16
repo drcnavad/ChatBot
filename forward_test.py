@@ -80,11 +80,11 @@ NOW = dict(score="rs", midweek={"enter_top": None, "exit_below": None, "days": M
 EQ = {**PLAIN, "vol_sizing": False}                      # ... and an equal weight per stock
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
 STRATEGIES = [
-    dict(name=LIVE, live=True, rule="Always the current live rules, as the account trades them (Oct 15: relative strength only, "
-         "top 10 + LMT NOC ABBV PFE KO at 5% max, 1/volatility weights, Fri rebalance, Mon-Thu sell worse than rank 20 -> "
-         "best top-10 not held, spare cash -> unheld top 10 then the holdings in profit equally (from Oct 16); do_not_buy never bought; max "
-         "15% per stock from Oct 15, was 20%). "
-         "Oct 2-14 as recorded then (the Oct 2 rules, Mon/Wed)."),
+    dict(name=LIVE, live=True, rule="Always the current live rules, as the account trades them (from Oct 16: low volatility in uptrend = the 10 "
+         "calmest stocks above their 200-day average, equal weight, + LMT NOC ABBV PFE KO at 5%, Fri rebalance, Mon-Thu "
+         "sell below the 200-day or worse than rank 20 -> best top-10 not held, spare cash -> unheld top 10 then the "
+         "holdings in profit equally; do_not_buy never bought; max 15% per stock). Oct 2-15 as recorded then (Oct 13-15: "
+         "relative strength only, 1/volatility weights; before: the Oct 2 rules)."),
     dict(name=C6, rule="What the bot traded Oct 2-7 (pinned): 50% technical + 50% relative strength, top 10, Fri rebalance + "
                        "Mon-Thu top-3 swap (below rank 15) and exit below rank 30 (checks Mon/Wed until Oct 15)."),
     dict(name="C6, 4 per sector, no earnings skip", select=PLAIN, earnings=None,
@@ -355,7 +355,8 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit
     rank (30) is swapped for the best non-held stock in the top exit_to_top (same weight, earnings rule) and only sold to
     cash when none is left. Default "winner" = the pinned EXIT_TO_TOP (10); pass None for cash-until-Friday.
     Returns (raw weights, open-sale prices)."""
-    W, args = be.WINNER, {**be.winner_rank_args(inp["regime"]), "sleeve": (), "max_weight": MAX_WEIGHT}   # pinned Oct 2 rules
+    W, args = be.WINNER, {**be.winner_rank_args(inp["regime"]), "sleeve": (), "max_weight": MAX_WEIGHT,
+                      "vol_sizing": True}                                  # pinned Oct 2 rules
     if exit_to_top == "winner":
         exit_to_top = EXIT_TO_TOP                         # pinned mid-week rules (MIDWEEK / EXIT_BELOW / EXIT_TO_TOP)
     score, elig, vol, tb = inp["scores"]["live"], inp["eligible"], inp["vol"], inp["scores"]["rs"]
@@ -613,7 +614,7 @@ def strategy_targets(cfg, inp):
         tgt, _ = be.winner_targets(inp["scores"][cfg.get("score", "live")], inp["eligible"], inp["vol"],
                                    inp[cfg.get("regime", "regime")], inp["weekly" if cal == "mwf" else cal],
                                    tiebreak_w=inp["scores"].get(tb), midweek=cfg.get("midweek", MIDWEEK) if cal == "mwf" else False,
-                                   selection={"max_weight": MAX_WEIGHT, **(cfg.get("select") or {}), "sleeve": sleeve},
+                                   selection={"max_weight": MAX_WEIGHT, "vol_sizing": True, **(cfg.get("select") or {}), "sleeve": sleeve},
                                    earnings_block_days=cfg.get("earnings", "winner"), earnings=inp["earnings"],
                                    exit_all_below=below, exit_to_top=top,
                                    never_buy=be.sector_mapping.do_not_buy if cfg.get("never_buy") else ())

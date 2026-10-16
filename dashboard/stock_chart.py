@@ -9,7 +9,7 @@ from plotly.subplots import make_subplots
 from dashboard.data import last_next_earnings, live_quote, load_decisions, row_for
 from dashboard.history import (RS_COLORS, daily_status, event_hover,
     relative_strength_lines, strategy_events)
-from dashboard.settings import CT, HOLDINGS_CSV, W_TECH
+from dashboard.settings import CT, HOLDINGS_CSV, LOW_VOL
 from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, HOLD_SHADE, MA_COLORS, MA_COLS, TEAL, num)
 
 def build_price_chart(ticker, tdata, show_strategy):
@@ -24,7 +24,9 @@ def build_price_chart(ticker, tdata, show_strategy):
     height_of = {"price": 0.44, "score": 0.20, "rs": 0.18, "rsi": 0.11, "macd": 0.11}
     titles = {
         "price": "<b>Price</b>",
-        "score": f"<b>Strategy score</b> (teal) = {W_TECH:g} × Technical (grey) + {1 - W_TECH:g} × Strength vs sector/SPY (violet)",
+        "score": ("<b>Strategy score</b> (teal) = 1 / 63-day volatility above the 200-day average, else -1 · Technical (grey) · "
+                  "Strength vs sector/SPY (violet)" if LOW_VOL else
+                  "<b>Strategy score</b> (teal) = Strength vs sector/SPY (violet) · Technical (grey)"),
         "rs": ("<b>Performance since " + f"{x_start:%b %-d, %Y}" + "</b> (% price change): " + " · ".join(
             f'<span style="color:{RS_COLORS[k]};">━ {name}</span>' for k, (name, _s) in rs_lines.items())),
         "rsi": "<b>RSI</b> (above 70 = stretched up, below 30 = stretched down)", "macd": "<b>MACD</b> (indigo) vs signal (dashed)",

@@ -63,7 +63,7 @@ if _missing:   # stop here with a clear message (the audit below needs every sto
     sys.exit(f"FAIL backtest bar cache has no bars for {_missing} (new in sector_mapping.py): the next pipeline run fetches "
              f"them (be.ensure_long_cache in main_signal_analysis.ipynb), or run python -c \"import backtest_engine as be; "
              f"print(be.ensure_long_cache())\"")
-_WT = be.WINNER.get("w_tech", 0.5)
+_SC = sa.pivot_table(index="Date", columns="Symbol", values="Close").combine_first(close)   # pipeline closes, older: cache
 etf_of = {s: dict((n, e) for e, n in sm.sector_etfs.items()).get(sm.symbol_sector.get(s)) for s in tradable}
 
 # raw closes agree with the pipeline's closes?
@@ -139,10 +139,14 @@ def check_scores(D, title=""):
     print(f"(b) RS_Score recomputed: {d_rs.notna().sum()} symbols, max |diff| {d_rs.max():.4f}")
     expect(d_rs.max() < 0.01, f"RS_Score mismatch on {D.date()}")
     # (a) Strategy score
-    exp = _WT * t.Technical_Score + (1 - _WT) * t.RS_Score   # live weights (w_tech 0.0 = RS only since 2026-10-13)
-    d_ss = (t.Strategy_Score - exp).abs()
-    print(f"(a) Strategy_Score = {_WT}*Tech + {1 - _WT}*RS: max |diff| {d_ss.max():.4f}; NaN scores (ineligible): {sorted(t.index[t.Strategy_Score.isna()])}")
-    expect(d_ss.max() < 0.01, f"Strategy_Score mismatch on {D.date()}")
+    if be.WINNER["score"] == "low_vol":            # 1 / 63-day volatility above the 200-day average, else -1
+        v = _SC.loc[:D, t.index].pct_change(fill_method=None).iloc[-63:].std()
+        exp = (1 / v).where(t.Close > t.ma_200, -1.0)
+    else:
+        exp = t.RS_Score
+    d_ss = (t.Strategy_Score - exp).abs() / exp.abs().clip(lower=1)
+    print(f"(a) Strategy_Score ({be.WINNER['score']}): max rel. diff {d_ss.max():.5f}; NaN scores (ineligible): {sorted(t.index[t.Strategy_Score.isna()])}")
+    expect(d_ss.max() < 1e-3, f"Strategy_Score mismatch on {D.date()}")
     print(f"    eligible (>=200 bars): {int(elig.sum())} of {len(tradable)}; Strategy_Score non-null: {int(t.Strategy_Score.notna().sum())}; "
           f"mismatch: {sorted(set(elig.index[elig]) ^ set(t.index[t.Strategy_Score.notna()]))}")
     # (c) rank
@@ -180,7 +184,7 @@ def audit(D, compare_col):
         for s in cands.index:
             if len(picked) < 10 and s not in picked:
                 picked.append(s); relaxed.append(s)
-    inv = 1 / vol[picked]
+    inv = 1 / vol[picked] if be.WINNER["vol_sizing"] else pd.Series(1.0, index=picked)
     w = inv / inv.sum() * len(picked) / 10
     if int(day.Regime_On.iloc[0]) == 0:
         w *= 0.5

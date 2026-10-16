@@ -32,7 +32,7 @@ stock_symbols = [
 # do_not_buy: never bought or topped up (on Friday its slot goes to the next eligible stock, down to rank 20).
 # do_not_sell: never sold or trimmed (the Mon-Thu rank-20 rule keeps it too). The earnings-day stop skips it too.
 do_not_buy = ['AMD', 'TSLA', 'PANW', 'ARM', 'SHOP']
-do_not_sell = ['LMT', 'NOC', 'ABBV', 'PFE', 'KO']   # the defensive sleeve: never sold until Chirag says (2026-10-15)
+do_not_sell = ['LMT', 'NOC']   # never sold until Chirag says (2026-10-15; ABBV, PFE, KO removed Oct 15 evening)
 # Defensive sleeve (Chirag, 2026-10-15): always bought on Friday next to the top 10 (15 stocks, same 1/volatility weights).
 # A sleeve stock that is also in the top 10 frees its slot for the next rank.
 defensive = ['LMT', 'NOC', 'ABBV', 'PFE', 'KO']

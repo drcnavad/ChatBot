@@ -233,7 +233,7 @@ check("registry: WINNER untouched", be.WINNER == w0)
 # Forward-test safety (t187u): the strategies keep their own Mon/Wed rules (ft.MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, the Oct 2
 # rules); a change of the live WINNER Mon/Wed keys must not move any of them.
 FT_PINS = dict(midweek=ft.MIDWEEK, exit_all_below=ft.EXIT_BELOW, exit_to_top=ft.EXIT_TO_TOP,
-               selection={"sleeve": (), "max_weight": ft.MAX_WEIGHT})   # the paper strategies keep the 20% cap
+               selection={"sleeve": (), "max_weight": ft.MAX_WEIGHT, "vol_sizing": True})   # the paper strategies keep the 20% cap
 check("forward-test pins = the Oct 2 mid-week rules (top-3 swap below 15, exit below 30, refill from the top 10), Mon-Thu",
       ft.MIDWEEK == {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Tue", "Wed", "Thu"]} and (ft.EXIT_BELOW, ft.EXIT_TO_TOP) == (30, 10)
       and ft.NOW["midweek"] == {"enter_top": None, "exit_below": None, "days": ft.MON_THU} and ft.NOW["exit"] == (20, 10))

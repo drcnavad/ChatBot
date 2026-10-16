@@ -32,7 +32,7 @@ EXIT_TO_TOP = WINNER.get("midweek_exit_to_top") if EXIT_BELOW else None  # refil
 EARNINGS = WINNER.get("earnings_block_days")                         # no new buys with earnings within N days (None = off)
 
 N_PICKS = WINNER.get("n", 10)                                        # portfolio size (top 10)
-W_TECH = WINNER.get("w_tech", 0.5)                                   # score = W_TECH x technical + (1 - W_TECH) x RS
+LOW_VOL = WINNER.get("score") == "low_vol"                          # low volatility in uptrend (else relative strength)
 REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day average"   # market filter off
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
@@ -51,12 +51,17 @@ def rules_text():
             "and trades in market hours: sells first, then buys sized from the cash free after the sells; any rest at 9 AM CT): "
             "the Friday rebalance (the week's last trading day)"
             + (f" and the {days} checks (the next trading day after a holiday)" if MIDWEEK else "") + ".\n"
-            f"- **Score:** {W_TECH:g} × Technical + {1 - W_TECH:g} × Relative Strength {RS_LABEL}. Only stocks with a score "
+            + ("- **Score:** low volatility in uptrend (from Oct 16, 2026): 1 / 63-day volatility, calmest first; a stock at or "
+               "below its 200-day average scores -1 (not picked; sold Mon-Thu). Ties: relative strength. " if LOW_VOL else
+               f"- **Score:** Relative Strength {RS_LABEL}. ")
+            + f"Only stocks with a score "
             f"above {WINNER.get('min_score', 0):g} and at least {MIN_BARS} trading days of prices are ranked "
             "(newer stocks are listed as not traded yet).\n"
             f"- **Friday picks:** the {N_PICKS} best-ranked stocks by rank (no sector limit); fewer qualifying stocks = "
             "the rest in cash. Stocks that are not picked are sold.\n"
-            f"- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger), scaled to {LIVE_INVESTED:.0%} invested, "
+            + ("- **Size:** equal weights (the defensive sleeve stocks at their 5% cap, the rest shared by the picks), "
+               if not WINNER.get("vol_sizing", True) else "- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger), ")
+            + f"scaled to {LIVE_INVESTED:.0%} invested, "
             "each weight rounded down to 0.01%.\n"
             + (f"- **Market filter:** with {REGIME_OFF} at a rebalance, every weight is {HALVED}.\n" if SCALE else "")
             + (f"- **Max per stock:** No single stock gets more than {MAX_WEIGHT:.0%}; any extra stays in cash.\n" if MAX_WEIGHT else "")
