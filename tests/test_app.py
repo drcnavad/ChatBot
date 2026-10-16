@@ -336,7 +336,7 @@ if _led is not None:      # Alpaca is off in tests: the holdings row = the sleev
     expect(set(bodies.get("Holdings", [])) == _held, f"holdings row {bodies.get('Holdings')} != ledger {sorted(_held)}")
 print(f"   stock list rows: {counts}")
 _sec = [d.value for d in at.dataframe if "1 month %" in d.value.columns and "Sector" in d.value.columns]
-expect(len(_sec) == 1 and list(_sec[0].columns) == ["Sector", "Stocks", "14 days %", "1 month %", "2 months %", "3 months %"]
+expect(len(_sec) == 1 and list(_sec[0].columns) == ["Sector", "Stocks", "14 days %", "1 month %", "2 months %", "3 months %", "6 months %", "1 year %"]
        and _sec[0]["Stocks"].sum() == len(sm.tradable_symbols) and _sec[0]["1 month %"].is_monotonic_decreasing,
        f"Home tab sector performance table: {_sec[0].columns.tolist() if _sec else None}")
 all_linked = set(every)

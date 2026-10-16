@@ -60,8 +60,8 @@ LIVE_SWITCH = "2026-10-16"
 C6 = "Oct 2 rules (pinned)" # the rules the forward test started with (pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, 50/50 score)
 # paper_trade's Mon-Thu spare-cash rule (forward_test never imports paper_trade; tests check these equal its constants)
 DEPLOY_MAX_RANK, DEPLOY_MIN_PCT = 10, 0.01
-LIVE_MARK = " (simulated, not your account)"
-ACCOUNT = "Your Alpaca account (real)"
+LIVE_MARK = " · Current strategy (live)"
+ACCOUNT = "My Alpaca account"
 RANK_RULE = ("Ranked by total return since Oct 2, 2026; a tie goes to the smaller max drawdown (Chirag, Oct 15; was the "
              f"median weekly return). After {WEEKS_TO_WIN} full weeks the top strategy is the winner only if its total "
              f"return beats both {LIVE} and QQQ; otherwise the live rules stay. Nothing switches on its own: the live "
@@ -114,8 +114,6 @@ STRATEGIES = [
          rule="The copy folder's main Quant leg: the Quant Score rules with 5 stocks."),
     dict(name="Quant + relative strength", score="quant_rs",
          rule="Oct 2 rules ranking on a 50/50 blend of Quant Score rank and relative strength rank."),
-    dict(name="C6 + news sentiment", score="sentiment",
-         rule="Oct 2 rules, ranking 80% on the C6 score and 20% on the latest news sentiment."),
     dict(name="Company fundamentals", score="fundamental", calendar="monthly", select=EQ, earnings=None,
          rule="Top 10 by the company-report score (Fundamental_Weight), equal weight, monthly."),
     dict(name="12-1 month momentum", score="mom_12_1", calendar="monthly", **SIMPLE,
@@ -127,16 +125,10 @@ STRATEGIES = [
     dict(name="Buy the dip", weights="dip",
          rule="The copy folder's dip test: buy a stock 8% below its 50-day average, sell when it is back at the average or "
               "after 30 days; 10% each, at most 10, deepest first, checked daily."),
-    dict(name="Legacy BUY/SELL signals", weights="legacy",
-         rule="The Legacy folder's rule: 60% technical + 25% fundamentals + 10% sector week + 5% news; hold from BUY (above "
-              "20) to SELL (below -25), an equal slice of the money per stock, checked daily."),
     dict(name="Top 5", select={"n": 5}, rule="The Oct 2 rules with 5 stocks."),
     dict(name="Top 20", select={"n": 20}, rule="The Oct 2 rules with 20 stocks (= ranks 1-20)."),
-    dict(name="Equal weight", select={"vol_sizing": False}, rule="The Oct 2 rules with an equal weight per stock."),
     dict(name="Friday only", calendar="weekly", rule="The Oct 2 rules without the Mon-Thu swaps and exits."),
     dict(name="Monthly", calendar="monthly", rule="The Oct 2 rules, rebalanced on the last trading day of each month only."),
-    dict(name="No sector limit", select={"sector_cap": 1.0, "cap_soft": True, "max_pick_rank": 20},
-         rule="Ranks 1-20 only, no sector cap (live is now pure top-10 with no rank-20 gate)."),
     dict(name="Dual momentum", score="dual", calendar="monthly", select={**EQ, "regime": None, "regime_scale": None},
          earnings=None, rule="Top 10 by 12-month return, only stocks that are up over the year; all cash while QQQ is "
                              "below its 200-day average; equal weight, monthly."),
@@ -158,35 +150,13 @@ STRATEGIES = [
     dict(name="Breakout with volume", score="breakout", calendar="weekly", select=EQ, earnings=None,
          rule="Stocks that closed within 2% of their 55-day high on 1.3x+ normal volume (5-day vs 50-day average) in the "
               "last 20 trading days and are still above their 50-day average; top 10 by that volume jump, equal weight, Fridays."),
-    dict(name="C6 + pre-earnings 3.5x ATR stop", stop="pre",
-         rule="The Oct 2 rules + a stop for a stock kept at the Friday rebalance with earnings in the next 7 days, from that "
-              "Friday through its first trading day after the report: sold in full at the close at or below its highest "
-              "close since bought minus 3.5x ATR(14), or at the open if that day opens below it; the best stock the live "
-              "rules would buy takes the slot."),
-    dict(name="C6 + post-earnings ATR stop", stop="post",
-         rule="The Oct 2 rules + the same stop from a holding's first trading day after earnings through 10 trading days "
-              "later: sold at the close at or below its highest close since bought minus 3x ATR(14); the best stock the "
-              "live rules would buy takes the slot."),
     dict(name="ATR dip buy (top 30)", weights="atr_dip",
          rule="Buy a stock ranked in the live top 30 when it closes 3x ATR(14) or more below its 20-day high close; 10% "
               "each (at most 10, best rank first), sold after 10 trading days."),
-    dict(name="ATR dip buy, not after earnings", weights="atr_dip_ex_earn",
-         rule="The ATR dip buy, but not within 10 trading days after the stock's earnings."),
     dict(name="ATR dip buy, sell on signal", weights="atr_dip_signal",
          rule="Buy a stock that closes 3x ATR(14) or more below its 20-day high close (live top 30, not a SELL); 10% each "
               "(at most 10, best rank first), held until the signal analysis says SELL (score below 0) or its live rank "
               "falls below 30 (the Oct 2 mid-week exit rank); no fixed hold."),
-    dict(name="C6 + ATR dip buys in spare cash", spare_dips=True,
-         rule="The Oct 2 rules; cash they leave unused (empty slots, half size when QQQ is weak) buys the not-after-earnings "
-              "ATR dips at 10% each (not within 5 days before earnings either), sold after 10 trading days or when the "
-              "live rules buy that stock or need the cash."),
-    dict(name="C6, swap below 20", midweek={**MIDWEEK, "exit_below": 20},
-         rule="The Oct 2 rules, but the Mon-Thu top-3 swap replaces a holding ranked worse than 20 (Oct 2 rules: 15)."),
-    dict(name="C6, swap below 25", midweek={**MIDWEEK, "exit_below": 25},
-         rule="The Oct 2 rules, but the Mon-Thu top-3 swap replaces a holding ranked worse than 25 (Oct 2 rules: 15)."),
-    dict(name="C6, exit to cash until Friday", replay={"exit_to_top": None},
-         rule="Like C6, but a Mon-Thu holding ranked worse than 30 is sold to cash until Friday (no top-10 refill; "
-              "the pre-2026-10-05 exit). The Oct 2 rules refill from the best non-held top-10."),
     dict(name="Risk parity", reweight="risk_parity",
          rule="The live picks, weighted so each stock adds the same risk (63-day volatility and correlation)."),
     dict(name="Top 20 rank-weighted (70/30)", score="rs", select={"n": 20}, reweight="rank_tier",
@@ -195,9 +165,7 @@ STRATEGIES = [
     # ---- the live rules of Oct 15, 2026 (pinned) with one change each (added Oct 15, computed from Oct 2)
     dict(name="Now: Friday only", **NOW, calendar="weekly", rule="Live rules of Oct 15 without the Mon-Thu checks."),
     dict(name="Now: no defensive sleeve", **{**NOW, "sleeve": False}, rule="Live rules of Oct 15 without the 5 defensive stocks."),
-    dict(name="Now: equal weight", **NOW, select={"vol_sizing": False}, rule="Live rules of Oct 15, an equal weight per stock."),
     dict(name="Now: top 15", **NOW, select={"n": 15}, rule="Live rules of Oct 15 with 15 stocks (+ the sleeve)."),
-    dict(name="Now: top 5", **NOW, select={"n": 5}, rule="Live rules of Oct 15 with 5 stocks (+ the sleeve), 20% max each."),
     dict(name="Now: exit below 15", **{**NOW, "exit": (15, 10)}, rule="Live rules of Oct 15, Mon-Thu sell worse than rank 15."),
     dict(name="Now: RS 10/21/63 days", **{**NOW, "score": "rs_short"},
          rule="Live rules of Oct 15, relative strength over 10/21/63 days (live: 21/63/126)."),
@@ -207,9 +175,6 @@ STRATEGIES = [
          rule="Live rules of Oct 15, ranking 30% technical + 70% relative strength."),
     dict(name="Now: calmer half", **{**NOW, "score": "rs_calm"},
          rule="Live rules of Oct 15, only stocks with 63-day volatility at or below the list's median (others sold Mon-Thu)."),
-    dict(name="Now: cash if QQQ < 50-day", **NOW, regime="qqq50", select={"regime_scale": 0.0},
-         rule="Live rules of Oct 15, but a Friday with QQQ below its 50-day average goes all to cash (live: half size below "
-              "the 200-day)."),
     # ---- added Oct 15, 2026 (evening, Chirag): the live 50/50 halves (from the Oct 16 close) and every rule discussed
     # that day (from Oct 2), simulated by forward_combos (no_overlap: the low-volatility half has priority)
     dict(name="Live half: Low vol monthly", combo=dict(legs=LIVE_LEGS, start=LIVE_SWITCH, which=0), ranked=False,
@@ -220,17 +185,6 @@ STRATEGIES = [
          rule="The live account's sector-rotation half on its own (from the Oct 16 close, 1.0 then): the best C6-score "
               "stocks in the 3 sectors whose ETF has the best 63-day return, top 10, 1/volatility weights, max 20% of the "
               "half, rebalanced every Friday; never buys a stock the low-volatility half holds. Not ranked (starts Oct 16)."),
-    dict(name="100% Low vol monthly (live rules)", combo=dict(legs=(("lowvol", "full", "month", 1.0),)),
-         rule="The live low-volatility rules on 100% (the Oct 15 plan before the 50/50): calmest 10 above the 200-day "
-              "average, max 4 per sector, equal weight, monthly; do_not_buy never bought."),
-    dict(name="Low vol monthly + Friday falling check (B-final)", combo=dict(legs=(("lowvol", "bfinal", "month", 1.0),)),
-         rule="Low vol monthly + every other Friday a holding below its cost or its 200-day average, or no longer a pick, "
-              "is sold and its dollars go to the best new pick (live briefly on Oct 15, commit 08e5f08)."),
-    dict(name="Low vol weekly (live rules)", combo=dict(legs=(("lowvol", "full", "week", 1.0),)),
-         rule="The live low-volatility rules rebalanced every Friday instead of monthly."),
-    dict(name="Low vol monthly + keep winners (A)", combo=dict(legs=(("lowvol", "keep", "month", 1.0),)),
-         rule="Low vol monthly, but at the month-end rebalance a holding that is no longer a pick stays while it is above "
-              "its cost and its 200-day average (rule A); the picks share what is left."),
     dict(name="Restored RS + sleeve, Mon-Thu checks (Oct 15 rules)", **NOW,
          rule="The live rules of Oct 13-15 (restored by commit 39e6a47): relative strength only, top 10 + the defensive "
               "sleeve, Friday rebalance, Mon-Thu sell worse than rank 20 refilled from the top 10, do_not_buy never "
@@ -240,15 +194,6 @@ STRATEGIES = [
               "sectors) weekly half, no overlap."),
     dict(name="50/50: Low vol + SR every 2 weeks 63d", combo=dict(legs=(LIVE_LEGS[0], ("sr63", "full", "2week", 0.5))),
          rule="50/50, the sector-rotation half (63 days) rebalanced every other Friday (from Oct 2), no overlap."),
-    dict(name="50/50: Low vol + SR monthly 63d", combo=dict(legs=(LIVE_LEGS[0], ("sr63", "full", "month", 0.5))),
-         rule="50/50, the sector-rotation half (63 days) rebalanced monthly, no overlap."),
-    *[dict(name=f"50/50: Low vol + SR weekly {n}d", combo=dict(legs=(LIVE_LEGS[0], (f"sr{n}", "full", "week", 0.5))),
-           rule=f"50/50, the sector-rotation half ranks sectors by their ETF's {n}-day return (live: 63), weekly, no overlap.")
-      for n in (10, 14, 21, 42)],
-    *[dict(name=f"50/50: Low vol + SR daily swap, keep top {k}", combo=dict(legs=(LIVE_LEGS[0], (f"sr63", f"swap{k}", "day", 0.5))),
-           rule=f"50/50, the sector-rotation half buys its top 10 once (equal dollars), then each day sells a holding ranked "
-                f"worse than {k} (or held by the low-vol half) for the best stock not held; no full rebalance.")
-      for k in (10, 15)],
     dict(name="50/50: Low vol + SR Friday swap, keep top 10", combo=dict(legs=(LIVE_LEGS[0], ("sr63", "swap10", "week", 0.5))),
          rule="50/50, the sector-rotation half swap-only (keep top 10) checked on Fridays only."),
     dict(name="50/50: Low vol + Vol-adjusted momentum weekly", combo=dict(legs=(LIVE_LEGS[0], ("vam", "full", "week", 0.5))),

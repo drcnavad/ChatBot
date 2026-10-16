@@ -1,4 +1,4 @@
-"""Home tab, bottom: sector performance over 14 days, 1, 2 and 3 months (Chirag, Oct 16, 2026).
+"""Home tab, bottom: sector performance over 14 days, 1, 2, 3 and 6 months and 1 year (Chirag, Oct 16, 2026).
 
 Each sector (sector_mapping.symbol_sector) = the equal-weighted average of its tradable stocks' price returns, from the
 closes in Reports/signal_analysis.csv: the latest close vs the last close on or before that many calendar days / months
@@ -16,7 +16,8 @@ except Exception:
     tradable_symbols = []
 
 WINDOWS = {"14 days %": pd.DateOffset(days=14), "1 month %": pd.DateOffset(months=1),
-           "2 months %": pd.DateOffset(months=2), "3 months %": pd.DateOffset(months=3)}
+           "2 months %": pd.DateOffset(months=2), "3 months %": pd.DateOffset(months=3),
+           "6 months %": pd.DateOffset(months=6), "1 year %": pd.DateOffset(years=1)}
 
 def sector_returns(df, symbols=None):
     """DataFrame Sector, Stocks, one column per WINDOWS entry (%), sorted by the 1-month return (best first)."""

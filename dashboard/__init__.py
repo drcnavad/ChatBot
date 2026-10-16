@@ -11,7 +11,7 @@
   stock_groups.py  Home tab: the stock list rows (holdings, candidates, buy zone, remaining)
   stock_chart.py   Home tab: price chart
   short_stock.py   Home tab: stocks too new to trade
-  sector_table.py  Home tab: sector performance (14 days, 1 / 2 / 3 months)
+  sector_table.py  Home tab: sector performance (14 days to 1 year)
   notes.py         Home tab: your notes table (add / edit / delete, saved to Reports/my_notes.csv)
   details/         Strategy and Trading Account tabs: one module per expander (details/__init__.py lays them out)
 """

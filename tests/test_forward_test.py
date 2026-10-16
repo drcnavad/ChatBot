@@ -219,20 +219,15 @@ full = {c["name"]: ft.strategy_targets(c, inp) for c in ft.STRATEGIES}
 tg = {k: t.loc["2026-10-02":] for k, t in full.items()}
 check(f"registry: {len(ft.STRATEGIES)} strategies with unique names, each with a one-line rule",
       len({c["name"] for c in ft.STRATEGIES}) == len(ft.STRATEGIES) >= 28 and all(c.get("rule") for c in ft.STRATEGIES))
-_q = "Now: cash if QQQ < 50-day"                       # the fake QQQ is below its 50-day from Oct 2: all cash
 _combo = {c["name"] for c in ft.STRATEGIES if c.get("combo")}   # forward_combos lines (tests/test_forward_combos.py)
 check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%), at most 99% invested",
       all((t.to_numpy() >= 0).all() and t.to_numpy().max() <= (0.198 + 1e-12 if k not in _combo else 0.25)
           and t.sum(axis=1).max() <= (0.99 + 1e-9 if k not in _combo else 1.0 + 1e-9)   # combo: drifted weights, no margin
-          and (t.sum(axis=1).max() > 0 or k == _q) for k, t in tg.items()),
+          and t.sum(axis=1).max() > 0 for k, t in tg.items()),
       {k: (round(t.to_numpy().max(), 4), round(t.sum(axis=1).max(), 4)) for k, t in tg.items()})
 check("registry: the strategies are not copies of each other (distinct weights over the fake history)",
       len({t.round(4).to_numpy().tobytes() for k, t in full.items() if k not in _combo}) >= len(ft.STRATEGIES) - len(_combo) - 5)   # the small fake history makes a few
 #                                                    coincide; the sleeve stocks are not in it (no sleeve = live now)
-_fri = inp["weekly"] & (full[_q].index >= full[_q].index[260])
-check("Now: cash if QQQ < 50-day: a Friday with QQQ below its 50-day goes all to cash, above it invests",
-      (full[_q][_fri & ~inp["qqq50"]].sum(axis=1) == 0).all() and (full[_q][_fri & inp["qqq50"]].sum(axis=1) > 0.4).all()
-      and (_fri & inp["qqq50"]).any() and (_fri & ~inp["qqq50"]).any())
 check("registry: WINNER untouched", be.WINNER == w0)
 # Forward-test safety (t187u): the strategies keep their own Mon/Wed rules (ft.MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, the Oct 2
 # rules); a change of the live WINNER Mon/Wed keys must not move any of them.
@@ -252,35 +247,20 @@ finally:
 check("forward-test safety: other WINNER mid-week settings change every pinned strategy not at all, and the live one does",
       all(full_alt[k].equals(full[k]) for k in full if k != ft.LIVE) and not full_alt[ft.LIVE].equals(full[ft.LIVE])
       and be.WINNER == w0, [k for k in full if not full_alt[k].equals(full[k])])
-lv, sp = full[ft.C6], full["C6 + ATR dip buys in spare cash"]
-check("live + ATR dips in spare cash: exactly the live weights, plus 10% dip positions in other stocks only with spare cash",
-      np.allclose(sp.where(lv > 0, 0), lv) and (sp.where(lv == 0, 0).isin([0, ft.be.live_weights(0.1)])).all().all()
-      and (sp.sum(axis=1) <= 0.99 + 1e-9).all() and (sp.where(lv == 0, 0).to_numpy() > 0).any(), (lv > 0).sum(axis=1).min())
 live_raw, _ = be.winner_targets(inp["scores"]["live"], inp["eligible"], inp["vol"], inp["regime"], inp["weekly"],
                                 tiebreak_w=inp["scores"]["rs"], earnings=EARN, **FT_PINS)
 check("ATR stops: with no stop the day-by-day replay = be.winner_targets exactly (every day, both windows)",
       all(ft.atr_stop_targets(inp, **{**ft.STOPS[m], "k": np.inf})[0].equals(live_raw) for m in ft.STOPS))
-# mid-week variants: swap-threshold ones differ from live at a Mon/Wed check; cash-until-Friday differs when a
-# rank>30 exit has a top-10 refill under live (Chirag 2026-10-05: live refills; this variant still cashes out).
-chk_days = be.midweek_check_days(live_raw.index, ft.MIDWEEK.get("days", ("Mon", "Wed")), inp["weekly"])
-tg_live_full = full[ft.C6]
-mid_swap = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c["name"].startswith("C6, swap")}
-first_swap = {k: int((~np.isclose(v, tg_live_full).all(axis=1)).argmax()) for k, v in mid_swap.items()}
-check("mid-week variants: swap below 20 / 25 = C6 until a Mon-Thu check, then differ there",
-      len(mid_swap) == 2 and all(chk_days.iloc[first_swap[k]] and first_swap[k] > 0 for k in mid_swap), first_swap)
-cash = full["C6, exit to cash until Friday"]
 # the "Now" strategies (live rules of Oct 15): do_not_buy never held, checks also on Tue / Thu, one change each
 now = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c.get("score") in ("rs", "rs_short", "rs_long", "tech30", "rs_calm")
        and c.get("exit")}
 _nb = [s_ for s_ in sector_mapping.do_not_buy if s_ in full[ft.LIVE]]
 _chg = lambda t: set(t.index[(t.diff().abs().sum(axis=1) > 1e-12).to_numpy()].dayofweek)
-check("Now strategies: 11 + the restored Oct 15 rules, do_not_buy never held, trades on Tue / Thu checks too, all different",
-      len(now) == 12 and all((t[_nb].to_numpy() == 0).all() for t in now.values())
+check("Now strategies: 8 + the restored Oct 15 rules, do_not_buy never held, trades on Tue / Thu checks too, all different",
+      len(now) == 9 and all((t[_nb].to_numpy() == 0).all() for t in now.values())
       and {1, 3} <= set().union(*(_chg(t) for t in now.values()))
-      and len({t.round(6).to_numpy().tobytes() for t in now.values()}) >= 11,     # fake data: no sleeve stocks
+      and len({t.round(6).to_numpy().tobytes() for t in now.values()}) >= 8,     # fake data: no sleeve stocks
       (_nb, sorted(set().union(*(_chg(t) for t in now.values())))))
-check("exit to cash until Friday: differs from live (live refills from top-10; this variant does not)",
-      not np.allclose(cash.to_numpy(), tg_live_full.to_numpy()), (float(np.abs(cash - tg_live_full).to_numpy().max()),))
 # stop scenarios: each stock held over a Friday reports (after the close) 2 sessions after that Friday
 L, fridays = live_raw.to_numpy(), np.where(inp["weekly"].to_numpy(bool))[0]
 EARN2 = pd.DataFrame([{"Symbol": s_, "Earnings Date": live_raw.index[f + 2], "Time": "PM"} for j_, s_ in enumerate(live_raw.columns)
