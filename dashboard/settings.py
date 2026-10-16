@@ -33,6 +33,10 @@ EARNINGS = WINNER.get("earnings_block_days")                         # no new bu
 
 N_PICKS = WINNER.get("n", 10)                                        # portfolio size (top 10)
 W_TECH = WINNER.get("w_tech", 0.5)                                   # score = W_TECH x technical + (1 - W_TECH) x RS
+LOW_VOL = WINNER.get("score") == "low_vol"                          # low volatility in uptrend (else relative strength)
+MONTHLY = WINNER.get("calendar") == "monthly"                       # rebalance on the last trading day of the month
+STRATEGY_NAME = ("Low volatility in uptrend (monthly)" if LOW_VOL and MONTHLY else
+                 "Low volatility in uptrend" if LOW_VOL else "C6 (relative strength)")
 REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day average"   # market filter off
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
@@ -42,8 +46,40 @@ try:                                                                 # Mon-Thu s
 except Exception:
     DEPLOY_MAX_RANK, DEPLOY_MIN_PCT, DEPLOY_MIN_USD, FRIDAY_SUB_MAX_RANK = 10, 0.01, 100.0, 20
 
+def low_vol_rules_text():
+    """The monthly low-volatility rules (live from Fri Oct 16, 2026) in plain words."""
+    band = WINNER.get("rebalance_band")
+    per_sector = max(1, int(WINNER.get("sector_cap", 1.0) * N_PICKS))
+    return (f"**Strategy rules: {STRATEGY_NAME} ({STRATEGY_TAG})**\n"
+            "- **When:** a full rebalance on Fri Oct 16, 2026 (the switch), then on the last trading day of each month, with "
+            "the prices at about 2:30 PM CT (sells first, then buys from the cash free after the sells; any rest at 9 AM CT "
+            "the next trading day)" + (", and the Friday check on the other Fridays" if WINNER.get("friday_falling_check") else "")
+            + ". **No Mon-Thu trading:** those 2:30 PM runs only refresh the data and place no orders.\n"
+            "- **Score:** 1 / 63-day volatility (calmest first), only stocks whose close is above their 200-day average; "
+            f"ties by relative strength. At least {MIN_BARS} trading days of prices.\n"
+            f"- **Picks:** the {N_PICKS} best, max {per_sector} per sector; do_not_buy stocks are never bought (the next "
+            "stock takes the slot). No earnings rule.\n"
+            f"- **Size:** equal weights, scaled to {LIVE_INVESTED:.0%} invested, each rounded down to 0.01%"
+            + (f"; max {MAX_WEIGHT:.0%} per stock" if MAX_WEIGHT else "") + ".\n"
+            + (f"- **Market filter:** with {REGIME_OFF} at a rebalance, every weight is {HALVED}.\n" if SCALE else "")
+            + (f"- **Rebalance:** every pick is brought back to its weight unless within {band * 100:g} point of it.\n" if band else "")
+            + ("- **Keep rule:** at a rebalance a holding that is no longer a pick is sold only if its price is below its "
+               "Alpaca average entry price or its close is at/below its 200-day average; one in profit and in an uptrend is "
+               "kept as it is (not sold, not trimmed) and the picks share the rest of the 99%.\n"
+               if WINNER.get("keep_profit_at_rebalance") else "")
+            + ("- **Friday check:** every Friday that is not a rebalance day (2:30 PM CT), a holding is sold in full when it "
+               "is below its Alpaca average entry price, its close is at/below its 200-day average, or it is no longer one of "
+               "the day's top-10 picks; each sale buys the best-ranked pick not held with the same dollars"
+               + (f" (max {MAX_WEIGHT * LIVE_INVESTED:.1%} of equity)" if MAX_WEIGHT else "")
+               + ", do_not_buy skipped; none left = cash. No trims or top-ups.\n" if WINNER.get("friday_falling_check") else "")
+            + ("- **Earnings-day stop:** off (no orders from earnings_stop.py).\n" if not WINNER.get("earnings_day_stop", True) else "")
+            + "- **Orders:** limit orders at the live quote (buy at the ask + 0.05%, sell at the bid - 0.05%); the 9 AM CT "
+            "check the next trading day sends any rest. A missed rebalance is caught up at the next market session.\n")
+
 def rules_text():
     """The live trading rules in plain words, in one place (numbers from backtest_engine.WINNER)."""
+    if LOW_VOL:
+        return low_vol_rules_text()
     band = WINNER.get("rebalance_band")
     days = " and ".join(MIDWEEK["days"]) if MIDWEEK else ""
     return (f"**Strategy rules ({STRATEGY_TAG})**\n"

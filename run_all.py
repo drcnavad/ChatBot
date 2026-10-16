@@ -1311,7 +1311,7 @@ def finished_text(label, end, ran, failures, trade_run, how, trades, sent_now=No
     else:
         moved, money = "no", "No trades needed - no orders, no money moved."
     nxt = be.next_decision_slot(end)
-    kind = {"full rebalance": "rebalance", "mid-week check": "check"}.get(be.decision_kind(nxt) if nxt else None)
+    kind = {"full rebalance": "rebalance", "mid-week check": "check", "Friday check": "check"}.get(be.decision_kind(nxt) if nxt else None)
     next_up = f"Next: {nxt:%a %b} {nxt.day} {kind} at {_hm(nxt)}." if kind else ""
     return moved, " ".join(f"{label} done {_hm(end)}. {steps} {money} {next_up} Nothing to do.".split())
 

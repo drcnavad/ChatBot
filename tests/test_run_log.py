@@ -23,6 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 os.environ["STOCK_ANALYSIS_RUN_LOG"] = os.path.join(tempfile.mkdtemp(), "run_log.csv")   # never the real one
+import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 
 class OrderSide(Enum):
     BUY = "buy"

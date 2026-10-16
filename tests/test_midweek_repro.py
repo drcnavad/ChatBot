@@ -21,6 +21,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import pandas as pd

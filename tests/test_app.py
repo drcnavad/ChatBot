@@ -17,6 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 os.environ["STOCK_ANALYSIS_LIVE_HOLDINGS"] = "off"   # never call Alpaca here (tests/test_live_holdings.py fakes it)
 sys.path.insert(0, ROOT)
+import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 import numpy as np
 import pandas as pd
 from markdown_it import MarkdownIt

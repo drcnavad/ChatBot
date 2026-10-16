@@ -67,26 +67,38 @@ RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 # read this one dict.
 # Change a rule here, then run `python run_all.py`.
 WINNER = {
+    # LIVE from Fri Oct 16, 2026 (Chirag, final): "Low volatility in uptrend (monthly)" = forward_test.py's "Low volatility
+    # in uptrend" strategy (score low_vol, calendar monthly, select EQ, earnings None, 20% cap) + do_not_buy never bought:
+    # a normal full rebalance on Oct 16 and the last trading day of each month, + the Friday check below on every other
+    # Friday. No Mon-Thu trading, no sleeve, no earnings rule.
     "n": 10,                # stocks held
-    "w_tech": 0.0,          # score = relative strength only
+    "score": "low_vol",     # winner_score: 1 / 63-day volatility (calmest first) while above the 200-day average, else -1
     "use_regime": True,     # soft market regime (below)
     "regime_symbol": "QQQ", # regime is on while QQQ closes above its 200-day average
     "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
-    "min_score": 0.0,       # only stocks with a score above 0 can be picked
-    "sector_cap": 1.0,      # no sector limit: Friday = pure top-10 by rank
-    "vol_sizing": True,     # weights proportional to 1 / 63-day volatility
-    "max_weight": 0.15,     # no stock above 15% (after the vol weights and the regime halving); the extra stays in cash
-    "buffer_rank": None,    # no rank buffer (tested, did not help)
-    "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF ('sector_median' / 'median_all': tested, not live)
-    # Mon-Thu close checks (days from this dict). No top-3 swap live; apply_midweek_swaps serves the forward test's pinned strategies.
-    "midweek_swap": {"enter_top": None, "exit_below": None, "days": ["Mon", "Tue", "Wed", "Thu"]},
-    "midweek_exit_below": 20,   # Mon-Thu: a holding ranked worse than 20 is always sold ...
-    "midweek_exit_to_top": 10,  # ... and replaced 1-for-1 by the best non-held top-10 (same weight, earnings rule);
-                                # cash until Friday only when no eligible refill is left
-    "max_pick_rank": None,      # no ranks 1-20 gate: every ranked name may be picked
-    "cap_soft": False,          # unused while sector_cap is 1.0
-    "earnings_block_days": 5,   # no new buy (or top-up) when earnings are due within 5 days (Reports/earnings_date.csv)
-    # Friday: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).
+    "min_score": 0.0,       # only stocks with a score above 0 can be picked (low_vol: above the 200-day)
+    "sector_cap": 0.4,      # max 4 per sector (forward_test EQ = PLAIN + equal weight)
+    "vol_sizing": False,    # equal weights: 10 x 10% (x 99% invested)
+    "max_weight": 0.20,     # no stock above 20% (forward_test MAX_WEIGHT); the extra stays in cash
+    "buffer_rank": None,    # no rank buffer
+    "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF (tiebreak only)
+    "calendar": "monthly",  # rebalance on the last trading day of each month (forward_test "monthly") ...
+    "switch_days": ["2026-10-16"],   # ... plus the one-off switch rebalance Fri Oct 16, 2026
+    "midweek_swap": None,   # no Mon-Thu checks: the 2:30 PM runs between rebalances place no orders
+    "midweek_exit_below": None,
+    "midweek_exit_to_top": None,
+    "max_pick_rank": None,      # no rank gate
+    "cap_soft": False,          # strict sector cap
+    "earnings_block_days": None,  # no earnings rule (the forward strategy has none)
+    "sleeve": False,            # no defensive sleeve (sector_mapping.defensive is kept only for the pinned forward strategies)
+    "keep_profit_at_rebalance": False,  # (tested, not live) keep a non-pick in profit + above its 200-day at a rebalance
+    "earnings_day_stop": False, # earnings_stop.py places no orders (not in the backtest; no Mon-Thu trading)
+    # Friday check (Chirag, Oct 15, final; ON): every Friday that is not a rebalance day, sell each holding that is below its
+    # Alpaca avg entry price, at/below its 200-day average, or no longer in the day's top-10 picks, and buy the best-ranked
+    # pick not held with the same dollars (max 20% x 99%; do_not_buy skipped). No trims / top-ups. (paper_trade
+    # friday_falling_orders.) False = monthly rebalances only.
+    "friday_falling_check": True,
+    # Rebalance: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).
     "rebalance_band": 0.01,
 }
 
@@ -94,6 +106,18 @@ TRADABLE = list(sector_mapping.tradable_symbols)
 SECTOR_ETFS = list(sector_mapping.sector_etfs)
 BENCHMARKS = list(sector_mapping.BENCHMARK_SYMBOLS)
 SHORT_HISTORY_CSV = REPORTS_DIR / "short_history_reference.csv"   # stocks too new to score (main_signal_analysis.ipynb)
+
+# The live rules of Oct 15, 2026 (weekly C6, relative strength + sleeve + Mon-Thu checks), before the Oct 16 switch to the
+# monthly low-volatility rules. Only the tests of that machinery use it (tests/c6_rules.py); live reads WINNER.
+C6_RULES_OCT15 = {
+    "n": 10, "w_tech": 0.0, "score": "rs", "use_regime": True, "regime_symbol": "QQQ", "regime_scale": 0.5, "min_score": 0.0,
+    "sector_cap": 1.0, "vol_sizing": True, "max_weight": 0.15, "buffer_rank": None, "rs_benchmark": "etf",
+    "calendar": "weekly", "switch_days": [],
+    "midweek_swap": {"enter_top": None, "exit_below": None, "days": ["Mon", "Tue", "Wed", "Thu"]},
+    "midweek_exit_below": 20, "midweek_exit_to_top": 10, "max_pick_rank": None, "cap_soft": False,
+    "earnings_block_days": 5, "sleeve": True, "keep_profit_at_rebalance": False, "earnings_day_stop": True,
+    "friday_falling_check": False, "rebalance_band": 0.01,
+}
 
 def scored_stock_count():
     """Stocks the strategy scores: the list minus the short-history stocks of the latest run."""
@@ -104,8 +128,18 @@ def scored_stock_count():
     return len([s for s in TRADABLE if s not in short])
 
 def winner_label(n_stocks):
-    """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'C6-U91-NS-MW30R10-E5'."""
+    """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'LV-M-U84' / 'C6-U91-NS-MW30R10-E5'."""
     S, mw = WINNER, WINNER.get("midweek_swap")
+    if S.get("score") == "low_vol" and S.get("calendar") == "monthly":
+        tag = (f"LV-M-U{n_stocks}" + ("-KP" if S.get("keep_profit_at_rebalance") else "")
+               + ("-FC" if S.get("friday_falling_check") else ""))
+        name = (f"Low volatility in uptrend (monthly): the {S['n']} calmest stocks above their 200-day average, equal weight, "
+                f"max {winner_max_per_sector()} per sector, rebalanced on the last trading day of the month + soft QQQ regime "
+                f"({n_stocks} stocks)" + (" [at a rebalance a non-pick is sold only below its purchase price or at/below its 200-day average]"
+                                          if S.get("keep_profit_at_rebalance") else "")
+                + (" + Friday check (sell a holding below its purchase price, at/below its 200-day or out of the top 10; "
+                   "same dollars into the best pick not held)" if S.get("friday_falling_check") else ""))
+        return tag, name
     tag = f"C6-U{n_stocks}"
     if S.get("sector_cap", 0.4) >= 1.0 - 1e-12:
         name = f"C6: weekly top-{S['n']} ranking, no sector limit + soft QQQ regime ({n_stocks} stocks)"
@@ -153,13 +187,31 @@ def winner_rank_args(regime):
                 sector_cap=S["sector_cap"], vol_sizing=S["vol_sizing"], buffer_rank=S["buffer_rank"],
                 regime_scale=S["regime_scale"] if S["use_regime"] else None,
                 max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"),
-                sleeve=list(sector_mapping.defensive), sleeve_cap=sector_mapping.defensive_cap)
+                **(dict(sleeve=list(sector_mapping.defensive), sleeve_cap=sector_mapping.defensive_cap) if S.get("sleeve") else {}))
+
+def winner_score(rs, close, ma_200, vol):
+    """The live score (WINNER["score"]). "low_vol": 1 / 63-day volatility (calmest first) while the close is above its
+    200-day average, else -1 (below min_score: never picked) - the same picks as forward_test's low_vol score.
+    "rs": relative strength."""
+    return rs if WINNER.get("score", "rs") == "rs" else (1 / vol).where(close > ma_200, -1.0)
+
+def winner_rebalance_days(dates, live=True):
+    """The live rebalance calendar (WINNER["calendar"]): "monthly" = the last trading day of each month (forward_test's
+    "monthly": the next session is in another month) + WINNER["switch_days"]; else the weekly Friday rebalance."""
+    if WINNER.get("calendar") != "monthly":
+        return weekly_rebalance_days(dates, live=live)
+    dates = pd.DatetimeIndex(dates)
+    sw = {pd.Timestamp(x).date() for x in (WINNER.get("switch_days") or [])}
+    return pd.Series([next_sessions(d, 1)[0].month != d.month or d.date() in sw for d in dates], index=dates)
 
 WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
 
 def rules_version():
     """Rules version stored in signal_analysis.csv (older rows of the same version keep their BUY/SELL/HOLD)."""
     S, mw = WINNER, WINNER.get("midweek_swap")
+    if S.get("score") == "low_vol":
+        return ("v6-lv-" + str(S.get("calendar", "weekly")) + ("-kp" if S.get("keep_profit_at_rebalance") else "")
+                + ("-fc" if S.get("friday_falling_check") else ""))
     v = f"v5-x{S.get('midweek_exit_below') or 0}" if mw else "v3"      # v5-x20r10-ns-e5: Mon-Thu exit rule, no swap
     if S.get("midweek_exit_below") and S.get("midweek_exit_to_top"):
         v += f"r{S['midweek_exit_to_top']}"
@@ -1670,6 +1722,16 @@ def next_decision(latest, days=None):
     Weekly rebalance = last session of an ISO week; mid-week check = first session on/after each check day (live: Mon-Thu)
     that is not the week's last session (same rules as weekly_rebalance_days / midweek_check_days)."""
     mw = WINNER.get("midweek_swap")
+    if days is None and WINNER.get("calendar") == "monthly":     # monthly: the next rebalance day, no mid-week checks
+        latest = pd.Timestamp(latest).normalize()
+        sess = list(next_sessions(latest, 70))
+        reb = winner_rebalance_days(sess[:-1])
+        for i, d in enumerate(sess[:-1]):
+            if reb.iloc[i]:
+                return d, "full rebalance", sess[i + 1]
+            if WINNER.get("friday_falling_check") and d.isocalendar()[:2] != sess[i + 1].isocalendar()[:2]:
+                return d, "Friday check", sess[i + 1]          # the week's last session (variant B, flag)
+        return sess[0], "full rebalance", sess[1]
     if days is None:
         days = mw.get("days", ("Mon", "Wed")) if mw else ()
     codes = {WEEKDAY_CODES[d] for d in days}
@@ -1684,6 +1746,7 @@ def next_decision(latest, days=None):
     return sess[1], "full rebalance", sess[2]
 
 # ----------------------------------------------------------------------------- decision calendar (live schedule)
+DECISION_SEARCH_DAYS = 50                      # calendar days searched for a decision (monthly rebalances: up to ~45 apart)
 DECISION_TIME_CT = (14, 30)                    # each decision is made and traded at 2:30 PM CT (30 min before the close)
 CENTRAL = ZoneInfo("America/Chicago")
 
@@ -1709,7 +1772,7 @@ def decision_slot(d):
 def last_decision_date(t):
     """The latest decision session whose 2:30 PM CT slot is at or before t (tz-aware), as a Timestamp."""
     d = pd.Timestamp(t.astimezone(CENTRAL).date())
-    for _ in range(15):
+    for _ in range(DECISION_SEARCH_DAYS):
         if decision_kind(d) and decision_slot(d) <= t:
             return d
         d -= pd.Timedelta(days=1)
@@ -1718,7 +1781,7 @@ def last_decision_date(t):
 def next_decision_slot(t):
     """The first decision slot (2:30 PM CT) strictly after t (tz-aware). A missed decision can be caught up until then."""
     d = pd.Timestamp(t.astimezone(CENTRAL).date())
-    for _ in range(15):
+    for _ in range(DECISION_SEARCH_DAYS):
         if decision_kind(d) and decision_slot(d) > t:
             return decision_slot(d)
         d += pd.Timedelta(days=1)

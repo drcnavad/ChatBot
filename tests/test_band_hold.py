@@ -18,6 +18,7 @@ from enum import Enum as _Enum
 os.environ.setdefault("STOCK_ANALYSIS_RUN_LOG", os.path.join(tempfile.gettempdir(), "sa_test_run_log.csv"))  # never the real log
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 os.chdir(ROOT)
 
 # --- stub alpaca.trading + dotenv (no keys, no network) -----------------------------------------------------------

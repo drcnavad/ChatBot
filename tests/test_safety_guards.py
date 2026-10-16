@@ -21,6 +21,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 tmp = tempfile.mkdtemp()
 os.environ["STOCK_ANALYSIS_RUN_LOG"] = os.path.join(tmp, "run_log.csv")
+import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 import pandas as pd
 
 import fake_quotes

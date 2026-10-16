@@ -30,11 +30,11 @@ stock_symbols = [
 
 # Your manual overrides for the live Mon-Fri trades and the 9 AM fill check (paper_trade.py), e.g. ['TSLA', 'NVDA'].
 # do_not_buy: never bought or topped up (on Friday its slot goes to the next eligible stock, down to rank 20).
-# do_not_sell: never sold or trimmed (the Mon-Thu rank-20 rule keeps it too). The earnings-day stop skips it too.
+# do_not_sell: never sold or trimmed (at a rebalance too). The earnings-day stop skips it too.
 do_not_buy = ['AMD', 'TSLA', 'PANW', 'ARM', 'SHOP']
-do_not_sell = ['LMT', 'NOC', 'ABBV', 'PFE', 'KO']   # the defensive sleeve: never sold until Chirag says (2026-10-15)
-# Defensive sleeve (Chirag, 2026-10-15): always bought on Friday next to the top 10 (15 stocks, same 1/volatility weights).
-# A sleeve stock that is also in the top 10 frees its slot for the next rank.
+do_not_sell = []   # sleeve removed Oct 15 evening (Chirag): live = monthly low volatility from Fri Oct 16, 2026
+# Defensive sleeve of Oct 15, 2026: NOT live any more (backtest_engine.WINNER['sleeve'] False); kept only for the pinned
+# forward-test 'Now' strategies (forward_test NOW sleeve=True).
 defensive = ['LMT', 'NOC', 'ABBV', 'PFE', 'KO']
 defensive_cap = 0.05   # max weight per sleeve stock; the trimmed weight goes to the top-10 picks pro rata (Chirag, 2026-10-15)
 

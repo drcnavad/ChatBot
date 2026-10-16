@@ -481,6 +481,11 @@ def main(argv=None):
     if a.as_of and not a.dry_run:
         ap.error("--as-of works with --dry-run only")
     now = pd.Timestamp(a.as_of).tz_localize(be.EASTERN).to_pydatetime() if a.as_of else None
+    if not a.dry_run and not be.WINNER.get("earnings_day_stop", True):
+        # Off with the monthly low-volatility rules (Chirag, Oct 15, 2026): no Mon-Thu trading, not in the backtest.
+        # Set backtest_engine.WINNER['earnings_day_stop'] = True to turn it back on. The launchd job stays loaded (no-op).
+        print("earnings-day stop is OFF (backtest_engine.WINNER['earnings_day_stop'] = False) - nothing checked, no order sent")
+        return 0
     if a.loop:
         loop()
     else:

@@ -139,10 +139,18 @@ def check_scores(D, title=""):
     print(f"(b) RS_Score recomputed: {d_rs.notna().sum()} symbols, max |diff| {d_rs.max():.4f}")
     expect(d_rs.max() < 0.01, f"RS_Score mismatch on {D.date()}")
     # (a) Strategy score
-    exp = _WT * t.Technical_Score + (1 - _WT) * t.RS_Score   # live weights (w_tech 0.0 = RS only since 2026-10-13)
-    d_ss = (t.Strategy_Score - exp).abs()
+    if be.WINNER.get("score") == "low_vol":                  # live from Oct 16, 2026: low volatility in uptrend
+        v = be.volatility(close.loc[:D, list(t.index)]).iloc[-1]
+        exp = (1 / v).where(t.Close > t.ma_200, -1.0).reindex(t.index)
+        d_ss = ((t.Strategy_Score - exp) / exp.abs()).abs()     # relative (dividend-adjusted closes move vol slightly)
+        d_ss = d_ss.where(~((t.Strategy_Score < 0) & (exp < 0)), 0.0)
+        d_ss = d_ss.where(t.Strategy_Score.notna())
+        d_ss = d_ss.clip(upper=d_ss.where(d_ss < 0.02, 1.0))
+    else:
+        exp = _WT * t.Technical_Score + (1 - _WT) * t.RS_Score   # live weights (w_tech 0.0 = RS only since 2026-10-13)
+        d_ss = (t.Strategy_Score - exp).abs()
     print(f"(a) Strategy_Score = {_WT}*Tech + {1 - _WT}*RS: max |diff| {d_ss.max():.4f}; NaN scores (ineligible): {sorted(t.index[t.Strategy_Score.isna()])}")
-    expect(d_ss.max() < 0.01, f"Strategy_Score mismatch on {D.date()}")
+    expect(d_ss.max() < (0.02 if be.WINNER.get("score") == "low_vol" else 0.01), f"Strategy_Score mismatch on {D.date()}")
     print(f"    eligible (>=200 bars): {int(elig.sum())} of {len(tradable)}; Strategy_Score non-null: {int(t.Strategy_Score.notna().sum())}; "
           f"mismatch: {sorted(set(elig.index[elig]) ^ set(t.index[t.Strategy_Score.notna()]))}")
     # (c) rank

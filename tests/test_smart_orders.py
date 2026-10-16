@@ -20,6 +20,7 @@ os.environ.setdefault("STOCK_ANALYSIS_RUN_LOG", os.path.join(tempfile.mkdtemp(),
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path[:0] = [ROOT, HERE]
+import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 os.chdir(ROOT)
 sys.modules["dotenv"] = types.SimpleNamespace(load_dotenv=lambda *a, **k: None)   # .env is never read
 

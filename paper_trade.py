@@ -43,7 +43,7 @@ EARNINGS_STOP_STATE = (os.environ.get("STOCK_ANALYSIS_EARNINGS_STOP_STATE")     
 ORDER_COLUMNS = ["Symbol", "Side", "Shares", "Price", "Est_Value", "Current_Shares", "Target_Shares",
                  "Target_Weight_%", "Target_Value"]
 NO_TRADE_BAND = 0.01   # Friday rebalance: a target holding within 1 percentage point of its weight is not traded
-MAX_ORDER_PCT = 0.15   # backstop: a BUY worth more than 15% of equity is refused (not sent, not carried to 9 AM).
+MAX_ORDER_PCT = 0.20   # backstop: a BUY worth more than 20% of equity is refused (not sent, not carried to 9 AM).
                        # Target weights are clipped to WINNER["max_weight"] x 99% (tests check it equals max_weight).
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
 INVESTED_CAP = 0.99   # a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED; a cap, not a scale-down)
@@ -965,6 +965,19 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
             px.update(live_prices)
             orders = build_replace_orders(mw, account_size, positions, px, fractional=fractional)
             orders = skip_orders(orders, {**earnings_stop_blocked(meta["as_of"]), **no_buy})
+        import backtest_engine as be
+        if not be.WINNER.get("midweek_swap") and not force_deploy:
+            # No Mon-Thu rule live (monthly low volatility, Oct 16, 2026): between rebalances nothing is sold or bought,
+            # except the optional Friday falling check (WINNER['friday_falling_check'], variant B, default OFF).
+            day = pd.Timestamp(decision).date().isoformat() if decision is not None else meta["as_of"]
+            if be.WINNER.get("friday_falling_check") and be.decision_kind(day) == "Friday check":
+                orders, meta["falling"] = friday_falling_orders(orders, positions, account_size, meta["as_of"], entry,
+                                                                {**live_prices}, signal_csv, fractional=fractional,
+                                                                keep=no_sell, no_buy=no_buy)
+                if meta["falling"]["sold"]:
+                    meta["source"] += "+falling"
+                    meta["invested"] = None
+            return orders, meta, targets
         day = pd.Timestamp(decision).date().isoformat() if decision is not None else meta["as_of"]
         if not (force_deploy or is_midweek_check_day(day, signal_csv)):
             return orders, meta, targets
@@ -1016,8 +1029,9 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     check = set(targets["Symbol"].astype(str))
     if ranking is not None:                         # Friday: also check the possible replacements (ranks up to 20)
         check |= set(ranking.loc[pd.to_numeric(ranking["Rank"], errors="coerce") <= FRIDAY_SUB_MAX_RANK, "Symbol"].astype(str))
+    import backtest_engine as be
     import sector_mapping as sm                     # the defensive sleeve is bought on Friday even before earnings (Chirag, Oct 15)
-    sleeve = {str(x).upper() for x in sm.defensive}
+    sleeve = {str(x).upper() for x in sm.defensive} if be.WINNER.get("sleeve") else set()
     earn = {k: v for k, v in earnings_blocked(sorted(check), meta["as_of"]).items() if k.upper() not in sleeve}
     blocked = {**earn, **earnings_stop_blocked(meta["as_of"]), **no_buy}
     if ranking is not None:
@@ -1032,8 +1046,16 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     # (e.g. 99% invested, SNOW kept at 10% -> the picks are scaled to 89%).
     w = pd.to_numeric(targets["Weight"], errors="coerce").fillna(0.0)
     px = {**dict(zip(targets["Symbol"].astype(str), targets["Price"])), **prices}
+    profit = {}
+    if meta["source"].startswith("provisional") and be.WINNER.get("keep_profit_at_rebalance"):
+        # Rebalance keep rule (Chirag, Oct 15): a holding that is no longer a pick is sold only when it is below its Alpaca
+        # avg entry price OR in a downtrend (close at/below its 200-day average = not "up" in the low-vol score); one in
+        # profit and in an uptrend is kept as it is (not sold, not trimmed) and the picks share the rest (like do_not_sell).
+        profit, meta["sold_rule"] = keep_in_profit(positions, set(targets.loc[w > 0, "Symbol"].astype(str)), px, entry,
+                                                   meta["as_of"], signal_csv, skip=no_sell)
+        meta["kept_profit"] = profit
     kept = {s: q * _safe_number(px.get(s), default=0.0) for s, q in _clean_positions(positions).items()
-            if s in no_sell and s not in set(targets.loc[w > 0, "Symbol"].astype(str))}
+            if (s in no_sell or s in profit) and s not in set(targets.loc[w > 0, "Symbol"].astype(str))}
     scale = max(0.0, 1 - sum(kept.values()) / max(account_size * w.sum(), 1e-9))
     targets = targets.assign(Weight=w * scale)
     meta["kept_outside"] = {s: v / account_size for s, v in kept.items()}
@@ -1041,7 +1063,69 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
         meta["source"] += "+kept"
         meta["invested"] = float(targets["Weight"].sum())
     return build_orders(targets, account_size, positions, prices, min_value=min_value, fractional=fractional,
-                        statuses=statuses, blocked=blocked, keep=no_sell), meta, targets
+                        statuses=statuses, blocked=blocked, keep={**no_sell, **profit}), meta, targets
+
+def friday_falling_orders(orders, positions, equity, as_of, entry, live_prices, signal_csv=SIGNAL_CSV, fractional=False,
+                          keep=None, no_buy=None):
+    """Friday check (WINNER['friday_falling_check'], Chirag, Oct 15, 2026): on a Friday that is not a rebalance day, every
+    held stock that is (a) going down - below its Alpaca avg entry price, or its close at/below its 200-day average
+    (keep_in_profit's test) - or (b) no longer one of the day's top-10 picks (Provisional_Weight > 0 = what a rebalance at
+    this close would hold) is sold in full. Each sale is replaced 1-for-1, same dollars (max WINNER max_weight x 99% of
+    equity), by the best-ranked pick the account does not hold (not do_not_buy, not stopped out); none left -> cash.
+    Nothing else trades (no trims / top-ups). build_account_exit_orders does the orders: the ranking it gets holds only
+    the picks that are not going down, so every other holding has no rank and is sold. Returns (orders, info)."""
+    ranking = latest_ranking(as_of, signal_csv)
+    px = {**latest_prices(sorted(_clean_positions(positions)), signal_csv), **dict(zip(ranking["Symbol"], ranking["Close"])),
+          **(live_prices or {})}
+    _kept, falling = keep_in_profit(positions, set(), px, entry, as_of, signal_csv, skip=keep)
+    sym = ranking["Symbol"].astype(str).str.upper()
+    picks = ranking[(pd.to_numeric(ranking["Provisional_Weight"], errors="coerce").fillna(0) > 0) & ~sym.isin(set(falling))]
+    held = set(_clean_positions(positions))
+    why = {s: falling.get(s) or "not in the top-10 picks" for s in held if s not in set(picks["Symbol"].astype(str).str.upper())
+           and s not in (keep or {})}
+    orders, info = build_account_exit_orders(orders, positions, equity, picks, listed=set(sym) | held,
+                                             blocked={**earnings_stop_blocked(as_of), **(no_buy or {})},
+                                             fractional=fractional, prices=px, exit_below=10 ** 7, refill_top=10 ** 6, keep=keep)
+    info["why"] = why
+    return orders, info
+
+def friday_check_text(info):
+    """meta['falling'] in one line: sales with their reason, and the replacements."""
+    sold = ", ".join(f"{s} ({info['why'].get(s, '')})" for s, *_ in info["sold"]) or "nothing to sell"
+    rep = ", ".join(f"{a} -> {b} (rank {rb}) ${v:,.2f}" for a, _ra, b, rb, v in info["replaced"])
+    return f"sold: {sold}" + (f"; replaced: {rep}" if rep else "")
+
+def keep_in_profit(positions, target_syms, prices, entry, as_of, signal_csv=SIGNAL_CSV, skip=None):
+    """Rebalance keep rule: ({SYMBOL: note} kept, {SYMBOL: why sold}) for held stocks that are not targets. Kept = price at or
+    above the Alpaca avg entry price AND close above its 200-day average on the decision bar (signal_analysis.csv as_of row:
+    Close > ma_200, the low-vol uptrend test). No entry price, no price or no 200-day row -> sold (fails toward the rule's
+    default sale). `skip` (do_not_sell) is handled elsewhere."""
+    entry, skip = entry or {}, skip or {}
+    others = [s for s in _clean_positions(positions) if s not in target_syms and s not in skip]
+    if not others:
+        return {}, {}
+    try:
+        sig = pd.read_csv(signal_csv, usecols=["Date", "Symbol", "Close", "ma_200"])
+        sig = sig[sig["Date"].astype(str).str[:10] == str(as_of)[:10]].set_index("Symbol")
+    except (OSError, ValueError, KeyError) as e:
+        print(f"WARNING: 200-day averages not read ({e}) - every non-pick is sold")
+        sig = pd.DataFrame(columns=["Close", "ma_200"])
+    kept, sold = {}, {}
+    for s in others:
+        e, p = _safe_number(entry.get(s), default=None), _safe_number(prices.get(s), default=None)
+        c = _safe_number(sig["Close"].get(s), default=None) if s in sig.index else None
+        m = _safe_number(sig["ma_200"].get(s), default=None) if s in sig.index else None
+        if e is None or p is None:
+            sold[s] = "no entry price / price"
+        elif p < e:
+            sold[s] = f"below entry ({p:.2f} < {e:.2f})"
+        elif c is None or m is None:
+            sold[s] = "no 200-day average"
+        elif c <= m:
+            sold[s] = f"downtrend (close {c:.2f} <= 200-day {m:.2f})"
+        else:
+            kept[s] = f"in profit ({p:.2f} >= entry {e:.2f}) and above its 200-day ({c:.2f} > {m:.2f})"
+    return kept, sold
 
 def substitute_blocked_picks(targets, positions, ranking, blocked, statuses=None, prices=None, max_rank=None):
     """Friday rebalance (Chirag, t191u, 2026-10-07): a NEW pick (the account holds none of it) that is blocked - earnings
@@ -2506,7 +2590,7 @@ def reconcile_positions(target_source="auto", tolerance_pct=1.0, symbols=None):
     "couldn't check" is never reported as drift). Never raises.
     """
     cols = ["Symbol", "Target_Weight_%", "Actual_Weight_%", "Diff_pp", "Shares_Held", "Status"]
-    if str(target_source).endswith(("+cash", "+exits", "+subs", "+kept")):
+    if str(target_source).endswith(("+cash", "+exits", "+subs", "+kept", "+falling")):
         # A Mon-Thu check that also invested spare cash in stocks outside the strategy's holdings, or sold / refilled
         # account positions (sell rule on every position): the account deliberately differs from Strategy_Weight until
         # Friday, so there is nothing to reconcile against (like hold). A Friday with replacements (+subs) or with
@@ -2655,7 +2739,11 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
     if meta.get("substitutions") and substitution_text(meta["substitutions"]):
         print(f"  Friday replacements (new pick blocked): {substitution_text(meta['substitutions'])}")
     if meta.get("kept_outside"):
-        print(f"  Do-not-sell kept outside the picks: {kept_text(meta['kept_outside'])} - the picks share the rest")
+        print(f"  Kept outside the picks (do-not-sell / in profit + uptrend): {kept_text(meta['kept_outside'])} - the picks share the rest")
+    if meta.get("sold_rule"):
+        print("  Non-picks sold (below entry or downtrend): " + ", ".join(f"{k} ({v})" for k, v in meta["sold_rule"].items()))
+    if meta.get("falling"):
+        print("  Friday check: " + friday_check_text(meta["falling"]))
     if meta.get("account_exits"):
         print(f"  Mon-Thu sell rule (every position): {account_exit_text(meta['account_exits'])}")
     dep = meta.get("cash_deploy")
@@ -2839,7 +2927,13 @@ def main(argv=None):
         print("FRIDAY REPLACEMENTS (new pick blocked by earnings / stop sale): "
               + (substitution_text(meta["substitutions"]) or "none needed"))
     if meta.get("kept_outside"):
-        print(f"DO-NOT-SELL KEPT OUTSIDE THE PICKS: {kept_text(meta['kept_outside'])} - the picks share the rest")
+        print(f"KEPT OUTSIDE THE PICKS (do-not-sell / in profit + uptrend): {kept_text(meta['kept_outside'])} - the picks share the rest")
+    if meta.get("kept_profit"):
+        print("KEPT (in profit and above the 200-day): " + ", ".join(f"{k} ({v})" for k, v in meta["kept_profit"].items()))
+    if meta.get("sold_rule"):
+        print("NON-PICKS SOLD (below entry or downtrend): " + ", ".join(f"{k} ({v})" for k, v in meta["sold_rule"].items()))
+    if meta.get("falling"):
+        print("FRIDAY CHECK: " + friday_check_text(meta["falling"]))
     if meta.get("account_exits"):
         print(f"MON-THU SELL RULE (every account position): {account_exit_text(meta['account_exits'])}")
     dep = meta.get("cash_deploy")

@@ -11,6 +11,7 @@ import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 import backtest_engine as be
 import forward_test as ft
 
@@ -558,7 +559,12 @@ if os.path.exists(ft.SIGNAL_CSV):
                    midweek={**be.WINNER["midweek_swap"], "days": dd})[0])
                    .reindex(index=pipe.index, columns=pipe.columns).fillna(0.0) - pipe).abs().max().max())
             for dd in (be.WINNER["midweek_swap"]["days"], ["Mon", "Wed"])]
-    check("live strategy = the pipeline's Strategy_Weight on every day since Oct 2 (same be.WINNER rules)", min(fits) < 1e-9, fits)
+    mw = os.path.join(os.path.dirname(ft.SIGNAL_CSV), "strategy_midweek_check.csv")
+    file_tag = str(pd.read_csv(mw)["Rules"].iloc[0]) if os.path.exists(mw) else ""
+    if file_tag.startswith("LV-"):   # reports written by the live monthly low-vol rules (from Oct 16): checked in test_low_vol_monthly / test_rank_audit
+        print(f"skip  live strategy = the pipeline's Strategy_Weight (reports carry {file_tag}, not the pinned Oct 15 rules)")
+    else:
+        check("live strategy = the pipeline's Strategy_Weight on every day since Oct 2 (same be.WINNER rules)", min(fits) < 1e-9, fits)
     cfg_now = next(c for c in ft.STRATEGIES if c["name"] == ft.LIVE)
     lnow = ft.strategy_targets(cfg_now, real_inp).loc[d0:, list(sector_mapping.defensive)]
     check("live strategy: the 5 defensive stocks held every day, at most 5% each (x 99%)",

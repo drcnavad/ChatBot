@@ -53,7 +53,7 @@ def ai_stock_summary(ticker, ticker_df, signal, why):
                f"Weekly strategy signal: {signal} ({why})\nStrategy Rank: {latest.get('Strategy_Rank')}\n"
                f"Technical Score: {latest['Technical_Score']:.2f}\n"
                f"Relative Strength Score: {latest.get('RS_Score', float('nan')):.2f}\n"
-               f"Strategy Score (0.5 technical + 0.5 relative strength): {latest['combined_signal']:.2f}\n"
+               f"Strategy Score (the live ranking score): {latest['combined_signal']:.2f}\n"
                f"RSI: {latest['RSI']:.2f}\nMACD: {latest['macd']:.2f}\n\n"
                f"Price vs Moving Averages (Difference):\n{ma_lines}\n\n"
                f"Balance Sheet Score: {latest['Fundamental_Weight']:.2f}\nSentiment Score: {latest['SentimentScore']:.2f}\n\n"
