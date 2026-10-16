@@ -18,7 +18,7 @@ A line = legs [(key, mode, calendar, share)]:
            each calendar day sell a holding ranked worse than k (or held by the first leg) for the best stock not held /
            "keep" = monthly, a held non-pick that is not falling stays (rule A) / "bfinal" = monthly + on other Fridays a
            falling holding (below its cost or below its 200-day average) or a non-pick is swapped for the best new pick
-  calendar "month" (last session of the month) / "week" (last session of the week) / "2week" (every other week end from
+  calendar "month" (last session of the month) / "week" (last session of the week) / "weekstart" (first session of the week) / "2week" (every other week end from
            the start) / "day"; the start close always buys.
 With no_overlap the first leg has priority: the second never buys a name the first holds, and when the first buys a name
 the second holds, the second rebalances (full) or swaps it out (swap) that same day."""
@@ -46,6 +46,8 @@ class Ctx:
         self.cal = {"month": inp["monthly"].reindex(self.idx).fillna(False).astype(bool),
                     "week": pd.Series([be.next_sessions(d, 1)[0].isocalendar()[:2] != d.isocalendar()[:2]
                                        for d in self.idx], index=self.idx),
+                    "weekstart": pd.Series([i == 0 or self.idx[i - 1].isocalendar()[:2] != d.isocalendar()[:2]
+                                            for i, d in enumerate(self.idx)], index=self.idx),
                     "day": pd.Series(True, index=self.idx)}
         self.never = [s for s in sm.do_not_buy if s in self.cols]
         self.e5 = be.earnings_days_ahead(self.idx, self.cols, inp["earnings"], ft.EARN_DAYS).reindex(

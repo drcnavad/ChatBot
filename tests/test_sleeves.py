@@ -32,14 +32,16 @@ check(sleeves.LEDGER_JSON.startswith(tempfile.gettempdir()) or "tmp" in sleeves.
 
 # calendar
 kinds = {d.date().isoformat(): be.decision_kind(d) for d in pd.date_range("2026-10-15", "2026-12-04") if be.decision_kind(d)}
-check(kinds == {"2026-10-16": "full rebalance", "2026-10-23": be.SECTOR_KIND, "2026-10-30": "full rebalance",
-                "2026-11-06": be.SECTOR_KIND, "2026-11-13": be.SECTOR_KIND, "2026-11-20": be.SECTOR_KIND,
-                "2026-11-27": be.SECTOR_KIND, "2026-11-30": "full rebalance", "2026-12-04": be.SECTOR_KIND},
-      "decisions: Oct 16 / Oct 30 / Nov 30 full, every other Friday the sector half, Mon-Thu none", kinds)
+check(kinds == {"2026-10-16": "full rebalance", "2026-10-19": be.SECTOR_KIND, "2026-10-26": be.SECTOR_KIND,
+                "2026-10-30": "full rebalance", "2026-11-02": be.SECTOR_KIND, "2026-11-09": be.SECTOR_KIND,
+                "2026-11-16": be.SECTOR_KIND, "2026-11-23": be.SECTOR_KIND, "2026-11-30": "full rebalance"},
+      "decisions: Oct 16 / Oct 30 / Nov 30 (a Monday: both halves) full, every other Monday the sector half, no Fridays", kinds)
+check(be.is_sector_day("2027-01-19") and not be.is_sector_day("2027-01-18") and be.is_sector_day("2026-11-30"),
+      "Monday holiday (MLK, Jan 18, 2027) -> the sector half on Tuesday; Nov 30 (month end, Monday) is a sector day too")
 cal = dict(sleeves.calendar("2026-10-15", 40))
-check(cal[pd.Timestamp("2026-10-16")] == ["lowvol", "sector"] and cal[pd.Timestamp("2026-10-23")] == ["sector"]
-      and cal[pd.Timestamp("2026-11-30")] == ["lowvol"] and pd.Timestamp("2026-10-20") not in cal,
-      "halves: Oct 16 both, Oct 23 sector, Nov 30 (Mon) low volatility only, Tue Oct 20 none")
+check(cal[pd.Timestamp("2026-10-16")] == ["lowvol"] and cal[pd.Timestamp("2026-10-19")] == ["sector"]
+      and cal[pd.Timestamp("2026-11-30")] == ["lowvol", "sector"] and pd.Timestamp("2026-10-23") not in cal,
+      "halves: Oct 16 low vol (the switch bought both: ledger init), Mon Oct 19 sector, Nov 30 (Mon, month end) both, Fri Oct 23 none")
 
 # the sector half's weights = the forward test's Sector rotation (the backtest's own selection)
 inp = sleeves.sector_inputs()
@@ -76,8 +78,8 @@ old = "ZZZOLD"
 P[old] = 50.0
 positions = {lvw.index[0]: 10.0, sec_name: 5.0, old: 100.0}
 equity = 100_000.0 + sum(q * P[s] for s, q in positions.items())
-orig_lv, orig_wk = sleeves.lowvol_day, sleeves.is_week_end
-sleeves.lowvol_day, sleeves.is_week_end = (lambda x: True), (lambda x: True)
+orig_lv, orig_wk = sleeves.lowvol_day, sleeves.sector_day
+sleeves.lowvol_day, sleeves.sector_day = (lambda x: True), (lambda x: True)
 o, info = sleeves.plan(day, positions, equity, P, lv_targets=lv_t, lv_statuses={s: "add" for s in lvw.index}, ledger=None, inp=inp)
 L = info["ledger"]["halves"]
 check(info["init"] and abs(info["values"]["lowvol"] - equity / 2) < 0.01 and abs(info["values"]["sector"] - equity / 2) < 0.01,
@@ -122,7 +124,7 @@ st4, un4, r4 = sleeves.reconcile(info["ledger"], pos4, P4, eq3 - cash3 + cash2 +
 check(un4 == {"HANDBUY": 1.0}, "a holding no half owns is reported as unowned (sold at the next trade run)")
 
 # month-end (low volatility only): it buys a name the sector half holds -> shares move over, sector half rebalances
-sleeves.lowvol_day, sleeves.is_week_end = (lambda x: True), (lambda x: False)
+sleeves.lowvol_day, sleeves.sector_day = (lambda x: True), (lambda x: False)
 take = sorted(secn)[0]
 lvw5 = pd.Series(0.099, index=list(lvw.index[:9]) + [take])
 lv_t5 = pd.DataFrame({"Symbol": lvw5.index, "Weight": lvw5.values, "Price": [P[s] for s in lvw5.index]})
@@ -135,7 +137,7 @@ check(any(t[0] == take and t[1] == "sector" and t[2] == "lowvol" for t in info5[
       and abs(L5["lowvol"]["shares"][take] * P[take] / info5["values"]["lowvol"] - 0.099) < 0.0101,
       "month-end clash: the shares move to the low-volatility half (the sector half does not sell them), trimmed to its 9.9%; "
       "the sector half rebalances without it")
-sleeves.lowvol_day, sleeves.is_week_end = orig_lv, orig_wk
+sleeves.lowvol_day, sleeves.sector_day = orig_lv, orig_wk
 
 # no ledger on a sector-only day: fail closed
 try:

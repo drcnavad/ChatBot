@@ -121,7 +121,7 @@ N_RANKED = sum(bool(c.get("ranked", True)) for c in ft.STRATEGIES)   # the Oct 1
 check("leaderboard: ranked by total return since Oct 2, a tie goes to the smaller drawdown; Rank counts strategies only",
       list(lb.dropna(subset=["Rank"])["Strategy"][:2]) == ["Top 5", "Top 20"] and list(lb.dropna(subset=["Rank"])["Rank"][:2]) == [1, 2]
       and sorted(lb["Rank"].dropna()) == list(range(1, N_RANKED + 1)), lb.head(4).to_dict("records"))
-check("leaderboard: the live row is marked", (lb["Strategy"] == ft.LIVE + ft.LIVE_MARK).sum() == 1, list(lb["Strategy"]))
+check("leaderboard: the live row is marked", (lb["Strategy"] == ft.MARKED + ft.LIVE_MARK).sum() == 1, list(lb["Strategy"]))
 _early = ft.leaderboard(daily.iloc[:3], bench.iloc[:3], vals[vals["Date"] <= "2026-10-06"])
 check("leaderboard: ranked from day one (no wait for a full week)",
       sorted(_early["Rank"].dropna()) == list(range(1, N_RANKED + 1)) and _early.dropna(subset=["Rank"])["Strategy"].iloc[-1] == "Top 20",

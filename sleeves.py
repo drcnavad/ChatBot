@@ -4,7 +4,7 @@
                the last trading day of each month (+ the Oct 16 switch).
   sector  50%: forward_test.py's "Sector rotation" (top 3 sector ETFs by 63-day return, then their top 10 by the C6 score,
                inverse-volatility weights, max 4 per sector, 20% cap, QQQ halving, do_not_buy), full rebalance of this half
-               every Friday (the week's last session). No overlap: it never buys a name the low-volatility half holds or
+               every Monday (the week's first session; Fridays until Oct 16, 2026). No overlap: it never buys a name the low-volatility half holds or
                targets; when the low-volatility half buys a name this half holds, the shares move to the low-volatility half
                at the current price (no trade) and this half rebalances the same day without it.
 
@@ -45,11 +45,11 @@ def config():
     s = be.WINNER.get("sleeves")
     return dict(s) if s else None
 
-def is_week_end(day):
-    """True when session `day` is the week's last session (Friday, or Thursday before a Friday holiday)."""
+def sector_day(day):
+    """True when session `day` is the sector half's weekly rebalance (backtest_engine.is_sector_day: Monday = the week's
+    first session, Tuesday after a Monday holiday; from Mon Oct 19, 2026)."""
     import backtest_engine as be
-    d = pd.Timestamp(day).normalize()
-    return be.is_session(d) and be.next_sessions(d, 1)[0].isocalendar()[:2] != d.isocalendar()[:2]
+    return be.is_sector_day(day)
 
 def lowvol_day(day):
     """True when session `day` is a low-volatility rebalance (last trading day of the month, or a switch day)."""
@@ -64,7 +64,7 @@ def calendar(start, sessions=30):
     days = [d0] + list(be.next_sessions(d0, sessions)) if be.is_session(d0) else list(be.next_sessions(d0, sessions))
     out = []
     for d in days:
-        h = (["lowvol"] if lowvol_day(d) else []) + (["sector"] if is_week_end(d) else [])
+        h = (["lowvol"] if lowvol_day(d) else []) + (["sector"] if sector_day(d) else [])
         if h:
             out.append((d, h))
     return out
@@ -207,7 +207,7 @@ def plan(day, positions, equity, prices, lv_targets=None, lv_statuses=None, no_b
         raise ValueError("WINNER['sleeves'] is off")
     led = load_ledger() if ledger == "load" else ledger
     d = pd.Timestamp(day).normalize()
-    do_lv, do_sec = lowvol_day(d), is_week_end(d)
+    do_lv, do_sec = lowvol_day(d), sector_day(d)
     if led is None and not do_lv:
         raise ValueError("no sleeve ledger (Reports/sleeve_ledger.json) and today is not a low-volatility rebalance - "
                          "the two halves start at a full rebalance; no orders")

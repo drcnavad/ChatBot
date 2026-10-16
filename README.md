@@ -16,7 +16,10 @@ Two independent halves, each with its own cash, tracked in `Reports/sleeve_ledge
   200-day average, equal weight, max 4 per sector, 20% cap; rebalanced on the **last trading day of the month**
   (targets = `Provisional_Weight` in `Reports/strategy_picks.csv`). QQQ below its 200-day average: weights halved.
 - **50% Sector rotation (weekly):** top 10 by C6 score in the 3 sectors with the best 63-day ETF return (not held by
-  the low-vol half), rebalanced **every Friday** (the week's last session).
+  the low-vol half), rebalanced **every Monday** at 2:30 PM CT (the week's first session: Tuesday after a Monday
+  holiday; `WINNER['sector_day']`, `backtest_engine.is_sector_day`). It was Fridays until Oct 16, 2026; the first Monday
+  run is Oct 19 (right after the Oct 16 rebalance). When the month's last trading day is a Monday (e.g. Nov 30), both
+  halves rebalance that day without overlap.
 - Decisions use the ~2:30 PM CT bar. A session that is no decision **holds everything** (no Mon-Thu trading, no Friday
   falling check, no earnings rule). A holding within 1 point of its target is not traded. A position in no half of the
   ledger is sold at the next trade run.
@@ -32,7 +35,7 @@ Two independent halves, each with its own cash, tracked in `Reports/sleeve_ledge
 | Job | When | What | Trades? |
 |---|---|---|---|
 | `com.stockanalysis.support` | Mon 1:00, Tue 1:07, Wed 1:14, Thu 1:21, Fri 1:28 PM | `run_all.py --support --scheduled`: company reports, news sentiment, earnings dates (quota APIs) | no |
-| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled` → `run_all.py`: 2:30 PM signals + decision + orders; from 3:05 PM the after-close step (`run_all.daily_step`: signal refresh, `forward_test.py --record`, `manual_trade.py update-blocks`). Never 4:05-4:30 PM. | **yes** (2:30 PM) |
+| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled` → `run_all.py`: 2:30 PM signals + decision + orders on decision days (Mondays: sector half; month's last trading day: low-vol half); from 3:05 PM the after-close step (`run_all.daily_step`: signal refresh, `forward_test.py --record`, `manual_trade.py update-blocks`). Never 4:05-4:30 PM. | **yes** (2:30 PM) |
 | `com.stockanalysis.morning` | Mon-Fri 9:00 AM | `pipeline_watchdog.py --fill-check --scheduled`: sends the pending rests | **yes** |
 | `com.stockanalysis.tradeaudit` | Mon-Fri every 30 min 8:30 AM-3:00 PM + 3:45 PM | `refresh_dashboard_data.sh`: `run_all.sync_live()` (my_positions.csv, `Reports/live_*.csv`) + `trade_audit.py --write --log` (ledger, round trips, alerts) | no (GET only) |
 | `com.stockanalysis.earningsstop` | every 5 min + at login | `earnings_stop.py --loop` (no-op while the stop is off) | no (off) |

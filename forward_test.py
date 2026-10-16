@@ -53,9 +53,13 @@ EARN_DAYS = 5
 BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
 LIVE = "Live 50/50 combined (no overlap)"   # always the CURRENT live rules (be.WINNER + sector_mapping, not pinned); saved days kept
-OLD_NAMES = {"Live rules (C6)": LIVE}           # renamed lines: saved rows are migrated to the new name (migrate_names)
+FRI = "Live 50/50, sector rotation on Fridays"      # Oct 16 evening: the sector half moved from Friday to Monday
+MON = "Live 50/50, sector rotation on Mondays"      # = the current live rules (marked on the leaderboard)
+MARKED = MON
+OLD_NAMES = {"Live rules (C6)": LIVE, "50/50: Low vol + SR weekly 63d (live combo from Oct 2)": FRI}           # renamed lines: saved rows are migrated to the new name (migrate_names)
 # the live 50/50 (be.WINNER "sleeves", from the Oct 16, 2026 switch): forward_combos legs, low-volatility half first
-LIVE_LEGS = (("lowvol", "full", "month", 0.5), ("sr63", "full", "week", 0.5))
+LIVE_LEGS = (("lowvol", "full", "month", 0.5), ("sr63", "full", "weekstart", 0.5))   # sector half on Mondays (Oct 19 on)
+FRI_LEGS = (LIVE_LEGS[0], ("sr63", "full", "week", 0.5))
 LIVE_SWITCH = "2026-10-16"
 C6 = "Oct 2 rules (pinned)" # the rules the forward test started with (pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, 50/50 score)
 # paper_trade's Mon-Thu spare-cash rule (forward_test never imports paper_trade; tests check these equal its constants)
@@ -97,7 +101,7 @@ STRATEGIES = [
          "50% low volatility in uptrend (monthly: the 10 calmest stocks above their 200-day average, max 4 per sector, "
          "equal weight, rebalanced Oct 16 and then the last trading day of each month) + 50% sector rotation (weekly: "
          "the best C6-score stocks in the 3 sectors with the best 63-day ETF return, top 10, 1/volatility weights, every "
-         "Friday), two independent halves with their own cash, the sector half never buys what the low-volatility half "
+         "Friday until Oct 16, every Monday from Oct 19), two independent halves with their own cash, the sector half never buys what the low-volatility half "
          "holds; no Mon-Thu trading, no earnings rule, max 20% per stock of its half, do_not_buy never bought "
          "(forward_combos, LIVE_LEGS; the Oct 15 holdings sold at the Oct 16 close). Oct 2-15 as recorded (named "
          "'Live rules (C6)' then: Oct 13-15 relative strength only + sleeve; before: the Oct 2 rules)."),
@@ -189,9 +193,12 @@ STRATEGIES = [
          rule="The live rules of Oct 13-15 (restored by commit 39e6a47): relative strength only, top 10 + the defensive "
               "sleeve, Friday rebalance, Mon-Thu sell worse than rank 20 refilled from the top 10, do_not_buy never "
               "bought. (Its Friday-only version is 'Now: Friday only'.)"),
-    dict(name="50/50: Low vol + SR weekly 63d (live combo from Oct 2)", combo=dict(legs=LIVE_LEGS),
-         rule="The live 50/50 computed from Oct 2: low vol monthly half + sector rotation (63-day ETF return, top 3 "
-              "sectors) weekly half, no overlap."),
+    dict(name=FRI, combo=dict(legs=FRI_LEGS),
+         rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
+              "(63-day ETF return, top 3 sectors) half rebalanced every Friday, no overlap (the live rules until Oct 16)."),
+    dict(name=MON, combo=dict(legs=LIVE_LEGS),
+         rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
+              "half rebalanced every Monday (Tuesday after a Monday holiday), no overlap. Current live rules from Oct 19."),
     dict(name="50/50: Low vol + SR every 2 weeks 63d", combo=dict(legs=(LIVE_LEGS[0], ("sr63", "full", "2week", 0.5))),
          rule="50/50, the sector-rotation half (63 days) rebalanced every other Friday (from Oct 2), no overlap."),
     dict(name="50/50: Low vol + SR Friday swap, keep top 10", combo=dict(legs=(LIVE_LEGS[0], ("sr63", "swap10", "week", 0.5))),
@@ -918,7 +925,7 @@ def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
         return df.assign(Date=pd.to_datetime(df["Date"])).set_index("Date").sort_index().loc[start:]
     for cfg in STRATEGIES:
         v = since(values[values["Strategy"] == cfg["name"]])["Value"] if values is not None else pd.Series(dtype=float)
-        series.append((cfg["name"] + (LIVE_MARK if cfg["name"] == LIVE else ""), cfg.get("ranked", True), v))
+        series.append((cfg["name"] + (LIVE_MARK if cfg["name"] == MARKED else ""), cfg.get("ranked", True), v))
     if daily is not None and len(daily):
         d = since(daily)
         if len(d):

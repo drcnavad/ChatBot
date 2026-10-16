@@ -105,6 +105,9 @@ WINNER = {
     # low-volatility half holds or targets). Two independent halves, each with its own cash (sleeves.py,
     # Reports/sleeve_ledger.json) = the backtested '50/50 + SR weekly, no overlap'. None = 100% low volatility.
     "sleeves": {"lowvol": 0.5, "sector": 0.5},
+    # The sector-rotation half's weekly full rebalance (Chirag, Oct 16, 2026 evening): "monday" = the week's FIRST session
+    # (Monday, or Tuesday after a Monday holiday), 2:30 PM CT, from Mon Oct 19; "friday" = the week's last session.
+    "sector_day": "monday",
     # Rebalance: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).
     "rebalance_band": 0.01,
 }
@@ -148,7 +151,8 @@ def winner_label(n_stocks):
                    "same dollars into the best pick not held)" if S.get("friday_falling_check") else ""))
         if S.get("sleeves"):
             name = (f"{S['sleeves']['lowvol']:.0%} " + name + f" + {S['sleeves']['sector']:.0%} Sector rotation (top 3 sectors by "
-                    "63-day ETF return, top 10, rebalanced every Friday, no overlap)")
+                    "63-day ETF return, top 10, rebalanced every " + ("Monday" if S.get("sector_day") == "monday" else "Friday")
+                    + ", no overlap)")
         return tag, name
     tag = f"C6-U{n_stocks}"
     if S.get("sector_cap", 0.4) >= 1.0 - 1e-12:
@@ -1726,7 +1730,22 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
                               keep=args.get("sleeve") or ())
     return tgt, checks
 
-SECTOR_KIND = "sector half rebalance"   # decision kind: the Friday rebalance of the sector-rotation half only (WINNER["sleeves"])
+SECTOR_KIND = "sector half rebalance"   # decision kind: the weekly rebalance of the sector-rotation half only (WINNER["sleeves"])
+
+def is_week_start(d):
+    """True when session d is the first session of its ISO week (Monday, or Tuesday after a Monday holiday)."""
+    d = pd.Timestamp(d).normalize()
+    if not is_session(d):
+        return False
+    prev = pd.date_range(d - pd.Timedelta(days=10), d - pd.Timedelta(days=1), freq=NYSE_SESSION)[-1]
+    return prev.isocalendar()[:2] != d.isocalendar()[:2]
+
+def is_sector_day(d):
+    """The sector-rotation half's weekly rebalance session (WINNER['sector_day']: 'monday' = week start, else week end)."""
+    d = pd.Timestamp(d).normalize()
+    if WINNER.get("sector_day") == "monday":
+        return is_week_start(d)
+    return is_session(d) and next_sessions(d, 1)[0].isocalendar()[:2] != d.isocalendar()[:2]
 
 def next_decision(latest, days=None):
     """Next decision session after ``latest``: (date, 'full rebalance' | 'mid-week check', fill_date).
@@ -1741,9 +1760,9 @@ def next_decision(latest, days=None):
         for i, d in enumerate(sess[:-1]):
             if reb.iloc[i]:
                 return d, "full rebalance", sess[i + 1]
+            if WINNER.get("sleeves") and is_sector_day(d):
+                return d, SECTOR_KIND, sess[i + 1]             # the sector-rotation half's weekly rebalance
             if d.isocalendar()[:2] != sess[i + 1].isocalendar()[:2]:     # the week's last session
-                if WINNER.get("sleeves"):
-                    return d, SECTOR_KIND, sess[i + 1]         # the sector-rotation half's weekly rebalance
                 if WINNER.get("friday_falling_check"):
                     return d, "Friday check", sess[i + 1]      # variant B (flag)
         return sess[0], "full rebalance", sess[1]

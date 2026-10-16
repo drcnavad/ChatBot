@@ -56,7 +56,7 @@ def low_vol_rules_text():
     per_sector = max(1, int(WINNER.get("sector_cap", 1.0) * N_PICKS))
     return (f"**Strategy rules: {STRATEGY_NAME} ({STRATEGY_TAG})**\n"
             "- **When:** a full rebalance on Fri Oct 16, 2026 (the switch), then on the last trading day of each month"
-            + (" (the low-volatility half; the sector half every Friday)" if SLEEVES else "") + ", with "
+            + (" (the low-volatility half; the sector half every Monday from Oct 19)" if SLEEVES else "") + ", with "
             "the prices at about 2:30 PM CT (sells first, then buys from the cash free after the sells; any rest at 9 AM CT "
             "the next trading day)" + (", and the Friday check on the other Fridays" if WINNER.get("friday_falling_check") else "")
             + ". **Other days:** the 2:30 PM runs only refresh the data and place no orders (a month-end on Mon-Thu is still a "
@@ -83,8 +83,9 @@ def low_vol_rules_text():
                "**low-volatility half** (weights are fractions of that half). The **sector-rotation half**: the 3 sector "
                "ETFs with the best 63-day return, then the best stocks of those sectors by the C6 score (50% technical + "
                "50% relative strength), top 10, weights ∝ 1 / 63-day volatility, max 4 per sector, max 20% of the half, "
-               f"{HALVED} with {REGIME_OFF}, do_not_buy never bought; a full rebalance of that half every Friday 2:30 PM CT "
-               "(the week's last trading day). **No overlap:** the sector half never buys a stock the low-volatility half "
+               f"{HALVED} with {REGIME_OFF}, do_not_buy never bought; a full rebalance of that half every Monday 2:30 PM CT "
+               "(the week's first trading day: Tuesday after a Monday holiday; Fridays until Oct 16). When the month's last "
+               "trading day is a Monday both halves rebalance that day, without overlap. **No overlap:** the sector half never buys a stock the low-volatility half "
                "holds or targets; if the low-volatility half buys one the sector half holds, the shares move over at the "
                "current price (no trade) and the sector half rebalances that day without it. Each half is sized from its "
                "own value and keeps its own cash (Reports/sleeve_ledger.json); a half that is not rebalancing is left "

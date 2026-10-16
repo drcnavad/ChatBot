@@ -221,7 +221,7 @@ def _ranked_ok(b):
     want = names.isin(rk) & b["Total return since Oct 2 %"].notna()
     return bool(((b["Rank"] != "–") == want).all()) or not (b["Rank"] != "–").any()
 expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Total return since Oct 2 %", "Daily return %", *_wk, "Max drawdown %"] and [w.replace(" (so far)", "") for w in _wk] == [f"Week {k} %" for k in range(1, 13)]
-                   and (_ft[0]["Strategy"] == ft.LIVE + ft.LIVE_MARK).sum() == 1 and _ranked_ok(_ft[0])),
+                   and (_ft[0]["Strategy"] == ft.MARKED + ft.LIVE_MARK).sum() == 1 and _ranked_ok(_ft[0])),
        f"leaderboard: columns, one marked live row, every ranked strategy with data ranked (the Oct 16 live halves not): {_ft[0].to_dict('list') if _ft else None}")
 expect(not _ft or sum(ft.RANK_RULE in c.value for c in at.caption) == 1, "the ranking rule is written once in the caption")
 _rules = [d.value for d in at.dataframe if "Rule" in d.value.columns]
