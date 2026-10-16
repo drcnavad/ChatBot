@@ -1013,55 +1013,6 @@ DECISION_DATE = "2026-12-24"   # the week-12 checkpoint (Thu: Fri Dec 25 is a ho
 LIVE_HALVES = ("Live half: Low vol monthly", "Live half: Sector rotation weekly (63d)")
 SPY_RULE = "We must beat SPY to stay in the current strategy, otherwise switch to SPY (Chirag, Oct 15, 2026)."
 
-def live_vs_benchmark(values=None, bench=None, daily=None, start=LIVE_SWITCH):
-    """Display only (no switch is ever wired): the live 50/50 line, its two halves, the real account (time-weighted) and
-    SPY / QQQ from the `start` close (Oct 16, 2026). Returns {"table": one row each (total return %, Week k %, max
-    drawdown %), "status": "Winning" / "Losing" / "Even" / None (no day after the start yet), "gap": live minus SPY total
-    return in points, "days": sessions since the start, "start", "decision"}."""
-    values = _read(STRATEGIES_CSV, parse_dates=["Date"]) if values is None else values
-    bench = _read(BENCH_CSV, parse_dates=["Date"]) if bench is None else bench
-    start = pd.Timestamp(start)
-
-    def since(df):
-        return df.assign(Date=pd.to_datetime(df["Date"])).set_index("Date").sort_index().loc[start:]
-    series = []
-    for name in (LIVE,) + LIVE_HALVES:
-        v = since(values[values["Strategy"].replace(OLD_NAMES) == name])["Value"] if values is not None and len(values) \
-            else pd.Series(dtype=float)
-        series.append((name, v))
-    if daily is not None and len(daily):
-        d = since(daily)
-        if len(d):
-            import alpaca_paper as ap
-            series.append((ACCOUNT, ap.account_twr_index(d.reset_index()) * float(d["Equity"].iloc[0])))
-    if bench is not None and len(bench):
-        b = since(bench)
-        series += [(s, b[s]) for s in ("SPY", "QQQ") if s in b]
-    stats = [(n, _stats(v.groupby(level=0).last())) for n, v in series]
-    nweeks = max((len(x[4]) for _, x in stats), default=0)
-    so_far = any(len(x[4]) > x[3] for _, x in stats)
-    weeks = [f"Week {k}" + (" (so far)" if so_far and k == nweeks else "") + " %" for k in range(1, nweeks + 1)]
-    table = pd.DataFrame([{"Line": n, "Total return %": x[0], **dict(zip(weeks, x[4])), "Max drawdown %": x[2]}
-                          for n, x in stats], columns=["Line", "Total return %"] + weeks + ["Max drawdown %"])
-    tot = table.set_index("Line")["Total return %"]
-    live_v = dict(series).get(LIVE, pd.Series(dtype=float))
-    days = max(len(live_v.dropna()) - 1, 0)
-    status, gap = None, np.nan
-    if days > 0 and pd.notna(tot.get(LIVE)) and pd.notna(tot.get("SPY")):
-        gap = float(tot[LIVE] - tot["SPY"])
-        status = "Winning" if gap > 0.005 else "Losing" if gap < -0.005 else "Even"
-    return {"table": table, "status": status, "gap": gap, "days": days, "start": start,
-            "decision": pd.Timestamp(DECISION_DATE)}
-
-def benchmark_verdict(r):
-    """One plain line for live_vs_benchmark's result."""
-    dec = f"decision date {r['decision']:%a %b %-d, %Y} (week 12)"
-    if r["status"] is None:
-        return f"Live 50/50 vs SPY: starts at the {r['start']:%a %b %-d} close; {dec}."
-    if r["status"] == "Even":
-        return f"Even with SPY after {r['days']} trading days; {dec}."
-    return f"{r['status']} vs SPY by {abs(r['gap']):.2f} pts after {r['days']} trading days; {dec}."
-
 def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
     """Display only, never saved. A trading day is saved by the daily run's after-close step (from 3:05 PM CT) once it
     has signal rows (the 2:30 PM decision run Mon-Fri, or the step's own refresh on a non-decision day, which runs first); until

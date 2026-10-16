@@ -2,9 +2,10 @@
 as HTML (no escaped tags / code blocks / unbalanced tags), the price chart draws Close + all MAs on a date axis, the displayed
 rank == Strategy_Rank and the portfolio slot == position among the picks, the dated decision badge / "Strategy rank ·
 <latest close>" / "<rebalance day> plan" chip agree with strategy_changes / signal_analysis / strategy_picks (and with the
-"Latest signals" and "Last decision" tables in Details), the Strategy tab widgets work, the rules text matches
+Strategy tab's Last decision table), the Strategy tab widgets work, the rules text matches
 backtest_engine.WINNER, removed sections stay gone (incl. the alert banner, the Summary section and the Strategy Health tab), and the stock list renders
-four rows (Holdings, Next week's candidates, Buy zone, Remaining) with a ?symbol= link per stock, each once; no strategy
+four rows (Holdings, Next in line (waiting list), Buy zone, Remaining) with a ?symbol= link per stock, each once, then
+the Do not buy note row; no strategy
 score chart panel.
 Run: python tests/run_tests.py  (or python tests/test_app.py)"""
 import base64
@@ -26,6 +27,7 @@ from streamlit.testing.v1 import AppTest
 
 import backtest_engine as be
 import sector_mapping as sm
+import sleeves
 
 FAIL = []
 MD = MarkdownIt("commonmark", {"html": True})
@@ -192,28 +194,18 @@ for sym in dict.fromkeys(cases):
            f"{sym}: rank label {lab!r} / stock list date vs latest {fmt(SIG.Date.max())} rank {r}")
     rk = (fmt(SIG.Date.max()), rk and rk.group(1))
     tabs = {tuple(d.value.columns): d.value for d in at.dataframe}
-    lt = next((v for c, v in tabs.items() if "Signal today" in c), None)
-    ld = next((v for c, v in tabs.items() if any(x.startswith("Rank at ") for x in c)), None)
-    expect(lt is not None and ld is not None, f"{sym}: Latest signals / Last decision tables missing")
-    if lt is not None and ld is not None:
-        a = lt.set_index("Symbol").loc[sym]
-        expect(int(a["Rank today"]) == int(r) and a[f"{fmt(plan_day)} plan"] == want_plan(sym)
-               and abs(a["Score today"] - latest.loc[sym, "Strategy_Score"]) < 0.06,
-               f"{sym}: Latest signals row {a.to_dict()} disagrees")
-        rank_then = f"Rank at {dec_day:%b} {dec_day.day} decision"
-        ld = ld.set_index("Symbol")
-        b = ld.loc[sym] if sym in ld.index else None          # the default filter shows the portfolio & changes only
-        expect(b is None and word is None or b is not None and int(b["Rank today"]) == int(r) and b["Next rebalance plan"] == want_plan(sym) and b["Signal"] == word
-               and int(b[rank_then]) == int(CH.set_index("Symbol").Rank[sym]),
-               f"{sym}: Last decision row {b.to_dict() if b is not None else None} disagrees")
+    ld = next((v for c, v in tabs.items() if "Rank Vol today" in c), None)    # Oct 16: the one portfolio view
+    if ld is not None and sym in set(ld["Symbol"]):
+        a = ld.set_index("Symbol").loc[sym]
+        expect(int(a["Rank Vol today"]) == int(r), f"{sym}: Last decision Rank Vol today {a.to_dict()} != rank {r}")
     print(f"   {sym}: {badges} · rank {rk} OK")
 import forward_test as ft  # noqa: E402
 # 4ad4ef4 order: Last decision, Forward test, Strategy rules and holdings first; live holdings and latest signals further down
 exp_titles = [f"Last decision · {fmt(dec_day)}",
-              "Live vs benchmark · live 50/50 and its halves vs SPY and QQQ since Oct 16, 2026",   # Oct 15 evening
+              "Live vs benchmark · your account vs QQQ and SPY",   # Oct 16: the real account (Alpaca), no simulated lines
               f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
               "Strategy rules and holdings (paper strategies)",
-              "Live holdings (Alpaca account)", f"Latest signals · {fmt(SIG.Date.max())} close"]
+              "Live holdings (Alpaca account)"]
 labels = [e.label for e in at.expander if e.label != "My notes"]   # the notes table sits on top (daf6f89)
 expect(len(labels) >= 3 and labels[0].startswith(exp_titles[0]) and labels[1:4] == exp_titles[1:4]
        and set(exp_titles[4:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
@@ -250,21 +242,35 @@ for _rule in (_rule, "No single stock gets more than 15%; any extra stays in cas
     expect(sum(_rule in m.value for m in at.markdown) + sum(_rule in c.value for c in at.caption) == 1, f"shown once: {_rule}")
 # short history: no Details section any more; the stocks sit in the clickable stock list (see the rank tiers test)
 expect(not any(l.startswith("Reference only") for l in labels), f"stale short-history Details section: {labels}")
-lt_all = next((d.value for d in at.dataframe if "Signal today" in d.value.columns), pd.DataFrame())
-expect(set(lt_all.get("Symbol", [])) == set(latest.index), "Latest signals should list every stock of the latest close")
+# Oct 16, 2026: ONE portfolio view (Strategy tab, Last decision); the Two halves, Targets and Latest signals views are gone
+expect(not any(l.startswith(("Latest signals", "Two halves")) for l in labels), f"stale duplicate views: {labels}")
+expect(not any("Signal today" in d.value.columns or "Weight_in_half_%" in d.value.columns for d in at.dataframe),
+       "stale Latest signals / halves targets tables")
+if sleeves.load_ledger() is not None:
+    at = at.radio(key="decision_filter").set_value("All stocks (both strategies' ranks)").run(); page_ok(at, "decision_filter all")
+    _ld = next((d.value for d in at.dataframe if "Rank Vol today" in d.value.columns), pd.DataFrame())
+    expect(list(_ld.columns) == ["Symbol", "Action", "Sleeve", "Rank Vol at decision", "Rank Vol today",
+                                 "Rank Sector at decision", "Rank Sector today", "Current weight %"]
+           and set(latest.index) - {"QQQ"} <= set(_ld["Symbol"]) and _ld["Symbol"].is_unique,
+           f"Last decision (all stocks): columns / every stock once: {list(_ld.columns)}")
 
 # ---------------------------------------------------------------- Strategy tab widgets and captions
 # the "if rebalanced at latest close" / "if the week ended today" preview views were removed from the app
 # (the pipeline runs on decision days only, so there is nothing hypothetical left to show)
 expect(not any(r.key == "changes_view" for r in at.radio), "stale changes_view preview radio still present")
 expect(not any(r.key == "signals_view" for r in at.radio), "stale signals_view preview radio still present")
-at = at.radio(key="signals_filter").set_value("All stocks").run(); page_ok(at, "signals_filter all")
+# Oct 16, 2026: Last decision = bought / sold / held from the account's fills (tests/test_strategy_tab.py has the math);
+# Alpaca is off here, so it and Live vs benchmark show the plain off message
+expect(not any(r.key == "signals_filter" for r in at.radio), "stale signals_filter radio (old Last decision view)")
+_infos = [i.value for i in at.info]
+expect(any(x.startswith("Last decision ·") and "turned off" in x or x.startswith("No trade run yet") for x in _infos)
+       and any(x.startswith("Live vs benchmark:") and "turned off" in x for x in _infos),
+       f"Last decision / Live vs benchmark: the plain message when Alpaca is not read: {_infos}")
 # ONE decision view: the old "What changed at the latest decision" table (rules area) is merged into "Last decision"
 expect(not any(c.key == "changes_all" for c in at.checkbox), "stale 'What changed' checkbox still present")
 expect(not any("What changed at the latest decision" in m.value for m in at.markdown), "duplicate 'What changed' view is back")
-why = [d.value for d in at.dataframe if "Why" in d.value.columns]
-expect(len(why) == 1 and {"Weight before %", "Portfolio weight %", "Next rebalance plan"} <= set(why[0].columns)
-       and len(why[0]) == len(latest), f"one decision table with every stock and before/after weights: {[list(w.columns) for w in why]}")
+old_cols = {"Weight before %", "Next rebalance plan", "Rank change"}
+expect(not any(old_cols & set(d.value.columns) for d in at.dataframe), "stale Last decision columns still shown")
 dec_labels = [e.label for e in at.expander if "decision" in e.label.lower()]
 expect(len(dec_labels) == 1 and dec_labels[0].startswith(f"Last decision · {fmt(dec_day)}"), f"decision expanders: {dec_labels}")
 expect([e.label for e in at.expander][-1] == "Strategy rules", f"the rules must be the last Details section: {[e.label for e in at.expander]}")
@@ -276,7 +282,7 @@ expect(not any(e.label in ("Holdings risk", "Order preview (nothing is sent)") f
 # the Backtest results expander (and its bt_segment selectbox) was removed from the app
 # (live Alpaca P&L is the real number now; the backtest was a research artifact)
 expect(not any(s.key == "bt_segment" for s in at.selectbox), "stale bt_segment selectbox still present")
-expect(any(m.label == "Last mid-week check" for m in at.metric), "metric 'Last mid-week check' missing")
+expect(not any(m.label == "Last mid-week check" for m in at.metric), "stale 'Last mid-week check' metric")
 blob = "\n".join(str(t.value) for t in list(at.markdown) + list(at.caption))
 mwc = pd.read_csv("Reports/strategy_midweek_check.csv")
 expect("run_pipeline" not in blob, "old command 'run_pipeline' still shown in the app")
@@ -309,27 +315,30 @@ expect(not [m for m in at.markdown if '<div class="sa-section">Summary</div>' in
 expect(any("Live holdings are turned off here" in i.value for i in at.info), "holdings expander: off message in tests")
 
 # ---------------------------------------------------------------- stock list: four rows, every stock once (Oct 16, 2026)
-ROWS = ["Holdings", "Next week's candidates", "Buy zone, not in portfolio", "Remaining"]
+ROWS = ["Holdings", "Next in line (waiting list)", "Buy zone, not in portfolio", "Remaining", "Do not buy list"]
 tier_md = [m.value for m in at.markdown if "Stock list<span>" in m.value and "?symbol=" in m.value]
 expect(len(tier_md) == 1, f"stock list block found: {len(tier_md)}")
 blob = tier_md[0] if tier_md else ""
-parts = re.split(r'<b(?: title="[^"]*")?>(Holdings|Next week\'s candidates|Buy zone, not in portfolio|Remaining) \((\d+)\):</b>', blob)
+parts = re.split(r'<b(?: title="[^"]*")?>(Holdings|Next in line \(waiting list\)|Buy zone, not in portfolio|Remaining|Do not buy list) \((\d+)\):</b>', blob)
 expect([parts[i] for i in range(1, len(parts), 3)] == ROWS, f"stock list rows: {[parts[i] for i in range(1, len(parts), 3)]}")
 bodies = {parts[i]: re.findall(r"\?symbol=([A-Z0-9.]+)", parts[i + 2]) for i in range(1, len(parts), 3)}
 counts = {parts[i]: int(parts[i + 1]) for i in range(1, len(parts), 3)}
 for name, syms in bodies.items():
     expect(len(syms) == counts[name], f"{name}: header count {counts[name]} != {len(syms)} links")
-every = [s for syms in bodies.values() for s in syms]
+every = [s for name, syms in bodies.items() if name != "Do not buy list" for s in syms]   # the note row repeats
+expect(bodies.get("Do not buy list") == list(sm.do_not_buy), f"Do not buy note row: {bodies.get('Do not buy list')}")
 expect(len(every) == len(set(every)), f"stock list: a stock shown twice: {sorted({s for s in every if every.count(s) > 1})}")
 expect(set(sm.tradable_symbols) <= set(every), f"stock list misses {sorted(set(sm.tradable_symbols) - set(every))}")
-expect(len(bodies.get("Next week's candidates", [])) <= 20, "at most 20 candidates")
-import sleeves  # noqa: E402
+expect(len(bodies.get("Next in line (waiting list)", [])) <= 20, "at most 20 candidates")
 _led = sleeves.load_ledger()
 if _led is not None:      # Alpaca is off in tests: the holdings row = the sleeve ledger's planned shares
     _held = {s for h in sleeves.HALVES for s, q in _led["halves"][h]["shares"].items() if q > 0}
     expect(set(bodies.get("Holdings", [])) == _held, f"holdings row {bodies.get('Holdings')} != ledger {sorted(_held)}")
-expect(not set(bodies.get("Next week's candidates", [])) & set(sm.do_not_buy), "do_not_buy stocks are never candidates")
 print(f"   stock list rows: {counts}")
+_sec = [d.value for d in at.dataframe if "1 month %" in d.value.columns and "Sector" in d.value.columns]
+expect(len(_sec) == 1 and list(_sec[0].columns) == ["Sector", "Stocks", "14 days %", "1 month %", "2 months %", "3 months %"]
+       and _sec[0]["Stocks"].sum() == len(sm.tradable_symbols) and _sec[0]["1 month %"].is_monotonic_decreasing,
+       f"Home tab sector performance table: {_sec[0].columns.tolist() if _sec else None}")
 all_linked = set(every)
 expect(all_linked <= set(opts), f"stock list links outside the dropdown: {sorted(all_linked - set(opts))}")
 

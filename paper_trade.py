@@ -2915,6 +2915,11 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
             log_event("Trade", "warning", "yes" if n_submitted else "no",
                       "Couldn't save the two halves' ledger (Reports/sleeve_ledger.json). The orders are not affected; "
                       "check the file before the next Friday run.", details=str(e))
+        try:   # the ranks this decision used, for the Strategy tab (display only; the orders are already sent)
+            import decision_ranks
+            decision_ranks.save(meta["sleeve_ledger"].get("day"))
+        except Exception as e:
+            print(f"  Decision ranks not saved (display only): {type(e).__name__}: {e}")
     _print_header("EVENING LIVE TRADE COMPLETE")
     return orders, meta, results
 

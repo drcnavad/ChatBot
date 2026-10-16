@@ -1,66 +1,126 @@
-"""Strategy tab: the last decision (decisions in force, every stock)."""
-import numpy as np
+"""Strategy tab: the ONE portfolio view (Oct 16, 2026; replaces the old Last decision, Two halves, Targets and Latest
+signals views) - what was actually bought, sold and held at the last decision, straight from the Alpaca account, and
+every stock's rank in both strategies.
+
+Decision day = the day of the last trade run (Reports/sleeve_ledger.json "day"). Action from the account's fills since that
+day (GET /account/activities, the Trading Account tab's read): Bought = not held before, held now; Sold = held before,
+none now; Held = held before and now (a trim or top-up is noted). Sleeve = the half that owns it in the ledger. Ranks at
+the decision from Reports/decision_ranks.csv (decision_ranks.py), today's from the latest signal data. Weight = the
+position's market value / account equity now."""
 import pandas as pd
 import streamlit as st
 
-from dashboard.data import read_report_csv
 from dashboard.page import open_symbol
-from dashboard.settings import CHANGES_CSV, MIDWEEK, N_PICKS, symbol_sector
-from dashboard.signals import SIGNALS, plan_text
-from dashboard.style import PCT_COL, SCORE_COL, SCORE_GOOD, toned
+from dashboard.settings import SIGNAL_CSV
+from dashboard.style import BAD, GOOD, INK, PCT_COL, toned
+
+SLEEVE = {"lowvol": "Low vol", "sector": "Sector rotation"}
+ORDER = {"Bought": 0, "Held": 1, "—": 1, "Sold": 2, "Not": 3}
+COLUMNS = ["Symbol", "Action", "Sleeve", "Rank Vol at decision", "Rank Vol today", "Rank Sector at decision",
+           "Rank Sector today", "Current weight %"]
+
+def decision_table(day, positions, fills, equity, ledger=None, ranks_then=None, ranks_now=None, all_stocks=()):
+    """One row per stock bought, sold or held at decision day `day` (COLUMNS); positions / fills = Alpaca dicts.
+    fills=None (account not read): actions unknown ("—"). all_stocks: every other symbol is added as "Not held"."""
+    since = pd.Timestamp(day).tz_localize("America/Chicago")
+    net = {}
+    for f in fills or []:
+        if pd.Timestamp(f["transaction_time"]) >= since:
+            q = float(f.get("qty") or 0) * (1 if f.get("side") == "buy" else -1)
+            net[f["symbol"]] = net.get(f["symbol"], 0.0) + q
+    now = {p["symbol"]: float(p.get("qty") or 0) for p in positions or []}
+    value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
+    owner = {s: SLEEVE[h] for h in SLEEVE for s, q in ((ledger or {}).get("halves", {}).get(h, {}).get("shares") or {}).items()
+             if float(q) > 0}
+    rank = lambda r, s, c: (r.set_index("Symbol")[c].get(s, pd.NA) if r is not None else pd.NA)
+    rows = []
+    for s in sorted(set(net) | set(now) | set(all_stocks)):
+        after, traded = now.get(s, 0.0), net.get(s, 0.0)
+        before = after - traded
+        if after <= 1e-6 and before <= 1e-6:
+            if s not in all_stocks:
+                continue                                  # bought and sold again since the decision: not in the portfolio
+            action = "Not held"
+        elif fills is None:
+            action = "—"
+        elif before <= 1e-6:
+            action = "Bought"
+        elif after <= 1e-6:
+            action = "Sold"
+        else:
+            action = "Held" + (" (trimmed)" if traded < -1e-6 else " (added)" if traded > 1e-6 else "")
+        rows.append({"Symbol": s, "Action": action, "Sleeve": owner.get(s, "—"),
+                     "Rank Vol at decision": rank(ranks_then, s, "Rank_Vol"), "Rank Vol today": rank(ranks_now, s, "Rank_Vol"),
+                     "Rank Sector at decision": rank(ranks_then, s, "Rank_Sector"),
+                     "Rank Sector today": rank(ranks_now, s, "Rank_Sector"),
+                     "Current weight %": round(100 * value.get(s, 0.0) / equity, 2) if equity else None})
+    t = pd.DataFrame(rows, columns=COLUMNS)
+    for c in COLUMNS[3:7]:
+        t[c] = pd.to_numeric(t[c], errors="coerce").round().astype("Int64")
+    key = t["Action"].str.split().str[0].map(ORDER).fillna(3)
+    return (t.assign(_k=key, _r=t["Rank Vol today"].astype("Float64").fillna(1e9))
+            .sort_values(["_k", "Sleeve", "_r", "Symbol"]).drop(columns=["_k", "_r"]).reset_index(drop=True))
+
+def sleeve_summary(day, positions, ledger, equity):
+    """One line per half: stocks, value (its positions + its ledger cash), share of the account, next rebalance."""
+    import sleeves
+    value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
+    cal = sleeves.calendar(pd.Timestamp(day) + pd.Timedelta(days=1), 45)
+    out = []
+    for h, label in SLEEVE.items():
+        L = ledger["halves"][h]
+        syms = [s for s, q in (L.get("shares") or {}).items() if float(q) > 0]
+        v = sum(value.get(s, 0.0) for s in syms) + float(L.get("cash", 0.0))
+        nxt = next((d for d, hs in cal if h in hs), None)
+        out.append(f"**{sleeves.LABEL[h]}**: {len(syms)} stocks · ${v:,.0f}"
+                   + (f" ({100 * v / equity:.1f}% of the account)" if equity else "")
+                   + (f" · next rebalance {nxt:%a %b %-d}" if nxt is not None else ""))
+    return out
+
+@st.cache_data(show_spinner=False)
+def _ranks_now(mtime):
+    import decision_ranks
+    return decision_ranks.ranks_on()[1]
 
 def render_last_decision(p):
-    """The decisions in force, in ONE view: decision dates, then every stock with its signal, reason, ranks, weight before
-    and after, and the next rebalance plan (filters: portfolio & changes / watch list / all). Click a row to open the stock."""
-    reb_days = p.df.loc[p.df["Rebalance_Day"] == 1, "Date"]
-    mw = p.midweek[p.midweek["Event"] == "mid-week check"] if p.midweek is not None else None
-    if mw is not None and len(mw):
-        last_day = mw["Event_Date"].iloc[-1]
-        acts = set(mw.loc[mw["Event_Date"] == last_day, "Action"])
-        mw_val = (f"{pd.Timestamp(last_day):%a %b %-d} · "
-                  + ("replace / exit" if acts & {"REPLACE", "SELL"} else "no trade"))
-    else:
-        mw_val = "none yet this week" if MIDWEEK else "off"
-    c = st.columns(3)
-    c[0].metric("Last weekly rebalance", f"{reb_days.max():%a %b %-d}" if not reb_days.empty else "—")
-    c[1].metric("Last mid-week check", mw_val)
-    c[2].metric("Next decision", f"{p.next_kind} · {p.next_dec:%a %b %-d}" if p.next_dec is not None else "—")
-    today = p.df["Date"].max()
-    plan_when = f"{p.plan_day:%a %b %-d}" if p.plan_day is not None else "next"
-    rank_then = f"Rank at {p.off_date:%b %-d} decision"
-    board = p.board_off.rename(columns={"Rank": rank_then})
-    board[rank_then] = board[rank_then].round(0).astype("Int64")
-    board.insert(4, "Rank today", board["Symbol"].map(p.by_symbol["Strategy_Rank"]).round(0).astype("Int64"))
-    board.insert(5, "Next rebalance plan", [plan_text(p.plan, s) if s in symbol_sector or s in p.plan else "—"
-                                            for s in board["Symbol"]])
-    board.insert(6, "Rank change", board["Symbol"].map(lambda s: p.rank_change.get(s, (np.nan,))[0]))
-    ch = read_report_csv(CHANGES_CSV)
-    ok = ch is not None and {"Symbol", "Old_Weight"} <= set(ch.columns)
-    # Newest decision first so drop_duplicates keeps the latest Old_Weight per symbol.
-    _ch = ch.sort_values("Date", ascending=False) if ok else None
-    before = _ch[_ch["Symbol"].notna()].drop_duplicates("Symbol").set_index("Symbol")["Old_Weight"] if ok else {}
-    board.insert(board.columns.get_loc("Portfolio weight %"), "Weight before %",
-                 board["Symbol"].map(lambda s: before.get(s, np.nan) * 100))
-    board.loc[board["Signal"] == "Sold", "Portfolio weight %"] = 0.0      # after the decision a sold stock weighs 0
-    counts = board["Signal"].value_counts()
-    filters = {"Portfolio & changes": ["Buy", "Hold", "Sold"],
-               "Watch list": ["Watch"],
-               "All stocks": SIGNALS}
-    show = st.radio("Show", list(filters), horizontal=True, key="signals_filter", label_visibility="collapsed")
-    part = board[board["Signal"].isin(filters[show])].reset_index(drop=True)
-    st.caption(f"Buy {counts.get('Buy', 0)} · Hold {counts.get('Hold', 0)} · "
-               f"Sold {counts.get('Sold', 0)} · Watch {counts.get('Watch', 0)} · "
-               f"Score below 0 {counts.get('Score below 0', 0)}. {rank_then} = the rank the decision used; Rank today = at "
-               f"the {today:%a %b %-d} close (Rank change: + = moved up since the decision day); Weight before % → Portfolio "
-               f"weight % = the portfolio before and after the decision; Portfolio slot = position among the {N_PICKS} picks; "
-               f"Next rebalance plan = what the {plan_when} rebalance would do at the latest close (the numbers the trade "
-               "step uses). Orders for a decision go out that day at 2:30 PM CT. Click a row to open the stock on the "
-               "Home tab.")
-    shown = toned(part.round({"Score": 1, "Weight before %": 2, "Portfolio weight %": 2}),
-                  ["Signal", "Next rebalance plan", "Rank change", "Earnings soon"])
-    event = st.dataframe(toned(shown, ["Score"], good=SCORE_GOOD), hide_index=True,
-                         width="stretch", on_select="rerun", selection_mode="single-row", key=f"sig_tbl_{show}",
-                         column_config={"Why": st.column_config.TextColumn("Why", width="large"), "Score": SCORE_COL,
-                                        "Rank change": st.column_config.NumberColumn(format="%+.0f"),
-                                        "Weight before %": PCT_COL, "Portfolio weight %": PCT_COL})
-    open_symbol(part, event, "signals")
+    """Strategy tab, the one portfolio view: per-half summary, then the last decision's Bought / Sold / Held (or every
+    stock with both strategies' ranks). Click a row to open the stock."""
+    import os
+
+    import decision_ranks
+    import sleeves
+    from dashboard.details.live_holdings import holdings_this_run
+    led = sleeves.load_ledger()
+    if led is None:
+        st.info("No trade run yet (Reports/sleeve_ledger.json is written by the first one).")
+        return
+    day = pd.Timestamp(led["day"])
+    data, err = holdings_this_run()
+    if data is not None:
+        positions, fills, equity = data["positions"], data["fills"], data["equity"]
+    else:                                   # Alpaca not readable: the ledger's planned shares at the latest closes
+        close = p.by_symbol["Close"]
+        positions = [{"symbol": s, "qty": q, "market_value": q * float(close.get(s, 0.0))}
+                     for h in sleeves.HALVES for s, q in led["halves"][h]["shares"].items() if float(q) > 0]
+        fills = None
+        equity = sum(x["market_value"] for x in positions) + sum(float(led["halves"][h]["cash"]) for h in sleeves.HALVES)
+        st.info(f"Last decision · {day:%a %b %-d}: {err} Holdings below = the halves' planned shares (actions unknown).")
+    for line in sleeve_summary(day, positions, led, equity):
+        st.markdown(line)
+    show = st.radio("Show", ["Portfolio (last decision)", "All stocks (both strategies' ranks)"], horizontal=True,
+                    key="decision_filter", label_visibility="collapsed")
+    then = decision_ranks.load(day)
+    now = _ranks_now(os.path.getmtime(SIGNAL_CSV))
+    every = list(now["Symbol"]) if show.startswith("All") else ()
+    t = decision_table(day, positions, fills, equity, led, then, now, all_stocks=every)
+    n = t["Action"].str.split().str[0].value_counts()
+    st.caption(f"Decision of {day:%a %b %-d} (orders at 2:30 PM CT, any rest at 9 AM CT the next trading day), from the "
+               f"account's fills: Bought {n.get('Bought', 0)} · Sold {n.get('Sold', 0)} · Held {n.get('Held', 0)}. "
+               "Rank Vol = low-volatility rank (calmest first, above the 200-day average only); Rank Sector = "
+               "sector-rotation rank (score among the 3 sectors with the best 63-day ETF return); blank = not ranked. "
+               + ("" if then is not None else "Ranks at the decision were not saved for this day. ")
+               + "Current weight = the position's value / equity now. Click a row to open the stock on the Home tab.")
+    sty = toned(t, ["Action"], fn=lambda v: GOOD if v == "Bought" else BAD if v == "Sold" else INK)
+    event = st.dataframe(sty, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
+                         key=f"last_decision_tbl_{show[:3]}", column_config={"Current weight %": PCT_COL})
+    open_symbol(t, event, "last_decision")

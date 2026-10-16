@@ -4,7 +4,8 @@ Stock Analysis dashboard (Streamlit).
 Page layout, top to bottom:
   1. Title bar.
   2. "Home" tab: your notes table first (editable, saved to Reports/my_notes.csv), then the single-stock view
-     (clickable stock list: holdings, next week's candidates, buy zone, remaining; stock picker, chart). Open any stock directly with http://localhost:8502/?symbol=NVDA
+     (clickable stock list: holdings, next in line (waiting list), buy zone, remaining; stock picker, chart;
+     sector performance table at the bottom). Open any stock directly with http://localhost:8502/?symbol=NVDA
   3. "Strategy" tab: last decision, forward test, strategy rules and holdings, data freshness and settings.
   4. "Trading Account" tab: live holdings, latest signals, trade audit, tax view, strategy rules.
 
@@ -30,6 +31,7 @@ from dashboard.details import render_strategy_tab, render_trading_tab  # noqa: E
 from dashboard.details.live_holdings import new_run  # noqa: E402
 from dashboard.notes import render_notes  # noqa: E402
 from dashboard.page import build_page, render_top_bar  # noqa: E402
+from dashboard.sector_table import render_sector_table  # noqa: E402
 from dashboard.short_stock import render_short_stock  # noqa: E402
 from dashboard.stock_chart import render_stock_figure, stock_chart_inputs  # noqa: E402
 from dashboard.stock_view import render_stock_picker, render_stock_section  # noqa: E402
@@ -61,6 +63,7 @@ def main():
             render_stock_section(p, ticker, tdata)
             fig = stock_chart_inputs(ticker, tdata)
             render_stock_figure(fig, ticker)
+        render_sector_table(p)
     with tab_strategy:
         render_strategy_tab(p)
     with tab_trading:

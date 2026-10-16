@@ -175,11 +175,13 @@ try:
     ap.holdings_refresh_key = lambda now=None: "k3"
     at.run()
     msg = [i.value for i in at.info if "Live holdings unavailable" in i.value]
-    check("app: Alpaca failure -> plain message, page still renders", not at.exception and len(msg) == 1, [str(e) for e in at.exception])
+    # Oct 16, 2026: the Strategy tab's Last decision / Live vs benchmark read the same holdings and show the same message
+    check("app: Alpaca failure -> plain message, page still renders", not at.exception and len(msg) >= 1, [str(e) for e in at.exception])
     FakeAccount.fail = None
     at.run()
     check("app: a failure is not cached (same key, next run reads again and shows the table)",
-          reads() == 4 and any("First bought" in d.value.columns for d in at.dataframe), reads())
+          reads() == 5 and any("First bought" in d.value.columns for d in at.dataframe), reads())   # a failed read is
+    # never cached: the failing run reads twice (the Strategy tab's read of the run, then the holdings table's own)
 finally:
     ap.PaperAccount, ap.holdings_refresh_key, FakeAccount.fail = real, real_key, None
     lh.etf_prices = real_lh

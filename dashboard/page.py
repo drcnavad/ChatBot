@@ -6,10 +6,10 @@ from types import SimpleNamespace
 import pandas as pd
 import streamlit as st
 
-from dashboard.data import data_freshness, day_rank_change, latest_rows, load_midweek_rows, load_signals
+from dashboard.data import data_freshness, latest_rows, load_signals
 from dashboard.settings import CT, SIGNAL_CSV
 from dashboard.short_stock import load_short_history
-from dashboard.signals import next_decision_date, rebalance_plan, signal_board
+from dashboard.signals import rebalance_plan, signal_board
 from dashboard.style import esc, show_html
 
 def build_page():
@@ -17,7 +17,6 @@ def build_page():
     df = load_signals(mtime)
     latest = latest_rows(df, mtime)
     board_off, off_date = signal_board(df)
-    next_dec, next_kind = next_decision_date(df["Date"].max())
     plan_day, plan_asof, plan = rebalance_plan(df)
     ref = load_short_history()
     short = (ref if ref is not None else pd.DataFrame(columns=["Symbol"])).set_index("Symbol")
@@ -26,15 +25,11 @@ def build_page():
         options=latest.sort_values('combined_signal', ascending=False)['Symbol'].tolist()   # dropdown: best score first,
         + [s for s in short.index if s not in set(latest['Symbol'])],                       # then short-history stocks
         short=short,
-        rank_change=day_rank_change(df, mtime),
-        board_off=board_off.drop(columns="Tag"), off_date=off_date,
+        off_date=off_date,
         tag_off=dict(zip(board_off["Symbol"], board_off["Tag"])),
-        rank_off=dict(zip(board_off["Symbol"], board_off["Rank"])),
         plan_day=plan_day, plan_asof=plan_asof, plan=plan,
         sig_off=dict(zip(board_off["Symbol"], board_off["Signal"])),
         why_off=dict(zip(board_off["Symbol"], board_off["Why"])),
-        slot_off=dict(zip(board_off["Symbol"], board_off["Portfolio slot"])),
-        next_dec=next_dec, next_kind=next_kind, midweek=load_midweek_rows(),
         freshness=data_freshness(df["Date"].max()),
     )
 

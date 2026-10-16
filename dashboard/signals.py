@@ -1,13 +1,11 @@
 """Plain-language signals (display only; the CSV values stay unchanged) and the next-rebalance plan."""
 import re
 
-import numpy as np
 import pandas as pd
 
-from dashboard.data import last_next_earnings, read_report_csv
-from dashboard.settings import CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, N_PICKS, PICKS_CSV, symbol_sector
+from dashboard.data import read_report_csv
+from dashboard.settings import CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, N_PICKS, PICKS_CSV
 
-SIGNALS = ["Buy", "Hold", "Sold", "Score below 0", "Watch", "Not ranked"]
 SIGNAL_BADGE = {"Buy": "sa-badge-bull", "Hold": "sa-badge-hold", "Sold": "sa-badge-bear",
                 "Score below 0": "sa-badge-bear", "Watch": "sa-badge-hold", "Not ranked": "sa-badge-grey"}
 PLAN_BADGE = {"Buy": "sa-badge-bull", "Keep": "sa-badge-hold", "Sell": "sa-badge-bear"}
@@ -67,58 +65,32 @@ def decision_tag(signal, reason):
     return ""
 
 def signal_board(df):
-    """Every symbol's signal for the decisions in force (the last rebalance / mid-week check).
-
-    Uses Reports/strategy_changes.csv (the engine's decisions) plus signal_analysis.csv for stocks not in it.
-    Returns (board DataFrame, decision date)."""
+    """Every symbol's signal (Buy / Hold / Sold / Watch / Score below 0 / Not ranked), plain reason and tag for the
+    decisions in force (Reports/strategy_changes.csv, else the last rebalance day's ranks). Returns (DataFrame Symbol,
+    Signal, Why, Tag; decision date)."""
     ch = read_report_csv(CHANGES_CSV)
     sub = ch[ch["Symbol"].notna()] if ch is not None else pd.DataFrame()
     if not sub.empty:
-        # The decisions in force are the LATEST ones: sort newest-first so iloc[0]
-        # and drop_duplicates(keep="first") both pick the latest decision per symbol.
-        sub = sub.sort_values("Date", ascending=False)
+        sub = sub.sort_values("Date", ascending=False)      # newest first: the decision in force per symbol
         date = pd.Timestamp(sub["Date"].iloc[0])
     else:
         reb = df.loc[df["Rebalance_Day"] == 1, "Date"]
         date = reb.max() if len(reb) else df["Date"].max()
     day = df[df["Date"] == date].drop_duplicates("Symbol").set_index("Symbol")
     dec = sub.drop_duplicates("Symbol").set_index("Symbol") if not sub.empty else pd.DataFrame()
-    next_ed = last_next_earnings(list(day.index)).set_index("Symbol")["Next ED"]
-    today = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
+    status_sig = {"add": "Buy", "hold": "Hold", "drop": "Sold"}
     rows = []
     for sym, r in day.iterrows():
         d = dec.loc[sym] if sym in dec.index else None
         score = d["Score"] if d is not None and pd.notna(d["Score"]) else r.get("Strategy_Score")
         rank = d["Rank"] if d is not None and pd.notna(d["Rank"]) else r.get("Strategy_Rank")
-        status = d["Status"] if d is not None else None
-        if status == "add":
-            sig, weight = "Buy", d["New_Weight"]
-        elif status == "hold":
-            sig, weight = "Hold", d["New_Weight"]
-        elif status == "drop":
-            sig, weight = "Sold", d["Old_Weight"]
-        elif pd.isna(score):
-            sig, weight = "Not ranked", np.nan
-        else:
-            sig, weight = ("Score below 0" if score <= 0 else "Watch"), 0.0
-        ned = next_ed.get(sym, "")
-        soon = ""
-        if ned:
-            n_days = int(np.busday_count(today.date(), pd.Timestamp(ned).date()))
-            soon = "⚠️ within 2 sessions" if 0 <= n_days <= 2 else ""
-        sector = d["Sector"] if d is not None and "Sector" in d and pd.notna(d["Sector"]) else symbol_sector.get(sym)
-        rows.append({"Symbol": sym, "Signal": sig, "Rank": rank, "Score": score,
-                     "Portfolio weight %": weight * 100 if pd.notna(weight) else np.nan, "Sector": sector or "—",
-                     "Why": plain_reason(sig, d["Reason"] if d is not None else None, rank, score),
-                     "Tag": decision_tag(sig, d["Reason"] if d is not None else None),
-                     "Next earnings": ned, "Earnings soon": soon})
-    board = pd.DataFrame(rows, columns=["Symbol", "Signal", "Rank", "Score", "Portfolio weight %", "Sector", "Why",
-                                        "Next earnings", "Earnings soon", "Tag"])
-    board = board.sort_values(["Rank", "Symbol"], na_position="last").reset_index(drop=True)
-    picked = board["Signal"].isin(["Buy", "Hold"])
-    board.insert(2, "Portfolio slot", "—")
-    board.loc[picked, "Portfolio slot"] = [str(i) for i in range(1, int(picked.sum()) + 1)]
-    return board, date
+        sig = status_sig.get(d["Status"] if d is not None else None)
+        if sig is None:
+            sig = "Not ranked" if pd.isna(score) else ("Score below 0" if score <= 0 else "Watch")
+        reason = d["Reason"] if d is not None else None
+        rows.append({"Symbol": sym, "Signal": sig, "Why": plain_reason(sig, reason, rank, score),
+                     "Tag": decision_tag(sig, reason)})
+    return pd.DataFrame(rows, columns=["Symbol", "Signal", "Why", "Tag"]), date
 
 def next_full_rebalance(day):
     """Date of the first full (Friday) rebalance after `day` (backtest_engine's decision calendar), or None."""
@@ -155,12 +127,3 @@ def plan_text(plan, sym):
     """'Buy 14.23%' / 'Keep 9.14%' / 'Sell' / 'not picked'."""
     action, w = plan.get(sym, (None, 0.0))
     return f"{action} {w:.2f}%" if action in ("Buy", "Keep") else (action or "not picked")
-
-def next_decision_date(latest_day):
-    """(date, kind) of the next decision close: 'full rebalance' or 'mid-week check' (from backtest_engine)."""
-    try:
-        from backtest_engine import next_decision
-        d, kind, _fill = next_decision(pd.Timestamp(latest_day))
-        return d, kind
-    except Exception:
-        return None, None

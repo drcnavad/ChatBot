@@ -2,21 +2,20 @@
 import streamlit as st
 
 from dashboard.details.data_settings import render_data_and_settings
-from dashboard.details.forward_test import render_forward_rules, render_forward_test, render_live_vs_benchmark
+from dashboard.details.forward_test import render_forward_rules, render_forward_test
 from dashboard.details.last_decision import render_last_decision
-from dashboard.details.latest_signals import latest_signals_title, render_latest_signals
 from dashboard.details.live_holdings import render_live_holdings
-from dashboard.details.sleeves import render_sleeves, sleeves_title
+from dashboard.details.live_vs_benchmark import render_live_vs_benchmark
 from dashboard.details.tax_view import render_tax_view
 from dashboard.details.trade_audit import render_trade_audit
 from dashboard.settings import rules_text
 
 def render_strategy_tab(p):
     """Strategy tab: last decision, forward test, strategy rules and holdings, data freshness and settings."""
-    with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=True):
+    with st.expander(f"Last decision · {p.off_date:%a %b %-d} · portfolio and both strategies' ranks", expanded=True):
         render_last_decision(p)
     import forward_test as ft
-    with st.expander(f"Live vs benchmark · live 50/50 and its halves vs SPY and QQQ since Oct 16, 2026", expanded=True):
+    with st.expander("Live vs benchmark · your account vs QQQ and SPY", expanded=True):
         render_live_vs_benchmark()
     with st.expander(f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
                      expanded=True):
@@ -27,15 +26,10 @@ def render_strategy_tab(p):
         render_data_and_settings(p)
 
 def render_trading_tab(p):
-    """Trading Account tab: live holdings, latest signals, trade audit, tax view, strategy rules."""
+    """Trading Account tab: live holdings, trade audit, tax view, strategy rules (the portfolio by half and both strategies'
+    ranks are in the Strategy tab's Last decision)."""
     with st.expander("Live holdings (Alpaca account)", expanded=True):
         render_live_holdings()
-    from dashboard.settings import WINNER
-    if WINNER.get("sleeves"):
-        with st.expander(sleeves_title(), expanded=True):
-            render_sleeves(p)
-    with st.expander(latest_signals_title(p), expanded=True):
-        render_latest_signals(p)
     with st.expander("Trade audit · every order vs its plan price, buy / sell prices, checks (read-only)", expanded=False):
         render_trade_audit()
     import tax_lots as tl

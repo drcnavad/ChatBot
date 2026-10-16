@@ -1,6 +1,6 @@
 """forward_combos (Chirag, Oct 15, 2026 evening): the forward-test lines with two independent halves, swap-only halves and
 the low-volatility keep / Friday falling rules; the live line renamed "Live 50/50 combined (no overlap)" and switched to
-the 50/50 at the Oct 16 close; the Live vs benchmark card's numbers (forward_test.live_vs_benchmark). Real saved data,
+the 50/50 at the Oct 16 close. Real saved data,
 temp copies of the forward files (the real Reports files are never written); no broker calls, no orders.
 
 Covers: deterministic replay (two runs equal; a shorter replay is a prefix of the longer one = saved days never change);
@@ -8,7 +8,7 @@ no overlap between the halves at any close; at most 10 names and 20% of its half
 do_not_buy never held; the 63-day sector score = forward_test's Sector rotation score; values 1.0 at the start close;
 update_strategies appends the new lines and migrates the old live name; the live switch (shown on Oct 13 so the saved data
 covers it): the Oct 12 saved day unchanged, the switch-day value = the old holdings marked to that close minus the sale
-cost and the buys' cost, two halves held after; the live halves are not ranked; Winning / Losing vs SPY."""
+cost and the buys' cost, two halves held after; the live halves are not ranked."""
 import os
 import shutil
 import sys
@@ -125,20 +125,6 @@ again = ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)
 check(again == 0, "a second update adds nothing (saved days never redone)", again)
 shutil.rmtree(tmp, ignore_errors=True)
 
-# live vs benchmark (synthetic)
-d = pd.bdate_range("2026-10-16", periods=8)
-vals = pd.concat([pd.DataFrame({"Date": d, "Strategy": n, "Value": np.linspace(1, 1 + g, 8), "Cash": 0.0})
-                  for n, g in ((ft.LIVE, 0.05), (halves[0], 0.02), (halves[1], 0.08))])
-bench = pd.DataFrame({"Date": d, "SPY": np.linspace(100, 103, 8), "QQQ": np.linspace(100, 106, 8)})
-r = ft.live_vs_benchmark(vals, bench)
-check(r["status"] == "Winning" and abs(r["gap"] - 2.0) < 1e-9 and r["days"] == 7, "Winning vs SPY by 2.00 pts", (r["status"], r["gap"]))
-check("Winning vs SPY by 2.00 pts" in ft.benchmark_verdict(r) and "Thu Dec 24, 2026" in ft.benchmark_verdict(r), "verdict line + decision date")
-check([c for c in r["table"].columns if c.startswith("Week ")] == ["Week 1 %", "Week 2 (so far) %"]
-      and list(r["table"]["Line"]) == [ft.LIVE, *halves, "SPY", "QQQ"], "rows: live, halves, SPY, QQQ; weekly columns", list(r["table"].columns))
-r2 = ft.live_vs_benchmark(vals.assign(Value=lambda v: np.where(v["Strategy"] == ft.LIVE, 1 - (v["Value"] - 1), v["Value"])), bench)
-check(r2["status"] == "Losing" and abs(r2["gap"] + 8.0) < 1e-9, "Losing vs SPY by 8.00 pts", (r2["status"], r2["gap"]))
-r3 = ft.live_vs_benchmark(vals[vals["Date"] < "2026-10-16"], bench)
-check(r3["status"] is None and "starts at the Fri Oct 16 close" in ft.benchmark_verdict(r3), "before Oct 16: not started")
 src = open(os.path.join(ROOT, "forward_combos.py")).read()
 check(not any(k in src for k in ("submit", "alpaca", "requests", "to_csv", "WINNER[")), "forward_combos: no orders, no writes")
 

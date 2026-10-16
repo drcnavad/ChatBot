@@ -2,14 +2,15 @@
 
   1. Holdings: the live Alpaca positions (read-only GET, the Trading Account tab's read); when Alpaca is not readable
      (tests, an outage) the planned shares in Reports/sleeve_ledger.json (both halves) stand in.
-  2. Next week's candidates: up to 20 stocks the live 50/50 rules would pick next, not already held: first the next
+  2. Next in line (waiting list): up to 20 stocks the live 50/50 rules would pick next, not already held: first the next
      rebalance targets (low-volatility half = Provisional_Weight in strategy_picks.csv, sector half = sleeves.sector_weights
      without the low-volatility names), then the next best of each half's ranking, alternating (low volatility: 1 / 63-day
      volatility above the 200-day average; sector rotation: C6 score in the 3 sectors with the best 63-day ETF return).
-     do_not_buy stocks are never candidates.
+     Ranked like any other stock (do_not_buy included).
   3. Buy zone, not in portfolio: every other stock in the buy zone of either half - low volatility (ranked, close above
      its 200-day average) or sector rotation (in a top-3 sector with a score above 0).
   4. Remaining: every other stock of the stock list (sector_mapping.tradable_symbols), then any other symbol on the dashboard.
+  + Do not buy list: a note row with sector_mapping.do_not_buy (those stocks also stay in their ranked row).
 Display only: nothing here feeds the strategy or orders."""
 
 import pandas as pd
@@ -17,9 +18,9 @@ import pandas as pd
 from dashboard.settings import PICKS_CSV
 
 try:
-    from sector_mapping import tradable_symbols
+    from sector_mapping import do_not_buy, tradable_symbols
 except Exception:   # deployed without the pipeline modules
-    tradable_symbols = []
+    tradable_symbols, do_not_buy = [], []
 
 N_CANDIDATES = 20
 
@@ -44,9 +45,8 @@ def held_symbols():
     return sorted(syms), f"sleeve ledger of {led.get('day')} (Alpaca not readable here)"
 
 def _rankings():
-    """(lv targets, sector targets, lv ranking, sector ranking, lv buy zone, sector buy zone) at the latest close."""
+    """(lv targets, sector targets, lv ranking, sector ranking) at the latest close; the rankings = each half's buy zone."""
     import sleeves
-    import sector_mapping as sm
     inp = sleeves.sector_inputs()
     picks = pd.read_csv(PICKS_CSV)
     day = pd.Timestamp(str(picks["As_Of"].iloc[0])[:10])
@@ -64,9 +64,7 @@ def _rankings():
         sec_t = list(w[w > 0].sort_values(ascending=False, kind="stable").index)
     except Exception:
         sec_t = []
-    no = set(sm.do_not_buy)
-    return (lv_t, sec_t, [s for s in lv_zone.index if s not in no], [s for s in sr_zone.index if s not in no],
-            list(lv_zone.index), list(sr_zone.index))
+    return lv_t, sec_t, list(lv_zone.index), list(sr_zone.index)
 
 def _alternate(a, b):
     out = []
@@ -75,12 +73,12 @@ def _alternate(a, b):
     return out
 
 def stock_groups(p):
-    """[(title, symbols, note)] - the four rows, every symbol once."""
+    """[(title, symbols, note)] - the four rows (every symbol once), then the Do not buy note row."""
     held, src = held_symbols()
     try:
-        lv_t, sec_t, lv_rk, sr_rk, lv_zone, sr_zone = _rankings()
+        lv_t, sec_t, lv_rk, sr_rk = _rankings()
     except Exception:
-        lv_t = sec_t = lv_rk = sr_rk = lv_zone = sr_zone = []
+        lv_t = sec_t = lv_rk = sr_rk = []
     seen = set(held)
     cand = []
     for s in _alternate(lv_t, sec_t) + _alternate(lv_rk, sr_rk):
@@ -88,12 +86,13 @@ def stock_groups(p):
             cand.append(s)
             seen.add(s)
     rank = p.by_symbol["Strategy_Rank"] if "Strategy_Rank" in p.by_symbol.columns else pd.Series(dtype=float)
-    zone = [s for s in sorted(set(lv_zone) | set(sr_zone), key=lambda s: (rank.get(s, float("inf")), s)) if s not in seen]
+    zone = [s for s in sorted(set(lv_rk) | set(sr_rk), key=lambda s: (rank.get(s, float("inf")), s)) if s not in seen]
     seen |= set(zone)
     universe = list(tradable_symbols) + [s for s in p.options if s not in tradable_symbols and s != "QQQ"]
     rest = sorted({s for s in universe if s not in seen},
                   key=lambda s: (pd.isna(rank.get(s)), rank.get(s, 0) if pd.notna(rank.get(s)) else 0, s))
     return [("Holdings", held, src),
-            ("Next week's candidates", cand, "the next picks of the two halves, not held"),
+            ("Next in line (waiting list)", cand, "the next picks of the two halves, not held"),
             ("Buy zone, not in portfolio", zone, "low volatility or sector rotation buy zone"),
-            ("Remaining", rest, "")]
+            ("Remaining", rest, ""),
+            ("Do not buy list", list(do_not_buy), "note only: never bought (sector_mapping.do_not_buy); also in its ranked row")]

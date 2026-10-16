@@ -165,7 +165,6 @@ PICKS_CSV = os.path.join(REPORTS, "strategy_picks.csv")
 CHANGES_CSV = os.path.join(REPORTS, "strategy_changes.csv")
 HOLDINGS_CSV = os.path.join(REPORTS, "strategy_holdings.csv")
 DECISIONS_CSV = os.path.join(REPORTS, "strategy_decisions.csv")
-MIDWEEK_CSV = os.path.join(REPORTS, "strategy_midweek_check.csv")
 BENCH_CSV = os.path.join(REPORTS, "benchmark_prices.csv")
 NEWS_CSV = os.path.join(REPORTS, "news_cleaned_df.csv")
 SHORT_HISTORY_CSV = os.path.join(REPORTS, "short_history_reference.csv")   # main_signal_analysis.ipynb: too new to trade

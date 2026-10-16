@@ -85,7 +85,7 @@ CSS = """
 """
 
 CHART_FONT = "DM Sans, system-ui, sans-serif"
-PCT_COL, SCORE_COL = st.column_config.NumberColumn(format="%.2f%%"), st.column_config.NumberColumn(format="%.1f")
+PCT_COL = st.column_config.NumberColumn(format="%.2f%%")
 
 MA_COLS = ['ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']
 MA_COLORS = ['#0ea5e9', '#8b5cf6', '#f59e0b', '#a16207', '#94a3b8']   # chart lines: sky, violet, amber, brown, slate

@@ -105,28 +105,3 @@ def render_forward_rules(p=None):
     if h is not None and len(h):
         st.caption(f"Holdings as of the {pd.Timestamp(h['Date'].max()):%a %b %-d} close (Reports/forward_strategies_holdings.csv "
                    "has every day). Ordered like the leaderboard above. Paper only: none of these is traded.")
-
-def render_live_vs_benchmark():
-    """Strategy tab: the live 50/50 line, its two halves and the real account vs SPY and QQQ from the Oct 16, 2026 switch
-    close (forward_test.live_vs_benchmark), with Chirag's rule as a status. Display only: nothing switches on its own."""
-    import forward_test as ft
-    daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
-    bench = load_benchmarks()
-    bench = bench.reset_index() if bench is not None else None
-    if values is not None and not values.empty:
-        values, bench = ft.provisional(values, bench)
-    r = ft.live_vs_benchmark(values, bench, daily)
-    tone = {"Winning": "#15803d", "Losing": "#b91c1c"}.get(r["status"], "#b45309")
-    head = (f"{r['status']} vs SPY by {abs(r['gap']):.2f} pts" if r["status"] in ("Winning", "Losing") else
-            "Even with SPY" if r["status"] == "Even" else f"Starts at the {r['start']:%a %b %-d} close")
-    show_html(f'<div class="sa-card"><div class="sa-card-title">Live vs benchmark<span>since the {r["start"]:%a %b %-d, %Y} '
-              f'close · decision date {r["decision"]:%a %b %-d, %Y} (week 12)</span></div>'
-              f'<div class="sa-tier"><b>Status</b><div class="sa-tier-syms"><span style="color:{tone};font-weight:600">{esc(head)}</span>'
-              f'<span>{esc(ft.SPY_RULE)}</span></div></div></div>')
-    t = r["table"]
-    sty = toned(toned(t, [c for c in t.columns if "return" in c or c.startswith("Week ")]), ["Max drawdown %"], fn=drawdown_tone)
-    st.dataframe(sty, hide_index=True, width="stretch", column_config={c: PCT_COL for c in t.columns if c.endswith("%")})
-    st.caption(f"**{ft.benchmark_verdict(r)}** Status = the simulated live 50/50 line's total return since the switch minus "
-               "SPY's (closes). Each line starts at its Oct 16 close; Week k = Friday close to Friday close (week 1 = Oct "
-               "16-23); max drawdown from the Oct 16 close. Your account = time-weighted (deposits are not returns). "
-               "Display only: no automatic switch to SPY - the decision is yours on the decision date.")

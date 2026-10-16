@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.settings import (APP_FILES, BENCH_CSV, COMPANY_XLSX, CT, DECISIONS_CSV, EARNINGS_CSV, FRESHNESS,
-    MIDWEEK_CSV, NEWS_CSV, REPORTS, SIGNAL_CSV)
+    NEWS_CSV, REPORTS, SIGNAL_CSV)
 
 @st.cache_data(ttl=3600)
 def _read_csv_cached(path, mtime):
@@ -44,11 +44,6 @@ def load_benchmarks():
     b["Date"] = pd.to_datetime(b["Date"])
     return b.set_index("Date")
 
-def load_midweek_rows():
-    """Reports/strategy_midweek_check.csv (this week's Friday rebalance + Mon-Thu checks) or None."""
-    m = read_report_csv(MIDWEEK_CSV)
-    return None if m is None or m.empty or "Message" not in m.columns else m
-
 def row_for(path, symbol):
     """First row of a Reports CSV for one symbol, or None."""
     t = read_report_csv(path)
@@ -78,34 +73,6 @@ def data_freshness(latest_bar):
                      "Age": f"{age_d * 24:.0f} h" if age_d < 2 else f"{age_d:.0f} d",
                      "Status": "✅ fresh" if age_d <= max_days else f"⚠️ stale (> {max_days} d)"})
     return pd.DataFrame(rows)
-
-# --- Decision-day ranks (Fri rebalance + Mon-Thu checks, holiday-shifted): rank change compares the last two decision days, not calendar days ---
-def _decision_days(df):
-    """Sorted decision dates (Rebalance_Day or Midweek_Check) present in the signal data."""
-    mask = (df["Rebalance_Day"] == 1) | (df["Midweek_Check"] == 1)
-    return sorted(df.loc[mask, "Date"].unique())
-
-def _day_ranks(df, day):
-    """Symbol -> rank (1 = best) for one date: the pipeline's Strategy_Rank when present, else by combined_signal.
-    Only ranked symbols (non-null rank key) get a rank; unranked symbols are excluded, not parked at the bottom."""
-    key = "Strategy_Rank" if "Strategy_Rank" in df.columns else "combined_signal"
-    sub = (df.loc[df["Date"] == day, ["Symbol", key]].dropna(subset=[key])
-           .sort_values([key], ascending=(key == "Strategy_Rank"))
-           .drop_duplicates(subset=["Symbol"]))
-    return pd.Series(range(1, len(sub) + 1), index=sub["Symbol"].values)
-
-@st.cache_data(ttl=3600)
-def day_rank_change(_df, mtime: float):
-    """Symbol -> (prev_decision_rank - latest_decision_rank, latest_rank); positive = moved up.
-    Compares the last two decision days, not consecutive calendar days."""
-    df = _df
-    days = _decision_days(df)
-    if len(days) < 2:
-        return {}
-    t = _day_ranks(df, days[-1])
-    y = _day_ranks(df, days[-2])
-    common = t.index.intersection(y.index)
-    return {s: (int(y[s]) - int(t[s]), int(t[s])) for s in common}
 
 @st.cache_data(ttl=3600)
 def _load_earnings(mtime: float):
