@@ -13,7 +13,7 @@
 #   com.stockanalysis.earningsstop    every 5 min + at login: earnings_stop.py --loop (LIVE earnings-day 5% drop stop;
 #                                     30-second checks only while a held stock is in an earnings-day session, 3:00 AM-
 #                                     7:00 PM CT on trading days; one loop at a time; otherwise exits after a quick look)
-#   com.stockanalysis.tradeaudit      Mon-Fri 9:45 AM + 3:45 PM CT: trade_audit.py --write --log (read-only ledger, round
+#   com.stockanalysis.tradeaudit      Mon-Fri every 30 min 8:30 AM-3:00 PM + 3:45 PM CT: trade_audit.py --write --log (read-only ledger, round
 #                                     trips, reconciliation + alerts to the run log; GET only, never orders)
 #   com.stockanalysis.dashboard-8502  always on (restarted if it stops): the app on http://localhost:8502
 #   com.unicorn.voice                 Voice Genie (Unicorn), only when ../Voice Genie/main.py exists next to this folder
