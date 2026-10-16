@@ -1,4 +1,4 @@
-"""Home tab: the single-stock price chart (strategy score, relative strength, RSI / MACD)."""
+"""Home tab: the single-stock price chart (price, RSI / MACD, relative strength)."""
 from datetime import datetime
 
 import pandas as pd
@@ -9,24 +9,21 @@ from plotly.subplots import make_subplots
 from dashboard.data import last_next_earnings, live_quote, load_decisions, row_for
 from dashboard.history import (RS_COLORS, daily_status, event_hover,
     relative_strength_lines, strategy_events)
-from dashboard.settings import CT, HOLDINGS_CSV, LOW_VOL, W_TECH
+from dashboard.settings import CT, HOLDINGS_CSV
 from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, HOLD_SHADE, MA_COLORS, MA_COLS, TEAL, num)
 
-def build_price_chart(ticker, tdata, show_strategy):
-    """Last 12 months: price + moving averages + buy/sell markers, the score panel (when ranked), RSI/MACD and relative
-    strength panels."""
+def build_price_chart(ticker, tdata):
+    """Last 12 months: price + moving averages + buy/sell markers, RSI/MACD and relative strength panels (the strategy
+    score panel was removed from the Home tab, Chirag Oct 16, 2026; the score stays in the stock card)."""
     chart = tdata[tdata['Date'] >= tdata['Date'].max() - pd.Timedelta(days=365)].sort_values('Date').set_index('Date')
     x_start, x_end = chart.index[0], chart.index[-1]
     events, periods = strategy_events(tdata, load_decisions(), ticker)
     rs_lines = relative_strength_lines(chart, ticker)
 
-    panels = ["price"] + (["score"] if show_strategy else []) + ["rsi", "macd"] + (["rs"] if rs_lines else [])
-    height_of = {"price": 0.44, "score": 0.20, "rs": 0.18, "rsi": 0.11, "macd": 0.11}
+    panels = ["price", "rsi", "macd"] + (["rs"] if rs_lines else [])
+    height_of = {"price": 0.44, "rs": 0.18, "rsi": 0.11, "macd": 0.11}
     titles = {
         "price": "<b>Price</b>",
-        "score": ("<b>Strategy score</b> (teal) = 1 / 63-day volatility above the 200-day average, else -1 · Technical (grey) · "
-                  "Strength vs sector/SPY (violet)" if LOW_VOL else
-                  f"<b>Strategy score</b> (teal) = {W_TECH:g} × Technical (grey) + {1 - W_TECH:g} × Strength vs sector/SPY (violet)"),
         "rs": ("<b>Performance since " + f"{x_start:%b %-d, %Y}" + "</b> (% price change): " + " · ".join(
             f'<span style="color:{RS_COLORS[k]};">━ {name}</span>' for k, (name, _s) in rs_lines.items())),
         "rsi": "<b>RSI</b> (above 70 = stretched up, below 30 = stretched down)", "macd": "<b>MACD</b> (indigo) vs signal (dashed)",
@@ -113,14 +110,6 @@ def build_price_chart(ticker, tdata, show_strategy):
                 row=1, col=1)
             x_right = max(x_right, live_day) + pd.Timedelta(days=2)
 
-    if "score" in row_of:  # score panel
-        r = row_of["score"]
-        for col, name, color, width, dash in (("Technical_Score", "Technical", "#9ca3af", 1.25, "dot"),
-                                              ("RS_Score", "Strength vs sector/SPY", "#8b5cf6", 1.5, "solid"),
-                                              ("Strategy_Score", "Strategy score", TEAL, 2, "solid")):
-            fig.add_trace(go.Scatter(x=chart.index, y=chart[col], name=name, mode='lines', line=dict(color=color, width=width, dash=dash),
-                                     showlegend=False, hovertemplate=f'<b>{name}</b> %{{y:.1f}}<extra></extra>'), row=r, col=1)
-        fig.add_hline(y=0, line=dict(color='rgba(100,116,139,0.5)', width=1, dash='dot'), row=r, col=1)
     if "rs" in row_of:
         r = row_of["rs"]
         for key, (label, series) in rs_lines.items():
@@ -166,8 +155,8 @@ def build_price_chart(ticker, tdata, show_strategy):
     return fig
 
 def stock_chart_inputs(ticker, tdata):
-    """The built figure (displayed later, below the detail block); the score panel only for a ranked stock."""
-    return build_price_chart(ticker, tdata, bool(tdata['Strategy_Score'].notna().any()))
+    """The built figure (displayed later, below the detail block)."""
+    return build_price_chart(ticker, tdata)
 
 def render_stock_figure(fig, ticker):
     """The price chart itself, under the always-open detail block."""

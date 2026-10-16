@@ -3,8 +3,9 @@ as HTML (no escaped tags / code blocks / unbalanced tags), the price chart draws
 rank == Strategy_Rank and the portfolio slot == position among the picks, the dated decision badge / "Strategy rank ·
 <latest close>" / "<rebalance day> plan" chip agree with strategy_changes / signal_analysis / strategy_picks (and with the
 "Latest signals" and "Last decision" tables in Details), the Strategy tab widgets work, the rules text matches
-backtest_engine.WINNER, removed sections stay gone (incl. the alert banner, the Summary section and the Strategy Health tab), and the rank tiers render with a ?symbol= link
-per ranked stock.
+backtest_engine.WINNER, removed sections stay gone (incl. the alert banner, the Summary section and the Strategy Health tab), and the stock list renders
+four rows (Holdings, Next week's candidates, Buy zone, Remaining) with a ?symbol= link per stock, each once; no strategy
+score chart panel.
 Run: python tests/run_tests.py  (or python tests/test_app.py)"""
 import base64
 import json
@@ -107,6 +108,9 @@ def price_chart_ok(at, sym):
     if f["layout"].get("xaxis", {}).get("type") != "date":
         probs.append("x-axis not a date axis")
     expect(not probs, f"{sym}: price chart problems {probs}")
+    names = {t.get("name") for t in f["data"]}
+    expect(not names & {"Strategy score", "Technical", "Strength vs sector/SPY"},
+           f"{sym}: the strategy score panel was removed from the Home tab (Oct 16, 2026): {sorted(names & {'Strategy score'})}")
 
 # ---------------------------------------------------------------- page, tickers, charts, displayed rank / slot
 latest = SIG[SIG.Date == SIG.Date.max()].set_index("Symbol")
@@ -304,28 +308,35 @@ expect([t.label for t in at.tabs][:3] == ["Home", "Strategy", "Trading Account"]
 expect(not [m for m in at.markdown if '<div class="sa-section">Summary</div>' in m.value], "the Summary section was removed")
 expect(any("Live holdings are turned off here" in i.value for i in at.info), "holdings expander: off message in tests")
 
-# ---------------------------------------------------------------- rank tiers: horizontal clickable lists by rank
-tier_md = [m.value for m in at.markdown if "Rank 1 to 20" in m.value and "?symbol=" in m.value]
-expect(len(tier_md) == 1, f"rank tier block found: {len(tier_md)}")
+# ---------------------------------------------------------------- stock list: four rows, every stock once (Oct 16, 2026)
+ROWS = ["Holdings", "Next week's candidates", "Buy zone, not in portfolio", "Remaining"]
+tier_md = [m.value for m in at.markdown if "Stock list<span>" in m.value and "?symbol=" in m.value]
+expect(len(tier_md) == 1, f"stock list block found: {len(tier_md)}")
 blob = tier_md[0] if tier_md else ""
-parts = re.split(r"<b>(Rank 1 to 20|Rank 21 to 50|Rank 51\+|Not traded yet \(short history, not ranked\)):</b>", blob)
-expect(len(parts) == 7, f"tier headers/bodies: {len(parts)} parts")   # 4ad4ef4: short-history row has no header
-bodies = dict(zip(parts[1::2], parts[2::2]))
-def want_tier(sym):
-    r = latest.loc[sym, "Strategy_Rank"]
-    return "Rank 1 to 20" if r <= 20 else ("Rank 21 to 50" if r <= 50 else "Rank 51+")
-for sym in latest[latest.Strategy_Rank.notna()].index:
-    syms = set(re.findall(r"\?symbol=([A-Z0-9.]+)", bodies[want_tier(sym)]))
-    expect(sym in syms, f"{sym} (rank {latest.loc[sym, 'Strategy_Rank']:.0f}) not in its tier {want_tier(sym)!r}")
-all_linked = set(re.findall(r"\?symbol=([A-Z0-9.]+)", blob))
-expect(all_linked <= set(opts), f"tier links outside the dropdown: {sorted(all_linked - set(opts))}")
+parts = re.split(r'<b(?: title="[^"]*")?>(Holdings|Next week\'s candidates|Buy zone, not in portfolio|Remaining) \((\d+)\):</b>', blob)
+expect([parts[i] for i in range(1, len(parts), 3)] == ROWS, f"stock list rows: {[parts[i] for i in range(1, len(parts), 3)]}")
+bodies = {parts[i]: re.findall(r"\?symbol=([A-Z0-9.]+)", parts[i + 2]) for i in range(1, len(parts), 3)}
+counts = {parts[i]: int(parts[i + 1]) for i in range(1, len(parts), 3)}
+for name, syms in bodies.items():
+    expect(len(syms) == counts[name], f"{name}: header count {counts[name]} != {len(syms)} links")
+every = [s for syms in bodies.values() for s in syms]
+expect(len(every) == len(set(every)), f"stock list: a stock shown twice: {sorted({s for s in every if every.count(s) > 1})}")
+expect(set(sm.tradable_symbols) <= set(every), f"stock list misses {sorted(set(sm.tradable_symbols) - set(every))}")
+expect(len(bodies.get("Next week's candidates", [])) <= 20, "at most 20 candidates")
+import sleeves  # noqa: E402
+_led = sleeves.load_ledger()
+if _led is not None:      # Alpaca is off in tests: the holdings row = the sleeve ledger's planned shares
+    _held = {s for h in sleeves.HALVES for s, q in _led["halves"][h]["shares"].items() if q > 0}
+    expect(set(bodies.get("Holdings", [])) == _held, f"holdings row {bodies.get('Holdings')} != ledger {sorted(_held)}")
+expect(not set(bodies.get("Next week's candidates", [])) & set(sm.do_not_buy), "do_not_buy stocks are never candidates")
+print(f"   stock list rows: {counts}")
+all_linked = set(every)
+expect(all_linked <= set(opts), f"stock list links outside the dropdown: {sorted(all_linked - set(opts))}")
 
 # short-history stocks: listed with their rough signal, and a click (?symbol=) opens a stock view that renders
 if len(SHORT):
-    sh_body = blob.rsplit('<div class="sa-tier">', 1)[-1]       # 4ad4ef4: last row, links only (rough signal in the dropdown)
-    for _, r in SHORT.iterrows():
-        expect(f"?symbol={r.Symbol}" in sh_body and "<b>" not in sh_body,
-               f"{r.Symbol} missing from the short-history row: {sh_body[:200]}")
+    for _, r in SHORT.iterrows():   # Oct 16, 2026: in the stock list rows (Remaining unless held / a candidate)
+        expect(r.Symbol in all_linked, f"{r.Symbol} missing from the stock list")
         at2 = AppTest.from_file("app.py", default_timeout=180)
         at2.query_params["symbol"] = r.Symbol
         at2.run()

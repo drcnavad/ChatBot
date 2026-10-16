@@ -1,4 +1,4 @@
-"""Home tab: the single-stock view (rank tiers, stock picker, header, detail card)."""
+"""Home tab: the single-stock view (stock list rows, stock picker, header, detail card)."""
 from datetime import datetime
 
 import pandas as pd
@@ -10,6 +10,7 @@ from dashboard.data import (company_metrics, last_next_earnings, live_quote, loa
     row_for)
 from dashboard.settings import CT, HOLDINGS_CSV, symbol_sector
 from dashboard.signals import PLAN_BADGE, SIGNAL_BADGE, plan_text
+from dashboard.stock_groups import stock_groups
 from dashboard.style import (BAD, GOOD, INK, MA_COLS, TONE_CLASS, esc, fmt, num, score_tone,
     show_html, sign_color, stat_html, symbol_link, tone)
 
@@ -25,30 +26,24 @@ def ticker_label(p, s):
     return "  ·  ".join(parts)
 
 def render_rank_tiers(p):
-    """Horizontal clickable rank tiers: Rank 1 to 20, Rank 21 to 50, Rank 51+.
+    """Horizontal clickable stock list, four rows, every stock once (dashboard/stock_groups.py): Holdings, Next week's
+    candidates, Buy zone (not in portfolio), Remaining.
 
     Each symbol is a ?symbol= link, handled in main() exactly like a table click
     (opens the stock in the stock view below). The dropdown underneath stays for manual typing."""
-    la = p.by_symbol
-    ranked = la[la["Strategy_Rank"].notna()].sort_values("Strategy_Rank")
-    tiers = [("Rank 1 to 20", ranked[ranked["Strategy_Rank"] <= 20]),
-             ("Rank 21 to 50", ranked[(ranked["Strategy_Rank"] > 20) & (ranked["Strategy_Rank"] <= 50)]),
-             ("Rank 51+", ranked[ranked["Strategy_Rank"] > 50])]
     current = st.session_state.get("ticker_dropdown")
     held = lambda s: TONE_CLASS.get(tone(p.sig_off.get(s)), "") if p.sig_off.get(s) in ("Buy", "Hold", "Sold") else ""
     rows = []
-    for title, df in tiers:
-        links = " ".join(symbol_link(s, held(s) + (" sel" if s == current else "")) for s in df.index)
-        rows.append(f'<div class="sa-tier"><b>{title}:</b><div class="sa-tier-syms">{links or "\u2014"}</div></div>')
-    if len(p.short):
-        links = " ".join(symbol_link(s, " sel" if s == current else "") for s in p.short.index)
-        rows.append(f'<div class="sa-tier"><div class="sa-tier-syms">{links}</div></div>')
+    for title, syms, note in stock_groups(p):
+        links = " ".join(symbol_link(s, held(s) + (" sel" if s == current else "")) for s in syms)
+        tip = f' title="{esc(note)}"' if note else ""
+        rows.append(f'<div class="sa-tier"><b{tip}>{title} ({len(syms)}):</b><div class="sa-tier-syms">{links or "\u2014"}</div></div>')
     day = p.df["Date"].max()
     show_html(f'<div class="sa-card"><div class="sa-card-title">Stock list<span>ranks at the {day:%a %b %-d} close · '
               'click a stock to open it</span></div>' + "".join(rows) + '</div>')
 
 def render_stock_picker(p, jumped):
-    """Rank tiers (click a symbol to open it) + dropdown for manual typing + AI button.
+    """Stock list (click a symbol to open it) + dropdown for manual typing + AI button.
 
     ?symbol=X, a table click, a tier click or the dropdown choose the stock."""
     pending = st.session_state.pop("_pending_ticker", None)
