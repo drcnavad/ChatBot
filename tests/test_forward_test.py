@@ -233,7 +233,7 @@ check("registry: WINNER untouched", be.WINNER == w0)
 # Forward-test safety (t187u): the strategies keep their own Mon/Wed rules (ft.MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, the Oct 2
 # rules); a change of the live WINNER Mon/Wed keys must not move any of them.
 FT_PINS = dict(midweek=ft.MIDWEEK, exit_all_below=ft.EXIT_BELOW, exit_to_top=ft.EXIT_TO_TOP,
-               selection={"sleeve": (), "max_weight": ft.MAX_WEIGHT, "vol_sizing": True})   # the paper strategies keep the 20% cap
+               selection={"sleeve": (), "max_weight": ft.MAX_WEIGHT})   # the paper strategies keep the 20% cap
 check("forward-test pins = the Oct 2 mid-week rules (top-3 swap below 15, exit below 30, refill from the top 10), Mon-Thu",
       ft.MIDWEEK == {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Tue", "Wed", "Thu"]} and (ft.EXIT_BELOW, ft.EXIT_TO_TOP) == (30, 10)
       and ft.NOW["midweek"] == {"enter_top": None, "exit_below": None, "days": ft.MON_THU} and ft.NOW["exit"] == (20, 10))
@@ -560,10 +560,9 @@ if os.path.exists(ft.SIGNAL_CSV):
             for dd in (be.WINNER["midweek_swap"]["days"], ["Mon", "Wed"])]
     check("live strategy = the pipeline's Strategy_Weight on every day since Oct 2 (same be.WINNER rules)", min(fits) < 1e-9, fits)
     cfg_now = next(c for c in ft.STRATEGIES if c["name"] == ft.LIVE)
-    lnow = ft.strategy_targets(cfg_now, real_inp).loc[d0:]
-    check("live strategy: no defensive sleeve (Oct 16): at most 10 stocks a day before the spare-cash buys, max 15% x 99%",
-          be.winner_rank_args(real_inp["regime"])["n"] == 10 and "sleeve" not in be.winner_rank_args(real_inp["regime"])
-          and lnow.to_numpy().max() <= be.live_weights(be.WINNER["max_weight"]) + 1e-12, lnow.max().max())
+    lnow = ft.strategy_targets(cfg_now, real_inp).loc[d0:, list(sector_mapping.defensive)]
+    check("live strategy: the 5 defensive stocks held every day, at most 5% each (x 99%)",
+          (lnow > 0).all().all() and lnow.to_numpy().max() <= be.live_weights(sector_mapping.defensive_cap) + 1e-12, lnow.max().to_dict())
     check("no live file changed (signal_analysis, picks, run_state, pending orders, orders log); WINNER untouched",
           digest() == before and be.WINNER == w0)
 # provisional marks (display only): Tue / Thu have no signal rows until the next decision run

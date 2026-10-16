@@ -6,17 +6,18 @@ All code lives in this folder. Everything the pipeline writes goes to `Reports/`
 ## Strategy (live rules: `backtest_engine.WINNER`)
 - **Stock list:** `sector_mapping.py` is the only stock list (84 tradable stocks + QQQ as the benchmark). Stocks with
   less than 200 trading days of history are shown but never traded.
-- **Score (from Oct 16, 2026): low volatility in uptrend.** 1 / 63-day volatility, calmest first; only stocks above their
-  200-day average (the others score -1). Ranked every day; ties by relative strength.
-- **Friday rebalance** (the week's last session), decided on the 2:30 PM CT bar: hold the top 10 at equal weights,
-  max 15% per stock, 99% invested (9.9% each; no defensive sleeve from Oct 16, 2026). When QQQ is below its 200-day average every weight is halved. A holding
-  within 1 point of its target is left alone. Cash still left below 99% (rounding, band holds) buys the next best-ranked
-  stock that is not a pick (skipping earnings-blocked / do-not-buy ones; max 15%; under $100: nothing).
-- **Monday-Thursday check** (2:30 PM CT): a holding at or below its 200-day average or ranked worse than 20 is sold, but only if it is below
-  its Alpaca average entry price (at or above it: kept until Friday), and replaced, same dollars, by the best-ranked top-10 stock not held (cash until Friday only if none is left). On the live account this applies to every
+- **Score:** relative strength only (stock vs its sector ETF, sector ETF vs SPY), ranked every day.
+- **Friday rebalance** (the week's last session), decided on the 2:30 PM CT bar: hold the top 10, weighted by inverse
+  volatility, max 15% per stock, 99% invested. Plus the **defensive sleeve** (`defensive` in `sector_mapping.py`: LMT,
+  NOC, ABBV, PFE, KO, from Oct 16, 2026): always held next to the top 10 (15 stocks share the same 1/volatility weights);
+  a sleeve stock that is also in the top 10 frees its slot for rank 11. The sleeve is on `do_not_sell` and the Mon-Thu
+  rank-20 rule never sells it. When QQQ is below its 200-day average every weight is halved. A holding
+  within 1 point of its target is left alone.
+- **Monday-Thursday check** (2:30 PM CT): a holding ranked worse than 20 is sold and replaced, same dollars, by the
+  best-ranked top-10 stock not held (cash until Friday only if none is left). On the live account this applies to every
   position. Then cash above 1% of equity buys top-10 stocks not held, and what is left is split equally over the held stocks at or above their
   average entry price (none in profit: all held; earnings-blocked / sold-today ones skipped; a stock at its cap passes its
-  share on).
+  share on; sleeve stocks stay at 5%).
 - **Earnings:** no new buy or top-up of a stock with earnings within 5 days (including a report after that day's close). On Friday a new pick blocked this way is
   replaced by the next eligible stock (down to rank 20). On a held stock's earnings day, a drop of 5% or more below the
   previous close sells it (`earnings_stop.py`), and it is not bought back until its earnings sessions are over.

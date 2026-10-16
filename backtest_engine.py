@@ -68,13 +68,13 @@ RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 # Change a rule here, then run `python run_all.py`.
 WINNER = {
     "n": 10,                # stocks held
-    "score": "low_vol",     # Low volatility in uptrend (from Oct 16, 2026; winner_score): calmest first, above the 200-day only
+    "w_tech": 0.0,          # score = relative strength only
     "use_regime": True,     # soft market regime (below)
     "regime_symbol": "QQQ", # regime is on while QQQ closes above its 200-day average
     "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
     "min_score": 0.0,       # only stocks with a score above 0 can be picked
     "sector_cap": 1.0,      # no sector limit: Friday = pure top-10 by rank
-    "vol_sizing": False,    # equal weights: 10 x 10% (x 99% invested)
+    "vol_sizing": True,     # weights proportional to 1 / 63-day volatility
     "max_weight": 0.15,     # no stock above 15% (after the vol weights and the regime halving); the extra stays in cash
     "buffer_rank": None,    # no rank buffer (tested, did not help)
     "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF ('sector_median' / 'median_all': tested, not live)
@@ -106,12 +106,11 @@ def scored_stock_count():
 def winner_label(n_stocks):
     """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'C6-U91-NS-MW30R10-E5'."""
     S, mw = WINNER, WINNER.get("midweek_swap")
-    tag, lv = f"C6-U{n_stocks}" + ("-LV" if S["score"] == "low_vol" else ""), S["score"] == "low_vol"
-    head = "Low volatility in uptrend (equal weight)" if lv else "C6"
+    tag = f"C6-U{n_stocks}"
     if S.get("sector_cap", 0.4) >= 1.0 - 1e-12:
-        name = f"{head}: weekly top-{S['n']} ranking, no sector limit + soft QQQ regime ({n_stocks} stocks)"
+        name = f"C6: weekly top-{S['n']} ranking, no sector limit + soft QQQ regime ({n_stocks} stocks)"
     else:
-        name = f"{head}: weekly top-{S['n']} ranking, max {winner_max_per_sector()} per sector + soft QQQ regime ({n_stocks} stocks)"
+        name = f"C6: weekly top-{S['n']} ranking, max {winner_max_per_sector()} per sector + soft QQQ regime ({n_stocks} stocks)"
     if S.get("rs_benchmark", "etf") != "etf":
         tag += {"sector_median": "-MED", "median_all": "-MEDALL"}[S["rs_benchmark"]]
         name += f' [RS vs {S["rs_benchmark"].replace("_", " ")}]'
@@ -147,19 +146,14 @@ def winner_max_per_sector():
     """Max names per sector implied by WINNER (same formula as rank_targets)."""
     return max(1, int(np.floor(WINNER["sector_cap"] * WINNER["n"])))
 
-def winner_score(rs, close, ma_200, vol):
-    """The live score (WINNER["score"]). "low_vol": 1 / 63-day volatility (calmest first) while the close is above its
-    200-day average, else -1 (below min_score: never picked, no rank, so sold Mon-Thu).
-    "rs": relative strength."""
-    return rs if WINNER["score"] == "rs" else (1 / vol).where(close > ma_200, -1.0)
-
 def winner_rank_args(regime):
     """kwargs for rank_targets() implementing WINNER."""
     S = WINNER
     return dict(n=S["n"], regime=regime if S["use_regime"] else None, min_score=S["min_score"],
                 sector_cap=S["sector_cap"], vol_sizing=S["vol_sizing"], buffer_rank=S["buffer_rank"],
                 regime_scale=S["regime_scale"] if S["use_regime"] else None,
-                max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"))
+                max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"),
+                sleeve=list(sector_mapping.defensive), sleeve_cap=sector_mapping.defensive_cap)
 
 WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
 

@@ -31,7 +31,7 @@ vol = be.volatility(C[U])
 reg = be.regime_series(C, "QQQ")
 # Historical C6 pins (EXPECTED in test_midweek_repro) use hard max-4/sector; live WINNER is now sector_cap=1.0.
 HIST_SECTOR_CAP = 0.4
-RA = {**be.winner_rank_args(reg), "sector_cap": HIST_SECTOR_CAP, "sleeve": (), "max_weight": 0.20, "vol_sizing": True}   # pins: no sleeve, the 20% cap (live 15% from Oct 15, 2026)
+RA = {**be.winner_rank_args(reg), "sector_cap": HIST_SECTOR_CAP, "sleeve": (), "max_weight": 0.20}   # pins: no sleeve, the 20% cap (live 15% from Oct 15, 2026)
 last = idx[-1]
 
 # decision calendars: Friday = last session of each ISO week; Mon/Wed checks = first session on/after each Mon/Wed, not a Friday

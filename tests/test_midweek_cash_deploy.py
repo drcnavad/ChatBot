@@ -1,7 +1,7 @@
 """Mon-Thu spare-cash rule (live only, approved 2026-10-06; leftover rule Chirag 2026-10-15): after the mid-week
 replacements/exits, the account's cash above 1% of equity buys the top-10 stocks NOT held (latest ranking, rank order) at
 their rule weights; what is left is split equally over the held stocks at/above their Alpaca avg entry price (none in
-profit -> all held; blocked / sold-today ones skipped; a stock at the 15% x 99% = 14.85% cap
+profit -> all held; blocked / sold-today ones skipped; a stock at the 15% x 99% = 14.85% cap, 5% for the defensive sleeve,
 passes its share to the others); earnings / earnings-day-stop blocks; an order under max($100, 1% of equity) is not made; cash no
 stock can take stays cash. Friday's rebalance (exactly the top-10 targets, every other stock sold) is unchanged.
 Hand-worked cases with fake CSVs; no network, no orders.
@@ -71,8 +71,8 @@ check("$7,000 over BBB and CCC (in profit): BBB to the cap (+$2,350), its spill 
       "(room under the minimum) none", buys(o) == {"BBB": 2_350.0, "CCC": 4_650.0}, buys(o))
 o, info = pt.build_cash_deploy_orders(EMPTY, {"LMT": 30}, EQ, cash=5_000, ranking=ranking([("ZZZ", 15, 0.0, 10.0)]),
                                       fractional=True, prices={"LMT": 100.0}, entry={"LMT": 90.0})
-check("LMT (no sleeve cap from Oct 16) takes the whole $4,000 spare like any stock",
-      buys(o) == {"LMT": 4_000.0}, buys(o))
+check("defensive-sleeve LMT tops up only to its 5% x 99% cap ($4,950: +$1,950); the rest stays cash",
+      buys(o) == {"LMT": 1_950.0}, buys(o))
 
 # 3) small leftover stays in cash (below max($100, 1% of equity) = $1,000)
 o, info = pt.build_cash_deploy_orders(EMPTY, {}, EQ, cash=1_900, ranking=R, fractional=True)

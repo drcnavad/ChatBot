@@ -2,7 +2,6 @@
 window or by the no-buy-back after an earnings-day stop sale gives its weight to the next best-ranked eligible stock not
 already picked (score above 0, not blocked, down to rank 20), so the account still ends with 10 stocks; cash only if
 none is left. Held picks with earnings keep the old behaviour (kept, not topped up). Mid-week is unchanged.
-Leftover cash below 99% (Oct 15) -> the next best rank not targeted (add_next_best).
 Hand-worked cases with fake data; no network, no orders.
 Run: python tests/run_tests.py  (or python tests/test_friday_substitute.py)"""
 import json
@@ -56,24 +55,6 @@ check("the replacement is a buy signal (status add) - an unknown status would ne
 # 2) a HELD pick with earnings soon: unchanged (kept, not topped up), no replacement
 t, st, bl, info = pt.substitute_blocked_picks(T, HELD8, R, {"S01": "earnings Mon Oct 12, in 3 days"}, ST)
 check("held S01 with earnings: no replacement (old behaviour)", info["replaced"] == [] and kept(t) == SYMS[:10], info)
-
-# 2b) Friday leftover cash -> the next best rank not targeted (Chirag, Oct 15)
-T9 = pd.DataFrame({"Symbol": SYMS[:10], "Weight": [0.09] * 10, "Price": 100.0})          # 90%: $9,000 left below 99%
-nb = lambda t, pos, bl={}, fr=True: pt.add_next_best(pt.build_orders(t, EQ, pos, {s: 100.0 for s in SYMS}, fractional=fr,
-                                                                     statuses={s: "add" for s in SYMS}), EQ, 0.99, R, bl, fractional=fr)
-o, add = nb(T9, {})
-check("next best: S11 (rank 11) gets the $9,000 left; one extra stock", add == [("S11", 11, 90.0, 9_000.0)]
-      and o.loc[o.Symbol == "S11", "Side"].tolist() == ["BUY"], add)
-o, add = nb(T9, {}, {"S11": "earnings Tue Oct 13, in 4 days"})
-check("next best skips a blocked rank (earnings / do_not_buy): S12", [a[0] for a in add] == ["S12"], add)
-o, add = nb(T9, {"S11": 120})
-check("next best already held and being sold: S11 keeps 90 sh (SELL 30 instead of 120)", add == [("S11", 11, 90.0, 9_000.0)]
-      and o.loc[o.Symbol == "S11", ["Side", "Shares"]].values.tolist() == [["SELL", 30.0]], o.values.tolist())
-o, add = nb(pd.DataFrame({"Symbol": SYMS[:10], "Weight": [0.05] * 10, "Price": 100.0}), {})
-check("leftover above the cap: S11, S12, S13 at 14.85% ($14,850), the rest ($4,450) to S14",
-      add == [("S11", 11, 148.5, 14_850.0), ("S12", 12, 148.5, 14_850.0), ("S13", 13, 148.5, 14_850.0), ("S14", 14, 44.5, 4_450.0)], add)
-o, add = nb(pd.DataFrame({"Symbol": SYMS[:10], "Weight": [0.09895] * 10, "Price": 100.0}), {})
-check("leftover under $100 ($50): nothing", add == [] and "S11" not in set(o.Symbol), add)
 
 # 3) blocked candidates are skipped: rank 11 earnings, rank 12 stop sale -> rank 13; a stop-blocked new pick is replaced too
 blk = {"S10": "sold by the earnings-day stop, no buy back until after Wed Oct 14",
@@ -144,14 +125,13 @@ try:
     check("source provisional+subs; buys S10 and S13; the account ends with exactly 10 stocks",
           meta["source"] == "provisional+subs" and b == {"S10", "S13"}
           and len(set(HELD8) | b) == 10 and abs(meta["invested"] - 0.99) < 1e-9, (meta["source"], b, meta["invested"]))
-    # Friday leftover cash -> next best rank (Oct 15): held picks inside the 1-point band leave $7,200 below 99%
-    held90 = {s: 90 for s in SYMS[:8]}
-    o, meta, _ = pt.plan_orders("auto", EQ, held90, picks_csv=picks, signal_csv=sig, midweek_csv=mid, fractional=True)
-    check("plan_orders Friday: the $7,200 the band holds leave goes to S14 (rank 15 here; S11 earnings, S12 stop sale, S13 a target); "
-          "source provisional+subs+next", meta["next_best"] == [("S14", 15, 72.0, 7_200.0)]
-          and meta["source"] == "provisional+subs+next", (meta.get("next_best"), meta["source"]))
-    rep, ok = pt.reconcile_positions("provisional+subs+next")
-    check("reconcile_positions('...+next') -> empty, ok", rep.empty and ok is True, (rep, ok))
+    import sector_mapping as sm                    # defensive sleeve: bought on Friday even with earnings soon (Oct 15)
+    saved_def, sm.defensive = sm.defensive, ["s09"]
+    o, meta, _ = pt.plan_orders("auto", EQ, HELD8, picks_csv=picks, signal_csv=sig, midweek_csv=mid, fractional=True,
+                                cash=EQ - 8 * 9_900)
+    sm.defensive = saved_def
+    check("sleeve stock with earnings soon (S09 in defensive): bought, not replaced",
+          "S09" in set(o.loc[o.Side == "BUY", "Symbol"]) and meta["substitutions"]["replaced"] == [], meta.get("substitutions"))
     rep, ok = pt.reconcile_positions("provisional+subs")
     check("reconcile_positions('provisional+subs') -> empty, ok (holdings differ from Provisional_Weight on purpose)",
           rep.empty and ok is True, (rep, ok))

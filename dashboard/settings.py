@@ -32,7 +32,7 @@ EXIT_TO_TOP = WINNER.get("midweek_exit_to_top") if EXIT_BELOW else None  # refil
 EARNINGS = WINNER.get("earnings_block_days")                         # no new buys with earnings within N days (None = off)
 
 N_PICKS = WINNER.get("n", 10)                                        # portfolio size (top 10)
-LOW_VOL = WINNER.get("score") == "low_vol"                          # low volatility in uptrend (else relative strength)
+W_TECH = WINNER.get("w_tech", 0.5)                                   # score = W_TECH x technical + (1 - W_TECH) x RS
 REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day average"   # market filter off
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
@@ -51,19 +51,12 @@ def rules_text():
             "and trades in market hours: sells first, then buys sized from the cash free after the sells; any rest at 9 AM CT): "
             "the Friday rebalance (the week's last trading day)"
             + (f" and the {days} checks (the next trading day after a holiday)" if MIDWEEK else "") + ".\n"
-            + ("- **Score:** low volatility in uptrend (from Oct 16, 2026): 1 / 63-day volatility, calmest first; a stock at or "
-               "below its 200-day average scores -1 (not picked; sold Mon-Thu). Ties: relative strength. " if LOW_VOL else
-               f"- **Score:** Relative Strength {RS_LABEL}. ")
-            + f"Only stocks with a score "
+            f"- **Score:** {W_TECH:g} × Technical + {1 - W_TECH:g} × Relative Strength {RS_LABEL}. Only stocks with a score "
             f"above {WINNER.get('min_score', 0):g} and at least {MIN_BARS} trading days of prices are ranked "
             "(newer stocks are listed as not traded yet).\n"
             f"- **Friday picks:** the {N_PICKS} best-ranked stocks by rank (no sector limit); fewer qualifying stocks = "
-            "the rest in cash. Stocks that are not picked are sold. Cash still left below the invested level (rounding, "
-            "band holds) buys the next best-ranked stock that is not a pick (earnings rule, do-not-buy, max per stock; "
-            "under $100: nothing).\n"
-            + ("- **Size:** equal weights, "
-               if not WINNER.get("vol_sizing", True) else "- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger), ")
-            + f"scaled to {LIVE_INVESTED:.0%} invested, "
+            "the rest in cash. Stocks that are not picked are sold.\n"
+            f"- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger), scaled to {LIVE_INVESTED:.0%} invested, "
             "each weight rounded down to 0.01%.\n"
             + (f"- **Market filter:** with {REGIME_OFF} at a rebalance, every weight is {HALVED}.\n" if SCALE else "")
             + (f"- **Max per stock:** No single stock gets more than {MAX_WEIGHT:.0%}; any extra stays in cash.\n" if MAX_WEIGHT else "")
@@ -71,8 +64,7 @@ def rules_text():
                "of it; overweight holdings are trimmed so new buys get their full weight.\n" if band else "")
             + (f"- **{days} sell rule:** every position in the account (the "
                f"strategy's and any other) ranked worse than {EXIT_BELOW}, or with no rank (score 0 or below, or not in the "
-               "stock list), is always sold in full if it is below its Alpaca average entry price (at or above it, it is kept until "
-               "Friday's rebalance, with no replacement), worst rank first (one sell order per stock), "
+               "stock list), is always sold in full, worst rank first (one sell order per stock), "
                + (f"and replaced 1-for-1 by the best-ranked top-{EXIT_TO_TOP} stock the account does not hold (same dollars; "
                   "earnings rule, no buy back after an earnings-day stop sale); if none is left the cash goes to the "
                   "spare-cash rule below.\n" if EXIT_TO_TOP else
@@ -82,7 +74,7 @@ def rules_text():
                "not hold, in rank order, each at its current rule weight; what is left is split equally over the "
                "stocks already held that are at or above break-even (their Alpaca average entry price; if none is, over all "
                "held stocks; a blocked stock or one being sold today is skipped; a stock at its cap passes its share to "
-               "the others)"
+               "the others; sleeve stocks stay at their cap)"
                + (f" (max {MAX_WEIGHT * LIVE_INVESTED:.1%} of equity per stock)" if MAX_WEIGHT else "")
                + ("; earnings rule" if EARNINGS else "") + ", no buy back after an earnings-day stop sale. Cash no stock can "
                f"take, and any order under ${DEPLOY_MIN_USD:,.0f} or {DEPLOY_MIN_PCT:.0%} of equity (whichever is larger), "
