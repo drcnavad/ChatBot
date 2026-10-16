@@ -37,6 +37,10 @@ LOW_VOL = WINNER.get("score") == "low_vol"                          # low volati
 MONTHLY = WINNER.get("calendar") == "monthly"                       # rebalance on the last trading day of the month
 STRATEGY_NAME = ("Low volatility in uptrend (monthly)" if LOW_VOL and MONTHLY else
                  "Low volatility in uptrend" if LOW_VOL else "C6 (relative strength)")
+SLEEVES = WINNER.get("sleeves")                                      # two halves (sleeves.py), else None
+if SLEEVES:
+    STRATEGY_NAME = (f"{SLEEVES['lowvol']:.0%} Low volatility in uptrend (monthly) + "
+                     f"{SLEEVES['sector']:.0%} Sector rotation (weekly)")
 REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day average"   # market filter off
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
@@ -51,10 +55,12 @@ def low_vol_rules_text():
     band = WINNER.get("rebalance_band")
     per_sector = max(1, int(WINNER.get("sector_cap", 1.0) * N_PICKS))
     return (f"**Strategy rules: {STRATEGY_NAME} ({STRATEGY_TAG})**\n"
-            "- **When:** a full rebalance on Fri Oct 16, 2026 (the switch), then on the last trading day of each month, with "
+            "- **When:** a full rebalance on Fri Oct 16, 2026 (the switch), then on the last trading day of each month"
+            + (" (the low-volatility half; the sector half every Friday)" if SLEEVES else "") + ", with "
             "the prices at about 2:30 PM CT (sells first, then buys from the cash free after the sells; any rest at 9 AM CT "
             "the next trading day)" + (", and the Friday check on the other Fridays" if WINNER.get("friday_falling_check") else "")
-            + ". **No Mon-Thu trading:** those 2:30 PM runs only refresh the data and place no orders.\n"
+            + ". **Other days:** the 2:30 PM runs only refresh the data and place no orders (a month-end on Mon-Thu is still a "
+            "rebalance day).\n"
             "- **Score:** 1 / 63-day volatility (calmest first), only stocks whose close is above their 200-day average; "
             f"ties by relative strength. At least {MIN_BARS} trading days of prices.\n"
             f"- **Picks:** the {N_PICKS} best, max {per_sector} per sector; do_not_buy stocks are never bought (the next "
@@ -73,6 +79,16 @@ def low_vol_rules_text():
                + (f" (max {MAX_WEIGHT * LIVE_INVESTED:.1%} of equity)" if MAX_WEIGHT else "")
                + ", do_not_buy skipped; none left = cash. No trims or top-ups.\n" if WINNER.get("friday_falling_check") else "")
             + ("- **Earnings-day stop:** off (no orders from earnings_stop.py).\n" if not WINNER.get("earnings_day_stop", True) else "")
+            + (f"- **Two halves:** the account is split {SLEEVES['lowvol']:.0%} / {SLEEVES['sector']:.0%}. The rules above run the "
+               "**low-volatility half** (weights are fractions of that half). The **sector-rotation half**: the 3 sector "
+               "ETFs with the best 63-day return, then the best stocks of those sectors by the C6 score (50% technical + "
+               "50% relative strength), top 10, weights ∝ 1 / 63-day volatility, max 4 per sector, max 20% of the half, "
+               f"{HALVED} with {REGIME_OFF}, do_not_buy never bought; a full rebalance of that half every Friday 2:30 PM CT "
+               "(the week's last trading day). **No overlap:** the sector half never buys a stock the low-volatility half "
+               "holds or targets; if the low-volatility half buys one the sector half holds, the shares move over at the "
+               "current price (no trade) and the sector half rebalances that day without it. Each half is sized from its "
+               "own value and keeps its own cash (Reports/sleeve_ledger.json); a half that is not rebalancing is left "
+               "alone. Holdings no half owns are sold at the next trade run.\n" if SLEEVES else "")
             + "- **Orders:** limit orders at the live quote (buy at the ask + 0.05%, sell at the bid - 0.05%); the 9 AM CT "
             "check the next trading day sends any rest. A missed rebalance is caught up at the next market session.\n")
 

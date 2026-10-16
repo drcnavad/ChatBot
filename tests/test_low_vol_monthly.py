@@ -37,8 +37,10 @@ check(not W["sleeve"] and "sleeve" not in be.winner_rank_args(pd.Series(dtype=bo
 check(not W["keep_profit_at_rebalance"] and not W["earnings_day_stop"] and not W["friday_falling_check"], "keep rule off, stop off, Friday check off (plain monthly)")
 check(pt.MAX_ORDER_PCT == W["max_weight"], "order backstop = 20% cap")
 
-# calendar: Oct 16 switch, then the last trading day of each month; nothing in between
+# calendar of the low-volatility rules alone (the sector half's Fridays: tests/test_sleeves.py): Oct 16 switch, then the
+# last trading day of each month; nothing in between
 days = pd.date_range("2026-10-12", "2027-01-31", freq="D")
+sleeves_cfg = W.pop("sleeves", None)
 W["friday_falling_check"] = False
 dec = {d.date().isoformat(): be.decision_kind(d) for d in days if be.decision_kind(d)}
 W["friday_falling_check"] = True   # the flag's own calendar
@@ -50,6 +52,8 @@ check(all(be.decision_kind(d) == "Friday check" for d in fridays) and be.decisio
 W["friday_falling_check"] = False
 check(be.decision_kind(pd.Timestamp("2026-10-23")) is None, "flag off: Fri Oct 23 is no decision")
 W["friday_falling_check"] = True   # flag on for the friday_falling_orders checks below
+if sleeves_cfg:
+    W["sleeves"] = sleeves_cfg
 
 # keep rule + Friday falling check on a small signal file
 tmp = tempfile.mkdtemp()

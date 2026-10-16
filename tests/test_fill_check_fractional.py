@@ -60,6 +60,8 @@ sys.modules.update(mods)
 
 import pandas as pd
 import paper_trade as pt
+import backtest_engine as be  # noqa: E402
+be.WINNER.pop("sleeves", None)   # the single-portfolio plan logic (the two halves: tests/test_sleeves.py)
 import fake_quotes
 QUOTES = fake_quotes.install(pt)   # every symbol quoted 99.99 / 100.01 (tight, fresh)
 

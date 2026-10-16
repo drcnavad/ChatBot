@@ -947,6 +947,12 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     top-10 stocks the account does not hold, the rest split equally over the held stocks in profit (build_cash_deploy_orders); meta['source'] becomes 'hold+cash' / 'midweek+cash'
     when it buys something. None = no spare-cash step. force_deploy: run it even if the data's day is not a Mon-Thu
     check (dry-run preview only). entry {symbol: Alpaca avg entry price}: which holdings are in profit."""
+    import backtest_engine as be
+    if be.WINNER.get("sleeves") and source in ("auto", "provisional") and not force_deploy:
+        # Two halves (50% low volatility monthly + 50% sector rotation weekly, sleeves.py): each half is planned as its
+        # own account; replaces everything below.
+        return plan_sleeve_orders(source, account_size, positions, picks_csv, signal_csv, midweek_csv, decision,
+                                  live_prices, min_value, fractional)
     targets, meta = load_targets(source, picks_csv, midweek_csv, decision=decision)
     no_buy, no_sell = manual_list("buy"), manual_list("sell")
     positions = positions or {}
@@ -1064,6 +1070,53 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
         meta["invested"] = float(targets["Weight"].sum())
     return build_orders(targets, account_size, positions, prices, min_value=min_value, fractional=fractional,
                         statuses=statuses, blocked=blocked, keep={**no_sell, **profit}), meta, targets
+
+def plan_sleeve_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signal_csv=SIGNAL_CSV,
+                       midweek_csv=MIDWEEK_CSV, decision=None, live_prices=None, min_value=1.0, fractional=False):
+    """plan_orders with WINNER['sleeves'] (live from Fri Oct 16, 2026): on a decision session the low-volatility half
+    rebalances on its monthly days (its targets = Provisional_Weight, as fractions of the half, with the usual add/hold
+    statuses, fail closed) and the sector-rotation half every week's last session; a half that does not rebalance is left
+    alone; a session that is no decision holds everything. Returns (orders, meta, targets) like plan_orders;
+    meta['sleeves'] = sleeves.plan info, meta['sleeve_ledger'] = the ledger auto_trade saves after sending the orders;
+    targets = the account-level weights of both halves after the plan (display)."""
+    import backtest_engine as be
+    import sleeves
+    picks = pd.read_csv(picks_csv)
+    if picks.empty:
+        raise ValueError(f"{picks_csv} is empty - run main_signal_analysis.ipynb first")
+    as_of, last_reb = str(picks["As_Of"].iloc[0])[:10], str(picks["Last_Rebalance"].iloc[0])[:10]
+    day = pd.Timestamp(decision).date().isoformat() if decision is not None else as_of
+    positions = _clean_positions(positions or {})
+    live_prices = live_prices or {}
+    meta = {"as_of": as_of, "last_rebalance": last_reb, "last_decision": str(picks.get("Last_Decision", picks["Last_Rebalance"]).iloc[0]),
+            "strategy": be.WINNER.get("name", str(picks["Strategy"].iloc[0])), "invested": None,
+            "midweek": pd.DataFrame(columns=["Sell", "Buy"])}
+    syms = sorted(set(positions) | set(picks["Symbol"].astype(str)))
+    px = {**latest_prices(syms, signal_csv), **dict(zip(picks["Symbol"].astype(str), picks["Close"])), **live_prices}
+    unpriced = sorted(s for s in positions if _safe_number(px.get(s), default=None) is None)
+    if unpriced:
+        print(f"  held but not in the stock list / signals: {', '.join(unpriced)} - pricing from market data")
+        px.update(current_prices(unpriced))
+    if source == "auto" and not be.decision_kind(day):
+        return build_hold_orders(positions, px), {**meta, "source": "hold"}, pd.DataFrame(columns=["Symbol", "Weight", "Price"])
+    lv_t, statuses = None, None
+    if sleeves.lowvol_day(day):
+        lv_t, lv_meta = load_targets("provisional" if source == "provisional" else "auto", picks_csv, midweek_csv, decision=decision)
+        if not lv_meta["source"].startswith("provisional"):
+            raise ValueError(f"the low-volatility half rebalances on {day} but strategy_picks.csv has no rebalance for it "
+                             f"(last rebalance {last_reb}, data as of {as_of}) - no orders")
+        lv_t = lv_t.assign(Price=lv_t["Symbol"].map(live_prices).fillna(lv_t["Price"]))
+        statuses = latest_signal_status(as_of=as_of)
+    no_buy = {**manual_list("buy"), **earnings_stop_blocked(as_of)}
+    orders, info = sleeves.plan(day, positions, account_size, px, lv_targets=lv_t, lv_statuses=statuses, no_buy=no_buy,
+                                fractional=fractional, min_value=min_value)
+    meta.update(source=("provisional" if info["lowvol"] else "sector") + "+sleeves", sleeves=info, sleeve_ledger=info["ledger"])
+    tab = sleeves.plan_table(info)
+    tab = tab[tab["Symbol"] != "(cash)"]
+    targets = pd.DataFrame({"Symbol": tab["Symbol"], "Weight": tab["Weight_of_account_%"] / 100, "Price": tab["Price"],
+                            "Half": tab["Half"]}).reset_index(drop=True)
+    meta["invested"] = float(targets["Weight"].sum())
+    return orders, meta, targets
 
 def friday_falling_orders(orders, positions, equity, as_of, entry, live_prices, signal_csv=SIGNAL_CSV, fractional=False,
                           keep=None, no_buy=None):
@@ -2590,7 +2643,7 @@ def reconcile_positions(target_source="auto", tolerance_pct=1.0, symbols=None):
     "couldn't check" is never reported as drift). Never raises.
     """
     cols = ["Symbol", "Target_Weight_%", "Actual_Weight_%", "Diff_pp", "Shares_Held", "Status"]
-    if str(target_source).endswith(("+cash", "+exits", "+subs", "+kept", "+falling")):
+    if str(target_source).endswith(("+cash", "+exits", "+subs", "+kept", "+falling", "+sleeves")):
         # A Mon-Thu check that also invested spare cash in stocks outside the strategy's holdings, or sold / refilled
         # account positions (sell rule on every position): the account deliberately differs from Strategy_Weight until
         # Friday, so there is nothing to reconcile against (like hold). A Friday with replacements (+subs) or with
@@ -2744,6 +2797,9 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         print("  Non-picks sold (below entry or downtrend): " + ", ".join(f"{k} ({v})" for k, v in meta["sold_rule"].items()))
     if meta.get("falling"):
         print("  Friday check: " + friday_check_text(meta["falling"]))
+    if meta.get("sleeves"):
+        import sleeves
+        print("  Two halves: " + sleeves.summary_text(meta["sleeves"]))
     if meta.get("account_exits"):
         print(f"  Mon-Thu sell rule (every position): {account_exit_text(meta['account_exits'])}")
     dep = meta.get("cash_deploy")
@@ -2847,6 +2903,18 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
     if n_submitted:
         prices = dict(zip(orders["Symbol"].astype(str), pd.to_numeric(orders["Price"], errors="coerce")))
         log_event("Trade", "ok", *_trade_notice(results, prices))
+    if meta.get("sleeve_ledger") is not None:
+        # The halves' ledger after this run's PLANNED orders; the next run reconciles it with the account (an order that
+        # did not fill gives its dollars back to its half). Saved even if some orders failed or wait for 9 AM.
+        import sleeves
+        try:
+            sleeves.save_ledger(meta["sleeve_ledger"])
+            sleeves.plan_table(meta["sleeves"]).to_csv(sleeves.PLAN_CSV, index=False)
+            print(f"  Sleeve ledger saved: {os.path.relpath(sleeves.LEDGER_JSON, PROJECT_ROOT)}")
+        except Exception as e:   # never hides the trade: logged, the next run reconciles from the account
+            log_event("Trade", "warning", "yes" if n_submitted else "no",
+                      "Couldn't save the two halves' ledger (Reports/sleeve_ledger.json). The orders are not affected; "
+                      "check the file before the next Friday run.", details=str(e))
     _print_header("EVENING LIVE TRADE COMPLETE")
     return orders, meta, results
 

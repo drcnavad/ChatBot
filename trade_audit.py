@@ -269,6 +269,17 @@ def reconcile(data, pending=None, stop_state=None, picks=None):
         # The live account also holds today's top-10 rule picks (Provisional_Weight: Mon-Thu refills and spare-cash buys).
         prov = pd.to_numeric(picks.reindex(columns=["Provisional_Weight"])["Provisional_Weight"], errors="coerce").fillna(0)
         live = set(target) | {str(s).upper() for s, w in zip(picks["Symbol"], prov) if w > 0}
+        try:                                    # two halves (sleeves.py): the targets are the ledger's planned holdings
+            import backtest_engine as be
+            import sleeves
+            led = sleeves.load_ledger() if be.WINNER.get("sleeves") else None
+        except Exception:
+            led = None
+        if led is not None:
+            val = {s: q * float(L["prices"].get(s, 0.0)) for L in led["halves"].values() for s, q in L["shares"].items() if q > 0}
+            tot = sum(float(L.get("value", 0.0)) for L in led["halves"].values()) or sum(val.values()) or 1.0
+            target = {s: v / tot for s, v in val.items()}
+            live = set(target)
         import sector_mapping as sm
         kept = {str(s).upper() for s in sm.do_not_sell}
         for s in sorted(set(held) - live):

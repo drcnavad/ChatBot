@@ -98,6 +98,13 @@ WINNER = {
     # pick not held with the same dollars (max 20% x 99%; do_not_buy skipped). No trims / top-ups. (paper_trade
     # friday_falling_orders.) False = monthly rebalances only.
     "friday_falling_check": False,
+    # Two halves (Chirag, Oct 15, 8:44 PM; live from Fri Oct 16): 50% of the account = the low-volatility rules above (monthly)
+    # and 50% = forward_test's "Sector rotation" (63-day sector ETF return, top 3 sectors, its top 10 by the C6 score,
+    # inverse-volatility weights, max 4 per sector, 20% cap within the half, QQQ halving, do_not_buy) with a full
+    # rebalance of that half every Friday (the week's last session); no overlap (the sector half never holds a name the
+    # low-volatility half holds or targets). Two independent halves, each with its own cash (sleeves.py,
+    # Reports/sleeve_ledger.json) = the backtested '50/50 + SR weekly, no overlap'. None = 100% low volatility.
+    "sleeves": {"lowvol": 0.5, "sector": 0.5},
     # Rebalance: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).
     "rebalance_band": 0.01,
 }
@@ -132,13 +139,16 @@ def winner_label(n_stocks):
     S, mw = WINNER, WINNER.get("midweek_swap")
     if S.get("score") == "low_vol" and S.get("calendar") == "monthly":
         tag = (f"LV-M-U{n_stocks}" + ("-KP" if S.get("keep_profit_at_rebalance") else "")
-               + ("-FC" if S.get("friday_falling_check") else ""))
+               + ("-FC" if S.get("friday_falling_check") else "") + ("+SR-W" if S.get("sleeves") else ""))
         name = (f"Low volatility in uptrend (monthly): the {S['n']} calmest stocks above their 200-day average, equal weight, "
                 f"max {winner_max_per_sector()} per sector, rebalanced on the last trading day of the month + soft QQQ regime "
                 f"({n_stocks} stocks)" + (" [at a rebalance a non-pick is sold only below its purchase price or at/below its 200-day average]"
                                           if S.get("keep_profit_at_rebalance") else "")
                 + (" + Friday check (sell a holding below its purchase price, at/below its 200-day or out of the top 10; "
                    "same dollars into the best pick not held)" if S.get("friday_falling_check") else ""))
+        if S.get("sleeves"):
+            name = (f"{S['sleeves']['lowvol']:.0%} " + name + f" + {S['sleeves']['sector']:.0%} Sector rotation (top 3 sectors by "
+                    "63-day ETF return, top 10, rebalanced every Friday, no overlap)")
         return tag, name
     tag = f"C6-U{n_stocks}"
     if S.get("sector_cap", 0.4) >= 1.0 - 1e-12:
@@ -1716,6 +1726,8 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
                               keep=args.get("sleeve") or ())
     return tgt, checks
 
+SECTOR_KIND = "sector half rebalance"   # decision kind: the Friday rebalance of the sector-rotation half only (WINNER["sleeves"])
+
 def next_decision(latest, days=None):
     """Next decision session after ``latest``: (date, 'full rebalance' | 'mid-week check', fill_date).
 
@@ -1729,8 +1741,11 @@ def next_decision(latest, days=None):
         for i, d in enumerate(sess[:-1]):
             if reb.iloc[i]:
                 return d, "full rebalance", sess[i + 1]
-            if WINNER.get("friday_falling_check") and d.isocalendar()[:2] != sess[i + 1].isocalendar()[:2]:
-                return d, "Friday check", sess[i + 1]          # the week's last session (variant B, flag)
+            if d.isocalendar()[:2] != sess[i + 1].isocalendar()[:2]:     # the week's last session
+                if WINNER.get("sleeves"):
+                    return d, SECTOR_KIND, sess[i + 1]         # the sector-rotation half's weekly rebalance
+                if WINNER.get("friday_falling_check"):
+                    return d, "Friday check", sess[i + 1]      # variant B (flag)
         return sess[0], "full rebalance", sess[1]
     if days is None:
         days = mw.get("days", ("Mon", "Wed")) if mw else ()
