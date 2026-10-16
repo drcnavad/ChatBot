@@ -4,8 +4,8 @@ rank == Strategy_Rank and the portfolio slot == position among the picks, the da
 <latest close>" / "<rebalance day> plan" chip agree with strategy_changes / signal_analysis / strategy_picks (and with the
 Strategy tab's Last decision table), the Strategy tab widgets work, the rules text matches
 backtest_engine.WINNER, removed sections stay gone (incl. the alert banner, the Summary section and the Strategy Health tab), and the stock list renders
-four rows (Holdings, Next in line (waiting list), Buy zone, Remaining) with a ?symbol= link per stock, each once, then
-the Do not buy note row; no strategy
+three rows (Holdings, Next in line (waiting list), Remaining) with a ?symbol= link per stock, each once, do-not-buy
+stocks tagged DNB inline; no strategy
 score chart panel.
 Run: python tests/run_tests.py  (or python tests/test_app.py)"""
 import base64
@@ -314,19 +314,21 @@ expect([t.label for t in at.tabs][:3] == ["Home", "Strategy", "Trading Account"]
 expect(not [m for m in at.markdown if '<div class="sa-section">Summary</div>' in m.value], "the Summary section was removed")
 expect(any("Live holdings are turned off here" in i.value for i in at.info), "holdings expander: off message in tests")
 
-# ---------------------------------------------------------------- stock list: four rows, every stock once (Oct 16, 2026)
-ROWS = ["Holdings", "Next in line (waiting list)", "Buy zone, not in portfolio", "Remaining", "Do not buy list"]
+# ---------------------------------------------------------------- stock list: three rows, every stock once (Oct 16, 2026)
+ROWS = ["Holdings", "Next in line (waiting list)", "Remaining"]
 tier_md = [m.value for m in at.markdown if "Stock list<span>" in m.value and "?symbol=" in m.value]
 expect(len(tier_md) == 1, f"stock list block found: {len(tier_md)}")
 blob = tier_md[0] if tier_md else ""
-parts = re.split(r'<b(?: title="[^"]*")?>(Holdings|Next in line \(waiting list\)|Buy zone, not in portfolio|Remaining|Do not buy list) \((\d+)\):</b>', blob)
+parts = re.split(r'<b(?: title="[^"]*")?>(Holdings|Next in line \(waiting list\)|Remaining) \((\d+)\):</b>', blob)
 expect([parts[i] for i in range(1, len(parts), 3)] == ROWS, f"stock list rows: {[parts[i] for i in range(1, len(parts), 3)]}")
 bodies = {parts[i]: re.findall(r"\?symbol=([A-Z0-9.]+)", parts[i + 2]) for i in range(1, len(parts), 3)}
 counts = {parts[i]: int(parts[i + 1]) for i in range(1, len(parts), 3)}
 for name, syms in bodies.items():
     expect(len(syms) == counts[name], f"{name}: header count {counts[name]} != {len(syms)} links")
-every = [s for name, syms in bodies.items() if name != "Do not buy list" for s in syms]   # the note row repeats
-expect(bodies.get("Do not buy list") == list(sm.do_not_buy), f"Do not buy note row: {bodies.get('Do not buy list')}")
+every = [s for syms in bodies.values() for s in syms]
+_dnb = re.findall(r"\?symbol=([A-Z0-9.]+)[^<]*</a><sup[^>]*>DNB</sup>", blob)
+expect(sorted(_dnb) == sorted(s for s in map(str.upper, sm.do_not_buy) if s in every) and _dnb,
+       f"do-not-buy stocks tagged DNB inline once: {_dnb}")
 expect(len(every) == len(set(every)), f"stock list: a stock shown twice: {sorted({s for s in every if every.count(s) > 1})}")
 expect(set(sm.tradable_symbols) <= set(every), f"stock list misses {sorted(set(sm.tradable_symbols) - set(every))}")
 expect(len(bodies.get("Next in line (waiting list)", [])) <= 20, "at most 20 candidates")

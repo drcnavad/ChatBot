@@ -1,4 +1,4 @@
-"""Home tab stock list: every stock once, in four rows (Chirag, Oct 16, 2026).
+"""Home tab stock list: every stock once, in three rows (Chirag, Oct 16, 2026).
 
   1. Holdings: the live Alpaca positions (read-only GET, the Trading Account tab's read); when Alpaca is not readable
      (tests, an outage) the planned shares in Reports/sleeve_ledger.json (both halves) stand in.
@@ -7,10 +7,10 @@
      without the low-volatility names), then the next best of each half's ranking, alternating (low volatility: 1 / 63-day
      volatility above the 200-day average; sector rotation: C6 score in the 3 sectors with the best 63-day ETF return).
      Ranked like any other stock (do_not_buy included).
-  3. Buy zone, not in portfolio: every other stock in the buy zone of either half - low volatility (ranked, close above
-     its 200-day average) or sector rotation (in a top-3 sector with a score above 0).
-  4. Remaining: every other stock of the stock list (sector_mapping.tradable_symbols), then any other symbol on the dashboard.
-  + Do not buy list: a note row with sector_mapping.do_not_buy (those stocks also stay in their ranked row).
+  3. Remaining: every other stock of the stock list (sector_mapping.tradable_symbols) by Strategy_Rank, then any other
+     symbol on the dashboard.
+  sector_mapping.do_not_buy stocks stay in whichever row they land and get a small DNB tag (dnb_symbols); no separate
+  buy-zone or do-not-buy row (Oct 16: they showed stocks twice).
 Display only: nothing here feeds the strategy or orders."""
 
 import pandas as pd
@@ -73,7 +73,7 @@ def _alternate(a, b):
     return out
 
 def stock_groups(p):
-    """[(title, symbols, note)] - the four rows (every symbol once), then the Do not buy note row."""
+    """[(title, symbols, note)] - the three rows, every symbol once."""
     held, src = held_symbols()
     try:
         lv_t, sec_t, lv_rk, sr_rk = _rankings()
@@ -86,13 +86,13 @@ def stock_groups(p):
             cand.append(s)
             seen.add(s)
     rank = p.by_symbol["Strategy_Rank"] if "Strategy_Rank" in p.by_symbol.columns else pd.Series(dtype=float)
-    zone = [s for s in sorted(set(lv_rk) | set(sr_rk), key=lambda s: (rank.get(s, float("inf")), s)) if s not in seen]
-    seen |= set(zone)
     universe = list(tradable_symbols) + [s for s in p.options if s not in tradable_symbols and s != "QQQ"]
     rest = sorted({s for s in universe if s not in seen},
                   key=lambda s: (pd.isna(rank.get(s)), rank.get(s, 0) if pd.notna(rank.get(s)) else 0, s))
     return [("Holdings", held, src),
             ("Next in line (waiting list)", cand, "the next picks of the two halves, not held"),
-            ("Buy zone, not in portfolio", zone, "low volatility or sector rotation buy zone"),
-            ("Remaining", rest, ""),
-            ("Do not buy list", list(do_not_buy), "note only: never bought (sector_mapping.do_not_buy); also in its ranked row")]
+            ("Remaining", rest, "")]
+
+def dnb_symbols():
+    """sector_mapping.do_not_buy, upper case: tagged DNB in the stock list."""
+    return {str(s).upper() for s in do_not_buy}

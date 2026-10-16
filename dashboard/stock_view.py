@@ -10,7 +10,7 @@ from dashboard.data import (company_metrics, last_next_earnings, live_quote, loa
     row_for)
 from dashboard.settings import CT, HOLDINGS_CSV, symbol_sector
 from dashboard.signals import PLAN_BADGE, SIGNAL_BADGE, plan_text
-from dashboard.stock_groups import stock_groups
+from dashboard.stock_groups import dnb_symbols, stock_groups
 from dashboard.style import (BAD, GOOD, INK, MA_COLS, TONE_CLASS, esc, fmt, num, score_tone,
     show_html, sign_color, stat_html, symbol_link, tone)
 
@@ -26,16 +26,18 @@ def ticker_label(p, s):
     return "  ·  ".join(parts)
 
 def render_rank_tiers(p):
-    """Horizontal clickable stock list, four rows, every stock once (dashboard/stock_groups.py): Holdings, Next week's
-    candidates, Buy zone (not in portfolio), Remaining.
+    """Horizontal clickable stock list, three rows, every stock once (dashboard/stock_groups.py): Holdings, Next in line
+    (waiting list), Remaining; do-not-buy stocks carry a small DNB tag.
 
     Each symbol is a ?symbol= link, handled in main() exactly like a table click
     (opens the stock in the stock view below). The dropdown underneath stays for manual typing."""
     current = st.session_state.get("ticker_dropdown")
     held = lambda s: TONE_CLASS.get(tone(p.sig_off.get(s)), "") if p.sig_off.get(s) in ("Buy", "Hold", "Sold") else ""
-    rows = []
+    rows, dnb = [], dnb_symbols()
+    tag = ('<sup title="on your do-not-buy list (sector_mapping.do_not_buy)" style="font-size:0.6em;opacity:0.7;'
+           'margin-left:1px;">DNB</sup>')
     for title, syms, note in stock_groups(p):
-        links = " ".join(symbol_link(s, held(s) + (" sel" if s == current else "")) for s in syms)
+        links = " ".join(symbol_link(s, held(s) + (" sel" if s == current else "")) + (tag if s in dnb else "") for s in syms)
         tip = f' title="{esc(note)}"' if note else ""
         rows.append(f'<div class="sa-tier"><b{tip}>{title} ({len(syms)}):</b><div class="sa-tier-syms">{links or "\u2014"}</div></div>')
     day = p.df["Date"].max()
