@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Read-only trade audit + dashboard data refresh: Mon-Fri every 30 min 8:30 AM-3:00 PM CT, plus 3:45 PM CT after close. trade_audit.py --write --log writes the order ledger
+<!-- Read-only trade audit + dashboard data refresh: Mon-Fri every 30 min 8:30 AM-3:00 PM CT, plus 3:45 PM CT after close. refresh_dashboard_data.sh = read-only live sync (my_positions.csv, Reports/live_*.csv) + trade_audit.py --write --log, which writes the order ledger
      (Reports/live_trade_ledger.csv, plan price vs fill) and the round trips (Reports/live_round_trips.csv), and each NEW
      alert (daily loss 3% / 5%, Mac clock drift, NYSE calendar vs Alpaca, rejected order, fill over 1% worse than plan,
      untracked / orphan orders, Alpaca unreadable) as one Reports/run_log.csv row. GET only, never orders.
@@ -11,10 +11,8 @@
     <string>com.stockanalysis.tradeaudit</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/anaconda3/bin/python</string>
-        <string>/Users/drcnavad/Desktop/Stock Analysis/trade_audit.py</string>
-        <string>--write</string>
-        <string>--log</string>
+        <string>/bin/bash</string>
+        <string>/Users/drcnavad/Desktop/Stock Analysis/refresh_dashboard_data.sh</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/drcnavad/Desktop/Stock Analysis</string>
