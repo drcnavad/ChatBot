@@ -2,7 +2,7 @@
 import streamlit as st
 
 from dashboard.details.data_settings import render_data_and_settings
-from dashboard.details.forward_test import render_forward_rules, render_forward_test
+from dashboard.details.forward_test import render_forward_rules, render_forward_test, render_live_vs_benchmark
 from dashboard.details.last_decision import render_last_decision
 from dashboard.details.latest_signals import latest_signals_title, render_latest_signals
 from dashboard.details.live_holdings import render_live_holdings
@@ -16,6 +16,8 @@ def render_strategy_tab(p):
     with st.expander(f"Last decision · {p.off_date:%a %b %-d} (decisions in force, every stock)", expanded=True):
         render_last_decision(p)
     import forward_test as ft
+    with st.expander(f"Live vs benchmark · live 50/50 and its halves vs SPY and QQQ since Oct 16, 2026", expanded=True):
+        render_live_vs_benchmark()
     with st.expander(f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
                      expanded=True):
         render_forward_test()

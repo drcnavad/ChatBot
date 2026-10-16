@@ -117,13 +117,14 @@ vals.loc[(vals["Strategy"] == "Top 5") & (vals["Date"] >= pd.Timestamp("2026-10-
 vals.loc[(vals["Strategy"] == "Top 20") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02
 vals.loc[(vals["Strategy"] == "Top 20") & (vals["Date"] == pd.Timestamp("2026-10-05")), "Value"] = 0.95  # same total, deeper drop
 lb = ft.leaderboard(daily, bench, vals)
+N_RANKED = sum(bool(c.get("ranked", True)) for c in ft.STRATEGIES)   # the Oct 16 live halves are shown, not ranked
 check("leaderboard: ranked by total return since Oct 2, a tie goes to the smaller drawdown; Rank counts strategies only",
       list(lb.dropna(subset=["Rank"])["Strategy"][:2]) == ["Top 5", "Top 20"] and list(lb.dropna(subset=["Rank"])["Rank"][:2]) == [1, 2]
-      and sorted(lb["Rank"].dropna()) == list(range(1, len(ft.STRATEGIES) + 1)), lb.head(4).to_dict("records"))
+      and sorted(lb["Rank"].dropna()) == list(range(1, N_RANKED + 1)), lb.head(4).to_dict("records"))
 check("leaderboard: the live row is marked", (lb["Strategy"] == ft.LIVE + ft.LIVE_MARK).sum() == 1, list(lb["Strategy"]))
 _early = ft.leaderboard(daily.iloc[:3], bench.iloc[:3], vals[vals["Date"] <= "2026-10-06"])
 check("leaderboard: ranked from day one (no wait for a full week)",
-      sorted(_early["Rank"].dropna()) == list(range(1, len(ft.STRATEGIES) + 1)) and _early.dropna(subset=["Rank"])["Strategy"].iloc[-1] == "Top 20",
+      sorted(_early["Rank"].dropna()) == list(range(1, N_RANKED + 1)) and _early.dropna(subset=["Rank"])["Strategy"].iloc[-1] == "Top 20",
       _early.head(3).to_dict("records"))
 check("verdict: too early before 12 weeks", ft.verdict(lb) == "Week 2 of 12: too early to name a winner.", ft.verdict(lb))
 long_days = pd.bdate_range("2026-10-02", periods=70)
@@ -219,12 +220,14 @@ tg = {k: t.loc["2026-10-02":] for k, t in full.items()}
 check(f"registry: {len(ft.STRATEGIES)} strategies with unique names, each with a one-line rule",
       len({c["name"] for c in ft.STRATEGIES}) == len(ft.STRATEGIES) >= 28 and all(c.get("rule") for c in ft.STRATEGIES))
 _q = "Now: cash if QQQ < 50-day"                       # the fake QQQ is below its 50-day from Oct 2: all cash
+_combo = {c["name"] for c in ft.STRATEGIES if c.get("combo")}   # forward_combos lines (tests/test_forward_combos.py)
 check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%), at most 99% invested",
-      all((t.to_numpy() >= 0).all() and t.to_numpy().max() <= 0.198 + 1e-12 and t.sum(axis=1).max() <= 0.99 + 1e-9
+      all((t.to_numpy() >= 0).all() and t.to_numpy().max() <= (0.198 + 1e-12 if k not in _combo else 0.25)
+          and t.sum(axis=1).max() <= (0.99 + 1e-9 if k not in _combo else 1.0 + 1e-9)   # combo: drifted weights, no margin
           and (t.sum(axis=1).max() > 0 or k == _q) for k, t in tg.items()),
       {k: (round(t.to_numpy().max(), 4), round(t.sum(axis=1).max(), 4)) for k, t in tg.items()})
 check("registry: the strategies are not copies of each other (distinct weights over the fake history)",
-      len({t.round(4).to_numpy().tobytes() for t in full.values()}) >= len(ft.STRATEGIES) - 5)   # the small fake history makes a few
+      len({t.round(4).to_numpy().tobytes() for k, t in full.items() if k not in _combo}) >= len(ft.STRATEGIES) - len(_combo) - 5)   # the small fake history makes a few
 #                                                    coincide; the sleeve stocks are not in it (no sleeve = live now)
 _fri = inp["weekly"] & (full[_q].index >= full[_q].index[260])
 check("Now: cash if QQQ < 50-day: a Friday with QQQ below its 50-day goes all to cash, above it invests",
@@ -271,10 +274,10 @@ now = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c.get("score") in ("
        and c.get("exit")}
 _nb = [s_ for s_ in sector_mapping.do_not_buy if s_ in full[ft.LIVE]]
 _chg = lambda t: set(t.index[(t.diff().abs().sum(axis=1) > 1e-12).to_numpy()].dayofweek)
-check("Now strategies: 11, do_not_buy never held, trades on Tue / Thu checks too, all different from each other",
-      len(now) == 11 and all((t[_nb].to_numpy() == 0).all() for t in now.values())
+check("Now strategies: 11 + the restored Oct 15 rules, do_not_buy never held, trades on Tue / Thu checks too, all different",
+      len(now) == 12 and all((t[_nb].to_numpy() == 0).all() for t in now.values())
       and {1, 3} <= set().union(*(_chg(t) for t in now.values()))
-      and len({t.round(6).to_numpy().tobytes() for t in now.values()}) >= 10,     # fake data: no sleeve stocks
+      and len({t.round(6).to_numpy().tobytes() for t in now.values()}) >= 11,     # fake data: no sleeve stocks
       (_nb, sorted(set().union(*(_chg(t) for t in now.values())))))
 check("exit to cash until Friday: differs from live (live refills from top-10; this variant does not)",
       not np.allclose(cash.to_numpy(), tg_live_full.to_numpy()), (float(np.abs(cash - tg_live_full).to_numpy().max()),))
@@ -327,9 +330,11 @@ with tempfile.TemporaryDirectory() as tmp:
     n1 = ft.update_strategies(SIG, FACTS, NO_EARN, BENCH, BARS, **P("a"))
     v = pd.read_csv(P("a")["path"], parse_dates=["Date"])
     check("no margin: no strategy's cash is ever below 0", v["Cash"].min() >= -1e-12, v.loc[v["Cash"].idxmin()].to_dict())
-    n_days = (sdays >= pd.Timestamp(be.FORWARD_START)).sum()
-    check("update: one row per strategy and trading day from the Oct 2 close, each at 1.0 on Oct 2",
-          n1 == len(ft.STRATEGIES) * n_days and (v.loc[v["Date"] == "2026-10-02", "Value"] == 1.0).sum() == len(ft.STRATEGIES), n1)
+    _st = [pd.Timestamp((c.get("combo") or {}).get("start") or be.FORWARD_START) for c in ft.STRATEGIES]
+    n_rows = lambda lo, hi=None: sum(int(((sdays >= max(lo, s0)) & (sdays <= (hi or sdays.max()))).sum()) for s0 in _st)
+    n_oct2 = sum(s0 == pd.Timestamp(be.FORWARD_START) for s0 in _st)
+    check("update: one row per strategy and trading day from its start close (Oct 2; the live halves Oct 16), 1.0 on Oct 2",
+          n1 == n_rows(pd.Timestamp(be.FORWARD_START)) and (v.loc[v["Date"] == "2026-10-02", "Value"] == 1.0).sum() == n_oct2, n1)
     import shutil  # noqa: E402
     shutil.copy(P("a")["path"], os.path.join(tmp, "a_copy.csv"))
     ft.update_strategies(SIG[SIG["Date"] <= "2026-10-05"], FACTS, NO_EARN, BENCH, BARS, **P("r"))
@@ -343,13 +348,13 @@ with tempfile.TemporaryDirectory() as tmp:
           ft.update_strategies(SIG, FACTS, NO_EARN, BENCH, BARS, **P("a")) == 0 and filecmp.cmp(P("a")["path"], os.path.join(tmp, "a_copy.csv"), shallow=False))
     early = [BARS[0][BARS[0]["Date"] <= "2026-10-05"]]                                  # bars only through Oct 5
     n_early = ft.update_strategies(SIG[SIG["Date"] <= "2026-10-07"], FACTS, NO_EARN, BENCH, early, **P("b"))
-    check("update: days after the last volume bar wait for the bars", n_early == len(ft.STRATEGIES) * 2, n_early)
+    check("update: days after the last volume bar wait for the bars", n_early == n_rows(pd.Timestamp(be.FORWARD_START), pd.Timestamp("2026-10-05")), n_early)
     ft.update_strategies(SIG[SIG["Date"] <= "2026-10-07"], FACTS, NO_EARN, BENCH, BARS, **P("b"))  # missed days ...
     nb = ft.update_strategies(SIG, FACTS, NO_EARN, BENCH, BARS, **P("b"))                          # ... caught up later
     a_, b_ = pd.read_csv(P("a")["path"]), pd.read_csv(P("b")["path"])
     ha, hb = pd.read_csv(P("a")["hold_path"]), pd.read_csv(P("b")["hold_path"])
     check("catch-up: missed days are added from the saved bars, same values and holdings as running every day",
-          nb == len(ft.STRATEGIES) * (sdays > pd.Timestamp("2026-10-07")).sum() and len(a_) == len(b_)
+          nb == n_rows(pd.Timestamp("2026-10-08")) and len(a_) == len(b_)
           and np.allclose(a_["Value"], b_["Value"], rtol=0, atol=1e-12) and ha[["Date", "Strategy", "Symbol"]].equals(hb[["Date", "Strategy", "Symbol"]]),
           (nb, len(a_), len(b_)))
     # A later pipeline run rewrote the past (e.g. the 8f57015 rule change: Oct 2 BE -> MRVL). The saved holdings must stay

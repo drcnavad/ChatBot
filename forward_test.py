@@ -2,14 +2,18 @@
   1. the real Alpaca account (read-only GETs through alpaca_paper, never orders) -> Reports/forward_test_daily.csv, one
      row per trading day: equity, cash, net deposits (a deposit booked after the close, ~4:15 PM CT, counts from the next
      row), positions, closed / winning picks, $ traded and its cost vs the decision price;
-  2. STRATEGIES: 52 paper-only strategies (the current live rules, the pinned Oct 2 rules and variants; never traded), built from the saved
+  2. STRATEGIES: 71 paper-only strategies (the current live rules, the pinned Oct 2 rules and variants, the Oct 15 50/50
+     and low-volatility lines of forward_combos; never traded), built from the saved
      Reports files (signal_analysis, factor_history, earnings_date, benchmark_prices) + Alpaca daily volume
      (forward_bars) -> Reports/forward_strategies.csv (Value, 1.0 at the start; Cash) + forward_strategies_holdings.csv.
 leaderboard(): every strategy + the account + QQQ / SPY, ranked by RANK_RULE, with one column per week.
 Same accounting for all: decide at the day's close (the 2:30 PM bar on decision days), trade only names whose target
 changed (all back to target on the strategy's rebalance day, 1-point band, earnings rule), be.COST per side, max 20% per
 stock (the live one: be.WINNER's cap, 15% from Oct 15), 99% invested, buys never exceed the cash (no margin), cash earns 0. Saved days are never redone; missed days are
-caught up from the saved bars. On Oct 15, 2026 all but the live one were recomputed from Oct 2 (Mon-Thu checks, 11 new).
+caught up from the saved bars. On Oct 15, 2026 all but the live one were recomputed from Oct 2 (Mon-Thu checks, 11 new);
+later on Oct 15, 19 more (forward_combos: two independent halves, swap-only halves, the low-volatility keep / Friday
+falling rules) - the two live halves start at the Oct 16 close, the rest are computed from Oct 2 like the others. The
+live line was renamed "Live 50/50 combined (no overlap)" (was "Live rules (C6)"; its saved Oct 2-15 days are kept).
 
     python forward_test.py --record   # run_all.daily_step (Mon-Fri from 3:05 PM CT): strategies + today's account row
     python forward_test.py            # strategies only (no account request) + the leaderboard
@@ -48,7 +52,11 @@ PIN = {"vol_sizing": True, "sector_cap": 1.0, "max_pick_rank": None, "cap_soft":
 EARN_DAYS = 5
 BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
-LIVE = "Live rules (C6)"    # always the CURRENT live rules (be.WINNER + sector_mapping, not pinned); saved days kept as recorded
+LIVE = "Live 50/50 combined (no overlap)"   # always the CURRENT live rules (be.WINNER + sector_mapping, not pinned); saved days kept
+OLD_NAMES = {"Live rules (C6)": LIVE}           # renamed lines: saved rows are migrated to the new name (migrate_names)
+# the live 50/50 (be.WINNER "sleeves", from the Oct 16, 2026 switch): forward_combos legs, low-volatility half first
+LIVE_LEGS = (("lowvol", "full", "month", 0.5), ("sr63", "full", "week", 0.5))
+LIVE_SWITCH = "2026-10-16"
 C6 = "Oct 2 rules (pinned)" # the rules the forward test started with (pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, 50/50 score)
 # paper_trade's Mon-Thu spare-cash rule (forward_test never imports paper_trade; tests check these equal its constants)
 DEPLOY_MAX_RANK, DEPLOY_MIN_PCT = 10, 0.01
@@ -85,12 +93,14 @@ NOW = dict(score="rs", midweek={"enter_top": None, "exit_below": None, "days": M
 EQ = {**PLAIN, "vol_sizing": False}                      # ... and an equal weight per stock
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
 STRATEGIES = [
-    dict(name=LIVE, live=True, rule="Always the current live rules, as the account trades them (from Oct 16, 2026: low volatility "
-         "in uptrend, monthly = the 10 calmest stocks above their 200-day average, max 4 per sector, equal weight, rebalanced "
-         "on Oct 16 and then the last trading day of each month, no Mon-Thu trading, no earnings rule, max 20% per stock; "
-         "do_not_buy never bought; from Oct 16 the account holds this as its low-volatility HALF next to a weekly "
-         "sector-rotation half - see 'Sector rotation' - this line simulates the low-volatility rules on 100%). "
-         "Oct 2-15 as recorded then (Oct 13-15: relative strength only + sleeve; before: the Oct 2 rules)."),
+    dict(name=LIVE, live=True, rule="Always the current live rules, as the account trades them. From the Oct 16, 2026 close: "
+         "50% low volatility in uptrend (monthly: the 10 calmest stocks above their 200-day average, max 4 per sector, "
+         "equal weight, rebalanced Oct 16 and then the last trading day of each month) + 50% sector rotation (weekly: "
+         "the best C6-score stocks in the 3 sectors with the best 63-day ETF return, top 10, 1/volatility weights, every "
+         "Friday), two independent halves with their own cash, the sector half never buys what the low-volatility half "
+         "holds; no Mon-Thu trading, no earnings rule, max 20% per stock of its half, do_not_buy never bought "
+         "(forward_combos, LIVE_LEGS; the Oct 15 holdings sold at the Oct 16 close). Oct 2-15 as recorded (named "
+         "'Live rules (C6)' then: Oct 13-15 relative strength only + sleeve; before: the Oct 2 rules)."),
     dict(name=C6, rule="What the bot traded Oct 2-7 (pinned): 50% technical + 50% relative strength, top 10, Fri rebalance + "
                        "Mon-Thu top-3 swap (below rank 15) and exit below rank 30 (checks Mon/Wed until Oct 15)."),
     dict(name="C6, 4 per sector, no earnings skip", select=PLAIN, earnings=None,
@@ -200,6 +210,53 @@ STRATEGIES = [
     dict(name="Now: cash if QQQ < 50-day", **NOW, regime="qqq50", select={"regime_scale": 0.0},
          rule="Live rules of Oct 15, but a Friday with QQQ below its 50-day average goes all to cash (live: half size below "
               "the 200-day)."),
+    # ---- added Oct 15, 2026 (evening, Chirag): the live 50/50 halves (from the Oct 16 close) and every rule discussed
+    # that day (from Oct 2), simulated by forward_combos (no_overlap: the low-volatility half has priority)
+    dict(name="Live half: Low vol monthly", combo=dict(legs=LIVE_LEGS, start=LIVE_SWITCH, which=0), ranked=False,
+         rule="The live account's low-volatility half on its own (from the Oct 16 close, 1.0 then): the 10 calmest stocks "
+              "above their 200-day average, max 4 per sector, equal weight, rebalanced on Oct 16 and then the last trading "
+              "day of each month; do_not_buy never bought. Not ranked (starts Oct 16)."),
+    dict(name="Live half: Sector rotation weekly (63d)", combo=dict(legs=LIVE_LEGS, start=LIVE_SWITCH, which=1), ranked=False,
+         rule="The live account's sector-rotation half on its own (from the Oct 16 close, 1.0 then): the best C6-score "
+              "stocks in the 3 sectors whose ETF has the best 63-day return, top 10, 1/volatility weights, max 20% of the "
+              "half, rebalanced every Friday; never buys a stock the low-volatility half holds. Not ranked (starts Oct 16)."),
+    dict(name="100% Low vol monthly (live rules)", combo=dict(legs=(("lowvol", "full", "month", 1.0),)),
+         rule="The live low-volatility rules on 100% (the Oct 15 plan before the 50/50): calmest 10 above the 200-day "
+              "average, max 4 per sector, equal weight, monthly; do_not_buy never bought."),
+    dict(name="Low vol monthly + Friday falling check (B-final)", combo=dict(legs=(("lowvol", "bfinal", "month", 1.0),)),
+         rule="Low vol monthly + every other Friday a holding below its cost or its 200-day average, or no longer a pick, "
+              "is sold and its dollars go to the best new pick (live briefly on Oct 15, commit 08e5f08)."),
+    dict(name="Low vol weekly (live rules)", combo=dict(legs=(("lowvol", "full", "week", 1.0),)),
+         rule="The live low-volatility rules rebalanced every Friday instead of monthly."),
+    dict(name="Low vol monthly + keep winners (A)", combo=dict(legs=(("lowvol", "keep", "month", 1.0),)),
+         rule="Low vol monthly, but at the month-end rebalance a holding that is no longer a pick stays while it is above "
+              "its cost and its 200-day average (rule A); the picks share what is left."),
+    dict(name="Restored RS + sleeve, Mon-Thu checks (Oct 15 rules)", **NOW,
+         rule="The live rules of Oct 13-15 (restored by commit 39e6a47): relative strength only, top 10 + the defensive "
+              "sleeve, Friday rebalance, Mon-Thu sell worse than rank 20 refilled from the top 10, do_not_buy never "
+              "bought. (Its Friday-only version is 'Now: Friday only'.)"),
+    dict(name="50/50: Low vol + SR weekly 63d (live combo from Oct 2)", combo=dict(legs=LIVE_LEGS),
+         rule="The live 50/50 computed from Oct 2: low vol monthly half + sector rotation (63-day ETF return, top 3 "
+              "sectors) weekly half, no overlap."),
+    dict(name="50/50: Low vol + SR every 2 weeks 63d", combo=dict(legs=(LIVE_LEGS[0], ("sr63", "full", "2week", 0.5))),
+         rule="50/50, the sector-rotation half (63 days) rebalanced every other Friday (from Oct 2), no overlap."),
+    dict(name="50/50: Low vol + SR monthly 63d", combo=dict(legs=(LIVE_LEGS[0], ("sr63", "full", "month", 0.5))),
+         rule="50/50, the sector-rotation half (63 days) rebalanced monthly, no overlap."),
+    *[dict(name=f"50/50: Low vol + SR weekly {n}d", combo=dict(legs=(LIVE_LEGS[0], (f"sr{n}", "full", "week", 0.5))),
+           rule=f"50/50, the sector-rotation half ranks sectors by their ETF's {n}-day return (live: 63), weekly, no overlap.")
+      for n in (10, 14, 21, 42)],
+    *[dict(name=f"50/50: Low vol + SR daily swap, keep top {k}", combo=dict(legs=(LIVE_LEGS[0], (f"sr63", f"swap{k}", "day", 0.5))),
+           rule=f"50/50, the sector-rotation half buys its top 10 once (equal dollars), then each day sells a holding ranked "
+                f"worse than {k} (or held by the low-vol half) for the best stock not held; no full rebalance.")
+      for k in (10, 15)],
+    dict(name="50/50: Low vol + SR Friday swap, keep top 10", combo=dict(legs=(LIVE_LEGS[0], ("sr63", "swap10", "week", 0.5))),
+         rule="50/50, the sector-rotation half swap-only (keep top 10) checked on Fridays only."),
+    dict(name="50/50: Low vol + Vol-adjusted momentum weekly", combo=dict(legs=(LIVE_LEGS[0], ("vam", "full", "week", 0.5))),
+         rule="50/50, the second half = volatility-adjusted momentum (6-month return / 6-month volatility), top 10, equal "
+              "weight, weekly, no overlap."),
+    dict(name="50/50: Low vol + Calmer half weekly", combo=dict(legs=(LIVE_LEGS[0], ("calm", "full", "week", 0.5))),
+         rule="50/50, the second half = 'Now: calmer half' (relative strength among the calmer half of the list) rebalanced "
+              "weekly, no Mon-Thu checks, no overlap."),
 ]
 for _c in STRATEGIES:                                     # the limits the plain rankings keep (said once, here)
     if (_c.get("select") is PLAIN or _c.get("select") is EQ) and not _c["rule"].startswith("The Oct 2 rules"):
@@ -531,6 +588,7 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     have = bx["vwap_ratio"].notna().any(axis=1)
     qqq = b["QQQ"] if "QQQ" in b else pd.Series(np.nan, index=dates)
     return {"close": c.ffill(), "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
+            "bench": b, "up": up,
             "qqq50": (qqq > qqq.rolling(50).mean()).reindex(dates).fillna(False),
             "weekly": weekly, "live_cal": be.winner_rebalance_days(dates, live=True), "earnings": earnings, "atr": atr,
             "dip_spare": dip_b & ~soon.reindex(index=dates, columns=cols).fillna(False), "open": bx["open_ratio"] * c,
@@ -602,6 +660,8 @@ def strategy_targets(cfg, inp):
     """Daily live target weights of one STRATEGIES entry (Date x Symbol). Ranked ones go through the engine's own selection
     code (be.winner_targets): only overrides are passed, WINNER itself is never changed. A "stop" strategy also leaves its
     open-sale prices in inp["open_sells"][name]."""
+    if cfg.get("combo"):                               # forward_combos line: the simulated end-of-day weights
+        return combo_weights(cfg, inp)
     if cfg.get("live"):                                # the current live rules (be.WINNER), not pinned
         tgt, chk = be.winner_targets(inp["scores"]["now"], inp["eligible"], inp["vol"], inp["regime"], inp["live_cal"],
                                      tiebreak_w=inp["scores"]["rs"], earnings=inp["earnings"],
@@ -633,6 +693,56 @@ def strategy_targets(cfg, inp):
     cap = (be.WINNER.get("max_weight") or 1.0) if cfg.get("live") else MAX_WEIGHT      # the others keep their 20%
     return be.live_weights(tgt.clip(upper=cap)).reindex(columns=inp["close"].columns).fillna(0.0)
 
+def combo_weights(cfg, inp, through=None):
+    """Date x Symbol end-of-day weights of a forward_combos line (0 before its start)."""
+    import forward_combos as fc
+    c = cfg["combo"]
+    sim = fc.simulate(inp, tuple(c["legs"]), c.get("start") or be.FORWARD_START, through=through)
+    _, h = fc.line_rows(cfg["name"], sim, c.get("which", "total"))
+    w = pd.DataFrame(0.0, index=inp["close"].index, columns=inp["close"].columns)
+    if h:
+        hp = pd.DataFrame(h).pivot_table(index="Date", columns="Symbol", values="Weight", aggfunc="sum")
+        w.loc[hp.index, hp.columns.intersection(w.columns)] = hp[hp.columns.intersection(w.columns)].fillna(0.0)
+    return w
+
+def live_switch():
+    """The day the live line becomes the 50/50 (be.WINNER "sleeves" on), else None (the old single-strategy simulation)."""
+    return pd.Timestamp(LIVE_SWITCH) if be.WINNER.get("sleeves") else None
+
+def migrate_names(*paths):
+    """Saved rows of a renamed line (OLD_NAMES) take its new name; a file is rewritten only when it has old names."""
+    for p in paths:
+        df = _read(p)
+        if df is not None and len(df) and df["Strategy"].isin(list(OLD_NAMES)).any():
+            df.assign(Strategy=df["Strategy"].replace(OLD_NAMES)).to_csv(p, index=False)
+
+def _live_combo_rows(inp, old, old_h, rows, hold, after, through):
+    """The live line from the switch day: the pre-switch holdings marked to the switch close, sold (be.COST on the
+    invested part), then the 50/50 halves (forward_combos, LIVE_LEGS) on that value. Rows for the days `after`."""
+    import forward_combos as fc
+    sw, close = live_switch(), inp["close"]
+    before = close.index[close.index < sw]
+    vals = pd.concat([x[x["Strategy"] == LIVE] for x in (old, pd.DataFrame(rows, columns=["Date", "Strategy", "Value", "Cash"]))
+                      if x is not None and len(x)], ignore_index=True) if (old is not None or rows) else pd.DataFrame()
+    base = 1.0
+    if len(before) and len(vals):
+        vals = vals.assign(Date=pd.to_datetime(vals["Date"]))
+        p = before[-1]
+        if (vals["Date"] == p).any():
+            cash = float(vals.loc[vals["Date"] == p, "Cash"].iloc[-1])
+            hs = pd.concat([x[(x["Strategy"] == LIVE)] for x in (old_h, pd.DataFrame(hold, columns=["Date", "Strategy", "Symbol", "Weight", "Shares", "Price"]))
+                            if x is not None and len(x)], ignore_index=True)
+            hs = hs[pd.to_datetime(hs["Date"]) == p] if len(hs) else hs
+            px = close.loc[sw] if sw in close.index else pd.Series(dtype=float)
+            inv = float(sum(r.Shares * (px.get(r.Symbol) if pd.notna(px.get(r.Symbol)) else r.Price) for r in hs.itertuples()))
+            base = cash + inv - be.COST * inv
+    legs = tuple((k, m, cal, float((be.WINNER.get("sleeves") or {}).get("lowvol" if k == "lowvol" else "sector", share)))
+                 for k, m, cal, share in LIVE_LEGS)
+    sim = fc.simulate(inp, legs, sw, through=through)
+    r, h = fc.line_rows(LIVE, sim, "total", scale=base, normalize=False)
+    keep = set(after)
+    return [x for x in r if x["Date"] in keep], [x for x in h if x["Date"] in keep]
+
 def rebalance_days(cfg, inp):
     """Days on which every holding is brought back to its target (unless within 1 point of it), like the live Friday
     rebalance: the strategy's calendar (Fridays / month ends); the trend rule on Fridays; the dip and threshold rules
@@ -656,9 +766,10 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
     if inp.get("through") is not None and len(days) and days[-1] > inp["through"]:
         print(f"waiting for volume bars after {inp['through']:%b %-d} (days after it are added on a later run)")
         days = days[days <= inp["through"]]
+    migrate_names(path, hold_path)
     old = _read(path, parse_dates=["Date"])
     old_h = _read(hold_path, parse_dates=["Date"])
-    rows, hold = [], []
+    rows, hold, live_after = [], [], None
     for cfg in STRATEGIES:
         name = cfg["name"]
         mine = old[old["Strategy"] == name] if old is not None else pd.DataFrame(columns=["Date"])
@@ -666,6 +777,21 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
         todo = days if last is None else days[days > last]
         if not len(todo):
             continue
+        if cfg.get("combo"):                                  # forward_combos: replayed from its start, new days appended
+            import forward_combos as fc
+            c = cfg["combo"]
+            sim = fc.simulate(inp, tuple(c["legs"]), c.get("start") or start, through=todo[-1])
+            r, h_ = fc.line_rows(name, sim, c.get("which", "total"))
+            keep = set(todo)
+            rows += [x for x in r if x["Date"] in keep]
+            hold += [x for x in h_ if x["Date"] in keep]
+            continue
+        if cfg.get("live") and live_switch() is not None:     # the live 50/50 from the switch day (after the loop)
+            if (todo >= live_switch()).any():
+                live_after = todo[todo >= live_switch()]
+            todo = todo[todo < live_switch()]
+            if not len(todo):
+                continue
         h = pd.DataFrame(columns=["Symbol", "Weight", "Shares", "Price"])
         if last is not None and old_h is not None:
             h = old_h[(old_h["Strategy"] == name) & (old_h["Date"] == last)]
@@ -725,6 +851,9 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
             on = (wd > 0) | (shares > 0)
             hold += [{"Date": d, "Strategy": name, "Symbol": s, "Weight": wd[s], "Shares": shares[s], "Price": px[s]}
                      for s in cols[on.to_numpy()]]
+    if live_after is not None:
+        r, h_ = _live_combo_rows(inp, old, old_h, rows, hold, live_after, live_after[-1])
+        rows, hold = rows + r, hold + h_
     if rows:
         for p, new, prior in ((path, rows, old), (hold_path, hold, old_h)):
             out = pd.concat([prior, pd.DataFrame(new)], ignore_index=True) if prior is not None else pd.DataFrame(new)
@@ -836,13 +965,15 @@ def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
     daily = _read(DAILY_CSV, parse_dates=["Date"]) if daily is None else daily
     bench = _read(BENCH_CSV, parse_dates=["Date"]) if bench is None else bench
     values = _read(STRATEGIES_CSV, parse_dates=["Date"]) if values is None else values
+    if values is not None and len(values):
+        values = values.assign(Strategy=values["Strategy"].replace(OLD_NAMES))
     start, series = pd.Timestamp(start), []
 
     def since(df):
         return df.assign(Date=pd.to_datetime(df["Date"])).set_index("Date").sort_index().loc[start:]
     for cfg in STRATEGIES:
         v = since(values[values["Strategy"] == cfg["name"]])["Value"] if values is not None else pd.Series(dtype=float)
-        series.append((cfg["name"] + (LIVE_MARK if cfg["name"] == LIVE else ""), True, v))
+        series.append((cfg["name"] + (LIVE_MARK if cfg["name"] == LIVE else ""), cfg.get("ranked", True), v))
     if daily is not None and len(daily):
         d = since(daily)
         if len(d):
@@ -877,6 +1008,59 @@ def verdict(board):
     if by.at[top, "Total return %"] > bar:
         return f"After {weeks} weeks the winner is {top}: it ranks first and beats {LIVE} and QQQ."
     return f"After {weeks} weeks no winner: {top} ranks first but does not beat both {LIVE} and QQQ. Keep the live rules."
+
+DECISION_DATE = "2026-12-24"   # the week-12 checkpoint (Thu: Fri Dec 25 is a holiday): stay only if the live line beats SPY
+LIVE_HALVES = ("Live half: Low vol monthly", "Live half: Sector rotation weekly (63d)")
+SPY_RULE = "We must beat SPY to stay in the current strategy, otherwise switch to SPY (Chirag, Oct 15, 2026)."
+
+def live_vs_benchmark(values=None, bench=None, daily=None, start=LIVE_SWITCH):
+    """Display only (no switch is ever wired): the live 50/50 line, its two halves, the real account (time-weighted) and
+    SPY / QQQ from the `start` close (Oct 16, 2026). Returns {"table": one row each (total return %, Week k %, max
+    drawdown %), "status": "Winning" / "Losing" / "Even" / None (no day after the start yet), "gap": live minus SPY total
+    return in points, "days": sessions since the start, "start", "decision"}."""
+    values = _read(STRATEGIES_CSV, parse_dates=["Date"]) if values is None else values
+    bench = _read(BENCH_CSV, parse_dates=["Date"]) if bench is None else bench
+    start = pd.Timestamp(start)
+
+    def since(df):
+        return df.assign(Date=pd.to_datetime(df["Date"])).set_index("Date").sort_index().loc[start:]
+    series = []
+    for name in (LIVE,) + LIVE_HALVES:
+        v = since(values[values["Strategy"].replace(OLD_NAMES) == name])["Value"] if values is not None and len(values) \
+            else pd.Series(dtype=float)
+        series.append((name, v))
+    if daily is not None and len(daily):
+        d = since(daily)
+        if len(d):
+            import alpaca_paper as ap
+            series.append((ACCOUNT, ap.account_twr_index(d.reset_index()) * float(d["Equity"].iloc[0])))
+    if bench is not None and len(bench):
+        b = since(bench)
+        series += [(s, b[s]) for s in ("SPY", "QQQ") if s in b]
+    stats = [(n, _stats(v.groupby(level=0).last())) for n, v in series]
+    nweeks = max((len(x[4]) for _, x in stats), default=0)
+    so_far = any(len(x[4]) > x[3] for _, x in stats)
+    weeks = [f"Week {k}" + (" (so far)" if so_far and k == nweeks else "") + " %" for k in range(1, nweeks + 1)]
+    table = pd.DataFrame([{"Line": n, "Total return %": x[0], **dict(zip(weeks, x[4])), "Max drawdown %": x[2]}
+                          for n, x in stats], columns=["Line", "Total return %"] + weeks + ["Max drawdown %"])
+    tot = table.set_index("Line")["Total return %"]
+    live_v = dict(series).get(LIVE, pd.Series(dtype=float))
+    days = max(len(live_v.dropna()) - 1, 0)
+    status, gap = None, np.nan
+    if days > 0 and pd.notna(tot.get(LIVE)) and pd.notna(tot.get("SPY")):
+        gap = float(tot[LIVE] - tot["SPY"])
+        status = "Winning" if gap > 0.005 else "Losing" if gap < -0.005 else "Even"
+    return {"table": table, "status": status, "gap": gap, "days": days, "start": start,
+            "decision": pd.Timestamp(DECISION_DATE)}
+
+def benchmark_verdict(r):
+    """One plain line for live_vs_benchmark's result."""
+    dec = f"decision date {r['decision']:%a %b %-d, %Y} (week 12)"
+    if r["status"] is None:
+        return f"Live 50/50 vs SPY: starts at the {r['start']:%a %b %-d} close; {dec}."
+    if r["status"] == "Even":
+        return f"Even with SPY after {r['days']} trading days; {dec}."
+    return f"{r['status']} vs SPY by {abs(r['gap']):.2f} pts after {r['days']} trading days; {dec}."
 
 def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
     """Display only, never saved. A trading day is saved by the daily run's after-close step (from 3:05 PM CT) once it

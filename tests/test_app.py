@@ -206,20 +206,27 @@ for sym in dict.fromkeys(cases):
 import forward_test as ft  # noqa: E402
 # 4ad4ef4 order: Last decision, Forward test, Strategy rules and holdings first; live holdings and latest signals further down
 exp_titles = [f"Last decision · {fmt(dec_day)}",
+              "Live vs benchmark · live 50/50 and its halves vs SPY and QQQ since Oct 16, 2026",   # Oct 15 evening
               f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
               "Strategy rules and holdings (paper strategies)",
               "Live holdings (Alpaca account)", f"Latest signals · {fmt(SIG.Date.max())} close"]
 labels = [e.label for e in at.expander if e.label != "My notes"]   # the notes table sits on top (daf6f89)
-expect(len(labels) >= 3 and labels[0].startswith(exp_titles[0]) and labels[1:3] == exp_titles[1:3]
-       and set(exp_titles[3:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
+expect(len(labels) >= 3 and labels[0].startswith(exp_titles[0]) and labels[1:4] == exp_titles[1:4]
+       and set(exp_titles[4:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
 expect(sum("forward test" in l.lower() for l in labels) == 1, f"the forward test is in one place only: {labels}")
 _ft = [d.value for d in at.dataframe if "Total return since Oct 2 %" in d.value.columns]
 expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Strategy"]} if _ft else
        any("Forward test started Oct 2, 2026" in i.value for i in at.info), "forward test leaderboard (QQQ + SPY rows) or empty state")
 _wk = [c for c in _ft[0].columns if c.startswith("Week ")] if _ft else []
+def _ranked_ok(b):
+    """Ranked rows = the ranked strategies (cfg "ranked" not False) that have a total return; the rest show '–'."""
+    rk = {c["name"] for c in ft.STRATEGIES if c.get("ranked", True)}
+    names = b["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)
+    want = names.isin(rk) & b["Total return since Oct 2 %"].notna()
+    return bool(((b["Rank"] != "–") == want).all()) or not (b["Rank"] != "–").any()
 expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Total return since Oct 2 %", "Daily return %", *_wk, "Max drawdown %"] and [w.replace(" (so far)", "") for w in _wk] == [f"Week {k} %" for k in range(1, 13)]
-                   and (_ft[0]["Strategy"] == ft.LIVE + ft.LIVE_MARK).sum() == 1 and (_ft[0]["Rank"] != "–").sum() in (0, len(ft.STRATEGIES))),
-       f"leaderboard: columns, one marked live row, every strategy ranked: {_ft[0].to_dict('list') if _ft else None}")
+                   and (_ft[0]["Strategy"] == ft.LIVE + ft.LIVE_MARK).sum() == 1 and _ranked_ok(_ft[0])),
+       f"leaderboard: columns, one marked live row, every ranked strategy with data ranked (the Oct 16 live halves not): {_ft[0].to_dict('list') if _ft else None}")
 expect(not _ft or sum(ft.RANK_RULE in c.value for c in at.caption) == 1, "the ranking rule is written once in the caption")
 _rules = [d.value for d in at.dataframe if "Rule" in d.value.columns]
 _board_names = [s.replace(ft.LIVE_MARK, "") for s in _ft[0]["Strategy"] if s.replace(ft.LIVE_MARK, "") in {c["name"] for c in ft.STRATEGIES}] if _ft else [c["name"] for c in ft.STRATEGIES]
