@@ -352,7 +352,14 @@ def manual_list(kind):
     """{SYMBOL: note} for sector_mapping.do_not_buy / do_not_sell (kind 'buy' / 'sell'): Chirag's manual overrides for the
     Mon-Fri runs and the 9 AM fill check."""
     import sector_mapping as sm
-    return {str(s).upper(): f"on your do-not-{kind} list" for s in getattr(sm, f"do_not_{kind}")}
+    out = {str(s).upper(): f"on your do-not-{kind} list" for s in getattr(sm, f"do_not_{kind}")}
+    if kind == "buy":                        # + the manual sells' buy blocks (manual_trade.py, Reports/manual_block.json)
+        try:
+            import manual_trade
+            out.update(manual_trade.blocked_notes())
+        except Exception as e:
+            print(f"  Manual blocks unreadable ({type(e).__name__}: {e}) - check Reports/manual_block.json")
+    return out
 
 def skip_orders(orders, notes, side="BUY"):
     """`side` rows (BUY / SELL) of the stocks in `notes` {SYMBOL: note} become SKIP rows (nothing traded)."""

@@ -595,7 +595,9 @@ def daily_step(now_ct, run=subprocess.run):
          trading day that is not a decision day (none while Mon-Fri are all decision days; no paid APIs, never orders). On a decision day the
          2:30 PM run already wrote the day's rows, so it idles;
       2. the forward test, forward_test.py --record: the paper strategies' day + the account row (read-only GETs, never
-         orders), after the refresh, so both read the same Reports/signal_analysis.csv.
+         orders), after the refresh, so both read the same Reports/signal_analysis.csv;
+      3. manual_trade.py update-blocks: today's close becomes each new manual buy block's reference close, and a block
+         whose price reached block_until_price is removed (Reports/manual_block.json; never orders).
     Each part writes its own run-log row on a problem; the day is marked done (run_state last_daily_date) once both
     ran, so a failure waits for the next trading day (the forward test catches up missed strategy days). Returns 0."""
     locked, why = acquire_trade_lock(DAILY_LOCK)
@@ -607,6 +609,7 @@ def daily_step(now_ct, run=subprocess.run):
               flush=True)
         refresh = run([sys.executable, os.path.join(ROOT, "run_all.py"), "--quick", "--scheduled"], cwd=ROOT)
         forward = run([sys.executable, os.path.join(ROOT, "forward_test.py"), "--record"], cwd=ROOT)
+        run([sys.executable, os.path.join(ROOT, "manual_trade.py"), "update-blocks"], cwd=ROOT)   # never orders
         update_state(last_daily_date=now_ct.date().isoformat())
         print(f"after-close step done (refresh exit {refresh.returncode}, forward test exit {forward.returncode})",
               flush=True)

@@ -18,7 +18,9 @@ def main():
                STOCK_ANALYSIS_EARNINGS_STOP_STATE=os.path.join(tempfile.mkdtemp(), "earnings_stop_state.json"),   # never the real stop sales
                STOCK_ANALYSIS_SLEEVE_LEDGER=os.path.join(tempfile.mkdtemp(), "sleeve_ledger.json"),   # never the real halves' ledger
                STOCK_ANALYSIS_SLEEVE_PLAN=os.path.join(tempfile.mkdtemp(), "sleeve_plan.csv"),
-               STOCK_ANALYSIS_DECISION_RANKS=os.path.join(tempfile.mkdtemp(), "decision_ranks.csv"))   # never the real ranks file
+               STOCK_ANALYSIS_DECISION_RANKS=os.path.join(tempfile.mkdtemp(), "decision_ranks.csv"),
+               STOCK_ANALYSIS_MANUAL_ORDERS=os.path.join(tempfile.mkdtemp(), "manual_orders.json"),   # never the real manual log
+               STOCK_ANALYSIS_MANUAL_BLOCK=os.path.join(tempfile.mkdtemp(), "manual_block.json"))   # never the real ranks file
     results = []
     for t in TESTS:
         if fast and t in ("test_app.py", "test_dashboard_http.py"):

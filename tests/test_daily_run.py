@@ -92,7 +92,7 @@ try:
         rc = ra.daily_step(at("2026-10-08 15:05"), run=lambda cmd, cwd=None: calls.append(cmd[1:]) or Done(1 if len(calls) == 1 else 0))
     st = json.load(open(ra.STATE_FILE))
     check("daily_step: the signal refresh first (run_all.py --quick --scheduled), then forward_test.py --record; no order flags",
-          [[os.path.basename(c[0])] + c[1:] for c in calls] == [["run_all.py", "--quick", "--scheduled"], ["forward_test.py", "--record"]]
+          [[os.path.basename(c[0])] + c[1:] for c in calls] == [["run_all.py", "--quick", "--scheduled"], ["forward_test.py", "--record"], ["manual_trade.py", "update-blocks"]]
           and not any(f in sum(calls, []) for f in ("--trade", "--fill-check", "--submit")), calls)
     check("daily_step: marked done for the day (last_daily_date) even when a part failed (it reported itself); state kept",
           rc == 0 and st.get("last_daily_date") == "2026-10-08" and st.get("last_decision") == "2026-10-07"
