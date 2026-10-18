@@ -4,7 +4,7 @@
 # Dashboard (app.py)
 streamlit==1.51.0
 plotly==6.5.0
-huggingface_hub==0.36.0       # optional AI summaries (button only)
+huggingface_hub==0.36.0       # model download for the local news summarizer (dashboard/ai.py)
 
 # Shared
 pandas==2.3.3

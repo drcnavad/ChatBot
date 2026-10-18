@@ -21,6 +21,8 @@ stock_symbols = [
     'ANF', 'NUE', 'JCI', 'DAL', 'WSM', 'IBKR', 'GRMN',   # high-beta non-tech (2026-10-14)
     'ABBV', 'PFE', 'KO',   # defensive sleeve (2026-10-15)
     'WULF',   # TeraWulf (Chirag, 2026-10-15)
+    'LIN', 'ECL', 'SHW', 'STLD', 'MLM', 'VMC',   # Materials (2026-10-17)
+    'COST', 'WMT', 'PEP', 'PG', 'MNST',   # Consumer Staples (2026-10-17)
     # Loss-making (negative net income, last 4 quarters, as of 2026-10-13); uncomment to re-add:
     # 'AVAV', 'COIN', 'CRWV', 'FIG', 'GTLB', 'HIMS', 'IREN', 'SNOW', 'TEAM', 'ZS', 'UMAC', 'U',
     # 'ACHR', 'ASTS', 'CIFR', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RKLB', 'SOUN', 'TEM', 'TTWO', 'SPCX',
@@ -115,7 +117,7 @@ symbol_sector = {
     'DIS': 'Communication Services', 'TJX': 'Consumer Discretionary', 'BKNG': 'Consumer Discretionary',
     'COP': 'Energy', 'PSX': 'Energy', 'MPC': 'Energy',
     'VLO': 'Energy', 'BRK.B': 'Financials', 'ABBV': 'Health Care',
-    'CAT': 'Industrials', 'GE': 'Industrials', 'KO': 'Consumer Staples',
+    'CAT': 'Industrials', 'GE': 'Industrials',     'KO': 'Consumer Staples', 'MNST': 'Consumer Staples',
     'PM': 'Consumer Staples', 'MO': 'Consumer Staples', 'TGT': 'Consumer Staples',
     'MDLZ': 'Consumer Staples', 'CL': 'Consumer Staples', 'ECL': 'Materials',
     'VMC': 'Materials', 'STLD': 'Materials', 'APD': 'Materials',
@@ -235,7 +237,8 @@ symbol_name = {
     'MPC': 'Marathon Petroleum Corporation', 'VLO': 'Valero Energy Corporation',
     'BRK.B': 'Berkshire Hathaway Inc. (Class B)', 'ABBV': 'AbbVie Inc.',
     'CAT': 'Caterpillar Inc.', 'GE': 'General Electric (GE Aerospace)',
-    'KO': 'The Coca-Cola Company', 'PM': 'Philip Morris International Inc.',
+    'KO': 'The Coca-Cola Company', 'MNST': 'Monster Beverage Corporation',
+    'PM': 'Philip Morris International Inc.',
     'MO': 'Altria Group, Inc.', 'TGT': 'Target Corporation',
     'MDLZ': 'Mondelez International, Inc.', 'CL': 'Colgate-Palmolive Company',
     'ECL': 'Ecolab Inc.', 'VMC': 'Vulcan Materials Company',
@@ -274,7 +277,7 @@ tradable_symbols = [s for s in stock_symbols if s not in BENCHMARK_SYMBOLS]
 # tradable stocks plus these.
 fundamentals_extra = [
     'ABNB', 'ASML', 'AXON', 'BAC', 'BBAI', 'CDW', 'CELH', 'CRSP', 'CRWD', 'CVX', 'DDOG', 'DUOL',
-    'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'IT', 'KLAC', 'KVYO', 'LIN', 'LLY', 'MA',
+    'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'IT', 'KLAC', 'KVYO', 'LLY', 'MA',
     'MELI', 'MNDY', 'NEE', 'NEM', 'NET', 'NKE', 'NVO', 'PATH', 'PAYX', 'PCTY',
     'PLTR', 'POOL', 'RTX', 'SYM', 'TMO', 'TOST', 'TTD', 'WDAY', 'XOM', 'ZBRA', 'ZENA',
 ]

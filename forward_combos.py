@@ -12,7 +12,7 @@ redone). Display only: none of these lines is ever traded.
 A line = legs [(key, mode, calendar, share)]:
   key      "lowvol" (low volatility in uptrend, equal weight) / "sr<n>" (sector rotation: the C6 score in the 3 sectors
            whose ETF has the best n-day return, 1/volatility weights) / "vam" (volatility-adjusted momentum, equal weight)
-           / "calm" (the Oct 15 rules' calmer half: relative strength, 63-day volatility at or below the median, no buys
+           / "calm" (the Oct 15 rules' calmer half, "Now: RS, calmer half of the list": relative strength, 63-day volatility at or below the median, no buys
            5 days before earnings)
   mode     "full" = the leg's top 10 on each calendar day (a full rebalance) / "swap<k>" = buy the top 10 once, then on
            each calendar day sell a holding ranked worse than k (or held by the first leg) for the best stock not held /
@@ -72,7 +72,7 @@ class Ctx:
         elif key == "vam":
             cfg, score = _cfg("Volatility-adjusted momentum"), inp["scores"]["mom_risk"]
         elif key == "calm":
-            cfg, score = _cfg("Now: calmer half"), inp["scores"]["rs_calm"]
+            cfg, score = _cfg("Now: RS, calmer half of the list"), inp["scores"]["rs_calm"]
         elif key.startswith("sr"):
             cfg, n = _cfg("Sector rotation"), int(key[2:])
             b = inp["bench"]

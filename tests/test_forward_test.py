@@ -217,8 +217,11 @@ w0 = dict(be.WINNER)
 inp = ft.strategy_inputs(SIG, FACTS, EARN, BENCH, BARS)
 full = {c["name"]: ft.strategy_targets(c, inp) for c in ft.STRATEGIES}
 tg = {k: t.loc["2026-10-02":] for k, t in full.items()}
-check(f"registry: {len(ft.STRATEGIES)} strategies with unique names, each with a one-line rule",
-      len({c["name"] for c in ft.STRATEGIES}) == len(ft.STRATEGIES) >= 28 and all(c.get("rule") for c in ft.STRATEGIES))
+check(f"registry: {len(ft.STRATEGIES)} strategies with unique names, each with a one-line rule and a color",
+      len({c["name"] for c in ft.STRATEGIES}) == len(ft.STRATEGIES) >= 28
+      and all(c.get("rule") and ft.strategy_color(c["name"]) for c in ft.STRATEGIES)
+      and any(c["name"] == "Quant Score top 10" for c in ft.STRATEGIES)
+      and any(c["name"] == "ATR dip buy (top 10)" for c in ft.STRATEGIES))
 _combo = {c["name"] for c in ft.STRATEGIES if c.get("combo")}   # forward_combos lines (tests/test_forward_combos.py)
 check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%), at most 99% invested",
       all((t.to_numpy() >= 0).all() and t.to_numpy().max() <= (0.198 + 1e-12 if k not in _combo else 0.25)
