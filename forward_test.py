@@ -304,6 +304,20 @@ STRATEGIES = [
          rule="Buy when the close is below the lower Bollinger band (20, 2) with the close above the 200-day average; sell when the close is at or above the middle band or 5% below the entry (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="EMA 9/21 cross", event=dict(kind="ema"), earnings=None, group="event",
          rule="Buy on the 2nd close after the 9-day EMA crosses above the 21-day EMA; sell when the 9-day crosses below the 21-day (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="MACD cross + TP20", event=dict(kind="macd", tp=0.2, stop=0.05), earnings=None, group="event",
+         rule="The MACD cross (above its signal, close above the 200-day); sell when MACD crosses below the signal, at +20% or 5% below the entry (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="MACD cross, weekly", event=dict(kind="macd_weekly"), earnings=None, group="event",
+         rule="Weekly MACD(12,26,9) on weekly closes: buy on the week's last close when it crosses above its signal; sell when it crosses below (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="EMA 9/21 + ADX>25", event=dict(kind="ema_adx"), earnings=None, group="event",
+         rule="The EMA 9/21 cross (2 closes) only when ADX(14) is above 25 (ADX from closes); sell when the 9-day crosses below the 21-day (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="Minervini trend template", event=dict(kind="minervini"), earnings=None, group="event",
+         rule="Buy when price > SMA50 > SMA150 > SMA200, the SMA200 is up over 1 month, within 25% of the 52-week high and over 30% above the 52-week low; sell on a close below the SMA50 (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="52-week high momentum", event=dict(kind="high52", stop=0.08), earnings=None, group="event",
+         rule="Buy when the close gets within 5% of its 52-week high and is above the 200-day average; sell 8% below the entry or on a close below the SMA50 (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="Dual MA + RSI filter", event=dict(kind="ma_rsi"), earnings=None, group="event",
+         rule="Buy when the SMA50 is above the SMA200 and RSI(14) is 50-70; sell when RSI(14) falls below 40 (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="Golden cross + MACD confirm", event=dict(kind="golden_macd"), earnings=None, group="event",
+         rule="Buy when the SMA50 is above the SMA200 and MACD is above its signal; sell when MACD falls below the signal (10% each, at most 10, calmest first; checked at the close)."),
 ]
 for _c in STRATEGIES:                                     # the limits the plain rankings keep (said once, here)
     if (_c.get("select") is PLAIN or _c.get("select") is EQ) and not _c["rule"].startswith("The Oct 2 rules"):
@@ -484,6 +498,41 @@ def event_signals(inp, kind):
     if kind == "ema":
         a = c.ewm(span=9, adjust=False).mean() > c.ewm(span=21, adjust=False).mean()
         return two(a), cross(~a)
+    # Oct 19 (11:47 PM) additions. A state rule ("price > SMA50 > ..."): bought on the close it turns true (fresh).
+    fresh = lambda a: a & ~a.shift(1, fill_value=True)
+    ema = lambda x, n: x.ewm(span=n, adjust=False).mean()
+    macd_up = lambda x: (ema(x, 12) - ema(x, 26)) > ema(ema(x, 12) - ema(x, 26), 9)
+    def rsi(n):
+        d = c.diff()
+        g, l = d.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean(), (-d).clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
+        return 100 - 100 / (1 + g / l.replace(0, np.nan))
+    s50, s150, s200 = c.rolling(50).mean(), c.rolling(150).mean(), c.rolling(200).mean()
+    if kind == "macd_weekly":                            # weekly MACD on weekly (last session of the week) closes
+        last = [be.next_sessions(d, 1)[0].isocalendar()[:2] != d.isocalendar()[:2] for d in c.index]   # NYSE calendar:
+        wk = c[np.array(last, bool)]                     # a week counts once its last session closed (no partial week)
+        a = macd_up(wk)
+        r = lambda x: x.reindex(c.index).fillna(False).astype(bool)
+        return r(cross(a)), r(cross(~a))
+    if kind == "ema_adx":                                # ADX(14) from closes only (no highs / lows saved): |close change|
+        d = c.diff()
+        pdm, mdm, tr = d.clip(lower=0), (-d).clip(lower=0), d.abs()
+        sm_ = lambda x: x.ewm(alpha=1 / 14, adjust=False).mean()
+        pdi, mdi = 100 * sm_(pdm) / sm_(tr), 100 * sm_(mdm) / sm_(tr)
+        adx = sm_(100 * (pdi - mdi).abs() / (pdi + mdi).replace(0, np.nan))
+        a = ema(c, 9) > ema(c, 21)
+        return two(a) & (adx > 25), cross(~a)
+    if kind == "minervini":
+        hi, lo = c.rolling(252).max(), c.rolling(252).min()
+        a = (c > s50) & (s50 > s150) & (s150 > s200) & (s200 > s200.shift(21)) & (c >= 0.75 * hi) & (c > 1.3 * lo)
+        return fresh(a), c < s50
+    if kind == "high52":
+        return fresh((c >= 0.95 * c.rolling(252).max()) & (c > s200)), c < s50
+    if kind == "ma_rsi":
+        r14 = rsi(14)
+        return fresh((s50 > s200) & (r14 >= 50) & (r14 <= 70)), r14 < 40
+    if kind == "golden_macd":
+        a = macd_up(c)
+        return fresh((s50 > s200) & a), ~a
     raise ValueError(kind)
 
 def earnings_drift(c, spy, earnings, hold=60):
@@ -799,12 +848,20 @@ def spare_cash(tgt, chk, inp):
         prev = T[t].copy()
     return pd.DataFrame(T, index=tgt.index, columns=cols)
 
+def _dnb(inp):
+    """Date x Symbol True for sector_mapping.do_not_buy (skipped by every paper strategy from Oct 19, 2026)."""
+    c = inp["close"]
+    return pd.DataFrame(np.broadcast_to(c.columns.isin(be.sector_mapping.do_not_buy), c.shape), index=c.index, columns=c.columns)
+
 def strategy_targets(cfg, inp):
     """Daily live target weights of one STRATEGIES entry (Date x Symbol). Ranked ones go through the engine's own selection
     code (be.winner_targets): only overrides are passed, WINNER itself is never changed. A "stop" strategy also leaves its
     open-sale prices in inp["open_sells"][name]."""
     if cfg.get("combo"):                               # forward_combos line: the simulated end-of-day weights
-        return combo_weights(cfg, inp)
+        w = combo_weights(cfg, inp)
+        if cfg["name"].startswith("Live"):               # the live account's rules: as they are
+            return w
+        return w.mask(_dnb(inp).reindex(index=w.index, columns=w.columns, fill_value=False), 0.0)
     if cfg.get("live"):                                # the current live rules (be.WINNER), not pinned
         tgt, chk = be.winner_targets(inp["scores"]["now"], inp["eligible"], inp["vol"], inp["regime"], inp["live_cal"],
                                      tiebreak_w=inp["scores"]["rs"], earnings=inp["earnings"],
@@ -812,10 +869,10 @@ def strategy_targets(cfg, inp):
         tgt = spare_cash(tgt, chk, inp)
     elif cfg.get("event"):                             # event lines (Oct 19): only their entries / exits trade
         en, ex = event_signals(inp, cfg["event"]["kind"])
-        tgt = event_slot_weights(inp["close"], en, ex, inp["eligible"], inp["vol"], tp=cfg["event"].get("tp"),
+        tgt = event_slot_weights(inp["close"], en, ex, inp["eligible"] & ~_dnb(inp), inp["vol"], tp=cfg["event"].get("tp"),
                                  stop=cfg["event"].get("stop"), max_days=cfg["event"].get("days"), start=be.FORWARD_START)
     elif cfg.get("b200"):                              # 200-day breakout family (no calendar: only entries / exits trade)
-        tgt = breakout200_weights(inp["close"], inp["ma200"], inp["eligible"], inp["vol"], start=be.FORWARD_START, **cfg["b200"])
+        tgt = breakout200_weights(inp["close"], inp["ma200"], inp["eligible"] & ~_dnb(inp), inp["vol"], start=be.FORWARD_START, **cfg["b200"])
     elif cfg.get("weights"):
         tgt = inp["weights"][cfg["weights"]]
     elif cfg.get("stop") or cfg.get("replay"):          # the live rules replayed day by day + a stop / a mid-week change
@@ -839,6 +896,8 @@ def strategy_targets(cfg, inp):
         if cfg.get("spare_dips"):                         # the cash the live rules leave unused buys ATR dips (10% each)
             tgt = tgt + atr_dip_weights(inp["dip_spare"][tgt.columns], inp["scores"]["live"], taken=(tgt > 0).to_numpy(),
                                         room=np.floor((1 - tgt.sum(axis=1)).to_numpy() * 10 + 1e-9).astype(int))
+    if not cfg.get("live"):                               # Oct 19, 2026 (Chirag): no paper strategy holds a do-not-buy stock
+        tgt = tgt.mask(_dnb(inp).reindex(index=tgt.index, columns=tgt.columns, fill_value=False), 0.0)   # its weight: cash
     cap = (be.WINNER.get("max_weight") or 1.0) if cfg.get("live") else MAX_WEIGHT      # the others keep their 20%
     return be.live_weights(tgt.clip(upper=cap)).reindex(columns=inp["close"].columns).fillna(0.0)
 

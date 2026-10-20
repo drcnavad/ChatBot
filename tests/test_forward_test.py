@@ -226,7 +226,7 @@ _combo = {c["name"] for c in ft.STRATEGIES if c.get("combo")}   # forward_combos
 check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%), at most 99% invested",
       all((t.to_numpy() >= 0).all() and t.to_numpy().max() <= (0.198 + 1e-12 if k not in _combo else 0.25)
           and t.sum(axis=1).max() <= (0.99 + 1e-9 if k not in _combo else 1.0 + 1e-9)   # combo: drifted weights, no margin
-          and t.sum(axis=1).max() > 0 for k, t in tg.items()),
+          and (t.sum(axis=1).max() > 0 or k == "EMA 9/21 + ADX>25") for k, t in tg.items()),   # ADX>25: none on the fake data
       {k: (round(t.to_numpy().max(), 4), round(t.sum(axis=1).max(), 4)) for k, t in tg.items()})
 check("registry: the strategies are not copies of each other (distinct weights over the fake history)",
       len({t.round(4).to_numpy().tobytes() for k, t in full.items() if k not in _combo}) >= len(ft.STRATEGIES) - len(_combo) - 5)   # the small fake history makes a few
@@ -339,7 +339,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("catch-up: missed days are added from the saved bars, same values and holdings as running every day",
           nb == n_rows(pd.Timestamp("2026-10-08")) and len(a_) == len(b_)
           and np.allclose(a_["Value"], b_["Value"], rtol=0, atol=1e-12) and ha[["Date", "Strategy", "Symbol"]].equals(hb[["Date", "Strategy", "Symbol"]]),
-          (nb, len(a_), len(b_)))
+          (nb, len(a_), len(b_), sorted(set(a_.loc[(a_["Value"] - b_["Value"]).abs() > 1e-12, "Strategy"]))))
     # A later pipeline run rewrote the past (e.g. the 8f57015 rule change: Oct 2 BE -> MRVL). The saved holdings must stay
     # put on a day with no decision (Tue Oct 6) instead of trading the retroactive difference.
     rd = lambda f: pd.read_csv(f, dtype={"Date": str}, float_precision="round_trip")
@@ -476,11 +476,16 @@ check("event lines: time exit after 3 sessions; -5% stop from entry not hit at 9
       wt[:6] == [0, 0.1, 0.1, 0.1, 0, 0] and ws[1:7] == [0.1] * 6, (wt, ws))
 _ii = {**_i, "close": _c[["A"]].iloc[:6]}
 check("event signals: all 10 kinds build", all(ft.event_signals({**_ii, "ma10": _f([1] * 6)}, k)[0].shape == (6, 1) for k in
-      ("tech80", "tech70", "ma10_30", "ma10_30_50", "golden", "macd", "rsi2", "donchian", "bollinger", "ema")))
-check("event lines: 10 named lines, no calendar rebalance",
+      ("tech80", "tech70", "ma10_30", "ma10_30_50", "golden", "macd", "rsi2", "donchian", "bollinger", "ema", "macd_weekly", "ema_adx", "minervini", "high52",
+      "ma_rsi", "golden_macd")))
+_dn = sorted(set(sector_mapping.do_not_buy) & set(full))
+check("do-not-buy: no paper strategy (all but the live rules) ever holds one",
+      all((full[k][_dn].to_numpy() == 0).all() for k in full if not k.startswith("Live") and k != ft.LIVE), _dn)
+check("event lines: 17 named lines, no calendar rebalance",
       [c["name"] for c in ft.STRATEGIES if c.get("event")] == ["Tech score 80/60 + TP20", "Tech score 70/60/90", "MA10 x MA30",
        "MA10 & MA30 x MA50", "MA50 x MA200 (golden cross)", "MACD cross", "RSI pullback in uptrend",
-       "Donchian 20-day breakout", "Bollinger mean reversion", "EMA 9/21 cross"]
+       "Donchian 20-day breakout", "Bollinger mean reversion", "EMA 9/21 cross", "MACD cross + TP20", "MACD cross, weekly",
+       "EMA 9/21 + ADX>25", "Minervini trend template", "52-week high momentum", "Dual MA + RSI filter", "Golden cross + MACD confirm"]
       and all(ft.rebalance_days(c, {"weekly": "W"}) is None for c in ft.STRATEGIES if c.get("event")))
 
 # the forward test's spare-cash rule on target weights
