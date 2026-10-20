@@ -8,7 +8,7 @@ from dashboard.settings import CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, N
 
 SIGNAL_BADGE = {"Buy": "sa-badge-bull", "Hold": "sa-badge-hold", "Sold": "sa-badge-bear",
                 "Score below 0": "sa-badge-bear", "Watch": "sa-badge-hold", "Not ranked": "sa-badge-grey"}
-PLAN_BADGE = {"Buy": "sa-badge-bull", "Keep": "sa-badge-hold", "Sell": "sa-badge-bear"}
+PLAN_BADGE = {"Buy": "sa-badge-bull", "Keep": "sa-badge-hold", "Sell": "sa-badge-bear", "Blocked": "sa-badge-bear"}
 
 def plain_reason(signal, reason, rank=None, score=None):
     """Engine reason string -> short plain-English explanation for the given display signal."""
@@ -121,6 +121,14 @@ def rebalance_plan(df):
     plan = {s: ("Keep" if s in held else "Buy", w * 100)
             for s, w in zip(picks["Symbol"], picks["Provisional_Weight"].fillna(0.0)) if w > 0}
     plan.update({s: ("Sell", 0.0) for s in held if s not in plan})
+    try:   # a buy the trade step skips shows as Blocked: a new do-not-buy pick, or any pick under a manual sell's block
+        import manual_trade                # (the block exists only after the stock was sold, so it is not held)
+        import paper_trade
+        dnb, manual = set(paper_trade.manual_list("buy")), set(manual_trade.blocked_notes())
+    except Exception:
+        dnb, manual = set(), set()
+    plan.update({s: ("Blocked", 0.0) for s, (a, _) in list(plan.items())
+                 if (a == "Buy" and s in dnb) or (a in ("Buy", "Keep") and s in manual)})
     return day, as_of, plan
 
 def plan_text(plan, sym):

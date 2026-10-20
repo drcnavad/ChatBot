@@ -100,7 +100,7 @@ logs: `run_log.csv`, `live_orders_log.csv`, `logs/`.
 - **Home:** My notes (`Reports/my_notes.csv`), stock list (Holdings / Next in line / Remaining, DNB tag;
   `dashboard/stock_groups.py`), stock view (signal_analysis.csv + live quote), sector performance table.
 - **Strategy:** Last decision (Alpaca fills + ledger + decision_ranks.csv), Live vs benchmark (Alpaca portfolio history vs
-  QQQ/SPY), Forward test (forward_*.csv), Strategy rules and paper holdings, Manual orders and buy blocks, Data freshness.
+  QQQ/SPY), Forward test (forward_*.csv), Strategy rules and paper holdings, Manual orders and buy blocks, Data freshness, What each strategy does. The next-rebalance plan compares picks with the live Alpaca positions and marks a do-not-buy or manually blocked new buy as Blocked.
 - **Trading Account:** Live holdings (Alpaca, read-only), Trade audit (live_trade_ledger.csv), Tax view (tax_lots), rules.
 
 ## Tests and setup

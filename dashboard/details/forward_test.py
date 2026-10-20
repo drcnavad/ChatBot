@@ -123,3 +123,10 @@ def render_forward_rules(p=None):
     if h is not None and len(h):
         st.caption(f"Holdings as of the {pd.Timestamp(h['Date'].max()):%a %b %-d} close (Reports/forward_strategies_holdings.csv "
                    "has every day). Ordered like the leaderboard above. Paper only: none of these is traded.")
+
+def render_strategy_guide():
+    """Bottom of the Strategy tab: one or two lines for what each paper strategy holds."""
+    import forward_test as ft
+    guide = pd.DataFrame([{"Strategy": c["name"], "What it does": c["rule"]} for c in ft.STRATEGIES])
+    st.caption("The stock count in each line is the book that strategy holds. A defensive sleeve, where a line names one, is held on top of that count.")
+    st.dataframe(paint_strategy(guide.style, extra=("What it does",)), hide_index=True, width="stretch")

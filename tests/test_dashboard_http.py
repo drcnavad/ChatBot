@@ -12,7 +12,7 @@ import time
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PORT = 8599
+PORT = int(os.environ.get("STOCK_ANALYSIS_TEST_PORT", "8599"))   # override when 8599 is busy
 BASE = f"http://localhost:{PORT}"
 
 def port_busy(port):

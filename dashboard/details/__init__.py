@@ -2,7 +2,7 @@
 import streamlit as st
 
 from dashboard.details.data_settings import render_data_and_settings
-from dashboard.details.forward_test import render_forward_rules, render_forward_test
+from dashboard.details.forward_test import render_forward_rules, render_forward_test, render_strategy_guide
 from dashboard.details.last_decision import render_last_decision
 from dashboard.details.live_holdings import render_live_holdings
 from dashboard.details.live_vs_benchmark import render_live_vs_benchmark
@@ -27,6 +27,8 @@ def render_strategy_tab(p):
         render_manual_orders()
     with st.expander("Data freshness and settings", expanded=False):
         render_data_and_settings(p)
+    with st.expander("What each strategy does", expanded=False):
+        render_strategy_guide()
 
 def render_trading_tab(p):
     """Trading Account tab: live holdings, trade audit, tax view, strategy rules (the portfolio by half and both strategies'
