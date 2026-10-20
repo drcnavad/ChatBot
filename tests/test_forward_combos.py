@@ -1,6 +1,5 @@
 """forward_combos (Chirag, Oct 15, 2026 evening): the forward-test lines with two independent halves, swap-only halves and
-the low-volatility keep / Friday falling rules; the live line renamed "Live 50/50 combined (no overlap)" and switched to
-the 50/50 at the Oct 16 close. Real saved data,
+the low-volatility keep / Friday falling rules (the old "Live 50/50 combined (no overlap)" line was removed Oct 20, 2026). Real saved data,
 temp copies of the forward files (the real Reports files are never written); no broker calls, no orders.
 
 Covers: deterministic replay (two runs equal; a shorter replay is a prefix of the longer one = saved days never change);
@@ -17,10 +16,8 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
-import numpy as np
 import pandas as pd
 
-import backtest_engine as be
 import forward_combos as fc
 import forward_test as ft
 import sector_mapping as sm
@@ -80,40 +77,17 @@ tmp = tempfile.mkdtemp()
 vp, hp = os.path.join(tmp, "v.csv"), os.path.join(tmp, "h.csv")
 v0 = pd.read_csv(ft.STRATEGIES_CSV)
 h0 = pd.read_csv(ft.HOLDINGS_CSV)
-old_live = "Live rules (C6)"
-v0, h0 = (d.assign(Strategy=d["Strategy"].replace({ft.LIVE: old_live})) for d in (v0, h0))   # as saved before the rename
-v0 = v0[~((v0["Strategy"] == old_live) & (v0["Date"] >= "2026-10-13"))]
-h0 = h0[~((h0["Strategy"] == old_live) & (h0["Date"] >= "2026-10-13"))]
+removed = sorted(ft.REMOVED)[0]
+extra = v0[v0["Strategy"] == ft.MON].assign(Strategy=removed)     # a removed line still in a saved file
+v0 = pd.concat([v0, extra], ignore_index=True)
 names = [c["name"] for c in ft.STRATEGIES if c.get("combo")]
 v0, h0 = v0[~v0["Strategy"].isin(names)], h0[~h0["Strategy"].isin(names)]
 v0.to_csv(vp, index=False); h0.to_csv(hp, index=False)
-saved_sleeves, saved_switch = be.WINNER.get("sleeves"), ft.LIVE_SWITCH
-try:
-    be.WINNER["sleeves"] = {"lowvol": 0.5, "sector": 0.5}
-    ft.LIVE_SWITCH = "2026-10-13"                     # a switch the saved data covers
-    fc._CACHE.clear()
-    ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)
-finally:
-    if saved_sleeves is None:
-        be.WINNER.pop("sleeves", None)
-    else:
-        be.WINNER["sleeves"] = saved_sleeves
-    ft.LIVE_SWITCH = saved_switch
+fc._CACHE.clear()
+ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)
 v1, h1 = pd.read_csv(vp), pd.read_csv(hp)
-check(old_live not in set(v1["Strategy"]) and old_live not in set(h1["Strategy"]), "old live name migrated in both files")
-L = v1[v1["Strategy"] == ft.LIVE].set_index("Date")
-L0 = v0[v0["Strategy"] == old_live].set_index("Date")
-check(np.allclose(L.loc[L0.index, "Value"], L0["Value"]), "the live line's saved days before the switch are unchanged")
-ho = h0[(h0["Strategy"] == old_live) & (h0["Date"] == "2026-10-12")]
-px = inp["close"].loc["2026-10-13"]
-inv = float((ho["Shares"] * ho["Symbol"].map(px).fillna(ho["Price"])).sum())   # a stock gone from the list: its saved price
-base = float(L0.loc["2026-10-12", "Cash"]) + inv * (1 - be.COST)
-sim = fc.simulate(inp, ft.LIVE_LEGS, "2026-10-13")
-check(abs(L.loc["2026-10-13", "Value"] - base * sum(l[0][0] for l in sim["legs"])) < 1e-9,
-      "switch day = old holdings marked to the close, sold (0.1%), then the halves' buys", (L.loc["2026-10-13", "Value"], base))
-hl = h1[(h1["Strategy"] == ft.LIVE) & (h1["Date"] == "2026-10-13")]
-check(len(hl) > 10 and abs(float((hl["Shares"] * hl["Price"]).sum()) + float(L.loc["2026-10-13", "Cash"]) - L.loc["2026-10-13", "Value"]) < 1e-9,
-      "live holdings after the switch = both halves (shares x price + cash = value)", len(hl))
+check(not set(v1["Strategy"]) & ft.REMOVED and not set(h1["Strategy"]) & ft.REMOVED, "removed lines purged from both files")
+check(ft.LIVE == ft.MON and ft.MON in set(v1["Strategy"]), "the live comparison line is the Monday 50/50")
 new = v1[v1["Strategy"].isin(names)]
 starts = new.groupby("Strategy")["Date"].min()
 halves = list(ft.LIVE_HALVES)

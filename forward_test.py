@@ -13,7 +13,8 @@ stock (the live one: be.WINNER's cap, 15% from Oct 15), 99% invested, buys never
 caught up from the saved bars. On Oct 15, 2026 all but the live one were recomputed from Oct 2 (Mon-Thu checks, 11 new);
 later on Oct 15, 19 more (forward_combos: two independent halves, swap-only halves, the low-volatility keep / Friday
 falling rules) - the two live halves start at the Oct 16 close, the rest are computed from Oct 2 like the others. The
-live line was renamed "Live 50/50 combined (no overlap)" (was "Live rules (C6)"; its saved Oct 2-15 days are kept).
+old live line "Live 50/50 combined (no overlap)" (was "Live rules (C6)") was removed Oct 20, 2026 (near-duplicate of the
+Monday 50/50, which is now LIVE).
 
     python forward_test.py --record   # run_all.daily_step (Mon-Fri from 3:05 PM CT): strategies + today's account row
     python forward_test.py            # strategies only (no account request) + the leaderboard
@@ -52,14 +53,16 @@ PIN = {"vol_sizing": True, "sector_cap": 1.0, "max_pick_rank": None, "cap_soft":
 EARN_DAYS = 5
 BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
-LIVE = "Live 50/50 combined (no overlap)"   # always the CURRENT live rules (be.WINNER + sector_mapping, not pinned); saved days kept
 FRI = "Live 50/50, sector rotation on Fridays"      # Oct 16 evening: the sector half moved from Friday to Monday
 MON = "Live 50/50, sector rotation on Mondays"      # = the current live rules (marked on the leaderboard)
 MARKED = MON
+LIVE = MON          # the line the verdict and the dashboard compare against
+# Removed Oct 20, 2026 (Chirag): "Live 50/50 combined (no overlap)" (was "Live rules (C6)"), a near-duplicate of MON;
+# its saved rows are dropped (REMOVED, purge_removed).
+REMOVED = {"Live 50/50 combined (no overlap)", "Live rules (C6)"}
 # Renamed lines: saved rows take the new name (migrate_names, and the dashboard reads through this map).
 # A rule that changed (ATR dip buy, top 30 -> top 10) is a new name on purpose, so the old results are not relabeled.
 OLD_NAMES = {
-    "Live rules (C6)": LIVE,
     "50/50: Low vol + SR weekly 63d (live combo from Oct 2)": FRI,
     "Quant Score": "Quant Score top 10",
     "Now: calmer half": "Now: RS, calmer half of the list",
@@ -127,13 +130,6 @@ NOW = dict(score="rs", midweek={"enter_top": None, "exit_below": None, "days": M
 EQ = {**PLAIN, "vol_sizing": False}                      # ... and an equal weight per stock
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
 STRATEGIES = [
-    dict(name=LIVE, live=True, group="combo",
-         rule="The rules the account trades now, tracked on paper. Two halves that never hold the same stock, each with its own cash: "
-         "50% low volatility (the 10 calmest stocks above their 200-day average, at most 4 per sector, equal weight, rebalanced "
-         "Oct 16 and then the last trading day of each month) and 50% sector rotation (the best Oct 2 scores in the 3 sectors "
-         "with the best 63-day ETF return, top 10, 1/volatility weights; every Friday through Oct 16, every Monday from Oct 19). "
-         "No Mon-Thu trading, no earnings block, no defensive sleeve, at most 20% of a half in one stock, do_not_buy never bought. "
-         "Oct 2-15 stays as recorded (then named 'Live rules (C6)': Oct 13-15 was relative strength plus the sleeve; before that, the Oct 2 rules)."),
     dict(name=C6, group="blend",
          rule="What the bot traded Oct 2-7 (pinned): 50% technical + 50% relative strength, top 10, Fri rebalance + "
               "Mon-Thu top-3 swap (below rank 15) and exit below rank 30 (checks Mon/Wed until Oct 15)."),
@@ -913,43 +909,13 @@ def combo_weights(cfg, inp, through=None):
         w.loc[hp.index, hp.columns.intersection(w.columns)] = hp[hp.columns.intersection(w.columns)].fillna(0.0)
     return w
 
-def live_switch():
-    """The day the live line becomes the 50/50 (be.WINNER "sleeves" on), else None (the old single-strategy simulation)."""
-    return pd.Timestamp(LIVE_SWITCH) if be.WINNER.get("sleeves") else None
-
 def migrate_names(*paths):
     """Saved rows of a renamed line (OLD_NAMES) take its new name; a file is rewritten only when it has old names."""
     for p in paths:
         df = _read(p)
-        if df is not None and len(df) and df["Strategy"].isin(list(OLD_NAMES)).any():
+        if df is not None and len(df) and df["Strategy"].isin(list(OLD_NAMES) + list(REMOVED)).any():
+            df = df[~df["Strategy"].isin(REMOVED)]
             df.assign(Strategy=df["Strategy"].replace(OLD_NAMES)).to_csv(p, index=False)
-
-def _live_combo_rows(inp, old, old_h, rows, hold, after, through):
-    """The live line from the switch day: the pre-switch holdings marked to the switch close, sold (be.COST on the
-    invested part), then the 50/50 halves (forward_combos, LIVE_LEGS) on that value. Rows for the days `after`."""
-    import forward_combos as fc
-    sw, close = live_switch(), inp["close"]
-    before = close.index[close.index < sw]
-    vals = pd.concat([x[x["Strategy"] == LIVE] for x in (old, pd.DataFrame(rows, columns=["Date", "Strategy", "Value", "Cash"]))
-                      if x is not None and len(x)], ignore_index=True) if (old is not None or rows) else pd.DataFrame()
-    base = 1.0
-    if len(before) and len(vals):
-        vals = vals.assign(Date=pd.to_datetime(vals["Date"]))
-        p = before[-1]
-        if (vals["Date"] == p).any():
-            cash = float(vals.loc[vals["Date"] == p, "Cash"].iloc[-1])
-            hs = pd.concat([x[(x["Strategy"] == LIVE)] for x in (old_h, pd.DataFrame(hold, columns=["Date", "Strategy", "Symbol", "Weight", "Shares", "Price"]))
-                            if x is not None and len(x)], ignore_index=True)
-            hs = hs[pd.to_datetime(hs["Date"]) == p] if len(hs) else hs
-            px = close.loc[sw] if sw in close.index else pd.Series(dtype=float)
-            inv = float(sum(r.Shares * (px.get(r.Symbol) if pd.notna(px.get(r.Symbol)) else r.Price) for r in hs.itertuples()))
-            base = cash + inv - be.COST * inv
-    legs = tuple((k, m, cal, float((be.WINNER.get("sleeves") or {}).get("lowvol" if k == "lowvol" else "sector", share)))
-                 for k, m, cal, share in LIVE_LEGS)
-    sim = fc.simulate(inp, legs, sw, through=through)
-    r, h = fc.line_rows(LIVE, sim, "total", scale=base, normalize=False)
-    keep = set(after)
-    return [x for x in r if x["Date"] in keep], [x for x in h if x["Date"] in keep]
 
 def rebalance_days(cfg, inp):
     """Days on which every holding is brought back to its target (unless within 1 point of it), like the live Friday
@@ -979,7 +945,7 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
     migrate_names(path, hold_path)
     old = _read(path, parse_dates=["Date"])
     old_h = _read(hold_path, parse_dates=["Date"])
-    rows, hold, live_after = [], [], None
+    rows, hold = [], []
     for cfg in STRATEGIES:
         name = cfg["name"]
         mine = old[old["Strategy"] == name] if old is not None else pd.DataFrame(columns=["Date"])
@@ -996,12 +962,6 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
             rows += [x for x in r if x["Date"] in keep]
             hold += [x for x in h_ if x["Date"] in keep]
             continue
-        if cfg.get("live") and live_switch() is not None:     # the live 50/50 from the switch day (after the loop)
-            if (todo >= live_switch()).any():
-                live_after = todo[todo >= live_switch()]
-            todo = todo[todo < live_switch()]
-            if not len(todo):
-                continue
         h = pd.DataFrame(columns=["Symbol", "Weight", "Shares", "Price"])
         if last is not None and old_h is not None:
             h = old_h[(old_h["Strategy"] == name) & (old_h["Date"] == last)]
@@ -1061,9 +1021,6 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
             on = (wd > 0) | (shares > 0)
             hold += [{"Date": d, "Strategy": name, "Symbol": s, "Weight": wd[s], "Shares": shares[s], "Price": px[s]}
                      for s in cols[on.to_numpy()]]
-    if live_after is not None:
-        r, h_ = _live_combo_rows(inp, old, old_h, rows, hold, live_after, live_after[-1])
-        rows, hold = rows + r, hold + h_
     if rows:
         for p, new, prior in ((path, rows, old), (hold_path, hold, old_h)):
             out = pd.concat([prior, pd.DataFrame(new)], ignore_index=True) if prior is not None else pd.DataFrame(new)

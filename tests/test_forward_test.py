@@ -247,8 +247,8 @@ try:
     full_alt = {c["name"]: ft.strategy_targets(c, inp) for c in ft.STRATEGIES}
 finally:
     be.WINNER.update(_saved)
-check("forward-test safety: other WINNER mid-week settings change every pinned strategy not at all, and the live one does",
-      all(full_alt[k].equals(full[k]) for k in full if k != ft.LIVE) and not full_alt[ft.LIVE].equals(full[ft.LIVE])
+check("forward-test safety: other WINNER mid-week settings change no strategy (the live 50/50 has no mid-week trading)",
+      all(full_alt[k].equals(full[k]) for k in full)
       and be.WINNER == w0, [k for k in full if not full_alt[k].equals(full[k])])
 live_raw, _ = be.winner_targets(inp["scores"]["live"], inp["eligible"], inp["vol"], inp["regime"], inp["weekly"],
                                 tiebreak_w=inp["scores"]["rs"], earnings=EARN, **FT_PINS)
@@ -611,10 +611,6 @@ if os.path.exists(ft.SIGNAL_CSV):
         print(f"skip  live strategy = the pipeline's Strategy_Weight (reports carry {file_tag}, not the pinned Oct 15 rules)")
     else:
         check("live strategy = the pipeline's Strategy_Weight on every day since Oct 2 (same be.WINNER rules)", min(fits) < 1e-9, fits)
-    cfg_now = next(c for c in ft.STRATEGIES if c["name"] == ft.LIVE)
-    lnow = ft.strategy_targets(cfg_now, real_inp).loc[d0:, list(sector_mapping.defensive)]
-    check("live strategy: the 5 defensive stocks held every day, at most 5% each (x 99%)",
-          (lnow > 0).all().all() and lnow.to_numpy().max() <= be.live_weights(sector_mapping.defensive_cap) + 1e-12, lnow.max().to_dict())
     check("no live file changed (signal_analysis, picks, run_state, pending orders, orders log); WINNER untouched",
           digest() == before and be.WINNER == w0)
 # provisional marks (display only): Tue / Thu have no signal rows until the next decision run
