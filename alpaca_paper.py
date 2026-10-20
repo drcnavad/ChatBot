@@ -226,13 +226,13 @@ HOLDING_COLS = ["Stock", "Shares", "Avg price", "First bought", "Cost basis", "M
 
 def holdings_refresh_key(now=None):
     """Cache key for the dashboard's live holdings: a new key every minute in regular market hours (8:30 AM-3:00 PM CT,
-    12:00 PM on early-close days, NYSE sessions only), else every hour (after hours, nights, weekends, holidays)."""
+    12:00 PM on early-close days, NYSE sessions only), else every 5 minutes (was hourly: the Home list lagged a trade)."""
     import backtest_engine as be
     now = (now or datetime.now(CT)).astimezone(CT)
     close = (12, 0) if be.is_early_close(now.date()) else (15, 0)
     if be.is_session(now.date()) and (8, 30) <= (now.hour, now.minute) < close:
         return f"{now:%Y-%m-%d %H:%M}"
-    return f"{now:%Y-%m-%d %H}h"
+    return f"{now:%Y-%m-%d %H}h{now.minute // 5:02d}"
 
 def first_buy_dates(fills):
     """Symbol -> date (CT) of the earliest buy fill still part of the current position. Sells use up the oldest shares

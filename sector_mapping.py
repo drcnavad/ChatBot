@@ -14,15 +14,18 @@ stock_symbols = [
     'AAPL', 'AMZN', 'ANET', 'AMD', 'APP', 'AVGO', 'BIIB', 'BKR', 'CDNS', 'CRM', 'CVLT', 'DASH',
     'ENPH', 'FTNT', 'GOOGL', 'HAL', 'HOOD', 'INTU', 'LRCX', 'MCK', 'MRK', 'META', 'MRVL', 'MSFT',
     'NFLX', 'NOW', 'NVDA', 'ORCL', 'PANW', 'RCL', 'REGN', 'SLB', 'TSLA', 'UBER', 'UI', 'UNH',
-    'UPST', 'VEEV', 'VRT', 'NOC', 'LMT', 'CRCL', 'TWLO', 'ALAB', 'ARM', 'CVNA', 'RDDT',
-    'SHOP', 'SMCI', 'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'BE', 'BA', 'URI', 'PH', 'FCX',
+    'UPST', 'VEEV', 'VRT', 'NOC', 'LMT', 'TWLO', 'ALAB', 'ARM', 'CVNA', 'RDDT',
+    'SMCI', 'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'BE', 'BA', 'PH', 'FCX',
     'CRDO', 'CLS', 'HIMX', 'NU',
-    'PWR', 'GEV', 'CAT', 'CMI', 'EMR', 'ROK', 'MS', 'GS', 'ETN', 'HWM',   # high-beta industrials / financials (2026-10-13)
-    'ANF', 'NUE', 'JCI', 'DAL', 'WSM', 'IBKR', 'GRMN',   # high-beta non-tech (2026-10-14)
-    'ABBV', 'PFE', 'KO',   # defensive sleeve (2026-10-15)
+    'PWR', 'GEV', 'CAT', 'CMI', 'ROK', 'MS', 'GS', 'HWM',   # high-beta industrials / financials (2026-10-13)
+    'ANF', 'JCI', 'DAL', 'WSM', 'IBKR', 'GRMN',   # high-beta non-tech (2026-10-14)
+    'ABBV', 'KO',   # defensive sleeve (2026-10-15)
     'WULF',   # TeraWulf (Chirag, 2026-10-15)
-    'LIN', 'ECL', 'SHW', 'STLD', 'MLM', 'VMC',   # Materials (2026-10-17)
-    'COST', 'WMT', 'PEP', 'PG', 'MNST',   # Consumer Staples (2026-10-17)
+    'LIN', 'STLD', 'MLM',   # Materials (2026-10-17)
+    'COST', 'WMT', 'MNST',   # Consumer Staples (2026-10-17)
+    # Removed by Chirag 2026-10-19 (uncomment to re-add). PG / EMR / PFE were still held: their half sells them at its
+    # next rebalance (not in the universe = no target; priced from Alpaca market data until then):
+    # 'PG', 'EMR', 'PFE', 'ECL', 'SHW', 'NUE', 'URI', 'SHOP', 'PEP', 'VMC', 'CRCL', 'ETN',
     # Loss-making (negative net income, last 4 quarters, as of 2026-10-13); uncomment to re-add:
     # 'AVAV', 'COIN', 'CRWV', 'FIG', 'GTLB', 'HIMS', 'IREN', 'SNOW', 'TEAM', 'ZS', 'UMAC', 'U',
     # 'ACHR', 'ASTS', 'CIFR', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RKLB', 'SOUN', 'TEM', 'TTWO', 'SPCX',
@@ -37,7 +40,7 @@ do_not_buy = ['AMD', 'TSLA', 'PANW', 'ARM', 'SHOP']
 do_not_sell = []   # sleeve removed Oct 15 evening (Chirag): live = monthly low volatility from Fri Oct 16, 2026
 # Defensive sleeve of Oct 15, 2026: NOT live any more (backtest_engine.WINNER['sleeve'] False); kept only for the pinned
 # forward-test 'Now' strategies (forward_test NOW sleeve=True).
-defensive = ['LMT', 'NOC', 'ABBV', 'PFE', 'KO']
+defensive = [s for s in ['LMT', 'NOC', 'ABBV', 'PFE', 'KO'] if s in stock_symbols]   # PFE removed Oct 19
 defensive_cap = 0.05   # max weight per sleeve stock; the trimmed weight goes to the top-10 picks pro rata (Chirag, 2026-10-15)
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.

@@ -126,6 +126,83 @@ def next_in_line(half, exclude, rankings=None):
         rankings = {"lowvol": lv, "sector": sr}
     return next((s for s in rankings.get(half, []) if s.upper() not in exclude), None)
 
+LEFTOVER_MIN = 500.0        # leftover sleeve cash under max($500, 2% of the half) stays cash
+
+def queue_leftover_cash(dry_run=False, rankings=None, prices=None, positions=None, pending_path=None, min_cash=LEFTOVER_MIN):
+    """Standing rule (Chirag, Oct 19, 2026): after a rebalance, a half's leftover cash (e.g. a blocked target such as KO
+    under a manual block) buys that half's next-in-line stock, like a manual sell's replacement: one BUY row per half in
+    Reports/live_pending_orders.json (staged, at_ask = the limit is never above the ask) that the 9 AM CT fill check sends,
+    and the shares go into that half of the sleeve ledger. Only halves that rebalanced on the ledger's day; never twice
+    (a queued leftover buy for the half, or any queued BUY of the stock, skips it). Places no order itself.
+    Returns [{half, symbol, qty, limit, cash, status}]."""
+    import json
+    import paper_trade as pt
+    import sector_mapping as sm
+    import sleeves
+    pending_path = pending_path or pt.PENDING_ORDERS_JSON
+    led = sleeves.load_ledger()
+    if led is None:
+        return []
+    try:
+        pend = json.load(open(pending_path)).get("orders") or []
+    except (OSError, ValueError, AttributeError):
+        pend = []
+    if positions is None:
+        import alpaca_paper as ap
+        positions = [p["symbol"] for p in ap.PaperAccount().position_dicts()]
+    queued = {str(o.get("symbol", "")).upper() for o in pend if str(o.get("side", "")).upper() == "BUY"}
+    in_led = {s for h in sleeves.HALVES for s in (led["halves"][h].get("shares") or {})}
+    stop = pt.earnings_stop_blocked(_now().date().isoformat())
+    excl = ({str(s).upper() for s in positions} | in_led | queued | set(pt.manual_list("buy")) | set(stop)
+            | {s for s in sm.symbol_sector if s not in set(sm.tradable_symbols)})
+    out = []
+    for h in sleeves.HALVES:
+        L = led["halves"][h]
+        cash, value = float(L.get("cash", 0.0)), float(L.get("value", 0.0) or 0.0)
+        row = {"half": h, "cash": round(cash, 2)}
+        if not L.get("rebalanced") or cash < max(min_cash, 0.02 * value):
+            continue
+        if any(o.get("source") == "leftover-cash" and o.get("half") == h for o in pend):
+            out.append({**row, "status": "already queued (not doubled)"})
+            continue
+        lv_picks = set()
+        if h == "sector":                                # no overlap: the low-volatility half's picks stay its own
+            try:
+                import pandas as pd
+                p = pd.read_csv(pt.PICKS_CSV)
+                lv_picks = set(p.loc[pd.to_numeric(p["Provisional_Weight"], errors="coerce").fillna(0) > 0, "Symbol"].str.upper())
+            except (OSError, KeyError, ValueError):
+                pass
+        sym = next_in_line(h, excl | lv_picks, rankings)
+        if not sym:
+            out.append({**row, "status": "no next-in-line stock (cash stays)"})
+            continue
+        px = float((prices or {}).get(sym) or ((latest_closes([sym]).get(sym) or [(None, 0)])[-1][1]) or 0)
+        if px <= 0:
+            out.append({**row, "symbol": sym, "status": "no price (cash stays)"})
+            continue
+        limit = round(px * 1.005, 2)                     # ceiling for sizing; the 9 AM limit is the live ask or lower
+        qty = math.floor(cash * 0.99 / limit * 100) / 100
+        row = {**row, "symbol": sym, "qty": qty, "limit": limit}
+        if qty <= 0:
+            out.append({**row, "status": "buys no share"})
+            continue
+        excl.add(sym)
+        if dry_run:
+            out.append({**row, "status": "dry run (nothing queued)"})
+            continue
+        pt.record_pending_order({"symbol": sym, "side": "BUY", "qty": qty, "limit_price": limit, "order_id": None,
+                                 "at_ask": True, "source": "leftover-cash", "half": h},
+                                {"source": "leftover-cash"}, pending_path)
+        L.setdefault("shares", {})[sym] = qty
+        L.setdefault("prices", {})[sym] = px
+        L["cash"] = round(cash - qty * px, 2)
+        sleeves.save_ledger(led)
+        out.append({**row, "status": "queued for the 9 AM CT fill check"})
+        log({"action": "buy (leftover cash)", "half": h, "symbol": sym, "qty": qty, "limit": limit, "dry_run": False,
+             "status": "queued for the 9 AM CT fill check"})
+    return out
+
 def _wait_fill(client, order_id, secs=None, sleep=None):
     """(filled qty, avg price) once the order is filled, else None after `secs`."""
     import time

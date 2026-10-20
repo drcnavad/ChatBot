@@ -1121,6 +1121,14 @@ def _trade(D, how, failures, state, clock, ckpt):
             except Exception as e:                          # still pending (send_now): the fill-check job retries
                 logging.warning("  sending failed: %s - the orders stay in Reports/live_pending_orders.json", e)
                 failures.append("send_now")
+        try:                                     # leftover half cash -> that half's next-in-line, sent by the 9 AM check
+            import manual_trade
+            meta["leftover"] = manual_trade.queue_leftover_cash()
+            for r in meta["leftover"]:
+                logging.info("  leftover cash %s $%.2f -> %s", r["half"], r["cash"], r.get("symbol") and
+                             f"BUY {r['symbol']} {r['qty']} (max ${r['limit']}) {r['status']}" or r["status"])
+        except Exception as e:
+            logging.warning("  leftover-cash queue failed: %s (cash stays)", e)
         return results, meta
     finally:
         if session:

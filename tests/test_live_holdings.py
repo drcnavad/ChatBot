@@ -117,18 +117,18 @@ h.update(acct, now=day2.replace(day=7))
 check("next day: a full re-read (safety net)", len(FakeAccount.calls) == 2 and all("after" not in q for _, q in FakeAccount.calls))
 FILLS.pop()
 
-# ---------------------------------------------------------------- refresh: every minute in market hours, hourly otherwise
+# ---------------------------------------------------------------- refresh: every minute in market hours, every 5 minutes otherwise
 key = lambda s: ap.holdings_refresh_key(datetime.fromisoformat(s).replace(tzinfo=ap.CT))
 check("market hours: a new key each minute (Tue 10:31:05 = 10:31:59, 10:32 differs)",
       key("2026-10-06 10:31:05") == key("2026-10-06 10:31:59") != key("2026-10-06 10:32:00"))
 check("market hours start 8:30 AM CT and end 3:00 PM CT",
-      key("2026-10-06 08:29") == key("2026-10-06 08:01") != key("2026-10-06 08:30") != key("2026-10-06 08:31")
-      and key("2026-10-06 15:00") == key("2026-10-06 15:59") and key("2026-10-06 14:59") != key("2026-10-06 14:58"))
-check("after hours / nights: one key per hour", key("2026-10-06 20:05") == key("2026-10-06 20:59") != key("2026-10-06 21:00"))
-check("weekend: one key per hour, also at 10 AM", key("2026-10-03 10:01") == key("2026-10-03 10:45"))
-check("holiday (Thanksgiving): hourly", key("2026-11-26 10:01") == key("2026-11-26 10:45"))
-check("early close (day after Thanksgiving): per minute until 12:00 PM CT, hourly after",
-      key("2026-11-27 11:58") != key("2026-11-27 11:59") and key("2026-11-27 12:01") == key("2026-11-27 12:40"))
+      key("2026-10-06 08:29") == key("2026-10-06 08:25") != key("2026-10-06 08:30") != key("2026-10-06 08:31")
+      and key("2026-10-06 15:00") == key("2026-10-06 15:04") and key("2026-10-06 14:59") != key("2026-10-06 14:58"))
+check("after hours / nights: one key per 5 minutes", key("2026-10-06 20:05") == key("2026-10-06 20:09") != key("2026-10-06 20:10"))
+check("weekend: 5-minute keys, also at 10 AM", key("2026-10-03 10:01") == key("2026-10-03 10:04") != key("2026-10-03 10:05"))
+check("holiday (Thanksgiving): 5-minute keys", key("2026-11-26 10:01") == key("2026-11-26 10:04"))
+check("early close (day after Thanksgiving): per minute until 12:00 PM CT, 5-minute keys after",
+      key("2026-11-27 11:58") != key("2026-11-27 11:59") and key("2026-11-27 12:01") == key("2026-11-27 12:04"))
 app_src = open(os.path.join(ROOT, "dashboard", "details", "live_holdings.py")).read()   # the panel (app.py is the entry point)
 check("the table reruns by itself (st.fragment run_every=60), not the whole page",
       "@st.fragment(run_every=60)" in app_src.split("def render_live_holdings")[0][-200:])

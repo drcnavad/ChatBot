@@ -48,9 +48,10 @@ def _run_holdings():
 
 def holdings_this_run():
     """(data, err) of this page run's live holdings read (one Alpaca read per run, also when it fails)."""
-    run = _run_holdings()
-    if "v" not in run:
-        run["v"] = live_holdings()
+    import alpaca_paper as ap
+    run, key = _run_holdings(), ap.holdings_refresh_key()
+    if "v" not in run or run.get("key", key) != key:      # a 5-minute Home fragment rerun reads again once the key moves
+        run["v"], run["key"] = live_holdings(), key
     return run["v"]
 
 @st.fragment(run_every=60)        # reruns only this table each minute; it reads Alpaca only when the refresh key changes

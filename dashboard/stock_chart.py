@@ -6,11 +6,11 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from dashboard.data import last_next_earnings, live_quote, load_decisions, row_for
+from dashboard.data import last_next_earnings, live_quote, load_decisions
 from dashboard.history import (RS_COLORS, daily_status, event_hover,
     relative_strength_lines, strategy_events)
-from dashboard.settings import CT, HOLDINGS_CSV
-from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, HOLD_SHADE, MA_COLORS, MA_COLS, TEAL, num)
+from dashboard.settings import CT
+from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, HOLD_SHADE, MA_COLORS, MA_COLS, TEAL)
 
 def build_price_chart(ticker, tdata):
     """Last 12 months: price + moving averages + buy/sell markers, RSI/MACD and relative strength panels (the strategy
@@ -77,12 +77,17 @@ def build_price_chart(ticker, tdata):
             hovertext=[event_hover(x) for x in e.itertuples()], hovertemplate="%{hovertext}<extra></extra>",
             showlegend=False), row=1, col=1)
 
-    # While held: entry price dotted line
-    hold = row_for(HOLDINGS_CSV, ticker) if (num(chart['Strategy_Weight'].iloc[-1]) or 0) > 0 else None
-    if hold is not None and pd.notna(hold['Entry_Price']):
-        fig.add_hline(y=float(hold['Entry_Price']), line=dict(color='#64748b', width=1, dash='dot'), row=1, col=1,
-                      annotation_text=f"entry ${hold['Entry_Price']:,.2f}", annotation_position="top left",
-                      annotation_font=dict(size=10, color='#64748b'))
+    # Real account (Reports/live_trade_ledger.csv fills): dashed entry line from the entry date while held, dashed exit
+    # line from the sell date after a full exit
+    for kind, (day, price) in account_trade_lines(ticker).items():
+        color = GOOD if kind == "Entry" else BAD
+        fig.add_trace(go.Scatter(x=[max(pd.Timestamp(day), x_start), x_end], y=[price, price], mode="lines",
+                                 line=dict(color=color, width=1.2, dash="dash"), name=f"{kind} ${price:,.2f} ({day:%b %-d})",
+                                 hovertemplate=f"{kind} ${price:,.2f} ({day:%b %-d})<extra></extra>", showlegend=False),
+                      row=1, col=1)
+        fig.add_annotation(x=max(pd.Timestamp(day), x_start), y=price, xref="x", yref="y", showarrow=False,
+                           text=f"{kind} ${price:,.2f} ({day:%b %-d})", xanchor="left", yanchor="bottom",
+                           font=dict(size=10, color=color))
 
     # Next earnings date (extends the x-axis when it is within ~2 months)
     x_right = x_end
@@ -153,6 +158,36 @@ def build_price_chart(ticker, tdata):
     fig.update_yaxes(**grid)
     fig.update_yaxes(title_text="Price ($)", tickformat='$,.0f', row=1, col=1)
     return fig
+
+def account_trade_lines(ticker, ledger_csv=None):
+    """{'Entry': (date, avg price of the shares still held)} while the account holds `ticker`, else
+    {'Exit': (date, price)} of the sell that closed the position; {} when never traded. FIFO over the filled quantities
+    of Reports/live_trade_ledger.csv (partial fills of expired / canceled orders count too)."""
+    import os
+    from dashboard.settings import REPORTS
+    path = ledger_csv or os.path.join(REPORTS, "live_trade_ledger.csv")
+    try:
+        t = pd.read_csv(path, usecols=["Filled_CT", "Symbol", "Side", "Filled_Qty", "Fill_Price"])
+    except (OSError, ValueError):
+        return {}
+    t = t[(t["Symbol"] == ticker) & (pd.to_numeric(t["Filled_Qty"], errors="coerce") > 0)].dropna(subset=["Filled_CT"])
+    lots, last_sell = [], None
+    for r in t.assign(When=pd.to_datetime(t["Filled_CT"], format="mixed")).sort_values("When").itertuples():
+        q = float(r.Filled_Qty)
+        if r.Side == "BUY":
+            lots.append([r.When, q, float(r.Fill_Price)])
+            continue
+        last_sell = (r.When, float(r.Fill_Price))
+        while q > 1e-9 and lots:
+            used = min(q, lots[0][1])
+            lots[0][1] -= used
+            q -= used
+            if lots[0][1] <= 1e-9:
+                lots.pop(0)
+    if lots:
+        sh = sum(x[1] for x in lots)
+        return {"Entry": (lots[0][0].normalize(), round(sum(x[1] * x[2] for x in lots) / sh, 2))}
+    return {"Exit": (last_sell[0].normalize(), round(last_sell[1], 2))} if last_sell else {}
 
 def stock_chart_inputs(ticker, tdata):
     """The built figure (displayed later, below the detail block)."""

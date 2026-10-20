@@ -117,5 +117,22 @@ rows = json.load(open(mt.ORDERS_JSON))
 check("every action logged to the manual orders file (also refusals and dry runs)", len(rows) == 12
       and all({"time", "action", "symbol", "status"} <= set(r) for r in rows), len(rows))
 check("tests never touched the real files", mt.ORDERS_JSON.startswith(_tmp) and mt.BLOCK_JSON.startswith(_tmp))
+# ---- leftover sleeve cash -> next-in-line, queued for the 9 AM check (Oct 19, 2026)
+sleeves.save_ledger({"day": "2026-10-19", "halves": {"lowvol": {"shares": {"PFE": 10}, "prices": {"PFE": 25}, "cash": 40, "value": 290, "rebalanced": False},
+                     "sector": {"shares": {"AAA": 10}, "prices": {"AAA": 100}, "cash": 9000, "value": 10000, "rebalanced": True}}})
+pp = os.path.join(_tmp, "pending.json")
+_real_buy = pt.manual_list
+pt.manual_list = lambda kind: {"KO": "blocked"} if kind == "buy" else {}
+q = mt.queue_leftover_cash(rankings={"sector": ["AAA", "KO", "BBB", "CCC"], "lowvol": []}, prices={"BBB": 50.0},
+                           positions=["AAA", "PFE"], pending_path=pp)
+pend = json.load(open(pp))["orders"]
+L = sleeves.load_ledger()["halves"]["sector"]
+check("leftover: sector cash buys next-in-line BBB (held AAA, blocked KO skipped), staged at_ask; ledger updated",
+      [r["symbol"] for r in q] == ["BBB"] and pend[0]["at_ask"] and pend[0]["order_id"] is None and pend[0]["qty"] == q[0]["qty"]
+      and L["shares"].get("BBB") == q[0]["qty"] and L["cash"] < 200, (q, pend, L))
+q2 = mt.queue_leftover_cash(rankings={"sector": ["CCC"], "lowvol": []}, prices={"CCC": 50.0}, positions=["AAA"], pending_path=pp)
+check("leftover: never doubled (a second run queues nothing)", q2 == [] and len(json.load(open(pp))["orders"]) == 1, q2)
+pt.manual_list = _real_buy
+
 print(f"\n{len(FAIL)} failed" if FAIL else "\nall passed")
 sys.exit(1 if FAIL else 0)

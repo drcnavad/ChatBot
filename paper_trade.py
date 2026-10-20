@@ -625,6 +625,8 @@ def plan_sleeve_orders(source, account_size, positions=None, picks_csv=PICKS_CSV
             raise ValueError(f"the low-volatility half rebalances on {day} but strategy_picks.csv has no rebalance for it "
                              f"(last rebalance {last_reb}, data as of {as_of}) - no orders")
         lv_t = lv_t.assign(Price=lv_t["Symbol"].map(live_prices).fillna(lv_t["Price"]))
+        import sector_mapping as sm                 # a stock removed from the stock list is never a target (sold if held)
+        lv_t = lv_t[lv_t["Symbol"].astype(str).str.upper().isin(set(sm.tradable_symbols))].reset_index(drop=True)
         statuses = latest_signal_status(as_of=as_of)
     no_buy = {**manual_list("buy"), **earnings_stop_blocked(as_of)}
     orders, info = sleeves.plan(day, positions, account_size, px, lv_targets=lv_t, lv_statuses=statuses, no_buy=no_buy,

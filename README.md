@@ -31,6 +31,13 @@ Two independent halves, each with its own cash, tracked in `Reports/sleeve_ledge
   rest goes to `Reports/live_pending_orders.json` and the **9 AM CT fill check** sends it. Client order ids make every
   send idempotent; a missed decision is caught up once at the next session.
 
+**Removing a stock** (Oct 19, 2026): comment it out of `stock_symbols` in `sector_mapping.py`. It leaves the rankings,
+the dashboard lists and the forward test at once. If the account still holds it, nothing special happens until its half
+rebalances (sector = Mondays 2:30 PM CT, low volatility = last trading day of the month): it is no target there (both
+halves keep only `tradable_symbols`), so it is sold and never rebought. Until then it stays in `Reports/sleeve_ledger.json`
+(not an orphan) and is priced from Alpaca market data. No cleanup is needed after the sell. Removed Oct 19: PG
+(sector, sells Mon Oct 26), EMR and PFE (low vol, sell Fri Oct 30), plus ECL, SHW, NUE, URI, SHOP, PEP, VMC, CRCL, ETN (not held).
+
 ## Schedule (launchd, `launchd/*.plist`, installed by `launchd/install_schedule.sh`; times CT)
 | Job | When | What | Trades? |
 |---|---|---|---|

@@ -25,6 +25,7 @@ def ticker_label(p, s):
     parts.append(f"score {score:.0f}" if pd.notna(score) else "score —")
     return "  ·  ".join(parts)
 
+@st.fragment(run_every=300)   # re-renders every 5 min, so an open tab never shows a stale list (Oct 19)
 def render_rank_tiers(p):
     """Horizontal clickable stock list, three rows, every stock once (dashboard/stock_groups.py): Holdings, Next in line
     (waiting list), Remaining; do-not-buy stocks carry a small DNB tag.

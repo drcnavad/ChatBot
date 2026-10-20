@@ -25,7 +25,8 @@ except Exception:   # deployed without the pipeline modules
 N_CANDIDATES = 20
 
 def held_symbols():
-    """(symbols, source): the live Alpaca positions, else the sleeve ledger's planned shares."""
+    """(symbols, source): the live Alpaca positions (the Trading tab's cached read, at most 5 minutes old; Oct 19: the
+    Home list was stale), else the sleeve ledger's planned shares."""
     try:
         from dashboard.details.live_holdings import holdings_this_run
         data, _err = holdings_this_run()
@@ -64,7 +65,10 @@ def _rankings():
         sec_t = list(w[w > 0].sort_values(ascending=False, kind="stable").index)
     except Exception:
         sec_t = []
-    return lv_t, sec_t, list(lv_zone.index), list(sr_zone.index)
+    import sector_mapping as sm                        # a stock commented out of the list is never shown (Oct 19)
+    keep = set(sm.tradable_symbols)
+    f = lambda xs: [x for x in xs if str(x).upper() in keep]
+    return f(lv_t), f(sec_t), f(lv_zone.index), f(sr_zone.index)
 
 def _alternate(a, b):
     out = []

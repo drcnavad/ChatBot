@@ -110,7 +110,8 @@ def sector_weights(day, exclude=(), held=None, inp=None):
     args, cfg = sector_args(inp)
     score = inp["scores"][cfg.get("score", "live")]
     el = inp["eligible"].copy()
-    ex = [x for x in exclude if x in el.columns]
+    gone = [x for x in el.columns if x not in set(sm.tradable_symbols)]   # removed from the stock list: never a target
+    ex = sorted({x for x in list(exclude) + gone if x in el.columns})
     if ex:
         el.loc[idx[[t]], ex] = False
     block = pd.DataFrame(np.nan, index=idx[[t]], columns=cols)
