@@ -447,7 +447,12 @@ check("breakout g: held at 99.5 (within 1% of the 200-day), sold at 98 (more tha
 w1 = ft.breakout200_weights(_c, _m, _e, _v, tp=0.20, n=1, start="2026-10-01")
 check("breakout: more signals than slots -> the calmest first (B before A); unused cash stays cash",
       w1.loc[_bd[3], "B"] == 1.0 and w1.loc[_bd[3], "A"] == 0, w1.iloc[3].to_dict())
-check("breakout: 7 variants, no calendar rebalance", sum(bool(c.get("b200")) for c in ft.STRATEGIES) == 7
+w5 = {d: ft.breakout200_weights(_c, _m, _e, _v, tp=0.20, days=d, start="2026-10-01")["A"].tolist() for d in (1, 2, 4)}
+check("breakout N days: bought on the Nth close above (A crosses on day 2)", w5[1][1] == 0.1 and w5[1][0] == 0
+      and w5[2][1:3] == [0, 0.1] and w5[4][3:5] == [0, 0.1], w5)
+w98 = ft.breakout200_weights(_c, _m, _e, _v, tp=0.20, buffer=0.98, start="2026-10-01")["B"].tolist()
+check("breakout 2% exit: held at 99.5 and 98 (not 2%+ below)... sold below 98", w98[3:7] == [0.1, 0.1, 0.1, 0.1], w98)
+check("breakout: 5 variants (N = 1-5), exit 2% below the 200-day, no calendar rebalance", [c["b200"].get("days") for c in ft.STRATEGIES if c.get("b200")] == [1, 2, 3, 4, 5] and all(c["b200"]["buffer"] == 0.98 for c in ft.STRATEGIES if c.get("b200"))
       and all(ft.rebalance_days(c, {"weekly": "W"}) is None for c in ft.STRATEGIES if c.get("b200")))
 
 # the forward test's spare-cash rule on target weights

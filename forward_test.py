@@ -274,20 +274,16 @@ STRATEGIES = [
          group="combo",
          rule="50/50, the second half = 'Now: RS, calmer half of the list' (relative strength among stocks at or below the "
               "median 63-day volatility) rebalanced weekly, no Mon-Thu checks, no overlap."),
-    dict(name="200-day breakout: TP 20%, no stop", b200=dict(tp=0.2, stop=None, buffer=1.0), earnings=None, group="event",
-         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or sell when the close is below the 200-day average (no stop). Checked at the close."),
-    dict(name="200-day breakout: TP 20%, stop -5%", b200=dict(tp=0.2, stop=0.05, buffer=1.0), earnings=None, group="event",
-         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or sell when the close is below the 200-day average, or 5% below the entry. Checked at the close."),
-    dict(name="200-day breakout: TP 20%, stop -3%", b200=dict(tp=0.2, stop=0.03, buffer=1.0), earnings=None, group="event",
-         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or sell when the close is below the 200-day average, or 3% below the entry. Checked at the close."),
-    dict(name="200-day breakout: TP 15%, stop -5%", b200=dict(tp=0.15, stop=0.05, buffer=1.0), earnings=None, group="event",
-         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +15% from the entry or sell when the close is below the 200-day average, or 5% below the entry. Checked at the close."),
-    dict(name="200-day breakout: TP 15%, stop -3%", b200=dict(tp=0.15, stop=0.03, buffer=1.0), earnings=None, group="event",
-         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +15% from the entry or sell when the close is below the 200-day average, or 3% below the entry. Checked at the close."),
-    dict(name="200-day breakout: TP 30%, stop -5%", b200=dict(tp=0.3, stop=0.05, buffer=1.0), earnings=None, group="event",
-         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +30% from the entry or sell when the close is below the 200-day average, or 5% below the entry. Checked at the close."),
-    dict(name="200-day breakout: TP 20%, exit 1% below the 200-day", b200=dict(tp=0.2, stop=None, buffer=0.99), earnings=None, group="event",
-         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or sell when the close is 1% or more below the 200-day average (no other stop). Checked at the close."),
+    dict(name="200-day breakout, 1 day above, exit 2% below", b200=dict(tp=0.2, days=1, buffer=0.98), earnings=None, group="event",
+         rule="Buy a stock on the first close above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
+    dict(name="200-day breakout, 2 days above, exit 2% below", b200=dict(tp=0.2, days=2, buffer=0.98), earnings=None, group="event",
+         rule="Buy a stock on the 2nd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
+    dict(name="200-day breakout, 3 days above, exit 2% below", b200=dict(tp=0.2, days=3, buffer=0.98), earnings=None, group="event",
+         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
+    dict(name="200-day breakout, 4 days above, exit 2% below", b200=dict(tp=0.2, days=4, buffer=0.98), earnings=None, group="event",
+         rule="Buy a stock on the 4th close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
+    dict(name="200-day breakout, 5 days above, exit 2% below", b200=dict(tp=0.2, days=5, buffer=0.98), earnings=None, group="event",
+         rule="Buy a stock on the 5th close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
 ]
 for _c in STRATEGIES:                                     # the limits the plain rankings keep (said once, here)
     if (_c.get("select") is PLAIN or _c.get("select") is EQ) and not _c["rule"].startswith("The Oct 2 rules"):
@@ -383,9 +379,9 @@ def dip_weights(c, ma50, eligible, depth=0.08, max_hold=30, n=10):
         out[t, list(held)] = 1 / n
     return pd.DataFrame(out, index=c.index, columns=c.columns)
 
-def breakout200_weights(c, ma200, eligible, vol, tp, stop=None, buffer=1.0, n=10, start=None):
+def breakout200_weights(c, ma200, eligible, vol, tp, stop=None, buffer=1.0, n=10, start=None, days=3):
     """200-day breakout (Chirag, Oct 19, 2026): a stock that closed at/below its 200-day average and then closes above it
-    3 sessions in a row is bought at the 3rd close (1/n of equity, at most n open; more signals than free slots: lowest
+    `days` sessions in a row is bought at that close (Oct 19: N = 1-5 variants) (1/n of equity, at most n open; more signals than free slots: lowest
     63-day volatility first; cash left unused stays cash). Daily exit at the close (the forward test has closes only, not the
     2:35 PM CT price): +tp from the entry close, the close below buffer x the 200-day average, or (stop) -stop from entry.
     An exit's cash waits for the next signal. Entries only from `start` on (flat at the start)."""
@@ -399,8 +395,10 @@ def breakout200_weights(c, ma200, eligible, vol, tp, stop=None, buffer=1.0, n=10
             px, e = C[t, j], held[j]
             if px >= e * (1 + tp) or px < buffer * M[t, j] or (stop is not None and px <= e * (1 - stop)):
                 del held[j]
-        if t >= max(t0, 3):
-            sig = above[t] & above[t - 1] & above[t - 2] & ~above[t - 3] & E[t]
+        if t >= max(t0, days):
+            sig = ~above[t - days] & E[t]
+            for k in range(days):
+                sig = sig & above[t - k]
             new = [j for j in np.argsort(np.nan_to_num(V[t], nan=np.inf), kind="stable") if sig[j] and j not in held]
             for j in new[:n - len(held)]:
                 held[j] = C[t, j]

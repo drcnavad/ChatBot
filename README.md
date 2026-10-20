@@ -88,7 +88,7 @@ python manual_trade.py blocks                                   # list active bl
 | `decision_ranks.py` | Rank snapshot per decision (`Reports/decision_ranks.csv`, for the Last decision view). |
 | `alpaca_paper.py` | Read-only Alpaca client (GET only). |
 | `earnings_stop.py`, `trade_audit.py`, `tax_lots.py` | Earnings-day stop (off), trade audit, tax lots. |
-| `forward_test.py`, `forward_combos.py` | Forward test of the account and paper strategies since Oct 2, 2026. |
+| `forward_test.py`, `forward_combos.py` | Forward test of the account and paper strategies since Oct 2, 2026. Includes 5 paper lines "200-day breakout, N days above, exit 2% below" (N = 1-5): buy at the close of the Nth consecutive close above the 200-day SMA after a cross, 10% each (max 10, calmest first); sell at +20% or a close 2%+ below the 200-day (close < 0.98 x SMA200); recorded by the 3:05 PM CT after-close step. |
 | `sector_mapping.py` | The stock list (84 stocks + QQQ), sectors, `do_not_buy` / `do_not_sell`. |
 | `main_signal_analysis.ipynb` (+ 3 support notebooks) | Signals → `Reports/signal_analysis.csv`, `strategy_picks.csv`, ... (Chirag edits these; leave them alone). |
 
