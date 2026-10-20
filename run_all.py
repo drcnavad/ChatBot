@@ -11,7 +11,7 @@ QUICK any other time: main + validate (no quota APIs).
 
     python run_all.py --full | --quick | --dry-run | --list | --only STEP | --from STEP | --keep-going
     python run_all.py --support [--force-news]   # the supporting data refresh (quota APIs) alone
-    python run_all.py --sync-live            # refresh my_positions.csv + Reports/live_*.csv from the LIVE account (GET)
+    python run_all.py --sync-live            # refresh the Reports/live_*.csv snapshot from the LIVE account (GET)
     python run_all.py --trade [--scheduled]  # trade the due decision on the LIVE account (REAL MONEY), see below
     python run_all.py --fill-check [--scheduled]   # send Reports/live_pending_orders.json (regular hours, 9 AM CT on)
 
@@ -754,13 +754,12 @@ def data_summary():
                     for r in m.itertuples()]
     return out
 
-def sync_live(positions_path=None):
-    """Optional (--sync-live): refresh my_positions.csv + Reports/live_*.csv from the Alpaca LIVE account (read-only)."""
+def sync_live():
+    """Optional (--sync-live): refresh the offline Reports/live_*.csv snapshot from the Alpaca LIVE account (read-only)."""
     import alpaca_paper
-    kw = {"positions_csv": positions_path} if positions_path else {}
-    r = alpaca_paper.sync_paper_account(**kw)
+    r = alpaca_paper.sync_paper_account()
     logging.info("  live account: equity $%s, cash $%s, %d positions -> %s", f"{r['Equity']:,.2f}", f"{r['Cash']:,.2f}",
-                 r["Positions"], os.path.relpath(r["positions_csv"], ROOT))
+                 r["Positions"], os.path.relpath(r["snapshot_csv"], ROOT))
 
 def plan_steps(a, mode):
     """The steps to run for this mode and the command-line filters (--only / --from / opt-in flags)."""
@@ -810,13 +809,12 @@ def main(argv=None):
     p.add_argument("--force-news", action="store_true", help="allow NewsAPI even if it ran within the last 24 h")
     p.add_argument("--force-fundamentals", action="store_true", help="allow a second Alpha Vantage rotation the same day")
     p.add_argument("--dry-run", action="store_true", help="print the plan and exit (nothing runs, nothing is written)")
-    p.add_argument("--positions", help="where --sync-live writes the positions CSV (default: my_positions.csv)")
     p.add_argument("--only", choices=[s[0] for s in STEPS], help="run just this step")
     p.add_argument("--from", dest="start", choices=[s[0] for s in STEPS], help="start at this step (mode rules still apply)")
     p.add_argument("--keep-going", action="store_true", help="continue after a failed step (still exits 1)")
     p.add_argument("--list", action="store_true", help="list the steps and exit")
     p.add_argument("--sync-live", action="store_true",
-                   help="refresh my_positions.csv from the Alpaca LIVE account before the alert (read-only GET calls only)")
+                   help="refresh the Reports/live_*.csv snapshot from the Alpaca LIVE account before the alert (read-only GET calls only)")
     p.add_argument("--trade", action="store_true",
                    help="after the pipeline, auto-trade the Alpaca LIVE account (REAL MONEY) from the fresh signals "
                         "(pulls live positions + equity, submits extended-hours DAY limit orders; LIVE only)")
@@ -1207,7 +1205,7 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
     if a.sync_live:                                        # opt-in: refresh the positions file (read-only)
         logging.info("=== sync_live (alpaca_paper.py, read-only)")
         try:
-            sync_live(a.positions)
+            sync_live()
             live_synced = True
         except Exception as e:                              # missing keys / network: the rest of the run still counts
             logging.warning("  live account sync failed: %s", e)
@@ -1236,7 +1234,7 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
     logging.info("  API calls used: %s", ", ".join(f"{k} {v}" for k, v in quota.items()) if quota
                  else "none (Alpaca market-data bars only)")
     if live_synced:
-        logging.info("  Alpaca LIVE account: read-only GET calls only (my_positions.csv refreshed)")
+        logging.info("  Alpaca LIVE account: read-only GET calls only (snapshot refreshed)")
     if trade_results is not None and not trade_results.empty:
         logging.info("  %s", trade_summary(trade_results, (trade_meta or {}).get("sent_now")))
     if info["data_date"]:

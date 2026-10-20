@@ -275,11 +275,13 @@ def reconcile(data, pending=None, stop_state=None, picks=None):
             led = sleeves.load_ledger() if be.WINNER.get("sleeves") else None
         except Exception:
             led = None
-        if led is not None:
-            val = {s: q * float(L["prices"].get(s, 0.0)) for L in led["halves"].values() for s, q in L["shares"].items() if q > 0}
-            tot = sum(float(L.get("value", 0.0)) for L in led["halves"].values()) or sum(val.values()) or 1.0
-            target = {s: v / tot for s, v in val.items()}
-            live = set(target)
+        if led is not None:                     # the halves' tags (no shares: live positions are the record) + the plan's targets
+            try:
+                plan = pd.read_csv(sleeves.PLAN_CSV)
+                target = {str(s).upper(): float(w) / 100 for s, w in zip(plan["Symbol"], plan["Target_of_account_%"]) if float(w) > 0}
+            except (OSError, KeyError, ValueError):
+                target = {}
+            live = set(sleeves.owners(led)) | set(target)
         import sector_mapping as sm
         kept = {str(s).upper() for s in sm.do_not_sell}
         for s in sorted(set(held) - live):

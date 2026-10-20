@@ -131,11 +131,10 @@ try:
     expect(SECRET not in repr(acct) and KEY not in repr(acct), "repr hides the keys")
 
     # ------------------------------------------------------------ files (temporary paths only)
-    p_csv, snap, hist = (os.path.join(tmp, n) for n in ("my_positions.csv", "snapshot.csv", "history.csv"))
-    r = ap.sync_paper_account(acct, positions_csv=p_csv, snapshot_csv=snap, history_csv=hist)
-    ap.sync_paper_account(acct, positions_csv=p_csv, snapshot_csv=snap, history_csv=hist)
-    mp = pd.read_csv(p_csv)
-    expect(list(mp.columns) == ["Symbol", "Shares"] and dict(zip(mp.Symbol, mp.Shares)) == {"MRK": 25, "NVDA": 10}, "my_positions.csv = Symbol,Shares")
+    snap, hist = (os.path.join(tmp, n) for n in ("snapshot.csv", "history.csv"))
+    r = ap.sync_paper_account(acct, snapshot_csv=snap, history_csv=hist)
+    ap.sync_paper_account(acct, snapshot_csv=snap, history_csv=hist)
+    expect(not hasattr(ap, "POSITIONS_CSV") and not hasattr(ap, "write_positions_csv"), "no my_positions.csv (holdings.py is the only source)")
     sn = pd.read_csv(snap)
     expect({"CASH", "TOTAL EQUITY", "NVDA", "MRK"} <= set(sn.Symbol), "snapshot has positions + cash/equity rows")
     expect(len(pd.read_csv(hist)) == 2 and r["Positions"] == 2, "history appends one row per sync")
@@ -143,14 +142,14 @@ try:
 
     # ------------------------------------------------------------ run_all --sync-live hook (mocked, temp paths)
     import run_all
-    real = ap.PaperAccount, ap.POSITIONS_CSV, ap.SNAPSHOT_CSV, ap.HISTORY_CSV
+    real = ap.PaperAccount, ap.SNAPSHOT_CSV, ap.HISTORY_CSV
     try:
         ap.PaperAccount = functools.partial(real[0], KEY, SECRET, base_url=MOCK, _allow_local_test=True)
-        ap.POSITIONS_CSV, ap.SNAPSHOT_CSV, ap.HISTORY_CSV = (os.path.join(tmp, n) for n in ("rp.csv", "rs.csv", "rh.csv"))
+        ap.SNAPSHOT_CSV, ap.HISTORY_CSV = (os.path.join(tmp, n) for n in ("rs.csv", "rh.csv"))
         run_all.sync_live()
-        expect(os.path.exists(ap.POSITIONS_CSV) and os.path.exists(ap.SNAPSHOT_CSV), "run_all.sync_live writes the positions file")
+        expect(os.path.exists(ap.SNAPSHOT_CSV), "run_all.sync_live writes the snapshot file")
     finally:
-        ap.PaperAccount, ap.POSITIONS_CSV, ap.SNAPSHOT_CSV, ap.HISTORY_CSV = real
+        ap.PaperAccount, ap.SNAPSHOT_CSV, ap.HISTORY_CSV = real
     expect(run_all.main(["--dry-run", "--quick", "--sync-live"]) == 0, "run_all --dry-run --sync-live plans without calling")
 
     # ------------------------------------------------------------ read-only: only GETs, correct headers, no order code

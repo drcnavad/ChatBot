@@ -11,9 +11,9 @@ ask + 0.05%, sell at the bid - 0.05%, skipped on a stale / wide quote); outside 
 Sell + replace (Chirag, Oct 16): once the sell FILLS (waits up to FILL_WAIT_SECS), the freed cash buys the next-in-line
 stock of the same half (low volatility: best Strategy-ranked low_vol stock; sector rotation: best sector_rot stock in the
 top-3 sectors) that is not held, not blocked, not do-not-buy and not stopped out - a DAY limit at min(quote limit, ask),
-never above the ask - and the stock joins that half of the ledger. --no-replace keeps the cash. An unfilled sell buys
+never above the ask - and the stock is tagged to that half (owned only once Alpaca shows the fill). --no-replace keeps the cash. An unfilled sell buys
 nothing (logged).
-Sell: the symbol leaves the sleeve ledger (Reports/sleeve_ledger.json), so the pipeline neither rebuys nor "repairs" it.
+Sell: the half's tag goes once the stock is out of the live positions (sleeves.reconcile); the fill credits that half.
 --block-until-drop N adds Reports/manual_block.json[SYMBOL] = {reference_close, block_until_price = close x (1 - N%),
 added}: the reference close is that day's close, filled in by the after-close step (run_all.daily_step ->
 `manual_trade.py update-blocks`); the pipeline never buys a blocked symbol (paper_trade.manual_list("buy")), and the
@@ -98,24 +98,26 @@ def blocked_notes(path=None):
         out[s] = f"manual block until ${until:,.2f}" if until else "manual block (reference close at today's close)"
     return out
 
-def drop_from_ledger(sym, ledger=None, proceeds=None):
-    """Remove `sym` from both halves of the sleeve ledger (shares and prices); the sale proceeds (default shares x ledger
-    price) become that half's cash. Returns the half it was in, or None."""
+def half_of(sym, ledger=None):
+    """The half whose tag `sym` carries (sleeves.owners), or None. Nothing is changed: after a sell the tag goes once the
+    stock is out of the live positions, and the half's cash moves by the real fill (sleeves.reconcile)."""
     import sleeves
     led = sleeves.load_ledger() if ledger is None else ledger
-    if led is None:
+    return sleeves.owners(led).get(str(sym).upper()) if led else None
+
+def tag(sym, half):
+    """Tag `sym` as `half`'s (a queued / sent buy): no shares, no cash - those come from Alpaca once it fills."""
+    import sleeves
+    led = sleeves.load_ledger()
+    if not led:
         return None
-    was = None
     for h in sleeves.HALVES:
         L = led["halves"][h]
-        if sym in (L.get("shares") or {}):
-            was = h
-            q = float(L["shares"].pop(sym))
-            px = (L.get("prices") or {}).pop(sym, None)
-            L["cash"] = round(float(L.get("cash", 0.0)) + (proceeds if proceeds is not None else q * float(px or 0)), 2)
-    if was and ledger is None:
-        sleeves.save_ledger(led)
-    return was
+        L["tags"] = sorted({str(x).upper() for x in (L.get("tags") or []) + list(L.pop("shares", {}) or {})} - {sym})
+        L.pop("prices", None)
+    led["halves"][half]["tags"] = sorted(set(led["halves"][half]["tags"]) | {sym})
+    sleeves.save_ledger(led)
+    return half
 
 def next_in_line(half, exclude, rankings=None):
     """The best-ranked stock of `half` ('lowvol' / 'sector') not in `exclude` (held, blocked, do-not-buy, ...), or None.
@@ -148,10 +150,10 @@ def queue_leftover_cash(dry_run=False, rankings=None, prices=None, positions=Non
     except (OSError, ValueError, AttributeError):
         pend = []
     if positions is None:
-        import alpaca_paper as ap
-        positions = [p["symbol"] for p in ap.PaperAccount().position_dicts()]
+        import holdings
+        positions = list(holdings.get_positions())
     queued = {str(o.get("symbol", "")).upper() for o in pend if str(o.get("side", "")).upper() == "BUY"}
-    in_led = {s for h in sleeves.HALVES for s in (led["halves"][h].get("shares") or {})}
+    in_led = set(sleeves.owners(led))
     stop = pt.earnings_stop_blocked(_now().date().isoformat())
     excl = ({str(s).upper() for s in positions} | in_led | queued | set(pt.manual_list("buy")) | set(stop)
             | {s for s in sm.symbol_sector if s not in set(sm.tradable_symbols)})
@@ -194,10 +196,7 @@ def queue_leftover_cash(dry_run=False, rankings=None, prices=None, positions=Non
         pt.record_pending_order({"symbol": sym, "side": "BUY", "qty": qty, "limit_price": limit, "order_id": None,
                                  "at_ask": True, "source": "leftover-cash", "half": h},
                                 {"source": "leftover-cash"}, pending_path)
-        L.setdefault("shares", {})[sym] = qty
-        L.setdefault("prices", {})[sym] = px
-        L["cash"] = round(cash - qty * px, 2)
-        sleeves.save_ledger(led)
+        tag(sym, h)                                      # a tag only: owned (and its cash spent) once Alpaca shows the fill
         out.append({**row, "status": "queued for the 9 AM CT fill check"})
         log({"action": "buy (leftover cash)", "half": h, "symbol": sym, "qty": qty, "limit": limit, "dry_run": False,
              "status": "queued for the 9 AM CT fill check"})
@@ -221,9 +220,9 @@ def replace_buy(half, cash, client, quote, rankings=None, sold=None):
     """Buy the next-in-line stock of `half` with `cash` (limit <= ask), add it to that half of the ledger. Returns the log entry."""
     import paper_trade as pt
     import sleeves
-    held = {str(p.symbol).upper() for p in client.get_all_positions()}
-    led = sleeves.load_ledger()
-    in_led = {s for h in sleeves.HALVES for s in (led["halves"][h].get("shares") or {})} if led else set()
+    import holdings
+    held = set(holdings.get_positions(client))
+    in_led = set(sleeves.owners(sleeves.load_ledger()))
     stop = pt.earnings_stop_blocked(_now().date().isoformat())
     excl = held | in_led | set(pt.manual_list("buy")) | set(stop) | {str(sold or "").upper()}
     sym = next_in_line(half, excl, rankings)
@@ -244,15 +243,10 @@ def replace_buy(half, cash, client, quote, rankings=None, sold=None):
                                                   side=OrderSide.BUY, client_order_id=f"manual-{_now():%Y%m%d%H%M%S}-BUY-{sym}"[:48]))
     except Exception as e:
         return log({**base, "symbol": sym, "qty": qty, "limit": limit, "status": f"FAILED: {str(e)[:200]}"})
-    if led:
-        L = led["halves"][half]
-        L.setdefault("shares", {})[sym] = qty
-        L.setdefault("prices", {})[sym] = limit
-        L["cash"] = round(float(L.get("cash", 0.0)) - qty * limit, 2)
-        sleeves.save_ledger(led)
+    tag(sym, half)                                       # a tag only: owned once Alpaca shows the fill
     return log({**base, "symbol": sym, "qty": qty, "limit": limit, "bid": q.get("bid"), "ask": q.get("ask"),
                 "value": round(qty * limit, 2), "order_id": str(getattr(o, "id", "")),
-                "status": f"submitted ({getattr(o.status, 'value', o.status)})", "ledger_half_added": half})
+                "status": f"submitted ({getattr(o.status, 'value', o.status)})", "ledger_half_tag": half})
 
 def _market_open(client):
     try:
@@ -277,7 +271,8 @@ def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quo
         return log({**base, "status": f"refused: {q.get('skip') or 'no limit price'}"})
     limit = float(q["limit"])
     if side == "SELL":
-        pos = {str(p.symbol).upper(): float(p.qty) for p in client.get_all_positions()}
+        import holdings
+        pos = holdings.held_qty(client)
         qty = pos.get(sym, 0.0)
         if qty <= 0:
             return log({**base, "status": "refused: not held"})
@@ -307,8 +302,7 @@ def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quo
         if fill:
             entry.update(status="filled", filled_qty=fill[0], fill_price=fill[1])
     if side == "SELL" and not dry_run:
-        proceeds = round(fill[0] * fill[1], 2) if fill else round(qty * limit, 2)
-        entry["ledger_half_removed"] = drop_from_ledger(sym, proceeds=proceeds)
+        entry["ledger_half_removed"] = half_of(sym)      # tag dropped once the stock is out of the live positions
     if side == "SELL" and block_drop:
         entry["block"] = add_block(sym, block_drop, _now().date().isoformat()) if not dry_run else \
             {"drop_pct": float(block_drop), "note": "dry run: not saved"}

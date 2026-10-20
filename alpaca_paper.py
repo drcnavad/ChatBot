@@ -4,7 +4,7 @@ activities, daily portfolio history); nothing here places, changes or cancels or
 (ALPACA_LIVE_KEY_ID, ALPACA_LIVE_SECRET_KEY), go only into request headers and are never printed or saved.
 
     python alpaca_paper.py          # print the summary, positions and recent orders (writes nothing)
-    python alpaca_paper.py --sync   # ... and write my_positions.csv, Reports/live_portfolio_snapshot.csv and
+    python alpaca_paper.py --sync   # ... and write Reports/live_portfolio_snapshot.csv and
                                     #     Reports/live_account_history.csv (also run_all.py --sync-live)
 """
 import argparse
@@ -23,7 +23,6 @@ from dotenv import load_dotenv
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
-POSITIONS_CSV = os.path.join(ROOT, "my_positions.csv")
 SNAPSHOT_CSV = os.path.join(REPORTS, "live_portfolio_snapshot.csv")
 HISTORY_CSV = os.path.join(REPORTS, "live_account_history.csv")
 
@@ -327,12 +326,6 @@ def account_vs_etfs(history, snap, closes, prices_now, start):
     return out[["Compared with", "Return %", "Value now", "Gain $", "Account ahead by (pts)"]], start, put_in
 
 # --- files for the rest of the pipeline --------------------------------------------------------------------------------
-def write_positions_csv(positions, path=POSITIONS_CSV):
-    """my_positions.csv (Symbol,Shares) in the format paper_trade.py reads."""
-    out = positions.loc[positions["Qty"] != 0, ["Symbol", "Qty"]].rename(columns={"Qty": "Shares"})
-    out.to_csv(path, index=False)
-    return path
-
 def write_snapshot(summary, positions, snapshot_csv=SNAPSHOT_CSV, history_csv=HISTORY_CSV, now=None, net_deposits=0.0):
     """Positions + cash/equity rows (overwritten each sync) and one appended history row."""
     as_of = (now or datetime.now(CT)).strftime("%Y-%m-%d %H:%M")
@@ -347,23 +340,22 @@ def write_snapshot(summary, positions, snapshot_csv=SNAPSHOT_CSV, history_csv=HI
     row.to_csv(history_csv, mode="a", header=not os.path.exists(history_csv), index=False)
     return snapshot_csv, history_csv
 
-def sync_paper_account(account=None, positions_csv=None, snapshot_csv=None, history_csv=None):
-    """Read the LIVE account (read-only GET calls) and write my_positions.csv + the snapshot files. Returns the summary dict.
-    Paths default to the module settings (POSITIONS_CSV, SNAPSHOT_CSV, HISTORY_CSV), looked up at call time."""
+def sync_paper_account(account=None, snapshot_csv=None, history_csv=None):
+    """Read the LIVE account (read-only GET calls) and write the offline snapshot files (the dashboard's history; never
+    a holdings source - holdings.py is). Returns the summary dict. Paths default to SNAPSHOT_CSV / HISTORY_CSV."""
     account = account or PaperAccount()
-    positions_csv, snapshot_csv = positions_csv or POSITIONS_CSV, snapshot_csv or SNAPSHOT_CSV
+    snapshot_csv = snapshot_csv or SNAPSHOT_CSV
     history_csv = history_csv or HISTORY_CSV
     summary = account.account_summary()
     at = pd.Timestamp.now(tz="UTC")                       # deposits booked after the balance read are not in it yet
     positions = account.positions()
-    write_positions_csv(positions, positions_csv)
     write_snapshot(summary, positions, snapshot_csv, history_csv, net_deposits=account.net_deposits(before=at))
-    return {**summary, "Positions": int((positions["Qty"] != 0).sum()), "positions_csv": positions_csv}
+    return {**summary, "Positions": int((positions["Qty"] != 0).sum()), "snapshot_csv": snapshot_csv}
 
 def main(argv=None):
     """Command line: print the live account (read-only); --sync also writes the files."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--sync", action="store_true", help="also write my_positions.csv and the Reports snapshot files")
+    p.add_argument("--sync", action="store_true", help="also write the Reports snapshot files")
     p.add_argument("--orders", type=int, default=10, help="how many recent orders to show (default 10)")
     a = p.parse_args(argv)
     acct = PaperAccount()
@@ -375,7 +367,7 @@ def main(argv=None):
     print(acct.recent_orders(a.orders).to_string(index=False))
     if a.sync:
         r = sync_paper_account(acct)
-        print(f"wrote {os.path.relpath(r['positions_csv'], ROOT)} ({r['Positions']} positions) and the Reports snapshot files")
+        print(f"wrote {os.path.relpath(r['snapshot_csv'], ROOT)} ({r['Positions']} positions) and the history row")
 
 if __name__ == "__main__":
     main()

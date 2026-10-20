@@ -77,16 +77,16 @@ def build_price_chart(ticker, tdata):
             hovertext=[event_hover(x) for x in e.itertuples()], hovertemplate="%{hovertext}<extra></extra>",
             showlegend=False), row=1, col=1)
 
-    # Real account (Reports/live_trade_ledger.csv fills): dashed entry line from the entry date while held, dashed exit
+    # Real account (Reports/live_trade_ledger.csv fills): green dashed entry line + green price, red dashed exit line + red price; dashed entry line from the entry date while held, dashed exit
     # line from the sell date after a full exit
     for kind, (day, price) in account_trade_lines(ticker).items():
         color = GOOD if kind == "Entry" else BAD
         fig.add_trace(go.Scatter(x=[max(pd.Timestamp(day), x_start), x_end], y=[price, price], mode="lines",
-                                 line=dict(color=color, width=1.2, dash="dash"), name=f"{kind} ${price:,.2f} ({day:%b %-d})",
-                                 hovertemplate=f"{kind} ${price:,.2f} ({day:%b %-d})<extra></extra>", showlegend=False),
+                                 line=dict(color=color, width=1.2, dash="dash"), name=f"${price:,.2f}",
+                                 hovertemplate=f"${price:,.2f} ({day:%b %-d})<extra></extra>", showlegend=False),
                       row=1, col=1)
         fig.add_annotation(x=max(pd.Timestamp(day), x_start), y=price, xref="x", yref="y", showarrow=False,
-                           text=f"{kind} ${price:,.2f} ({day:%b %-d})", xanchor="left", yanchor="bottom",
+                           text=f"${price:,.2f}", xanchor="left", yanchor="bottom",
                            font=dict(size=10, color=color))
 
     # Next earnings date (extends the x-axis when it is within ~2 months)

@@ -12,12 +12,11 @@ Each half is sized from its OWN value (its shares at today's prices + its own ca
 as if it were its own account (1-point band of the half, 99% invested, trims, rounding) - the backtested '50/50 + SR weekly,
 no overlap' (two sleeves, each with its own cash). A half that does not rebalance today is left alone.
 
-Ledger (Reports/sleeve_ledger.json), written after each trade run: per half the PLANNED shares after the run's orders, the
-prices used and the half's cash after them. Next run, before planning (reconcile):
-  - shares owned = the account's actual shares of each symbol in that half's ledger;
-  - an order that did not fill (actual != planned) gives its planned dollars back to its own half's cash;
-  - whatever is left (fill slippage, dividends, interest, a deposit, an account position no half owns) is split between the
-    halves pro rata to their value; a position no half owns is sold at the next trade run.
+Ledger (Reports/sleeve_ledger.json): per half only TAGS (which half a symbol belongs to) and the half's cash claim at
+`cash_at`; never shares (Chirag, Oct 19, 2026: live Alpaca positions - holdings.py - are the only record of what is owned).
+Next run (reconcile): a half's shares = the live shares of its tagged symbols; the Alpaca fills since cash_at move that
+half's cash (a buy that never filled costs nothing); whatever is left (slippage, dividends, interest, a deposit) is split
+pro rata to value; a tag whose stock is neither held nor has a queued BUY is dropped; a position no half tags is sold.
 First run (no ledger, the Oct 16 switch): each half = 50% of equity in cash; a held stock that one half targets is taken
 over by that half at the current price, every other holding is sold.
 """
@@ -144,6 +143,16 @@ def save_ledger(led, path=None):
     os.replace(tmp, path)
     return path
 
+def owners(led):
+    """{SYMBOL: half} from the ledger's tags (old ledgers: the keys of 'shares')."""
+    out = {}
+    for h in HALVES:
+        L = (led or {}).get("halves", {}).get(h, {})
+        old = [s for s, q in (L.get("shares") or {}).items() if float(q or 0) > 0]      # pre-Oct 19 ledgers
+        for sym in list(L.get("tags") or []) + old:
+            out.setdefault(str(sym).upper(), h)
+    return out
+
 def _num(x):
     try:
         f = float(x)
@@ -151,39 +160,33 @@ def _num(x):
         return None
     return f if math.isfinite(f) and f > 0 else None
 
-def reconcile(led, positions, prices, equity, shares=None):
-    """(state, unowned, info): state = {half: {'shares': {sym: actual qty}, 'cash': $}} after the reconciliation in the
-    module doc; unowned = {sym: qty} the account holds that no half owns. No ledger -> each half = its share of equity in cash."""
+def reconcile(led, positions, prices, equity, shares=None, fills=None, pending=()):
+    """(state, unowned, info): state = {half: {'shares': {sym: LIVE qty}, 'cash': $}} after the reconciliation in the
+    module doc; unowned = {sym: qty} the account holds that no half tags. fills = holdings.fills_since(led['cash_at'])
+    (None: not readable - the residual split covers it); pending = symbols with a queued BUY (their tag is kept).
+    No ledger -> each half = its share of equity in cash."""
     shares = shares or config() or {"lowvol": 0.5, "sector": 0.5}
     pos = {str(k).upper(): float(v) for k, v in (positions or {}).items() if float(v or 0) > 0}
     if led is None:
         return ({h: {"shares": {}, "cash": equity * shares[h]} for h in HALVES}, dict(pos),
-                {"init": True, "residual": 0.0, "unfilled": {}})
-    state, owner, unfilled = {}, {}, {}
-    for h in HALVES:
-        L = led["halves"][h]
-        cash = float(L.get("cash", 0.0))
-        own = {}
-        for sym, planned in (L.get("shares") or {}).items():
-            sym = sym.upper()
-            if sym in owner:            # (never by construction) first half keeps it
-                continue
-            owner[sym] = h
-            actual = pos.get(sym, 0.0)
-            p = _num((L.get("prices") or {}).get(sym)) or _num(prices.get(sym)) or 0.0
-            if abs(actual - float(planned)) > 1e-6:
-                cash += (float(planned) - actual) * p          # unfilled buy -> its dollars back; unfilled sell -> none received
-                unfilled[sym] = (h, float(planned), actual)
-            if actual > 0:
-                own[sym] = actual
-        state[h] = {"shares": own, "cash": cash}
-    unowned = {s: q for s, q in pos.items() if s not in owner}
+                {"init": True, "residual": 0.0, "dropped": [], "tags": {}})
+    owner = owners(led)
+    cash = {h: float(led["halves"][h].get("cash", 0.0)) for h in HALVES}
+    for f in fills or []:                               # real fills only: what a half actually paid / received
+        h = owner.get(f["symbol"])
+        if h:
+            cash[h] += f["qty"] * f["price"] * (-1 if f["side"] == "BUY" else 1)
+    pend = {str(x).upper() for x in pending or ()}
+    dropped = sorted(s for s in owner if s not in pos and s not in pend)
+    tags = {s: h for s, h in owner.items() if s not in dropped}
+    state = {h: {"shares": {s: pos[s] for s, o in tags.items() if o == h and s in pos}, "cash": cash[h]} for h in HALVES}
+    unowned = {s: q for s, q in pos.items() if s not in tags}
     val = {h: state[h]["cash"] + sum(q * (_num(prices.get(s)) or 0.0) for s, q in state[h]["shares"].items()) for h in HALVES}
     resid = equity - sum(val.values())
     tot = sum(max(v, 0.0) for v in val.values())
     for h in HALVES:
         state[h]["cash"] += resid * (max(val[h], 0.0) / tot if tot > 0 else shares[h])
-    return state, unowned, {"init": False, "residual": resid, "unfilled": unfilled}
+    return state, unowned, {"init": False, "residual": resid, "dropped": dropped, "tags": tags}
 
 def half_value(st, prices):
     return st["cash"] + sum(q * (_num(prices.get(s)) or 0.0) for s, q in st["shares"].items())
@@ -198,7 +201,7 @@ def _take(state, h, sym, qty, price, frm=None):
         state[frm]["cash"] += v
 
 def plan(day, positions, equity, prices, lv_targets=None, lv_statuses=None, no_buy=None, fractional=True, ledger="load",
-         min_value=1.0, inp=None):
+         min_value=1.0, inp=None, fills=None, pending=()):
     """Orders for session `day` (2:30 PM run). lv_targets: DataFrame Symbol, Weight (fractions of the low-volatility half,
     = Provisional_Weight), Price - needed when the low-volatility half rebalances. prices {sym: price} for every held / target
     symbol. Returns (orders, info); info['ledger'] = the ledger to save after the orders are sent."""
@@ -215,7 +218,7 @@ def plan(day, positions, equity, prices, lv_targets=None, lv_statuses=None, no_b
     if led is not None and str(led.get("day", "")) > d.date().isoformat():
         raise ValueError(f"the sleeve ledger is from {led.get('day')}, after {d:%Y-%m-%d} - an old decision is not traded")
     px = {str(k).upper(): v for k, v in (prices or {}).items()}
-    state, unowned, info = reconcile(led, positions, px, equity, shares)
+    state, unowned, info = reconcile(led, positions, px, equity, shares, fills=fills, pending=pending)
     if info["init"]:
         do_sec = True                                   # the switch: both halves are bought
     transfers = []
@@ -278,41 +281,32 @@ def plan(day, positions, equity, prices, lv_targets=None, lv_statuses=None, no_b
         raise ValueError(f"both halves trade {sorted(set(dup))} - refusing (no-overlap broken)")
     orders["_o"] = orders["Side"].map({"SELL": 0}).fillna(1)
     orders = orders.sort_values(["_o"], kind="stable").drop(columns="_o").reset_index(drop=True)
-    # the ledger after this run's orders (planned shares at the plan's prices)
-    new = {"version": 1, "day": d.date().isoformat(), "halves": {}}
+    # the ledger after this run: tags (held + this run's buys) and each half's cash NOW; the fills move it next run
+    new = {"version": 2, "day": d.date().isoformat(), "cash_at": datetime.now(ZoneInfo("UTC")).isoformat(timespec="seconds"),
+           "halves": {}}
     for h in HALVES:
         st = state[h]
-        sh = dict(st["shares"])
-        for r in orders[(orders["Half"] == h) & orders["Side"].isin(["BUY", "SELL"])].itertuples():
-            q = float(r.Shares) * (1 if r.Side == "BUY" else -1)
-            sh[r.Symbol] = round(sh.get(r.Symbol, 0.0) + q, 6)
-        sh = {s: (q if q > 1e-6 else 0.0) for s, q in sh.items()}
-        cash = values[h] - sum(q * (_num(px.get(s)) or 0.0) for s, q in sh.items())
-        new["halves"][h] = {"shares": sh, "prices": {s: float(_num(px.get(s)) or 0.0) for s in sh}, "cash": round(cash, 2),
-                            "value": round(values[h], 2), "rebalanced": bool(do_lv if h == "lowvol" else do_sec)}
+        buys = orders.loc[(orders["Half"] == h) & (orders["Side"] == "BUY"), "Symbol"].tolist()
+        tags = sorted(set(st["shares"]) | set(buys) | {s for s, o in info.get("tags", {}).items() if o == h and s in pending})
+        held_v = sum(q * (_num(px.get(s)) or 0.0) for s, q in st["shares"].items())
+        new["halves"][h] = {"tags": tags, "cash": round(values[h] - held_v, 2), "value": round(values[h], 2),
+                            "rebalanced": bool(do_lv if h == "lowvol" else do_sec)}
     info.update(day=d.date().isoformat(), lowvol=do_lv, sector=do_sec, transfers=transfers, values=values,
-                lv_targets=lv_w, sector_targets=sec_w, unowned=unowned, ledger=new)
+                lv_targets=lv_w, sector_targets=sec_w, unowned=unowned, ledger=new, orders=orders)
     return orders, info
 
-def plan_table(info, prices=None):
-    """One row per symbol of each half after the plan: half, planned shares, value, weight in the half and in the account."""
-    rows = []
-    led = info["ledger"]["halves"]
-    total = sum(info["values"].values()) or 1.0
-    for h in HALVES:
-        L = led[h]
-        for s, q in sorted(L["shares"].items()):
-            if q <= 0:
-                continue
-            v = q * L["prices"].get(s, 0.0)
-            tw = (info["lv_targets"] if h == "lowvol" else info["sector_targets"]).get(s)
-            rows.append({"Half": LABEL[h], "Symbol": s, "Shares": q, "Price": L["prices"].get(s), "Value": round(v, 2),
-                         "Weight_in_half_%": round(100 * v / info["values"][h], 2) if info["values"][h] else None,
-                         "Target_in_half_%": round(100 * tw, 2) if tw is not None else None,
-                         "Weight_of_account_%": round(100 * v / total, 2)})
-        rows.append({"Half": LABEL[h], "Symbol": "(cash)", "Shares": None, "Price": None, "Value": L["cash"],
-                     "Weight_in_half_%": round(100 * L["cash"] / info["values"][h], 2) if info["values"][h] else None,
-                     "Target_in_half_%": None, "Weight_of_account_%": round(100 * L["cash"] / total, 2)})
+def plan_table(info, orders=None):
+    """One row per symbol of each half: live shares, the plan's target shares (orders.Target_Shares), weights."""
+    rows, total = [], sum(info["values"].values()) or 1.0
+    o = orders if orders is not None else info.get("orders")
+    for r in (o.itertuples() if o is not None else []):
+        if r.Half not in HALVES:
+            continue
+        v = float(r.Target_Shares or 0) * float(r.Price or 0)
+        hv = info["values"][r.Half]
+        rows.append({"Half": LABEL[r.Half], "Symbol": r.Symbol, "Held_Shares": r.Current_Shares, "Target_Shares": r.Target_Shares,
+                     "Price": r.Price, "Target_Value": round(v, 2), "Target_in_half_%": round(100 * v / hv, 2) if hv else None,
+                     "Target_of_account_%": round(100 * v / total, 2)})
     return pd.DataFrame(rows)
 
 def summary_text(info):

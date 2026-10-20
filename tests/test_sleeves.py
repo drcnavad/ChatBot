@@ -84,43 +84,61 @@ o, info = sleeves.plan(day, positions, equity, P, lv_targets=lv_t, lv_statuses={
 L = info["ledger"]["halves"]
 check(info["init"] and abs(info["values"]["lowvol"] - equity / 2) < 0.01 and abs(info["values"]["sector"] - equity / 2) < 0.01,
       "switch: each half = 50% of equity")
-check(lvw.index[0] in L["lowvol"]["shares"] and sec_name in L["sector"]["shares"]
+def planned(inf, h):
+    """{sym: (target shares, price)} of half h after the plan (orders.Target_Shares - the ledger holds no shares)."""
+    o_ = inf["orders"]
+    return {r.Symbol: (float(r.Target_Shares), float(r.Price)) for r in o_[(o_.Half == h)].itertuples() if float(r.Target_Shares or 0) > 0}
+def fills_for(o_, skip=()):
+    return [{"symbol": r.Symbol, "side": r.Side, "qty": float(r.Shares), "price": float(r.Price)}
+            for r in o_[o_.Side.isin(["BUY", "SELL"])].itertuples() if r.Symbol not in skip]
+PL = {h: planned(info, h) for h in sleeves.HALVES}
+check(lvw.index[0] in PL["lowvol"] and sec_name in PL["sector"]
       and not o[(o.Symbol == lvw.index[0]) & (o.Side == "SELL") & (o.Shares >= 10)].shape[0],
       "switch: a held stock one half targets is taken over by that half (not sold and bought back)")
 check(((o.Symbol == old) & (o.Side == "SELL") & (o.Shares == 100)).any(), "switch: a holding no half targets is sold in full")
-lvn = {s for s, q in L["lowvol"]["shares"].items() if q > 0}; secn = {s for s, q in L["sector"]["shares"].items() if q > 0}
+lvn, secn = set(PL["lowvol"]), set(PL["sector"])
 check(not (lvn & secn) and len(lvn) == 10 and len(secn) == (sec_first > 0).sum(), "no overlap; 10 + 10 names", (lvn & secn))
-inv = {h: sum(q * L[h]["prices"][s] for s, q in L[h]["shares"].items()) / info["values"][h] for h in sleeves.HALVES}
-check(all(0.97 <= v <= 0.99 + 1e-9 for v in inv.values()) and all(L[h]["cash"] > 0 for h in sleeves.HALVES),
-      "each half ~99% invested of its OWN value, own cash left", inv)
-w_lv = {s: q * L["lowvol"]["prices"][s] / info["values"]["lowvol"] for s, q in L["lowvol"]["shares"].items() if q > 0}
+check(all("shares" not in L[h] and set(L[h]["tags"]) >= set(PL[h]) for h in sleeves.HALVES),
+      "ledger: tags only (held + this run's buys), never shares (live positions are the record)", L)
+inv = {h: sum(q * p for q, p in PL[h].values()) / info["values"][h] for h in sleeves.HALVES}
+check(all(0.97 <= v <= 0.99 + 1e-9 for v in inv.values()), "each half ~99% invested of its OWN value", inv)
+w_lv = {s: q * p / info["values"]["lowvol"] for s, (q, p) in PL["lowvol"].items()}
 check(all(abs(w - 0.099) < 0.0101 for w in w_lv.values()), "low-volatility weights = 9.9% of the half (1-point band)", w_lv)
 
-# fill everything as planned (account = ledger), then a sector-only Friday: low-volatility half untouched
-pos2 = {s: q for h in sleeves.HALVES for s, q in L[h]["shares"].items() if q > 0}
-cash2 = sum(L[h]["cash"] for h in sleeves.HALVES)
+# everything fills as planned: the next run's halves come from the live positions + the real fills
+pos2 = {s: q for h in sleeves.HALVES for s, (q, _p) in PL[h].items()}
+F = fills_for(o)
+cash_h = {h: L[h]["cash"] + sum(f_["qty"] * f_["price"] * (-1 if f_["side"] == "BUY" else 1) for f_ in F
+                                 if sleeves.owners(info["ledger"]).get(f_["symbol"]) == h) for h in sleeves.HALVES}
+cash2 = sum(cash_h.values())                    # ZZZOLD was in the switch equity already
 P2 = {s: p * (1.05 if s in lvn else 0.97) for s, p in P.items()}
 eq2 = cash2 + sum(q * P2[s] for s, q in pos2.items())
+st2, _u2, r2 = sleeves.reconcile(info["ledger"], pos2, P2, eq2, fills=F)
+check(all(st2[h]["shares"] == {s: q for s, (q, _p) in PL[h].items()} for h in sleeves.HALVES),
+      "reconcile: each half's shares = the LIVE shares of its tagged symbols")
 sleeves.lowvol_day = lambda x: False
-o2, info2 = sleeves.plan(day, pos2, eq2, P2, ledger=info["ledger"], inp=inp)
+o2, info2 = sleeves.plan(day, pos2, eq2, P2, ledger=info["ledger"], inp=inp, fills=F)
 t2 = o2[o2.Side.isin(["BUY", "SELL"])]
 check(not info2["lowvol"] and info2["sector"] and not (set(t2.Symbol) & lvn), "sector-only Friday: no low-volatility name traded")
-check(abs(info2["values"]["lowvol"] - (L["lowvol"]["cash"] + sum(q * P2[s] for s, q in L["lowvol"]["shares"].items()))) < 0.01,
-      "each half keeps its own gains (low-volatility half +5%, sector half -3%)")
+lv_own = cash_h["lowvol"] + sum(q * P2[s] for s, (q, _p) in PL["lowvol"].items())
+check(abs(info2["values"]["lowvol"] - lv_own) / lv_own < 0.01, "each half keeps its own gains (low-volatility half +5%, sector half -3%)",
+      (info2["values"]["lowvol"], lv_own))
 
-# an unfilled buy: its dollars go back to its own half
-pos3 = dict(pos2)
+# a buy that never filled: no fill -> it costs its half nothing, and its tag goes (not held, nothing queued)
 miss = sorted(secn)[0]
-pos3.pop(miss)
-cash3 = cash2 + L["sector"]["shares"][miss] * L["sector"]["prices"][miss]
-eq3 = cash3 + sum(q * P[s] for s, q in pos3.items())
-st, unowned, rinfo = sleeves.reconcile(info["ledger"], pos3, P, eq3)
-check(abs(rinfo["residual"]) < 0.01 and abs(st["lowvol"]["cash"] - L["lowvol"]["cash"]) < 0.01
-      and abs(st["sector"]["cash"] - (L["sector"]["cash"] + L["sector"]["shares"][miss] * L["sector"]["prices"][miss])) < 0.01,
-      "unfilled buy: its dollars return to the sector half only")
+pos3 = {s: q for s, q in pos2.items() if s != miss}
+F3 = fills_for(o, skip={miss})
+c3 = {h: L[h]["cash"] + sum(f_["qty"] * f_["price"] * (-1 if f_["side"] == "BUY" else 1) for f_ in F3
+                             if sleeves.owners(info["ledger"]).get(f_["symbol"]) == h) for h in sleeves.HALVES}
+eq3 = sum(c3.values()) + sum(q * P[s] for s, q in pos3.items())
+st, unowned, rinfo = sleeves.reconcile(info["ledger"], pos3, P, eq3, fills=F3)
+check(st["sector"]["cash"] - c3["sector"] > -0.01 and miss in rinfo["dropped"] and miss not in st["sector"]["shares"],
+      "unfilled buy: no fill, so its dollars stay in the sector half; its tag is dropped", rinfo)
+st_p, _u, r_p = sleeves.reconcile(info["ledger"], pos3, P, eq3, fills=F3, pending={miss})
+check(miss not in r_p["dropped"] and miss not in st_p["sector"]["shares"], "a queued buy keeps its tag but is not a holding")
 pos4 = {**pos2, "HANDBUY": 1.0}
 P4 = {**P, "HANDBUY": 100.0}
-st4, un4, r4 = sleeves.reconcile(info["ledger"], pos4, P4, eq3 - cash3 + cash2 + 100.0 + sum(q * P[s] for s, q in pos2.items()) - sum(q * P[s] for s, q in pos3.items()))
+st4, un4, r4 = sleeves.reconcile(info["ledger"], pos4, P4, eq2 + 100.0, fills=F)
 check(un4 == {"HANDBUY": 1.0}, "a holding no half owns is reported as unowned (sold at the next trade run)")
 
 # month-end (low volatility only): it buys a name the sector half holds -> shares move over, sector half rebalances
@@ -128,13 +146,14 @@ sleeves.lowvol_day, sleeves.sector_day = (lambda x: True), (lambda x: False)
 take = sorted(secn)[0]
 lvw5 = pd.Series(0.099, index=list(lvw.index[:9]) + [take])
 lv_t5 = pd.DataFrame({"Symbol": lvw5.index, "Weight": lvw5.values, "Price": [P[s] for s in lvw5.index]})
-o5, info5 = sleeves.plan(day, pos2, cash2 + sum(q * P[s] for s, q in pos2.items()), P, lv_targets=lv_t5,
-                         lv_statuses={s: "add" for s in lvw5.index}, ledger=info["ledger"], inp=inp)
-L5 = info5["ledger"]["halves"]
+o5, info5 = sleeves.plan(day, pos2, eq2, P, lv_targets=lv_t5, lv_statuses={s: "add" for s in lvw5.index},
+                         ledger=info["ledger"], inp=inp, fills=F)
+P5 = {h: planned(info5, h) for h in sleeves.HALVES}
 check(any(t[0] == take and t[1] == "sector" and t[2] == "lowvol" for t in info5["transfers"]) and info5["sector"]
-      and L5["lowvol"]["shares"].get(take, 0) > 0 and L5["sector"]["shares"].get(take, 0) == 0
+      and take in P5["lowvol"] and take not in P5["sector"] and take in info5["ledger"]["halves"]["lowvol"]["tags"]
+      and take not in info5["ledger"]["halves"]["sector"]["tags"]
       and not ((o5.Symbol == take) & (o5.Half == "sector") & o5.Side.isin(["BUY", "SELL"])).any()
-      and abs(L5["lowvol"]["shares"][take] * P[take] / info5["values"]["lowvol"] - 0.099) < 0.0101,
+      and abs(P5["lowvol"][take][0] * P[take] / info5["values"]["lowvol"] - 0.099) < 0.0101,
       "month-end clash: the shares move to the low-volatility half (the sector half does not sell them), trimmed to its 9.9%; "
       "the sector half rebalances without it")
 sleeves.lowvol_day, sleeves.sector_day = orig_lv, orig_wk
@@ -148,7 +167,7 @@ except ValueError:
 
 # save / load
 path = sleeves.save_ledger(info["ledger"])
-check(sleeves.load_ledger(path)["halves"]["sector"]["shares"] == info["ledger"]["halves"]["sector"]["shares"], "ledger save / load")
+check(sleeves.load_ledger(path)["halves"]["sector"]["tags"] == info["ledger"]["halves"]["sector"]["tags"], "ledger save / load")
 
 print("\nSLEEVES OK" if not FAIL else f"\n{len(FAIL)} FAILED: {FAIL}")
 sys.exit(1 if FAIL else 0)

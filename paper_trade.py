@@ -629,13 +629,16 @@ def plan_sleeve_orders(source, account_size, positions=None, picks_csv=PICKS_CSV
         lv_t = lv_t[lv_t["Symbol"].astype(str).str.upper().isin(set(sm.tradable_symbols))].reset_index(drop=True)
         statuses = latest_signal_status(as_of=as_of)
     no_buy = {**manual_list("buy"), **earnings_stop_blocked(as_of)}
+    import holdings
+    led = sleeves.load_ledger()
     orders, info = sleeves.plan(day, positions, account_size, px, lv_targets=lv_t, lv_statuses=statuses, no_buy=no_buy,
-                                fractional=fractional, min_value=min_value)
+                                fractional=fractional, min_value=min_value, ledger=led,
+                                fills=holdings.fills_since((led or {}).get("cash_at")), pending=holdings.pending_symbols())
     meta.update(source=("provisional" if info["lowvol"] else "sector") + "+sleeves", sleeves=info, sleeve_ledger=info["ledger"])
     tab = sleeves.plan_table(info)
-    tab = tab[tab["Symbol"] != "(cash)"]
-    targets = pd.DataFrame({"Symbol": tab["Symbol"], "Weight": tab["Weight_of_account_%"] / 100, "Price": tab["Price"],
-                            "Half": tab["Half"]}).reset_index(drop=True)
+    tab = tab[pd.to_numeric(tab.get("Target_Shares"), errors="coerce").fillna(0) > 0] if len(tab) else tab
+    targets = pd.DataFrame({"Symbol": tab.get("Symbol", []), "Weight": tab.get("Target_of_account_%", pd.Series(dtype=float)) / 100,
+                            "Price": tab.get("Price", []), "Half": tab.get("Half", [])}).reset_index(drop=True)
     meta["invested"] = float(targets["Weight"].sum())
     return orders, meta, targets
 
@@ -790,15 +793,6 @@ def apply_order_cap(orders, equity, cap=MAX_ORDER_PCT):
     return orders, refused
 
 # ----------------------------------------------------------------------------- positions file, LIVE submission, command line
-def read_positions_csv(path):
-    """Positions CSV (Symbol,Shares or Symbol,Qty) -> {symbol: shares}."""
-    pos = pd.read_csv(path)
-    pos.columns = [c.strip().lower() for c in pos.columns]
-    if "shares" not in pos.columns and "qty" not in pos.columns:
-        raise SystemExit(f"{path}: needs a Shares column for order sizing (Symbol,Shares); a Weight-only file works for the alert only")
-    qty = "shares" if "shares" in pos.columns else "qty"
-    return dict(zip(pos["symbol"].astype(str).str.upper().str.strip(), pd.to_numeric(pos[qty], errors="coerce").fillna(0)))
-
 def paper_trading_client():
     """Alpaca TradingClient for the LIVE account (paper=False). Historical name, kept for compatibility."""
     from alpaca.trading.client import TradingClient
@@ -1322,8 +1316,8 @@ def _symbol_state(client, sym):
     try:
         from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest
-        held = sum(_safe_number(p.qty) for p in client.get_all_positions()
-                   if str(p.symbol).upper() == sym)
+        import holdings
+        held = holdings.held_qty(client).get(sym, 0.0)
         open_orders = []
         for o in client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[sym])):
             raw = getattr(o, "status", "")
@@ -1694,7 +1688,8 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         return pd.DataFrame([(o.get("symbol", "?"), o.get("side", "?"), o.get("qty"), o.get("order_id"),
                               "WAITING: " + msg) for o in evening_orders if isinstance(o, dict)], columns=cols)
     try:  # live holdings, so a SELL remainder is clamped to the shares actually held
-        live_positions = {str(p.symbol).upper(): float(p.qty) for p in client.get_all_positions()}
+        import holdings
+        live_positions = holdings.held_qty(client)
     except Exception as e:
         # Fail closed: without live holdings a SELL remainder cannot be clamped to the
         # shares actually held. Abort (the pending file is kept for a retry) instead
@@ -2083,11 +2078,10 @@ def get_live_positions_and_equity():
     acct = client.get_account()
     positions = {}
     LIVE_ENTRY.clear()                              # avg entry prices of this read (the spare-cash rule's in-profit test)
-    for p in client.get_all_positions():
-        qty = float(p.qty)
-        if qty != 0:
-            positions[str(p.symbol).upper()] = qty
-            LIVE_ENTRY[str(p.symbol).upper()] = _safe_number(getattr(p, "avg_entry_price", None), default=None)
+    import holdings
+    for sym, p in holdings.get_positions(client).items():
+        positions[sym] = p["qty"]
+        LIVE_ENTRY[sym] = _safe_number(p["avg_entry_price"], default=None)
     return positions, float(acct.equity), float(acct.cash), float(acct.buying_power)
 
 EVENING_SUBMIT_CUTOFF_CT = "19:00"  # extended hours end 7:00 PM CT - later runs stage orders for the morning
@@ -2351,8 +2345,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         prices = dict(zip(orders["Symbol"].astype(str), pd.to_numeric(orders["Price"], errors="coerce")))
         log_event("Trade", "ok", *_trade_notice(results, prices))
     if meta.get("sleeve_ledger") is not None:
-        # The halves' ledger after this run's PLANNED orders; the next run reconciles it with the account (an order that
-        # did not fill gives its dollars back to its half). Saved even if some orders failed or wait for 9 AM.
+        # The halves' tags + cash claims (no shares: live positions are the record); the next run moves the cash by the
+        # real fills. Saved even if some orders failed or wait for 9 AM.
         import sleeves
         try:
             sleeves.save_ledger(meta["sleeve_ledger"])
@@ -2384,7 +2378,6 @@ def main(argv=None):
     """Command line: print the order list (dry run) or submit to the Alpaca LIVE account (REAL MONEY)."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--account-size", type=float, help="dollars to allocate (dry run default: 100000)")
-    p.add_argument("--positions", help="CSV with Symbol,Shares of current holdings (dry run)")
     p.add_argument("--target", choices=["auto", "current", "provisional", "hold"], default="auto",
                    help="'hold' keeps every position unchanged (nothing is submitted)")
     p.add_argument("--fractional", action="store_true", help="fractional share quantities (dry run preview only)")
@@ -2405,7 +2398,7 @@ def main(argv=None):
     if a.fill_check:
         if not a.live:
             sys.exit("Refusing: --fill-check needs --live as well (LIVE trading only).")
-        if a.submit or a.fractional or a.account_size or a.positions or a.out or a.target != "auto":
+        if a.submit or a.fractional or a.account_size or a.out or a.target != "auto":
             sys.exit("Refusing: --fill-check takes no other order options.")
         results = complete_unfilled_orders()
         if results.empty:
@@ -2414,14 +2407,15 @@ def main(argv=None):
             print(results.drop(columns=["Order_ID"]).to_string(index=False))
         return results
 
-    positions = read_positions_csv(a.positions) if a.positions else {}
+    positions = {}                                   # holdings come only from the live account (--from-account / --submit)
     account_size, buying_power = a.account_size, None
     if a.from_account:                               # read-only GETs (account + positions); nothing is sent
         positions, equity, _cash, buying_power = get_live_positions_and_equity()
         account_size = account_size or equity
     if a.submit:
         client = paper_trading_client()
-        positions = {pos.symbol: float(pos.qty) for pos in client.get_all_positions()}
+        import holdings
+        positions = holdings.held_qty(client)
         acct = client.get_account()
         buying_power = float(acct.buying_power)
         if account_size is None:

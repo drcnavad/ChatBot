@@ -71,7 +71,7 @@ check("cap: a 14% buy passes, a 21% buy is refused, a 50% sell is never capped",
       and refused["Est_Value"].iloc[0] == 2100.0, capped.to_dict("records"))
 check("cap: unusable equity refuses every buy (fail closed), sells untouched",
       list(pt.apply_order_cap(o, float("nan"))[0]["Side"]) == ["SKIP (over order cap)"] * 2 + ["SELL"])
-pos = pt.read_positions_csv(os.path.join(ROOT, "my_positions.csv")) if os.path.exists(os.path.join(ROOT, "my_positions.csv")) else {}
+pos = {}
 for src in ("auto", "provisional", "current"):
     plan, _m, _t = pt.plan_orders(src, 58235.07, pos, fractional=True)
     check(f"cap: today's {src} plan is unchanged by it", pt.apply_order_cap(plan, 58235.07)[1].empty, plan)

@@ -30,8 +30,8 @@ def decision_table(day, positions, fills, equity, ledger=None, ranks_then=None, 
             net[f["symbol"]] = net.get(f["symbol"], 0.0) + q
     now = {p["symbol"]: float(p.get("qty") or 0) for p in positions or []}
     value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
-    owner = {s: SLEEVE[h] for h in SLEEVE for s, q in ((ledger or {}).get("halves", {}).get(h, {}).get("shares") or {}).items()
-             if float(q) > 0}
+    import sleeves
+    owner = {s: SLEEVE[h] for s, h in sleeves.owners(ledger).items() if h in SLEEVE}
     rank = lambda r, s, c: (r.set_index("Symbol")[c].get(s, pd.NA) if r is not None else pd.NA)
     rows = []
     for s in sorted(set(net) | set(now) | set(all_stocks)):
@@ -62,19 +62,24 @@ def decision_table(day, positions, fills, equity, ledger=None, ranks_then=None, 
             .sort_values(["_k", "Sleeve", "_r", "Symbol"]).drop(columns=["_k", "_r"]).reset_index(drop=True))
 
 def sleeve_summary(day, positions, ledger, equity):
-    """One line per half: stocks, value (its positions + its ledger cash), share of the account, next rebalance."""
+    """One line per half: its live positions (by tag) + its cash, share of the account, next rebalance; a queued buy is
+    'Pending order', never a holding."""
+    import holdings
     import sleeves
     value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
+    pend = holdings.pending_symbols()
     cal = sleeves.calendar(pd.Timestamp(day) + pd.Timedelta(days=1), 45)
     out = []
     for h, label in SLEEVE.items():
         L = ledger["halves"][h]
-        syms = [s for s, q in (L.get("shares") or {}).items() if float(q) > 0]
+        syms = [s for s, o in sleeves.owners(ledger).items() if o == h and s in value]
         v = sum(value.get(s, 0.0) for s in syms) + float(L.get("cash", 0.0))
+        waiting = sorted(s for s, o in pend.items() if (o or sleeves.owners(ledger).get(s)) == h and s not in value)
         nxt = next((d for d, hs in cal if h in hs), None)
         out.append(f"**{sleeves.LABEL[h]}**: {len(syms)} stocks · ${v:,.0f}"
                    + (f" ({100 * v / equity:.1f}% of the account)" if equity else "")
-                   + (f" · next rebalance {nxt:%a %b %-d}" if nxt is not None else ""))
+                   + (f" · next rebalance {nxt:%a %b %-d}" if nxt is not None else "")
+                   + (f" · Pending order: {', '.join(waiting)}" if waiting else ""))
     return out
 
 @st.cache_data(show_spinner=False)
@@ -98,13 +103,9 @@ def render_last_decision(p):
     data, err = holdings_this_run()
     if data is not None:
         positions, fills, equity = data["positions"], data["fills"], data["equity"]
-    else:                                   # Alpaca not readable: the ledger's planned shares at the latest closes
-        close = p.by_symbol["Close"]
-        positions = [{"symbol": s, "qty": q, "market_value": q * float(close.get(s, 0.0))}
-                     for h in sleeves.HALVES for s, q in led["halves"][h]["shares"].items() if float(q) > 0]
-        fills = None
-        equity = sum(x["market_value"] for x in positions) + sum(float(led["halves"][h]["cash"]) for h in sleeves.HALVES)
-        st.info(f"Last decision · {day:%a %b %-d}: {err} Holdings below = the halves' planned shares (actions unknown).")
+    else:                                   # Alpaca not readable: nothing is assumed held
+        st.info(f"Last decision · {day:%a %b %-d}: {err} (live positions are the only holdings source)")
+        return
     for line in sleeve_summary(day, positions, led, equity):
         st.markdown(line)
     show = st.radio("Show", ["Portfolio (last decision)", "All stocks (both strategies' ranks)"], horizontal=True,

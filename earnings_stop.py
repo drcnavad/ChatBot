@@ -229,7 +229,8 @@ def candidates(now, session, acct=None, earnings=None, quick=True, stand_in=Fals
     if quick and near.empty:
         return [], [], {}                       # no report near: no broker call at all
     acct = acct or account()
-    held = {str(p["symbol"]).upper(): float(p.get("qty") or 0) for p in acct.position_dicts()}
+    import holdings
+    held = holdings.held_qty(account=acct)
     keep = {str(x).upper() for x in sector_mapping.do_not_sell}   # never sold, not even by this stop (Chirag, 2026-10-15)
     events = {s: ev for s in held if held[s] > 0 and s not in keep and (ev := active_event(s, earnings, today, session))}
     if not events:

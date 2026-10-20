@@ -23,7 +23,8 @@ def _read_holdings(refresh_key):
     import alpaca_paper as ap
     import backtest_engine as be
     acct = ap.PaperAccount()
-    positions, fills, snap = acct.position_dicts(), _fill_history().update(acct), acct.snapshot()
+    import holdings
+    positions, fills, snap = holdings.position_rows(fresh=True), _fill_history().update(acct), acct.snapshot()
     return {"positions": positions, "fills": fills, "equity": snap["equity"], "snapshot": snap,
             "history": acct.daily_history(be.FORWARD_START), "as_of": datetime.now(CT)}
 

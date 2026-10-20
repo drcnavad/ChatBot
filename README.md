@@ -31,6 +31,17 @@ Two independent halves, each with its own cash, tracked in `Reports/sleeve_ledge
   rest goes to `Reports/live_pending_orders.json` and the **9 AM CT fill check** sends it. Client order ids make every
   send idempotent; a missed decision is caught up once at the next session.
 
+**Holdings: one source** (Chirag, Oct 19, 2026): live Alpaca positions, read only through `holdings.py`
+(`get_positions()`, 60 s cache; order code reads fresh through its trading client). Nothing is recorded as owned before a
+fill. `Reports/sleeve_ledger.json` keeps per half only the symbols' tags (which half a held stock belongs to) and the
+half's cash at `cash_at`; each run a half = the live shares of its tags + its cash moved by the real Alpaca fills since
+then (an unfilled buy costs nothing). A queued buy (`Reports/live_pending_orders.json`) shows as "Pending order", never as a
+holding; a tag goes once its stock is neither held nor queued. There is no `my_positions.csv` any more.
+
+**Leftover sleeve cash** (Oct 19): after a rebalance, a half's cash of at least max($500, 2% of the half) (e.g. a target
+blocked by a manual block) is queued for the 9 AM CT fill check as a buy of that half's next-in-line stock, limit never
+above the ask (`manual_trade.queue_leftover_cash`, called by the trade run; never doubled).
+
 **Removing a stock** (Oct 19, 2026): comment it out of `stock_symbols` in `sector_mapping.py`. It leaves the rankings,
 the dashboard lists and the forward test at once. If the account still holds it, nothing special happens until its half
 rebalances (sector = Mondays 2:30 PM CT, low volatility = last trading day of the month): it is no target there (both
@@ -44,7 +55,7 @@ halves keep only `tradable_symbols`), so it is sold and never rebought. Until th
 | `com.stockanalysis.support` | Mon 1:00, Tue 1:07, Wed 1:14, Thu 1:21, Fri 1:28 PM | `run_all.py --support --scheduled`: company reports, news sentiment, earnings dates (quota APIs) | no |
 | `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled` → `run_all.py`: 2:30 PM signals + decision + orders on decision days (Mondays: sector half; month's last trading day: low-vol half); from 3:05 PM the after-close step (`run_all.daily_step`: signal refresh, `forward_test.py --record`, `manual_trade.py update-blocks`). Never 4:05-4:30 PM. | **yes** (2:30 PM) |
 | `com.stockanalysis.morning` | Mon-Fri 9:00 AM | `pipeline_watchdog.py --fill-check --scheduled`: sends the pending rests | **yes** |
-| `com.stockanalysis.tradeaudit` | Mon-Fri every 30 min 8:30 AM-3:00 PM + 3:45 PM | `refresh_dashboard_data.sh`: `run_all.sync_live()` (my_positions.csv, `Reports/live_*.csv`) + `trade_audit.py --write --log` (ledger, round trips, alerts) | no (GET only) |
+| `com.stockanalysis.tradeaudit` | Mon-Fri every 30 min 8:30 AM-3:00 PM + 3:45 PM | `refresh_dashboard_data.sh`: `run_all.sync_live()` (offline `Reports/live_*.csv` snapshot) + `trade_audit.py --write --log` (ledger, round trips, alerts) | no (GET only) |
 | `com.stockanalysis.earningsstop` | every 5 min + at login | `earnings_stop.py --loop` (no-op while the stop is off) | no (off) |
 | `com.stockanalysis.dashboard-8502` | always on | `run_dashboard_8502.sh` → `streamlit run app.py`. Restart: `launchctl kickstart -k gui/$(id -u)/com.stockanalysis.dashboard-8502` | no |
 
@@ -81,7 +92,7 @@ python manual_trade.py blocks                                   # list active bl
 | `sector_mapping.py` | The stock list (84 stocks + QQQ), sectors, `do_not_buy` / `do_not_sell`. |
 | `main_signal_analysis.ipynb` (+ 3 support notebooks) | Signals → `Reports/signal_analysis.csv`, `strategy_picks.csv`, ... (Chirag edits these; leave them alone). |
 
-State files in `Reports/`: `sleeve_ledger.json` (halves), `live_pending_orders.json` (9 AM rests), `manual_orders.json`,
+State files in `Reports/`: `sleeve_ledger.json` (halves: tags + cash, no shares), `live_pending_orders.json` (9 AM rests), `manual_orders.json`,
 `manual_block.json`, `run_state.json` (decision done / last daily), `earnings_stop_state.json`, `trade_audit_state.json`;
 logs: `run_log.csv`, `live_orders_log.csv`, `logs/`.
 

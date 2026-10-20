@@ -34,16 +34,10 @@ def held_symbols():
         data = None
     if data is not None:
         pos = [str(p.get("symbol", "")).upper() for p in data.get("positions") or [] if float(p.get("qty") or 0) > 0]
-        return sorted(s for s in pos if s), "live Alpaca positions"
-    try:
-        import sleeves
-        led = sleeves.load_ledger()
-    except Exception:
-        led = None
-    if led is None:
-        return [], "no holdings source"
-    syms = {s.upper() for h in sleeves.HALVES for s, q in (led["halves"][h].get("shares") or {}).items() if float(q) > 0}
-    return sorted(syms), f"sleeve ledger of {led.get('day')} (Alpaca not readable here)"
+        import holdings
+        pend = sorted(set(holdings.pending_symbols()) - set(pos))
+        return sorted(s for s in pos if s), "live Alpaca positions" + (f" · Pending order: {', '.join(pend)}" if pend else "")
+    return [], "Alpaca not readable right now (live positions are the only holdings source)"
 
 def _rankings():
     """(lv targets, sector targets, lv ranking, sector ranking) at the latest close; the rankings = each half's buy zone."""
