@@ -83,7 +83,7 @@ python manual_trade.py blocks                                   # list active bl
 | `pipeline_watchdog.py` | Retries transient failures for launchd; never retries orders. |
 | `paper_trade.py` | Order planning (`plan_orders` → `plan_sleeve_orders`) and live sending, 9 AM fill check (`complete_unfilled_orders`). |
 | `sleeves.py` | The two halves: plan, ledger, sector rotation weights. |
-| `backtest_engine.py` | Rules (`WINNER`), scores, ranking, NYSE calendar; also the engine for the forward test. |
+| `backtest_engine.py` | The live engine despite its name: rules (`WINNER`), scores, ranking, NYSE calendar, and the simulator the forward test uses. Backtest-only code, tests and pins were removed Oct 19, 2026 (forward testing only). |
 | `manual_trade.py` | Manual orders, blocks, replacement buys. |
 | `decision_ranks.py` | Rank snapshot per decision (`Reports/decision_ranks.csv`, for the Last decision view). |
 | `alpaca_paper.py` | Read-only Alpaca client (GET only). |

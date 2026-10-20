@@ -1178,39 +1178,6 @@ def simulate(open_w, close_w, target, start, end=None, rebalance=None, cost=COST
     return {"equity": pd.Series(eq, idx), "exposure": pd.Series(expo, idx), "turnover": pd.Series(turn, idx),
             "trades": trades, "open_positions": open_pos}
 
-def metrics(res, name=None):
-    """Summary statistics of one simulation (return, CAGR, Sharpe, drawdown, turnover, trade stats)."""
-    eq, ex = res["equity"], res["exposure"]
-    r = eq.pct_change()
-    r.iloc[0] = eq.iloc[0] - 1
-    n = len(eq)
-    years = n / 252
-    total = eq.iloc[-1] - 1
-    cagr = eq.iloc[-1] ** (1 / years) - 1 if eq.iloc[-1] > 0 else np.nan
-    vol = r.std()
-    downside = np.sqrt((np.minimum(r, 0) ** 2).mean())
-    dd = (eq / eq.cummax().clip(lower=1.0) - 1).min()
-    closed = res["trades"][res["trades"]["Kind"] != "trim"]     # a trim is a partial sell, not a closed trade
-    opened = len(closed) + len(res["open_positions"])
-    out = {
-        "Strategy": name,
-        "Start": eq.index[0].date(), "End": eq.index[-1].date(), "Days": n,
-        "Total Return %": total * 100,
-        "CAGR %": cagr * 100,
-        "Sharpe": r.mean() / vol * np.sqrt(252) if vol > 0 else np.nan,
-        "Sortino": r.mean() / downside * np.sqrt(252) if downside > 0 else np.nan,
-        "Max DD %": dd * 100,
-        "Calmar": cagr / abs(dd) if dd < 0 else np.nan,
-        "Exposure %": ex.mean() * 100,
-        "Time in Market %": (ex > 0.001).mean() * 100,
-        "Return per Invested Day (bp)": (r.mean() / ex.mean() * 1e4) if ex.mean() > 0 else np.nan,
-        "Turnover x/yr": res["turnover"].sum() / years,
-        "Trades": opened,
-        "Closed Trades": len(closed),
-        "Win Rate % (closed, net)": (closed["Return"] > 0).mean() * 100 if len(closed) else np.nan,
-        "Avg Trade % (closed, net)": closed["Return"].mean() * 100 if len(closed) else np.nan,
-    }
-    return out
 
 # ----------------------------------------------------------------------------- ranking and selection
 def _name_positions(cols):
@@ -1406,7 +1373,7 @@ def midweek_check_days(dates, days=("Mon", "Wed"), rebalance_days=None):
 
     Each calendar check day (``days``, e.g. Mon / Wed) maps to the first session on or after it, so a Monday holiday moves the check to
     Tuesday. Sessions that are also a weekly rebalance day are excluded (the full rebalance wins). Same mapping as
-    the tested variant D (Reports/rebalance_frequency_test.csv; reproduced by tests/test_midweek_repro.py).
+    the tested variant D.
     """
     dates = pd.DatetimeIndex(dates)
     if rebalance_days is None:
@@ -1859,23 +1826,6 @@ def holding_details(weights, open_w, close_w, vol_w):
                      "Vol_63d_%": float(vol_w.at[last, sym]) * np.sqrt(252) * 100 if sym in vol_w else np.nan})
     return pd.DataFrame(rows)
 
-# ----------------------------------------------------------------------------- long-history inputs (tests)
-def backtest_inputs(refresh=False):
-    """Prices, scores, eligibility, volatility, market filter and decision calendar of the live rules over the long history, from
-    Reports/cache/bars_daily_long.pkl (refresh=True downloads the bars again: Alpaca market data, no quota; the pinned test
-    numbers in tests/ assume the cached bars). Same set-up as tests/backtest_setup.py."""
-    bars, _ = load_bars(refresh=refresh, cache_name=LONG_CACHE, start=LONG_START)
-    U = scored_symbols(bars)          # short-history stocks (< MIN_BARS bars at the end of the data) are not scored
-    tech = build_technical(bars, symbols=U)
-    close, opn = wide(bars, "Close"), wide(bars, "Open")
-    idx = close.index
-    tech_score = wide(tech, "Technical_Score").reindex(index=idx, columns=U)
-    elig = bool_wide(tech, "eligible", idx, U)
-    rs = relative_strength(close, U, eligible_w=elig)
-    return {"close": close, "open": opn, "score": 0.5 * tech_score + 0.5 * rs, "tiebreak": rs, "universe": U,
-            "eligible": elig,
-            "vol": volatility(close[U]),
-            "regime": regime_series(close), "weekly": weekly_rebalance_days(idx, live=True)}
 
 # ----------------------------------------------------------------------------- per-stock forward test (dashboard)
 FORWARD_START = "2026-10-02"          # the dashboard's per-stock forward test counts trades and stats from this close on

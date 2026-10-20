@@ -150,7 +150,7 @@ class FakeAccount:
         return [{"date": "2026-09-30", "time": "2026-09-30T21:15:00Z", "amount": 57000.0}]
 
     def position_dicts(self):
-        return [{"symbol": "CCC"}]
+        return [{"symbol": "CCC", "qty": "5"}]
 
 import tempfile  # noqa: E402
 from datetime import datetime  # noqa: E402

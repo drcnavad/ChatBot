@@ -985,7 +985,7 @@ def record(account=None, now=None, path=DAILY_CSV):
     traded, cost = trade_cost(fills, _read(ORDERS_CSV), closes)
     row = {"Date": f"{now:%Y-%m-%d}", "Time_CT": f"{now:%H:%M}", "Equity": round(s["Equity"] - late, 2),
            "Cash": round(s["Cash"] - late, 2), "Net_Deposits": round(sum(f["amount"] for f in flows) - late, 2),
-           "Positions": len(account.position_dicts()),
+           "Positions": len(__import__("holdings").held_qty(account=account)),
            "Closed_Picks": len(pk), "Winning_Picks": int((pk["P/L $"] > 0).sum()), "Traded_USD": round(traded, 2),
            "Cost_USD": round(cost, 2)}
     old = _read(path, dtype={"Date": str})

@@ -85,7 +85,7 @@ def auditable(D, label):
     The pipeline computes each row from live bars fetched at run time; this audit
     recomputes from the cached bars. A row newer than the cache is unauditable -
     it is skipped, not failed. Refresh the cache to audit it (Alpaca market data,
-    no quota): python -c "import backtest_engine as be; be.backtest_inputs(refresh=True)"
+    no quota): python -c "import backtest_engine as be; be.load_bars(refresh=True, cache_name=be.LONG_CACHE, start=be.LONG_START)"
     """
     if pd.Timestamp(D).date() > CACHE_MAX:
         msg = f"SKIP {label} {pd.Timestamp(D).date()}: bar cache ends {CACHE_MAX} (pipeline used live bars)"
@@ -271,7 +271,7 @@ if auditable(latest, "provisional"):
 if n_reb_audited == 0:
     FAIL.append("no rebalance row could be audited: the bar cache ends "
                 f"{CACHE_MAX}, older than every checked rebalance date - refresh it: "
-                "python -c \"import backtest_engine as be; be.backtest_inputs(refresh=True)\"")
+                "python -c \"import backtest_engine as be; be.load_bars(refresh=True, cache_name=be.LONG_CACHE, start=be.LONG_START)\"")
 
 # --- Mid-week checks (live rule: worse than rank 20 sold, refilled from the top 10): the last 3 historical rank-exit days
 #     and this week's Mon/Wed checks. Only when the CSV was written by the current rules (else the next run rewrites it).
@@ -307,6 +307,6 @@ if SKIPPED:
     print("\nNOTE: some audit dates were skipped - they are newer than the bar cache "
           f"(cache ends {CACHE_MAX}); the pipeline computed those rows from live bars.")
     print("To audit them, refresh the cache (Alpaca market data, no quota):")
-    print("  python -c \"import backtest_engine as be; be.backtest_inputs(refresh=True)\"")
+    print("  python -c \"import backtest_engine as be; be.load_bars(refresh=True, cache_name=be.LONG_CACHE, start=be.LONG_START)\"")
 print("\nRANK AUDIT OK" if not FAIL else f"\nRANK AUDIT FAILURES: {FAIL}")
 sys.exit(1 if FAIL else 0)
