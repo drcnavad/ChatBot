@@ -455,6 +455,34 @@ check("breakout 2% exit: held at 99.5 and 98 (not 2%+ below)... sold below 98", 
 check("breakout: 5 variants (N = 1-5), exit 2% below the 200-day, no calendar rebalance", [c["b200"].get("days") for c in ft.STRATEGIES if c.get("b200")] == [1, 2, 3, 4, 5] and all(c["b200"]["buffer"] == 0.98 for c in ft.STRATEGIES if c.get("b200"))
       and all(ft.rebalance_days(c, {"weekly": "W"}) is None for c in ft.STRATEGIES if c.get("b200")))
 
+# event lines (Oct 19, 2026): fresh crosses only, TP / exit signal, same slots as the breakouts
+_x = pd.DataFrame(False, index=_bd, columns=_c.columns)
+_en = _x.copy(); _en.loc[_bd[1], ["A", "B"]] = True
+_ex = _x.copy(); _ex.loc[_bd[4], "B"] = True
+we = ft.event_slot_weights(_c, _en, _ex, _e, _v, tp=0.20, start="2026-10-01")
+check("event lines: bought at the entry close, B sold on its exit signal, A at +20% (101 -> 125)",
+      we["B"].tolist()[:6] == [0, 0.1, 0.1, 0.1, 0, 0] and we["A"].tolist()[:7] == [0, 0.1, 0.1, 0.1, 0.1, 0.1, 0], we.to_dict())
+_f = lambda v: pd.DataFrame({"A": v}, index=_bd[:len(v)], dtype=float)
+_i = {"ma10": _f([1, 1, 3, 3, 3, 1]), "ma30": _f([2, 2, 2, 2, 2, 2]), "ma50": _f([0] * 6), "ma200": _f([0] * 6),
+      "eligible": _f([1] * 6).astype(bool), "scores": {"tech": _f([0] * 6)}}
+_en3, _ex3 = ft.event_signals(_i, "ma10_30")
+check("MA10 x MA30: entry on the 2nd close after a fresh cross only; exit when MA10 <= 0.98 x MA30",
+      _en3["A"].tolist() == [False, False, False, True, False, False] and _ex3["A"].tolist()[-1], _en3["A"].tolist())
+_i["ma10"] = _f([3] * 6)
+check("MA10 x MA30: already above from the start is not a fresh cross", not ft.event_signals(_i, "ma10_30")[0]["A"].any())
+wt = ft.event_slot_weights(_c, _en, _x, _e, _v, max_days=3, start="2026-10-01")["B"].tolist()
+ws = ft.event_slot_weights(_c, _en, _x, _e, _v, stop=0.05, start="2026-10-01")["B"].tolist()
+check("event lines: time exit after 3 sessions; -5% stop from entry not hit at 98 (stop 95.95)",
+      wt[:6] == [0, 0.1, 0.1, 0.1, 0, 0] and ws[1:7] == [0.1] * 6, (wt, ws))
+_ii = {**_i, "close": _c[["A"]].iloc[:6]}
+check("event signals: all 10 kinds build", all(ft.event_signals({**_ii, "ma10": _f([1] * 6)}, k)[0].shape == (6, 1) for k in
+      ("tech80", "tech70", "ma10_30", "ma10_30_50", "golden", "macd", "rsi2", "donchian", "bollinger", "ema")))
+check("event lines: 10 named lines, no calendar rebalance",
+      [c["name"] for c in ft.STRATEGIES if c.get("event")] == ["Tech score 80/60 + TP20", "Tech score 70/60/90", "MA10 x MA30",
+       "MA10 & MA30 x MA50", "MA50 x MA200 (golden cross)", "MACD cross", "RSI pullback in uptrend",
+       "Donchian 20-day breakout", "Bollinger mean reversion", "EMA 9/21 cross"]
+      and all(ft.rebalance_days(c, {"weekly": "W"}) is None for c in ft.STRATEGIES if c.get("event")))
+
 # the forward test's spare-cash rule on target weights
 sd = pd.bdate_range("2026-10-05", periods=5)                                   # Mon..Fri
 sc = [f"S{k:02d}" for k in range(1, 9)] + ["AMD"] + [f"S{k:02d}" for k in range(9, 14)]   # AMD rank 9 (do_not_buy)

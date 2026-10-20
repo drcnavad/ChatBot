@@ -284,6 +284,26 @@ STRATEGIES = [
          rule="Buy a stock on the 4th close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
     dict(name="200-day breakout, 5 days above, exit 2% below", b200=dict(tp=0.2, days=5, buffer=0.98), earnings=None, group="event",
          rule="Buy a stock on the 5th close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
+    dict(name="Tech score 80/60 + TP20", event=dict(kind="tech80", tp=0.2), earnings=None, group="event",
+         rule="Buy when the stock's Technical_Score percentile (among the day's stocks) crosses above 80; sell when it falls below 60 or at +20% from the entry (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="Tech score 70/60/90", event=dict(kind="tech70", tp=None), earnings=None, group="event",
+         rule="Buy when the Technical_Score percentile crosses above 70 (not if already 90+); sell when it falls below 60 or reaches 90 or above (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="MA10 x MA30", event=dict(kind="ma10_30", tp=None), earnings=None, group="event",
+         rule="Buy on the 2nd close after the 10-day average crosses above the 30-day; sell when the 10-day is 2% or more below the 30-day (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="MA10 & MA30 x MA50", event=dict(kind="ma10_30_50", tp=None), earnings=None, group="event",
+         rule="Buy on the 2nd close after the 10- and 30-day averages are both above the 50-day (fresh cross); sell when the 10-day drops below the 30-day (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="MA50 x MA200 (golden cross)", event=dict(kind="golden", tp=0.2), earnings=None, group="event",
+         rule="Buy on the 2nd close after the 50-day average crosses above the 200-day; sell when the 10-day drops below the 50-day or at +20% from the entry (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="MACD cross", event=dict(kind="macd", tp=0.2), earnings=None, group="event",
+         rule="Buy when MACD(12,26) crosses above its 9-day signal line with the close above the 200-day average; sell when MACD crosses below the signal or at +20% from the entry (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="RSI pullback in uptrend", event=dict(kind="rsi2", days=10), earnings=None, group="event",
+         rule="Connors-style: buy when the 2-day RSI is below 10 with the close above the 200-day average; sell when the close is above the 5-day average or after 10 sessions (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="Donchian 20-day breakout", event=dict(kind="donchian"), earnings=None, group="event",
+         rule="Turtle-style: buy on a close at a new 20-day high; sell on a close at a 10-day low (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="Bollinger mean reversion", event=dict(kind="bollinger", stop=0.05), earnings=None, group="event",
+         rule="Buy when the close is below the lower Bollinger band (20, 2) with the close above the 200-day average; sell when the close is at or above the middle band or 5% below the entry (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="EMA 9/21 cross", event=dict(kind="ema"), earnings=None, group="event",
+         rule="Buy on the 2nd close after the 9-day EMA crosses above the 21-day EMA; sell when the 9-day crosses below the 21-day (10% each, at most 10, calmest first; checked at the close)."),
 ]
 for _c in STRATEGIES:                                     # the limits the plain rankings keep (said once, here)
     if (_c.get("select") is PLAIN or _c.get("select") is EQ) and not _c["rule"].startswith("The Oct 2 rules"):
@@ -404,6 +424,67 @@ def breakout200_weights(c, ma200, eligible, vol, tp, stop=None, buffer=1.0, n=10
                 held[j] = C[t, j]
         out[t, list(held)] = 1 / n
     return pd.DataFrame(out, index=c.index, columns=c.columns)
+
+def event_slot_weights(c, entry, exit_, eligible, vol, tp=None, n=10, start=None, stop=None, max_days=None):
+    """Event lines (Chirag, Oct 19, 2026), sized like the 200-day breakouts: buy at the close of a day `entry` is True
+    (1/n of equity, at most n open; more signals than free slots: lowest 63-day volatility first; unused cash stays cash);
+    sell at a later close when `exit_` is True or (tp) the close is +tp from the entry close. Entries only from `start`."""
+    C = c.to_numpy(float)
+    N = entry.reindex_like(c).fillna(False).to_numpy(bool) & eligible.reindex_like(c).fillna(False).to_numpy(bool)
+    X, V = exit_.reindex_like(c).fillna(False).to_numpy(bool), vol.reindex_like(c).to_numpy(float)
+    out, held = np.zeros(C.shape), {}
+    t0 = int(np.searchsorted(c.index.values, np.datetime64(pd.Timestamp(start)))) if start is not None else 0
+    for t in range(len(C)):
+        for j in list(held):
+            e, t_in = held[j]
+            if X[t, j] or (tp is not None and C[t, j] >= e * (1 + tp)) or (stop is not None and C[t, j] <= e * (1 - stop)) \
+                    or (max_days is not None and t - t_in >= max_days):
+                del held[j]
+        if t >= t0:
+            new = [j for j in np.argsort(np.nan_to_num(V[t], nan=np.inf), kind="stable") if N[t, j] and j not in held]
+            for j in new[:n - len(held)]:
+                held[j] = (C[t, j], t)
+        out[t, list(held)] = 1 / n
+    return pd.DataFrame(out, index=c.index, columns=c.columns)
+
+def event_signals(inp, kind):
+    """(entry, exit) Date x Symbol frames of the 5 event lines. pct = the day's percentile (0-100) of Technical_Score
+    (signal_analysis combined_signal) among the eligible stocks. Crosses are fresh: below the day before the run starts."""
+    m10, m30, m50, m200, eg = inp["ma10"], inp["ma30"], inp["ma50"], inp["ma200"], inp["eligible"]
+    pct = inp["scores"]["tech"].where(eg).rank(axis=1, pct=True) * 100
+    prev = pct.shift(1)
+    two = lambda a: a & a.shift(1, fill_value=False) & ~a.shift(2, fill_value=True)   # fresh cross, 2 closes above
+    if kind == "tech80":
+        return (pct > 80) & (prev <= 80), pct < 60
+    if kind == "tech70":
+        return (pct > 70) & (prev <= 70) & (pct < 90), (pct < 60) | (pct >= 90)
+    if kind == "ma10_30":
+        return two(m10 > m30), m10 <= 0.98 * m30
+    if kind == "ma10_30_50":
+        return two((m10 > m50) & (m30 > m50)), m10 < m30
+    if kind == "golden":
+        return two(m50 > m200), m10 < m50
+    c = inp["close"]
+    up = c > c.rolling(200).mean()                       # SMA200 from the closes (same as ma_200)
+    cross = lambda a: a & ~a.shift(1, fill_value=True)   # fresh cross on this close
+    if kind == "macd":
+        macd = c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
+        a = macd > macd.ewm(span=9, adjust=False).mean()
+        return cross(a) & up, cross(~a)
+    if kind == "rsi2":
+        d = c.diff()
+        g, l = d.clip(lower=0).ewm(alpha=0.5, adjust=False).mean(), (-d).clip(lower=0).ewm(alpha=0.5, adjust=False).mean()
+        rsi = 100 - 100 / (1 + g / l.replace(0, np.nan))
+        return (rsi < 10) & up, c > c.rolling(5).mean()
+    if kind == "donchian":
+        return c >= c.rolling(20).max(), c <= c.rolling(10).min()
+    if kind == "bollinger":
+        mid, sd = c.rolling(20).mean(), c.rolling(20).std()
+        return (c < mid - 2 * sd) & up, c >= mid
+    if kind == "ema":
+        a = c.ewm(span=9, adjust=False).mean() > c.ewm(span=21, adjust=False).mean()
+        return two(a), cross(~a)
+    raise ValueError(kind)
 
 def earnings_drift(c, spy, earnings, hold=60):
     """Excess return vs SPY (%) of each stock's last earnings reaction day (the report day for AM reports, else the next
@@ -650,7 +731,7 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     have = bx["vwap_ratio"].notna().any(axis=1)
     qqq = b["QQQ"] if "QQQ" in b else pd.Series(np.nan, index=dates)
     return {"close": c.ffill(), "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
-            "bench": b, "up": up, "ma200": f["ma_200"],
+            "bench": b, "up": up, "ma200": f["ma_200"], "ma10": f["ma_10"], "ma30": f["ma_30"], "ma50": f["ma_50"],
             "qqq50": (qqq > qqq.rolling(50).mean()).reindex(dates).fillna(False),
             "weekly": weekly, "live_cal": be.winner_rebalance_days(dates, live=True), "earnings": earnings, "atr": atr,
             "dip_spare": dip_b & ~soon.reindex(index=dates, columns=cols).fillna(False), "open": bx["open_ratio"] * c,
@@ -729,6 +810,10 @@ def strategy_targets(cfg, inp):
                                      tiebreak_w=inp["scores"]["rs"], earnings=inp["earnings"],
                                      never_buy=be.sector_mapping.do_not_buy)
         tgt = spare_cash(tgt, chk, inp)
+    elif cfg.get("event"):                             # event lines (Oct 19): only their entries / exits trade
+        en, ex = event_signals(inp, cfg["event"]["kind"])
+        tgt = event_slot_weights(inp["close"], en, ex, inp["eligible"], inp["vol"], tp=cfg["event"].get("tp"),
+                                 stop=cfg["event"].get("stop"), max_days=cfg["event"].get("days"), start=be.FORWARD_START)
     elif cfg.get("b200"):                              # 200-day breakout family (no calendar: only entries / exits trade)
         tgt = breakout200_weights(inp["close"], inp["ma200"], inp["eligible"], inp["vol"], start=be.FORWARD_START, **cfg["b200"])
     elif cfg.get("weights"):
@@ -813,7 +898,7 @@ def rebalance_days(cfg, inp):
     never (only the names they buy or sell trade). None when the inputs carry no calendar."""
     if cfg.get("live"):
         return inp.get("live_cal", inp.get("weekly"))     # the live calendar (monthly + the Oct 16 switch from Oct 16, 2026)
-    if cfg.get("b200"):                                    # breakouts: only their entries / exits trade (10% at entry)
+    if cfg.get("b200") or cfg.get("event"):                # breakouts / event lines: only their entries / exits trade (10% at entry)
         return None
     key = {"trend": "weekly"}.get(cfg["weights"]) if cfg.get("weights") else \
         {"mwf": "weekly"}.get(cfg.get("calendar", "mwf"), cfg.get("calendar"))
