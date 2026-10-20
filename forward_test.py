@@ -172,21 +172,11 @@ STRATEGIES = [
     dict(name="Buy the dip", weights="dip", group="event",
          rule="The copy folder's dip test: buy a stock 8% below its 50-day average, sell when it is back at the average or "
               "after 30 days; 10% each, at most 10, deepest first, checked daily."),
-    dict(name="Top 5", select={"n": 5}, group="blend", rule="The Oct 2 rules with 5 stocks."),
-    dict(name="Top 20", select={"n": 20}, group="blend",
-         rule="The Oct 2 rules (half technical, half relative strength, Friday rebalance and Mon-Thu checks, 1/volatility "
-              "weights) with 20 stocks. Now: top 15 is relative strength with 15 stocks plus the defensive sleeve. "
-              "200-day high is the 20 stocks closest to their own 200-day high, monthly."),
     dict(name="Friday only", calendar="weekly", group="blend",
          rule="The Oct 2 rules (half technical, half relative strength, top 10) rebalanced on Friday only, with no Mon-Thu "
               "swaps or exits. Now: Friday only is different: it uses the Oct 15 relative-strength rules and keeps the five defensive stocks."),
     dict(name="Monthly", calendar="monthly", group="blend",
          rule="The Oct 2 rules, rebalanced on the last trading day of each month only."),
-    dict(name="Dual momentum", score="dual", calendar="monthly", select={**EQ, "regime": None, "regime_scale": None},
-         earnings=None, group="momentum",
-         rule="Two checks, monthly, equal weight, top 10, at most 4 per sector. The stock's own 12-month return "
-              "(252 trading days) must be positive, and the strongest of those returns are bought. While QQQ is below "
-              "its 200-day average the whole book is cash. An earnings date does not block a buy."),
     dict(name="Trend following 50/200", weights="trend", group="technical",
          rule="Every Friday, each scored stock whose 50-day average is above its 200-day average gets one equal slot: "
               "1 divided by how many stocks are scored that day. A stock below that trend gets nothing, so part of the book "
@@ -225,9 +215,6 @@ STRATEGIES = [
          rule="Same dip as ATR dip buy (top 10): the close is 3 times ATR(14) or more below the highest close of the last "
               "20 days. This line uses the top 30 of the Oct 2 score, and it does not sell after 10 days. It sells when "
               "signal analysis says SELL (score below 0) or the rank falls below 30. 10% each, at most 10, best rank first."),
-    dict(name="Risk parity", reweight="risk_parity", group="blend",
-         rule="The Oct 2 picks (half technical, half relative strength), weighted so each stock adds the same risk "
-              "(63-day volatility and correlation)."),
     dict(name="Top 20 rank-weighted (70/30)", score="rs", select={"n": 20}, reweight="rank_tier", group="rs",
          rule="Relative strength top 20 weighted by rank: ranks 1-10 share 70% (8.5% down to 5.5%), ranks 11-20 share "
               "30% (5.0% down to 1.0%). Half size while QQQ is below its 200-day average."),
@@ -236,16 +223,10 @@ STRATEGIES = [
          rule="The Oct 15 rules (relative strength, top 10, the five defensive stocks) with the Friday rebalance only. "
               "Mon-Thu does not sell or replace anything. Friday only, without the Now: prefix, is the older Oct 2 score "
               "(half technical, half relative strength) and holds no defensive stocks."),
-    dict(name="Now: no defensive sleeve", **{**NOW, "sleeve": False}, group="rs",
-         rule="The Oct 15 rules without the five defensive stocks (LMT, NOC, ABBV, PFE, KO). On the other Oct 15 lines those "
-              "five are always held, on top of the top 10, at 5% each. This line holds only the ranked top 10."),
     dict(name="Now: top 15", **NOW, select={"n": 15}, group="rs",
          rule="The Oct 15 rules (relative strength only, Friday rebalance, Mon-Thu sell below rank 20) with 15 ranked stocks "
               "plus the five defensive stocks. Top 20 is the Oct 2 score (half technical, half relative strength) with 20 stocks "
               "and no sleeve. 200-day high is the 20 stocks closest to their own 200-day high, monthly, equal weight."),
-    dict(name="Now: Mon-Thu sell below rank 15", **{**NOW, "exit": (15, 10)}, group="rs",
-         rule="The Oct 15 rules, except on Mon-Thu a holding ranked worse than 15 (rank 1 is best) is sold and replaced from "
-              "the top 10. The Oct 15 line uses rank 20 for that sell. Friday is still a full rebalance of the top 10 plus the defensive stocks."),
     dict(name="Now: shorter RS (10/21/63 days)", **{**NOW, "score": "rs_short"}, group="rs",
          rule="The Oct 15 rules, with relative strength measured over 10, 21 and 63 trading days (about 2 weeks, 1 month and "
               "3 months). The Oct 15 windows are 21, 63 and 126 days (about 1, 3 and 6 months). Same blend on each window: "
@@ -273,12 +254,6 @@ STRATEGIES = [
          rule="The live account's sector-rotation half on its own (from the Oct 16 close, 1.0 then): the best C6-score "
               "stocks in the 3 sectors whose ETF has the best 63-day return, top 10, 1/volatility weights, max 20% of the "
               "half, rebalanced every Friday; never buys a stock the low-volatility half holds. Not ranked (starts Oct 16)."),
-    dict(name="Oct 15 rules (RS + sleeve, Mon-Thu)", **NOW, group="rs",
-         rule="What the account traded on Oct 13-15: relative strength only, over 21, 63 and 126 trading days (about 1, 3 and "
-              "6 months), top 10, plus five defensive stocks always held (LMT, NOC, ABBV, PFE, KO, 5% each). Friday is a full "
-              "rebalance. On Mon-Thu a holding worse than rank 20 is sold and replaced from the top 10. do_not_buy is never "
-              "bought. Each Now: line is this rule with one change. Now: Friday only drops the Mon-Thu checks. The account "
-              "left these rules on Oct 16 for the 50/50."),
     dict(name=FRI, combo=dict(legs=FRI_LEGS), group="combo",
          rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
               "(63-day ETF return, top 3 sectors) half rebalanced every Friday, no overlap (the live rules until Oct 16)."),
@@ -299,6 +274,20 @@ STRATEGIES = [
          group="combo",
          rule="50/50, the second half = 'Now: RS, calmer half of the list' (relative strength among stocks at or below the "
               "median 63-day volatility) rebalanced weekly, no Mon-Thu checks, no overlap."),
+    dict(name="200-day breakout: TP 20%, no stop", b200=dict(tp=0.2, stop=None, buffer=1.0), earnings=None, group="event",
+         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or sell when the close is below the 200-day average (no stop). Checked at the close."),
+    dict(name="200-day breakout: TP 20%, stop -5%", b200=dict(tp=0.2, stop=0.05, buffer=1.0), earnings=None, group="event",
+         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or sell when the close is below the 200-day average, or 5% below the entry. Checked at the close."),
+    dict(name="200-day breakout: TP 20%, stop -3%", b200=dict(tp=0.2, stop=0.03, buffer=1.0), earnings=None, group="event",
+         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or sell when the close is below the 200-day average, or 3% below the entry. Checked at the close."),
+    dict(name="200-day breakout: TP 15%, stop -5%", b200=dict(tp=0.15, stop=0.05, buffer=1.0), earnings=None, group="event",
+         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +15% from the entry or sell when the close is below the 200-day average, or 5% below the entry. Checked at the close."),
+    dict(name="200-day breakout: TP 15%, stop -3%", b200=dict(tp=0.15, stop=0.03, buffer=1.0), earnings=None, group="event",
+         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +15% from the entry or sell when the close is below the 200-day average, or 3% below the entry. Checked at the close."),
+    dict(name="200-day breakout: TP 30%, stop -5%", b200=dict(tp=0.3, stop=0.05, buffer=1.0), earnings=None, group="event",
+         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +30% from the entry or sell when the close is below the 200-day average, or 5% below the entry. Checked at the close."),
+    dict(name="200-day breakout: TP 20%, exit 1% below the 200-day", b200=dict(tp=0.2, stop=None, buffer=0.99), earnings=None, group="event",
+         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or sell when the close is 1% or more below the 200-day average (no other stop). Checked at the close."),
 ]
 for _c in STRATEGIES:                                     # the limits the plain rankings keep (said once, here)
     if (_c.get("select") is PLAIN or _c.get("select") is EQ) and not _c["rule"].startswith("The Oct 2 rules"):
@@ -391,6 +380,30 @@ def dip_weights(c, ma50, eligible, depth=0.08, max_hold=30, n=10):
         new = [j for j in np.argsort(-gap, kind="stable") if E[t, j] and gap[j] >= depth and j not in held and j not in sold]
         for j in new[:n - len(held)]:
             held[j] = 0
+        out[t, list(held)] = 1 / n
+    return pd.DataFrame(out, index=c.index, columns=c.columns)
+
+def breakout200_weights(c, ma200, eligible, vol, tp, stop=None, buffer=1.0, n=10, start=None):
+    """200-day breakout (Chirag, Oct 19, 2026): a stock that closed at/below its 200-day average and then closes above it
+    3 sessions in a row is bought at the 3rd close (1/n of equity, at most n open; more signals than free slots: lowest
+    63-day volatility first; cash left unused stays cash). Daily exit at the close (the forward test has closes only, not the
+    2:35 PM CT price): +tp from the entry close, the close below buffer x the 200-day average, or (stop) -stop from entry.
+    An exit's cash waits for the next signal. Entries only from `start` on (flat at the start)."""
+    C, M, E = c.to_numpy(float), ma200.reindex_like(c).to_numpy(float), eligible.reindex_like(c).fillna(False).to_numpy(bool)
+    V = vol.reindex_like(c).to_numpy(float)
+    above = np.nan_to_num(C > M, nan=False) & np.isfinite(M)
+    out, held = np.zeros(C.shape), {}
+    t0 = int(np.searchsorted(c.index.values, np.datetime64(pd.Timestamp(start)))) if start is not None else 0
+    for t in range(len(C)):
+        for j in list(held):
+            px, e = C[t, j], held[j]
+            if px >= e * (1 + tp) or px < buffer * M[t, j] or (stop is not None and px <= e * (1 - stop)):
+                del held[j]
+        if t >= max(t0, 3):
+            sig = above[t] & above[t - 1] & above[t - 2] & ~above[t - 3] & E[t]
+            new = [j for j in np.argsort(np.nan_to_num(V[t], nan=np.inf), kind="stable") if sig[j] and j not in held]
+            for j in new[:n - len(held)]:
+                held[j] = C[t, j]
         out[t, list(held)] = 1 / n
     return pd.DataFrame(out, index=c.index, columns=c.columns)
 
@@ -639,7 +652,7 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     have = bx["vwap_ratio"].notna().any(axis=1)
     qqq = b["QQQ"] if "QQQ" in b else pd.Series(np.nan, index=dates)
     return {"close": c.ffill(), "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
-            "bench": b, "up": up,
+            "bench": b, "up": up, "ma200": f["ma_200"],
             "qqq50": (qqq > qqq.rolling(50).mean()).reindex(dates).fillna(False),
             "weekly": weekly, "live_cal": be.winner_rebalance_days(dates, live=True), "earnings": earnings, "atr": atr,
             "dip_spare": dip_b & ~soon.reindex(index=dates, columns=cols).fillna(False), "open": bx["open_ratio"] * c,
@@ -718,6 +731,8 @@ def strategy_targets(cfg, inp):
                                      tiebreak_w=inp["scores"]["rs"], earnings=inp["earnings"],
                                      never_buy=be.sector_mapping.do_not_buy)
         tgt = spare_cash(tgt, chk, inp)
+    elif cfg.get("b200"):                              # 200-day breakout family (no calendar: only entries / exits trade)
+        tgt = breakout200_weights(inp["close"], inp["ma200"], inp["eligible"], inp["vol"], start=be.FORWARD_START, **cfg["b200"])
     elif cfg.get("weights"):
         tgt = inp["weights"][cfg["weights"]]
     elif cfg.get("stop") or cfg.get("replay"):          # the live rules replayed day by day + a stop / a mid-week change
@@ -800,6 +815,8 @@ def rebalance_days(cfg, inp):
     never (only the names they buy or sell trade). None when the inputs carry no calendar."""
     if cfg.get("live"):
         return inp.get("live_cal", inp.get("weekly"))     # the live calendar (monthly + the Oct 16 switch from Oct 16, 2026)
+    if cfg.get("b200"):                                    # breakouts: only their entries / exits trade (10% at entry)
+        return None
     key = {"trend": "weekly"}.get(cfg["weights"]) if cfg.get("weights") else \
         {"mwf": "weekly"}.get(cfg.get("calendar", "mwf"), cfg.get("calendar"))
     return inp.get(key) if key else None

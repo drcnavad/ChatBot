@@ -113,27 +113,27 @@ check("leaderboard: QQQ from the start close", abs(q["Total return %"] + 1) < 1e
       q.to_dict())
 check("leaderboard: the account and QQQ / SPY are not ranked", sm.loc[[ft.ACCOUNT, "QQQ (comparison)", "SPY (comparison)"], "Rank"].isna().all())
 vals = pd.DataFrame([{"Date": d, "Strategy": c["name"], "Value": 1.0} for d in days for c in ft.STRATEGIES])
-vals.loc[(vals["Strategy"] == "Top 5") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02   # +2% then flat
-vals.loc[(vals["Strategy"] == "Top 20") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02
-vals.loc[(vals["Strategy"] == "Top 20") & (vals["Date"] == pd.Timestamp("2026-10-05")), "Value"] = 0.95  # same total, deeper drop
+vals.loc[(vals["Strategy"] == "Quant Score top 5") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02   # +2% then flat
+vals.loc[(vals["Strategy"] == "Quant Score top 10") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02
+vals.loc[(vals["Strategy"] == "Quant Score top 10") & (vals["Date"] == pd.Timestamp("2026-10-05")), "Value"] = 0.95  # same total, deeper drop
 lb = ft.leaderboard(daily, bench, vals)
 N_RANKED = sum(bool(c.get("ranked", True)) for c in ft.STRATEGIES)   # the Oct 16 live halves are shown, not ranked
 check("leaderboard: ranked by total return since Oct 2, a tie goes to the smaller drawdown; Rank counts strategies only",
-      list(lb.dropna(subset=["Rank"])["Strategy"][:2]) == ["Top 5", "Top 20"] and list(lb.dropna(subset=["Rank"])["Rank"][:2]) == [1, 2]
+      list(lb.dropna(subset=["Rank"])["Strategy"][:2]) == ["Quant Score top 5", "Quant Score top 10"] and list(lb.dropna(subset=["Rank"])["Rank"][:2]) == [1, 2]
       and sorted(lb["Rank"].dropna()) == list(range(1, N_RANKED + 1)), lb.head(4).to_dict("records"))
 check("leaderboard: the live row is marked", (lb["Strategy"] == ft.MARKED + ft.LIVE_MARK).sum() == 1, list(lb["Strategy"]))
 _early = ft.leaderboard(daily.iloc[:3], bench.iloc[:3], vals[vals["Date"] <= "2026-10-06"])
 check("leaderboard: ranked from day one (no wait for a full week)",
-      sorted(_early["Rank"].dropna()) == list(range(1, N_RANKED + 1)) and _early.dropna(subset=["Rank"])["Strategy"].iloc[-1] == "Top 20",
+      sorted(_early["Rank"].dropna()) == list(range(1, N_RANKED + 1)) and _early.dropna(subset=["Rank"])["Strategy"].iloc[-1] == "Quant Score top 10",
       _early.head(3).to_dict("records"))
 check("verdict: too early before 12 weeks", ft.verdict(lb) == "Week 2 of 12: too early to name a winner.", ft.verdict(lb))
 long_days = pd.bdate_range("2026-10-02", periods=70)
-lv = pd.DataFrame([{"Date": d, "Strategy": c["name"], "Value": 1.0 + i * (0.002 if c["name"] == "Top 5" else 0.0)}
+lv = pd.DataFrame([{"Date": d, "Strategy": c["name"], "Value": 1.0 + i * (0.002 if c["name"] == "Quant Score top 5" else 0.0)}
                    for i, d in enumerate(long_days) for c in ft.STRATEGIES])
 lbq = lambda q_end: ft.leaderboard(daily.iloc[:0], pd.DataFrame({"Date": long_days, "QQQ": 100.0, "SPY": 100.0}).assign(
     QQQ=lambda x: [100.0] * 69 + [q_end]), lv)
 check("verdict: after 12 weeks the top strategy wins only if it beats live and QQQ",
-      "the winner is Top 5" in ft.verdict(lbq(100.0)) and "no winner" in ft.verdict(lbq(200.0)),
+      "the winner is Quant Score top 5" in ft.verdict(lbq(100.0)) and "no winner" in ft.verdict(lbq(200.0)),
       (ft.verdict(lbq(100.0)), ft.verdict(lbq(200.0))))
 
 class FakeAccount:
@@ -259,10 +259,10 @@ now = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c.get("score") in ("
        and c.get("exit")}
 _nb = [s_ for s_ in sector_mapping.do_not_buy if s_ in full[ft.LIVE]]
 _chg = lambda t: set(t.index[(t.diff().abs().sum(axis=1) > 1e-12).to_numpy()].dayofweek)
-check("Now strategies: 8 + the restored Oct 15 rules, do_not_buy never held, trades on Tue / Thu checks too, all different",
-      len(now) == 9 and all((t[_nb].to_numpy() == 0).all() for t in now.values())
+check("Now strategies: 6 (Oct 19: near-duplicates removed), do_not_buy never held, trades on Tue / Thu checks too, all different",
+      len(now) == 6 and all((t[_nb].to_numpy() == 0).all() for t in now.values())
       and {1, 3} <= set().union(*(_chg(t) for t in now.values()))
-      and len({t.round(6).to_numpy().tobytes() for t in now.values()}) >= 8,     # fake data: no sleeve stocks
+      and len({t.round(6).to_numpy().tobytes() for t in now.values()}) >= 5,     # fake data: no sleeve stocks
       (_nb, sorted(set().union(*(_chg(t) for t in now.values())))))
 # stop scenarios: each stock held over a Friday reports (after the close) 2 sessions after that Friday
 L, fridays = live_raw.to_numpy(), np.where(inp["weekly"].to_numpy(bool))[0]
@@ -425,7 +425,30 @@ with tempfile.TemporaryDirectory() as tmp:
     rd = {c["name"]: ft.rebalance_days(c, {"weekly": "W", "monthly": "M"}) for c in ft.STRATEGIES}
     check("rebalance days: the calendar of each rule (Fridays, month ends, never for the dip and threshold rules)",
           rd[ft.LIVE] == rd["Friday only"] == rd["Short-term reversal"] == "W" and rd["Monthly"] == "M"
-          and rd["Dual momentum"] == "M" and rd["Buy the dip"] is None and set(rd.values()) <= {"W", "M", None}, rd)
+          and rd["12-1 month momentum"] == "M" and rd["Buy the dip"] is None and set(rd.values()) <= {"W", "M", None}, rd)
+
+# 200-day breakout family (Oct 19, 2026): 3 closes above the 200-day after one below, bought on the 3rd; TP / stop / 200-day exit
+_bd = pd.bdate_range("2026-10-01", periods=12)
+_c = pd.DataFrame({"A": [99, 101, 102, 103, 104, 110, 125, 120, 120, 120, 120, 120.0],      # breaks out, +20% TP on day 6
+                   "B": [99, 101, 102, 103, 100, 99.5, 98, 98, 98, 98, 98, 98.0],          # stop -3% / 1% below the 200-day
+                   "C": [101] * 12}, index=_bd, dtype=float)                                # always above: never a breakout
+_m = pd.DataFrame(100.0, index=_bd, columns=_c.columns)
+_e = pd.DataFrame(True, index=_bd, columns=_c.columns)
+_v = pd.DataFrame({"A": 0.2, "B": 0.1, "C": 0.3}, index=_bd)
+wa = ft.breakout200_weights(_c, _m, _e, _v, tp=0.20, start="2026-10-01")
+check("breakout: bought on the 3rd close above (10% each), sold at +20% from the entry close",
+      wa["A"].tolist() == [0, 0, 0, 0.1, 0.1, 0.1, 0, 0, 0, 0, 0, 0] and wa["C"].eq(0).all(), wa.to_dict())
+check("breakout: plain exit = the close below the 200-day; no stop", wa["B"].tolist()[:6] == [0, 0, 0, 0.1, 0.1, 0], wa["B"].tolist())
+wc = ft.breakout200_weights(_c, _m, _e, _v, tp=0.20, stop=0.03, start="2026-10-01")
+check("breakout: -3% stop from the entry (103 -> 99.91) sells at 99.5", wc["B"].tolist()[:6] == [0, 0, 0, 0.1, 0.1, 0], wc["B"].tolist())
+wg = ft.breakout200_weights(_c, _m, _e, _v, tp=0.20, buffer=0.99, start="2026-10-01")
+check("breakout g: held at 99.5 (within 1% of the 200-day), sold at 98 (more than 1% below)",
+      wg["B"].tolist()[:7] == [0, 0, 0, 0.1, 0.1, 0.1, 0], wg["B"].tolist())
+w1 = ft.breakout200_weights(_c, _m, _e, _v, tp=0.20, n=1, start="2026-10-01")
+check("breakout: more signals than slots -> the calmest first (B before A); unused cash stays cash",
+      w1.loc[_bd[3], "B"] == 1.0 and w1.loc[_bd[3], "A"] == 0, w1.iloc[3].to_dict())
+check("breakout: 7 variants, no calendar rebalance", sum(bool(c.get("b200")) for c in ft.STRATEGIES) == 7
+      and all(ft.rebalance_days(c, {"weekly": "W"}) is None for c in ft.STRATEGIES if c.get("b200")))
 
 # the forward test's spare-cash rule on target weights
 sd = pd.bdate_range("2026-10-05", periods=5)                                   # Mon..Fri
