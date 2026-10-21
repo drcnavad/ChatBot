@@ -29,7 +29,10 @@ def render_trade_audit():
     except Exception as e:
         info_text(f"Trade audit unavailable right now ({type(e).__name__}: {str(e)[:200]}). It tries again next hour.")
         return
+    from backtest_engine import FORWARD_START
     trips = rep["round_trips"]
+    if len(trips):                          # only round trips bought and sold on / after Oct 2 (Chirag, Oct 21)
+        trips = trips[pd.to_datetime(trips["Bought_CT"]).dt.date >= pd.Timestamp(FORWARD_START).date()]
     if not len(trips):
         caption_text("No sales yet.")
         return
@@ -39,5 +42,5 @@ def render_trade_audit():
     st.dataframe(toned(shown.round(2), ["P/L $", "P/L %"]), hide_index=True, width="stretch", height=300, column_config=cfg)
     total = pd.DataFrame([{c: None for c in shown.columns}]).astype(object)     # its own table: never sorted with the rows
     total.loc[0, shown.columns[0]] = "Total"
-    total.loc[0, "Shares"], total.loc[0, "P/L $"] = round(float(trips["Shares"].sum()), 4), round(float(trips["P/L $"].sum()), 2)
+    total.loc[0, "P/L $"] = round(float(trips["P/L $"].sum()), 2)
     st.dataframe(toned(total, ["P/L $"]), hide_index=True, width="stretch", column_config=cfg, key="trade_audit_total")

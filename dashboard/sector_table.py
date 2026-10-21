@@ -44,7 +44,7 @@ try:
 except Exception:
     sector_etfs = {}
 MARKETS = {"SPY": "S&P 500", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWM": "Russell 2000",
-           "DBC": "Commodities", "GLD": "Gold", "SLV": "Silver", "USO": "USO (crude ETF)"}
+           "DBC": "Commodities"}   # gold, silver, crude: the futures rows (GLD, SLV, USO removed Oct 21)
 LIVE_WINDOWS = {"3 days %": pd.DateOffset(days=3), "1 week %": pd.DateOffset(weeks=1), **WINDOWS,
                 "2 years %": pd.DateOffset(years=2)}
 

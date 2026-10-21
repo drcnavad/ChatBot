@@ -38,6 +38,8 @@ check(be.WINNER["sector_day"] == "friday" and kinds == {"2026-10-16": "full reba
                 "2026-11-13": be.SECTOR_KIND, "2026-11-20": be.SECTOR_KIND, "2026-11-27": be.SECTOR_KIND,
                 "2026-11-30": "full rebalance", "2026-12-04": be.SECTOR_KIND},
       "decisions: Oct 16 / Oct 30 (a Friday: both halves) / Nov 30 full, Mon Oct 19 then every Friday the sector half", kinds)
+check(be.is_sector_day(pd.Timestamp("2026-10-23 14:30", tz="America/Chicago")) and be.decision_kind(pd.Timestamp("2026-10-21 13:40", tz="America/Chicago")) is None,
+      "tz-aware CT clock times work (run_all.finished_text)")
 check(be.is_sector_day("2026-12-24") and not be.is_sector_day("2026-12-25") and be.is_sector_day("2026-10-30")
       and not be.is_sector_day("2026-10-26") and not be.is_sector_day("2026-11-30"),
       "Friday holiday (Christmas, Fri Dec 25, 2026) -> the sector half on Thursday Dec 24; Oct 30 (month end, Friday) is a sector day; no Mon Oct 26")

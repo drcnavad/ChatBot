@@ -3,6 +3,7 @@ per-run holdings read the tax view and trade audit reuse."""
 import os
 from datetime import datetime
 
+import pandas as pd
 import streamlit as st
 
 from dashboard.data import etf_prices
@@ -94,16 +95,33 @@ def strategy_of(symbols, reports=None):
         pass
     return {s: (tag[s] + (" (M)" if s in manual else "")) if s in tag else "Manual" for s in symbols}
 
+def rank_at_buy(sym, strategy, bought):
+    """The stock's rank in its half at the latest saved decision on or before its first buy (Reports/decision_ranks.csv);
+    None for manual buys or when no rank was saved then (ranks are saved from Fri Oct 16, 2026)."""
+    col = {"Low Vol": "Rank_Vol", "Sector": "Rank_Sector"}.get(strategy)
+    if col is None or bought is None or bought != bought:
+        return None
+    try:
+        import decision_ranks
+        r = pd.read_csv(decision_ranks.RANKS_CSV, parse_dates=["Date"])
+    except Exception:
+        return None
+    r = r[(r["Symbol"] == sym) & (r["Date"].dt.date <= pd.Timestamp(bought).date())].sort_values("Date")
+    return int(r[col].iloc[-1]) if len(r) and pd.notna(r[col].iloc[-1]) else None
+
 def render_positions(table, data):
     """The holdings table (alpaca_paper.holdings_table) and its caption."""
     strat = strategy_of(list(table["Stock"]))
     table.insert(1, "Strategy", [strat.get(s, "") if not str(s).startswith("Total") else "" for s in table["Stock"]])
+    table.insert(2, "Rank", pd.array([rank_at_buy(s, g, d) for s, g, d in zip(table["Stock"], table["Strategy"], table["First bought"])],
+                                     dtype="Int64"))
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
     money, pct = st.column_config.NumberColumn(format="dollar"), st.column_config.NumberColumn(format="%+.2f%%")
     table = table.drop(columns=["Weight %"], errors="ignore")   # equal weights: not shown (Oct 21, 2026)
     st.dataframe(toned(table, ["P/L $", "P/L %", "Today %"]), hide_index=True, width="stretch",
                  height=35 * (len(table) + 1) + 3,                  # every row visible, no inner scroll
-                 column_config={"Shares": st.column_config.NumberColumn(format="%.2f"), "Avg price": money,
+                 column_config={"Rank": st.column_config.NumberColumn(format="%d", help="Rank in its half on the day it was first bought"),
+                                "Shares": st.column_config.NumberColumn(format="%.2f"), "Avg price": money,
                                 "Cost basis": money, "Market value": money, "P/L $": money, "Price": money,
                                 "P/L %": pct, "Today %": pct})
 

@@ -1664,7 +1664,8 @@ MONDAY_SECTOR = (pd.Timestamp("2026-10-19"), pd.Timestamp("2026-10-22"))   # the
 
 def is_sector_day(d):
     """The sector-rotation half's weekly rebalance session (WINNER['sector_day']: 'monday' = week start, else week end)."""
-    d = pd.Timestamp(d).normalize()
+    d = pd.Timestamp(d)
+    d = (d.tz_localize(None) if d.tzinfo else d).normalize()   # CT clock times are tz-aware (run_all.finished_text)
     if WINNER.get("sector_day") == "monday" or MONDAY_SECTOR[0] <= d <= MONDAY_SECTOR[1]:
         return is_week_start(d)                          # (the live Monday rebalances Oct 19-22, 2026 stay in the history)
     return is_session(d) and next_sessions(d, 1)[0].isocalendar()[:2] != d.isocalendar()[:2]
