@@ -424,8 +424,8 @@ with tempfile.TemporaryDirectory() as tmp:
           abs(ht.at[pd.Timestamp("2026-10-07"), "Value"] - t7) < 1e-12 and (ht["Cash"] >= -1e-12).all(), ht.round(8).to_dict())
     rd = {c["name"]: ft.rebalance_days(c, {"weekly": "W", "monthly": "M"}) for c in ft.STRATEGIES}
     check("rebalance days: the calendar of each rule (Fridays, month ends, never for the dip and threshold rules)",
-          rd[ft.LIVE] == rd["Now: Friday only"] == rd["Short-term reversal"] == "W" and rd["Monthly"] == "M"
-          and rd["12-1 month momentum"] == "M" and rd["Buy the dip"] is None and set(rd.values()) <= {"W", "M", None}, rd)
+          rd[ft.LIVE] == rd["Now: Friday only"] == "W" and rd["Monthly"] == "M"
+          and rd["Buy the dip"] is None and set(rd.values()) <= {"W", "M", None}, rd)
 
 # 200-day breakout family (Oct 19, 2026): 3 closes above the 200-day after one below, bought on the 3rd; TP / stop / 200-day exit
 _bd = pd.bdate_range("2026-10-01", periods=12)
@@ -475,16 +475,15 @@ ws = ft.event_slot_weights(_c, _en, _x, _e, _v, stop=0.05, start="2026-10-01")["
 check("event lines: time exit after 3 sessions; -5% stop from entry not hit at 98 (stop 95.95)",
       wt[:6] == [0, 0.1, 0.1, 0.1, 0, 0] and ws[1:7] == [0.1] * 6, (wt, ws))
 _ii = {**_i, "close": _c[["A"]].iloc[:6]}
-check("event signals: all 10 kinds build", all(ft.event_signals({**_ii, "ma10": _f([1] * 6)}, k)[0].shape == (6, 1) for k in
-      ("tech80", "tech70", "ma10_30", "ma10_30_50", "golden", "macd", "rsi2", "donchian", "bollinger", "ema", "macd_weekly", "ema_adx", "minervini", "high52",
+check("event signals: every kind builds", all(ft.event_signals({**_ii, "ma10": _f([1] * 6)}, k)[0].shape == (6, 1) for k in
+      ("tech80", "tech70", "ma10_30", "golden", "macd", "donchian", "bollinger", "ema", "ema_adx", "minervini", "high52",
       "ma_rsi", "golden_macd")))
 _dn = sorted(set(sector_mapping.do_not_buy) & set(full))
 check("do-not-buy: no paper strategy (all but the live rules) ever holds one",
       all((full[k][_dn].to_numpy() == 0).all() for k in full if not k.startswith("Live") and k != ft.LIVE), _dn)
-check("event lines: 16 named lines, no calendar rebalance",
+check("event lines: 13 named lines, no calendar rebalance",
       [c["name"] for c in ft.STRATEGIES if c.get("event")] == ["Tech score 80/60 + TP20", "Tech score 70/60/90", "MA10 x MA30",
-       "MA10 & MA30 x MA50", "MA50 x MA200 (golden cross)", "MACD cross", "RSI pullback in uptrend",
-       "Donchian 20-day breakout", "Bollinger mean reversion", "EMA 9/21 cross", "MACD cross, weekly",
+       "MA50 x MA200 (golden cross)", "MACD cross", "Donchian 20-day breakout", "Bollinger mean reversion", "EMA 9/21 cross",
        "EMA 9/21 + ADX>25", "Minervini trend template", "52-week high momentum", "Dual MA + RSI filter", "Golden cross + MACD confirm"]
       and all(ft.rebalance_days(c, {"weekly": "W"}) is None for c in ft.STRATEGIES if c.get("event")))
 

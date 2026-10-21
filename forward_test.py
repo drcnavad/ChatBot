@@ -60,7 +60,9 @@ LIVE = TOP5         # the line the verdict and the dashboard compare against
 # its saved rows are dropped (REMOVED, purge_removed).
 # Removed Oct 21, 2026 (Chirag): near-duplicates (MACD cross + TP20 = MACD cross so far; breakouts cut to 2 and 4 days;
 # Friday only ~ Oct 2 rules without Mon-Thu checks, Now: Friday only covers that).
-REMOVED = {"Live 50/50 combined (no overlap)", "Live rules (C6)", "MACD cross + TP20", "Friday only",
+REMOVED = {"Short-term reversal", "12-1 month momentum", "RSI pullback in uptrend", "Worst 3 sectors 3M, +10%/-3%",
+           "Breakout with volume", "Relative strength only", "MACD cross, weekly", "MA10 & MA30 x MA50",
+           "Live 50/50 combined (no overlap)", "Live rules (C6)", "MACD cross + TP20", "Friday only",
            "Live 50/50, sector rotation on Fridays", "50/50: Low vol + SR weekly 63d (live combo from Oct 2)",   # old top-10 Friday rows
            "200-day breakout, 1 day above, exit 2% below", "200-day breakout, 3 days above, exit 2% below",
            "200-day breakout, 5 days above, exit 2% below",
@@ -150,9 +152,6 @@ STRATEGIES = [
               "list. Sector rotation is a different line: it first keeps only the 3 sectors whose ETF has the best 63-day return."),
     dict(name="Technical score only", score="tech", group="technical",
          rule="Oct 2 rules ranking on the technical score alone (moving averages, RSI, MACD). Top 10."),
-    dict(name="Relative strength only", score="rs", group="rs",
-         rule="Oct 2 rules ranking on relative strength alone: 60% the stock versus its sector ETF, 40% that ETF versus SPY, "
-              "over 21, 63 and 126 trading days. Top 10."),
     dict(name="Quant Score top 10", score="quant", tiebreak=None, group="quant",
          rule="Quant Score only, 10 stocks. The score is 0-100 from the trend, the moving averages, the 20-day VWAP, RSI, MACD "
               "and Bollinger bands (a missing part counts as 50). It holds the 10 highest scores above 50, on the Oct 2 calendar "
@@ -165,10 +164,6 @@ STRATEGIES = [
          rule="Oct 2 rules ranking on a 50/50 blend of Quant Score rank and relative strength rank. Top 10."),
     dict(name="Company fundamentals", score="fundamental", calendar="monthly", select=EQ, earnings=None, group="fundamental",
          rule="Top 10 by the company-report score (Fundamental_Weight), equal weight, monthly."),
-    dict(name="12-1 month momentum", score="mom_12_1", calendar="monthly", **SIMPLE, group="momentum",
-         rule="Top 10 by the return from 12 months ago to 1 month ago (252 trading days back, stopping 21 trading days ago). "
-              "The last month is left out, so a jump in the last few weeks does not count. Monthly, equal weights. "
-              "6-month momentum uses the plain last 126 trading days and rebalances every Friday."),
     dict(name="6-month momentum", score="mom_6", calendar="weekly", **SIMPLE, group="momentum",
          rule="Top 10 by the plain return over the last 126 trading days (about 6 months), including the last month. Every Friday, "
               "equal weights. 12-1 month momentum leaves out the last month and rebalances once a month."),
@@ -194,8 +189,6 @@ STRATEGIES = [
          rule="The 20 stocks closest to their highest close of the last 200 trading days (today's close divided by that "
               "high; 1 means the stock is at the high). Equal weight, monthly, at most 8 per sector (the 40% sector cap on a 20-stock book), half size while QQQ "
               "is below its 200-day average. Now: top 15 is relative strength plus the defensive sleeve."),
-    dict(name="Short-term reversal", score="reversal", calendar="weekly", select=EQ, earnings=None, group="event",
-         rule="The 10 biggest 1-week losers among stocks above their 200-day average, equal weight, every Friday."),
     dict(name="Quality + momentum", score="quality_mom", calendar="monthly", **SIMPLE, group="fundamental",
          rule="Top 10 by half the company-report score (Fundamental_Weight, the quality rank) and half the 12-1 month momentum "
               "rank (return from 12 months ago to 1 month ago). Monthly, equal weights."),
@@ -207,10 +200,6 @@ STRATEGIES = [
          rule="The 3 sector ETFs with the best 63-day (about 3-month) return, then the best Oct 2 scores (half technical, "
               "half relative strength) inside only those sectors. Top 10, every Friday, no Mon-Thu checks, and an earnings date "
               "never blocks a buy. The C6 4-per-sector line is different: it ranks the whole list and can hold any sector."),
-    dict(name="Breakout with volume", score="breakout", calendar="weekly", select=EQ, earnings=None, group="event",
-         rule="A stock qualifies when, during the last 20 sessions, it closed within 2% of its 55-day high on at least "
-              "1.3 times normal volume (the 5-day average volume versus the 50-day average), and the close is still above "
-              "the 50-day average. The rank is that volume jump, not the size of the price gain. Top 10, equal weight, every Friday."),
     dict(name="ATR dip buy (top 10)", weights="atr_dip", group="event",
          rule="Same dip as ATR dip buy, sell on signal, with a shorter list and a fixed exit. Buy only a top-10 name on the "
               "Oct 2 score (half technical, half relative strength, score above 0) when the close is 3 times ATR(14) or more "
@@ -289,22 +278,16 @@ STRATEGIES = [
          rule="Buy when the Technical_Score percentile crosses above 70 (not if already 90+); sell when it falls below 60 or reaches 90 or above (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="MA10 x MA30", event=dict(kind="ma10_30", tp=None), earnings=None, group="event",
          rule="Buy on the 2nd close after the 10-day average crosses above the 30-day; sell when the 10-day is 2% or more below the 30-day (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="MA10 & MA30 x MA50", event=dict(kind="ma10_30_50", tp=None), earnings=None, group="event",
-         rule="Buy on the 2nd close after the 10- and 30-day averages are both above the 50-day (fresh cross); sell when the 10-day drops below the 30-day (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="MA50 x MA200 (golden cross)", event=dict(kind="golden", tp=0.2), earnings=None, group="event",
          rule="Buy on the 2nd close after the 50-day average crosses above the 200-day; sell when the 10-day drops below the 50-day or at +20% from the entry (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="MACD cross", event=dict(kind="macd", tp=0.2), earnings=None, group="event",
          rule="Buy when MACD(12,26) crosses above its 9-day signal line with the close above the 200-day average; sell when MACD crosses below the signal or at +20% from the entry (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="RSI pullback in uptrend", event=dict(kind="rsi2", days=10), earnings=None, group="event",
-         rule="Connors-style: buy when the 2-day RSI is below 10 with the close above the 200-day average; sell when the close is above the 5-day average or after 10 sessions (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="Donchian 20-day breakout", event=dict(kind="donchian"), earnings=None, group="event",
          rule="Turtle-style: buy on a close at a new 20-day high; sell on a close at a 10-day low (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="Bollinger mean reversion", event=dict(kind="bollinger", stop=0.05), earnings=None, group="event",
          rule="Buy when the close is below the lower Bollinger band (20, 2) with the close above the 200-day average; sell when the close is at or above the middle band or 5% below the entry (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="EMA 9/21 cross", event=dict(kind="ema"), earnings=None, group="event",
          rule="Buy on the 2nd close after the 9-day EMA crosses above the 21-day EMA; sell when the 9-day crosses below the 21-day (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="MACD cross, weekly", event=dict(kind="macd_weekly"), earnings=None, group="event",
-         rule="Weekly MACD(12,26,9) on weekly closes: buy on the week's last close when it crosses above its signal; sell when it crosses below (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="EMA 9/21 + ADX>25", event=dict(kind="ema_adx"), earnings=None, group="event",
          rule="The EMA 9/21 cross (2 closes) only when ADX(14) is above 25 (ADX from closes); sell when the 9-day crosses below the 21-day (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="Minervini trend template", event=dict(kind="minervini"), earnings=None, group="event",
@@ -319,8 +302,6 @@ STRATEGIES = [
          rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last month (21 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
     dict(name="Worst 3 sectors 2M, +10%/-3%", worst=dict(look=42), earnings=None, group="event",
          rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 2 months (42 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
-    dict(name="Worst 3 sectors 3M, +10%/-3%", worst=dict(look=63), earnings=None, group="event",
-         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 3 months (63 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
     dict(name="Golden cross + MACD confirm", event=dict(kind="golden_macd"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and MACD is above its signal; sell when MACD falls below the signal (10% each, at most 10, calmest first; checked at the close)."),
 ]
@@ -368,7 +349,7 @@ def bar_features(sources, dates, cols):
     """Close / 20-day VWAP (the copy's daily-bar VWAP: typical price x volume), the volume jump (5-day / 50-day average
     volume), ATR(14) / close and open / close, computed inside each download so splits and dividends stay consistent; the newest download wins where its
     window is full. Decision days use their 2:30 PM bar, like signal_analysis.csv."""
-    out = {k: pd.DataFrame(index=dates, columns=cols, dtype=float) for k in ("vwap_ratio", "vol_jump", "atr_ratio", "open_ratio")}
+    out = {k: pd.DataFrame(index=dates, columns=cols, dtype=float) for k in ("vwap_ratio", "atr_ratio", "open_ratio")}
     for b in sources:
         b = be.keep_decision_bars(b.sort_values(["Symbol", "Date"]).reset_index(drop=True), now=_NO_SAVE)
         w = {c: b.pivot_table(index="Date", columns="Symbol", values=c) for c in be.BAR_COLS}
@@ -377,7 +358,7 @@ def bar_features(sources, dates, cols):
         pc = w["Close"].shift(1)                         # ATR: Wilder 14, as in be.calculate_technical_indicators
         tr = np.fmax(w["High"] - w["Low"], np.fmax((w["High"] - pc).abs(), (w["Low"] - pc).abs()))
         atr = tr.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
-        new = {"vwap_ratio": w["Close"] / vwap, "vol_jump": v.rolling(5).mean() / v.rolling(50).mean(),
+        new = {"vwap_ratio": w["Close"] / vwap,
                "atr_ratio": atr / w["Close"], "open_ratio": w["Open"] / w["Close"]}
         for k in out:
             out[k] = out[k].combine_first(new[k].reindex(index=dates, columns=cols))
@@ -479,8 +460,6 @@ def event_signals(inp, kind):
         return (pct > 70) & (prev <= 70) & (pct < 90), (pct < 60) | (pct >= 90)
     if kind == "ma10_30":
         return two(m10 > m30), m10 <= 0.98 * m30
-    if kind == "ma10_30_50":
-        return two((m10 > m50) & (m30 > m50)), m10 < m30
     if kind == "golden":
         return two(m50 > m200), m10 < m50
     c = inp["close"]
@@ -490,11 +469,6 @@ def event_signals(inp, kind):
         macd = c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
         a = macd > macd.ewm(span=9, adjust=False).mean()
         return cross(a) & up, cross(~a)
-    if kind == "rsi2":
-        d = c.diff()
-        g, l = d.clip(lower=0).ewm(alpha=0.5, adjust=False).mean(), (-d).clip(lower=0).ewm(alpha=0.5, adjust=False).mean()
-        rsi = 100 - 100 / (1 + g / l.replace(0, np.nan))
-        return (rsi < 10) & up, c > c.rolling(5).mean()
     if kind == "donchian":
         return c >= c.rolling(20).max(), c <= c.rolling(10).min()
     if kind == "bollinger":
@@ -512,12 +486,6 @@ def event_signals(inp, kind):
         g, l = d.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean(), (-d).clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
         return 100 - 100 / (1 + g / l.replace(0, np.nan))
     s50, s150, s200 = c.rolling(50).mean(), c.rolling(150).mean(), c.rolling(200).mean()
-    if kind == "macd_weekly":                            # weekly MACD on weekly (last session of the week) closes
-        last = [be.next_sessions(d, 1)[0].isocalendar()[:2] != d.isocalendar()[:2] for d in c.index]   # NYSE calendar:
-        wk = c[np.array(last, bool)]                     # a week counts once its last session closed (no partial week)
-        a = macd_up(wk)
-        r = lambda x: x.reindex(c.index).fillna(False).astype(bool)
-        return r(cross(a)), r(cross(~a))
     if kind == "ema_adx":                                # ADX(14) from closes only (no highs / lows saved): |close change|
         d = c.diff()
         pdm, mdm, tr = d.clip(lower=0), (-d).clip(lower=0), d.abs()
@@ -710,18 +678,14 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
         "quant_rs": 100 * (0.5 * _pct(quant) + 0.5 * _pct(rs)),
         "sentiment": (100 * (0.8 * _pct(live) + 0.2 * _pct(snap["SentimentScore"].fillna(0.0)))).where(live > 0),
         "fundamental": snap["Fundamental_Weight"],
-        "mom_12_1": mom_12_1,
         "mom_6": ret(126) * 100,
         "low_vol": (1 / vol).where(up),
         "dual": (ret(252) * 100).where(regime, axis=0),
         "mom_risk": ret(126) / (c.pct_change(fill_method=None).rolling(126).std() * np.sqrt(126)),
         "high_200": c / c.rolling(200).max(),          # 1 = the close is the highest close of the last 200 sessions
-        "reversal": (-ret(5) * 100).where(up),
         "quality_mom": (100 * (0.5 * _pct(snap["Fundamental_Weight"]) + 0.5 * _pct(mom_12_1))),
         "drift": earnings_drift(c, b["SPY"] if "SPY" in b else pd.Series(1.0, index=dates), earnings),
         "sector_rot": live.where(etf_3m.rank(axis=1, method="dense", ascending=False).le(3)),   # top 3 ETF returns
-        "breakout": bx["vol_jump"].where((c >= 0.98 * c.rolling(55).max()) & (bx["vol_jump"] >= 1.3))
-                    .rolling(20, min_periods=1).max().where(c > f["ma_50"]),     # a breakout in the last 20 sessions
     }
     # Legacy combined_signal (Stock Analysis Legacy/main_signal_analysis.ipynb): missing news / fundamentals = that day's mean
     fill = lambda x: x.T.fillna(x.mean(axis=1)).T.fillna(0.0)

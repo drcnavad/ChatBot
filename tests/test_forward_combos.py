@@ -1,5 +1,4 @@
-"""forward_combos (Chirag, Oct 15, 2026 evening): the forward-test lines with two independent halves, swap-only halves and
-the low-volatility keep / Friday falling rules (the old "Live 50/50 combined (no overlap)" line was removed Oct 20, 2026). Real saved data,
+"""forward_combos (Chirag, Oct 15, 2026 evening): the forward-test lines with two independent halves and swap-only halves. Real saved data,
 temp copies of the forward files (the real Reports files are never written); no broker calls, no orders.
 
 Covers: deterministic replay (two runs equal; a shorter replay is a prefix of the longer one = saved days never change);

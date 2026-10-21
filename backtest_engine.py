@@ -397,7 +397,7 @@ def ensure_long_cache(cache_name=LONG_CACHE, start=LONG_START, data_client=None)
     fails (no keys / network); a symbol Alpaca has no bars for is reported (warning) and skipped."""
     path = CACHE_DIR / cache_name
     if not path.exists():
-        return []                                   # load_bars fetches the whole cache
+        return []                                   # no cache yet: nothing to append
     cached = pd.read_pickle(path)
     missing = sorted(set(TRADABLE + BENCHMARKS + SECTOR_ETFS) - set(cached["Symbol"].unique()))
     if not missing:
@@ -421,22 +421,6 @@ def ensure_long_cache(cache_name=LONG_CACHE, start=LONG_START, data_client=None)
     if still:
         log.warning("backtest bar cache: Alpaca has no bars for %s - check the ticker in sector_mapping.py", still)
     return got
-
-def load_bars(refresh=False, cache_name=LONG_CACHE, start=LONG_START):
-    """All bars needed by the backtest (tradable + benchmarks + sector ETFs), cached under Reports/cache.
-    The cache is refetched when asked, when it is missing, or when it starts later than `start`; a stock added to
-    sector_mapping.py since the last fetch is appended (ensure_long_cache)."""
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = CACHE_DIR / cache_name
-    stale = not path.exists() or pd.read_pickle(path)["Date"].min() > pd.Timestamp(start) + pd.Timedelta(days=7)
-    if refresh or stale:
-        bars = fetch_daily_bars(TRADABLE + BENCHMARKS + SECTOR_ETFS, start=start)
-        bars.to_pickle(path)
-    else:
-        ensure_long_cache(cache_name, start)
-    bars = apply_history_start(pd.read_pickle(path))
-    bars, dropped = drop_partial_last_bar(bars)
-    return bars, dropped
 
 # ----------------------------------------------------------------------------- technical indicators
 # (merged from signal_analysis_functions.py) calculate_technical_indicators (moving averages, RSI, MACD, Bollinger
@@ -862,12 +846,6 @@ def short_history_symbols(bars, symbols=None, min_bars=MIN_BARS):
     n = bars.loc[bars["Symbol"].isin(symbols), "Symbol"].value_counts()
     return [s for s in symbols if 0 < n.get(s, 0) < min_bars]
 
-def scored_symbols(bars, symbols=None, min_bars=MIN_BARS):
-    """`symbols` (default TRADABLE) minus short_history_symbols: the stocks that are scored and ranked."""
-    symbols = list(symbols if symbols is not None else TRADABLE)
-    short = set(short_history_symbols(bars, symbols, min_bars))
-    return [s for s in symbols if s not in short]
-
 def short_history_reference(bars, symbols=None, min_bars=MIN_BARS):
     """Reference table (display only, never traded) for every short-history stock: first trade, days of history vs the
     `min_bars` needed, the estimated date it becomes eligible (its `min_bars`-th NYSE session, assuming it trades every
@@ -897,10 +875,6 @@ def short_history_reference(bars, symbols=None, min_bars=MIN_BARS):
                      "High_Since_First": round(hi, 2), "Off_High_%": round((c.iloc[-1] / hi - 1) * 100, 2),
                      "Rough_Signal": rough_signal(c.iloc[-1], ma(10), ma(30), ma(50), rsi)})
     return pd.DataFrame(rows, columns=SHORT_HISTORY_COLUMNS)
-
-def save_short_history_reference(ref, path=SHORT_HISTORY_CSV):
-    """Write the reference table (header only when no stock is short on history -> the app hides its section)."""
-    ref.reindex(columns=SHORT_HISTORY_COLUMNS).to_csv(path, index=False)
 
 def short_history_message(ref):
     """One plain line for the logs, e.g. 'Skipped for short history (not tradable yet): X (77 of 200 days, first traded ...)'."""

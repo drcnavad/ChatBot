@@ -16,7 +16,7 @@
 #   com.stockanalysis.tradeaudit      Mon-Fri every 30 min 8:30 AM-3:00 PM + 3:45 PM CT: trade_audit.py --write --log (read-only ledger, round
 #                                     trips, reconciliation + alerts to the run log; GET only, never orders)
 #   com.stockanalysis.dashboard-8502  always on (restarted if it stops): the app on http://localhost:8502
-#   com.unicorn.voice                 Voice Genie (Unicorn), only when ../Voice Genie/main.py exists next to this folder
+#   com.unicorn.voice                 Voice Genie (Unicorn), template in ../Voice Genie/launchd/ (when that folder exists)
 # The plists in this folder are templates written on the old Mac: their paths (/Users/drcnavad/Desktop/..., /opt/anaconda3)
 # are rewritten to this folder's real location and the python in $PYTHON (default: /opt/anaconda3/bin/python3, else
 # python3 on PATH) before they are copied to ~/Library/LaunchAgents. run_all.py decides whether anything is due; run_state
@@ -63,7 +63,7 @@ PYEOF
 }
 
 templates=("$HERE"/com.stockanalysis.*.plist)
-[ -f "$VG/main.py" ] && templates+=("$HERE/com.unicorn.voice.plist")
+[ -f "$VG/launchd/com.unicorn.voice.plist" ] && templates+=("$VG/launchd/com.unicorn.voice.plist")   # its template lives in Voice Genie
 for f in "${templates[@]}"; do
     label="$(basename "$f" .plist)"
     if [ "$OUT" != "$AGENTS" ]; then render "$f"; echo "ok  $OUT/$label.plist"; continue; fi
