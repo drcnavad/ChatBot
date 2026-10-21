@@ -28,13 +28,12 @@ def render_forward_test():
         marked = (f" {pd.Timestamp(values['Date'].max()):%a %b %-d}: each strategy's holdings from the last saved day marked "
                   "to that day's close (provisional, no trades yet); the daily run's 3:05 PM CT step saves that day with its trades.")
     board = tidy_board(board, start[:-6])
-    pct = [c for c in board.columns if c not in ("Rank", "Strategy")]
+    pct = [c for c in board.columns if c not in ("Rank", "Strategy", "Rule")]
     sty = toned(toned(board, [c for c in pct if c != "Max drawdown"]), ["Max drawdown"], fn=drawdown_tone)
-    render_group_legend()
-    st.dataframe(highlight_rows(paint_strategy(sty)), hide_index=True, width="stretch",
+    st.dataframe(highlight_rows(sty), hide_index=True, width="stretch",
                  height=35 * (len(board) + 1) + 3,                                                # every row, no scrolling
                  column_config={"Rank": st.column_config.NumberColumn(format="%d", width="small"),
-                                "Strategy": st.column_config.TextColumn(width="large"),
+                                "Strategy": st.column_config.TextColumn(width="large"), "Rule": st.column_config.TextColumn(),
                                 **{c: st.column_config.NumberColumn(format="%+.2f%%") for c in pct}})
     acct = ""
     if daily is not None and len(daily):
@@ -57,11 +56,23 @@ def tidy_board(board, start):
     """Leaderboard for display: short column names (Total since <start>, Today, Max drawdown, Wk 1..), integer Rank
     (blank = not ranked), weeks that have not started dropped."""
     weeks = [c for c in board.columns if c.startswith("Week ") and board[c].notna().any()]
-    b = board[["Rank", "Strategy", "Total return %", "Daily return %", "Max drawdown %", *weeks]].copy()
+    b = board[["Rank", "Strategy", "Total return %", "Daily return %", *weeks[::-1], "Max drawdown %"]].copy()   # newest week first
     b["Rank"] = pd.array(pd.to_numeric(b["Rank"], errors="coerce"), dtype="Int64")
     names = {"Total return %": f"Total since {start}", "Daily return %": "Today", "Max drawdown %": "Max drawdown",
              **{w: w.replace("Week ", "Wk ").replace(" %", "") for w in weeks}}
+    b.insert(2, "Rule", [rule_of(x) for x in b["Strategy"]])
     return b.rename(columns=names)
+
+def rule_of(name):
+    """The family a leaderboard row belongs to (forward_test.GROUP_LABEL), Live / Your account / Benchmark otherwise."""
+    import forward_test as ft
+    name = str(name)
+    if name.startswith(ft.LIVE):
+        return "Live strategy"
+    if name == "My Alpaca account":
+        return "Your account"
+    g = ft.GROUP_OF.get(name.replace(ft.LIVE_MARK, ""))
+    return ft.GROUP_LABEL.get(g, g) if g else "Benchmark"
 
 def highlight_rows(sty):
     """Darker rows: your Alpaca account, the current (live) strategy, Low volatility in uptrend, Sector rotation."""
