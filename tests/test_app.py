@@ -214,7 +214,7 @@ def _ranked_ok(b):
     names = b["Strategy"].replace({"Current Strategy (live)": ft.MARKED}).str.replace(ft.LIVE_MARK, "", regex=False)
     want = names.isin(rk) & b["Total since Oct 2"].notna()
     return bool((b["Rank"].notna() == want).all()) or not b["Rank"].notna().any()
-expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Rule", "Total since Oct 2", "Today", *_wk, "Max drawdown"] and [w.replace(" (so far)", "") for w in _wk] == [f"Wk {k}" for k in range(len(_wk), 0, -1)]
+expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Rule", "Total since Oct 2", "Last EOD", *_wk, "Max drawdown"] and [w.replace(" (so far)", "") for w in _wk] == [f"Wk {k}" for k in range(len(_wk), 0, -1)]
                    and (_ft[0]["Strategy"] == "Current Strategy (live)").sum() == 1 and _ranked_ok(_ft[0])),
        f"leaderboard: columns, one marked live row, every ranked strategy with data ranked (the Oct 16 live halves not): {_ft[0].to_dict('list') if _ft else None}")
 expect(not _ft or sum(ft.RANK_RULE in c.value for c in at.caption) == 1, "the ranking rule is written once in the caption")

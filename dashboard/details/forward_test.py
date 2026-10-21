@@ -34,7 +34,9 @@ def render_forward_test():
                  height=35 * (len(board) + 1) + 3,                                                # every row, no scrolling
                  column_config={"Rank": st.column_config.NumberColumn(format="%d", width="small"),
                                 "Strategy": st.column_config.TextColumn(width="large"), "Rule": st.column_config.TextColumn(),
-                                **{c: st.column_config.NumberColumn(format="%+.2f%%") for c in pct}})
+                                **{c: st.column_config.NumberColumn(format="%+.2f%%") for c in pct},
+                                "Last EOD": st.column_config.NumberColumn(format="%+.2f%%", help="EOD = end of day close")})
+    st.caption("Last EOD = the return on the last end-of-day close (EOD = end of day close).")
     acct = ""
     if daily is not None and len(daily):
         last = daily.iloc[-1]
@@ -55,13 +57,13 @@ HIGHLIGHT_BG = "background-color: #e2e8f0; font-weight: 700"   # subtle slate on
 CURRENT = "Current Strategy (live)"   # display name of the live strategy's row (forward_test.LIVE stays its id)
 
 def tidy_board(board, start):
-    """Leaderboard for display: short column names (Total since <start>, Today, Max drawdown, Wk 1..), integer Rank
+    """Leaderboard for display: short column names (Total since <start>, Last EOD, Max drawdown, Wk 1..), integer Rank
     (blank = not ranked), weeks that have not started dropped."""
     import forward_test as ft
     weeks = [c for c in board.columns if c.startswith("Week ") and board[c].notna().any()]
     b = board[["Rank", "Strategy", "Total return %", "Daily return %", *weeks[::-1], "Max drawdown %"]].copy()   # newest week first
     b["Rank"] = pd.array(pd.to_numeric(b["Rank"], errors="coerce"), dtype="Int64")
-    names = {"Total return %": f"Total since {start}", "Daily return %": "Today", "Max drawdown %": "Max drawdown",
+    names = {"Total return %": f"Total since {start}", "Daily return %": "Last EOD", "Max drawdown %": "Max drawdown",
              **{w: w.replace("Week ", "Wk ").replace(" %", "") for w in weeks}}
     b.insert(2, "Rule", [rule_of(x) for x in b["Strategy"]])
     b["Strategy"] = [CURRENT if str(x).startswith(ft.LIVE) else x for x in b["Strategy"]]   # display name only
