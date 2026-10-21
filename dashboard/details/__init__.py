@@ -2,6 +2,7 @@
 import streamlit as st
 
 from dashboard.details.data_settings import render_data_and_settings
+from dashboard.details.equity_chart import render_equity_chart
 from dashboard.details.forward_test import render_forward_rules, render_forward_test
 from dashboard.details.last_decision import render_last_decision
 from dashboard.details.live_holdings import render_live_holdings
@@ -28,6 +29,8 @@ def render_strategy_tab(p):
 def render_trading_tab(p):
     """Trading Account tab: live holdings, trade audit, tax view, strategy rules (the portfolio by half and both strategies'
     ranks are in the Strategy tab's Last decision)."""
+    with st.expander("Portfolio value", expanded=True):
+        render_equity_chart()
     with st.expander("Live holdings (Alpaca account)", expanded=True):
         render_live_holdings()
     with st.expander("Trade audit · gain / loss per sale (read-only)", expanded=False):

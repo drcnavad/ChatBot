@@ -71,10 +71,10 @@ def render_curve(board, values):
                                  line=dict(width=3.5 if live else 1.8, dash="dot" if "(comparison)" in n else None),
                                  hovertemplate="%{x|%b %-d}: %{y:+.2f}%<extra>%{fullData.name}</extra>"))
     fig.add_hline(y=0, line=dict(color="#cbd5e1", width=1))
-    fig.update_layout(height=360, margin=dict(l=10, r=10, t=10, b=10), font=dict(family=CHART_FONT, size=12),
+    fig.update_layout(height=440, margin=dict(l=10, r=10, t=10, b=90), font=dict(family=CHART_FONT, size=12),
                       plot_bgcolor="#fff", paper_bgcolor="#fff", hovermode="x unified",
-                      legend=dict(orientation="h", y=-0.15, font=dict(size=11)),
-                      yaxis=dict(ticksuffix="%", gridcolor="#f1f5f9", zeroline=False), xaxis=dict(gridcolor="#f1f5f9"))
+                      legend=dict(orientation="h", y=-0.2, yanchor="top", x=0, xanchor="left", font=dict(size=11)),
+                      yaxis=dict(ticksuffix="%", gridcolor="#f1f5f9", zeroline=False), xaxis=dict(gridcolor="#f1f5f9", tickformat="%b %-d"))
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 RANK = st.column_config.NumberColumn(format="%d", width="small",

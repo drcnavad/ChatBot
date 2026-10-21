@@ -47,6 +47,30 @@ CSS = """
     .sa-kv td:nth-child(even) { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; padding-right: 0.9rem; }
     .sa-open, .sa-back { font-size: 0.8rem; font-weight: 600; color: var(--sa-brand); text-decoration: none; }
     .sa-back { display: inline-block; margin: 0.2rem 0 0.6rem; }
+    /* header cards (dashboard/page.py kpi_card): one grid, every card the same size; hover = today's intraday line */
+    .sa-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 0.6rem; margin-bottom: 0.4rem; }
+    .sa-kpi { position: relative; background: #fff; border: 1px solid var(--sa-line); border-radius: 14px; padding: 0.9rem 1.1rem;
+        height: 112px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between;
+        box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: box-shadow .15s ease, transform .15s ease; min-width: 0; }
+    .sa-kpi:hover { box-shadow: 0 6px 18px rgba(15,23,42,.08); transform: translateY(-1px); }
+    .sa-kpi.has-pop { cursor: default; }
+    .sa-kpi-label { color: var(--sa-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: .05em;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sa-kpi-value { font-size: 1.45rem; font-weight: 700; color: var(--sa-ink); font-variant-numeric: tabular-nums; line-height: 1.2; }
+    .sa-kpi-delta { font-size: 0.8rem; font-weight: 600; color: var(--sa-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sa-kpi-delta.up { color: #15803d; } .sa-kpi-delta.down { color: #b91c1c; }
+    .sa-pop { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 1000; background: #fff;
+        border: 1px solid var(--sa-line); border-radius: 12px; padding: 0.6rem 0.7rem; box-shadow: 0 12px 32px rgba(15,23,42,.16); }
+    .sa-kpi.has-pop:hover .sa-pop { display: block; }
+    [data-testid="stElementContainer"]:has(.sa-kpis), [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .sa-kpis) {
+        position: relative; z-index: 50; overflow: visible !important; }
+    [data-testid="stMarkdownContainer"]:has(.sa-kpis), [data-testid="stMarkdown"]:has(.sa-kpis) { overflow: visible !important; }
+    .sa-pop-title { font-size: 0.72rem; font-weight: 700; color: var(--sa-ink); margin-bottom: 0.3rem; }
+    .sa-pop-foot { display: flex; justify-content: space-between; gap: 1rem; font-size: 0.72rem; color: var(--sa-muted); margin-top: 0.2rem; }
+    .sa-pop-empty { font-size: 0.75rem; color: var(--sa-muted); width: 220px; }
+    .sa-eq-head { display: flex; align-items: baseline; gap: 0.8rem; flex-wrap: wrap; margin: 0.2rem 0 0.3rem; }
+    .sa-eq-val { font-size: 1.6rem; font-weight: 800; color: var(--sa-ink); font-variant-numeric: tabular-nums; }
+    .sa-eq-chg { font-size: 0.95rem; font-weight: 700; } .sa-eq-sub { font-size: 0.78rem; color: var(--sa-muted); }
     /* KPI cards */
     [data-testid="stMetric"] { background: #fff; border: 1px solid var(--sa-line); border-radius: 14px; padding: 0.9rem 1.1rem;
         box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: box-shadow .15s ease, transform .15s ease;
@@ -130,7 +154,7 @@ PCT_COL = st.column_config.NumberColumn(format="%.2f%%")
 
 MA_COLS = ['ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']
 MA_COLORS = ['#0ea5e9', '#8b5cf6', '#f59e0b', '#a16207', '#94a3b8']   # chart lines: sky, violet, amber, brown, slate
-TEAL, HOLD_SHADE = "#0f766e", "rgba(245,158,11,0.10)"               # price line; held periods (yellow = hold)
+TEAL = "#0f766e"
 EARN_LINE = dict(color="rgba(234,88,12,0.45)", width=1, dash="dot")  # dotted vertical line at each earnings date
 
 esc = html.escape

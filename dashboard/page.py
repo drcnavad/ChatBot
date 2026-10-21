@@ -138,20 +138,50 @@ def render_kpis(box):
         d = k["daily"]
         acct = {"equity": float(d["Equity"]), "cash": float(d["Cash"]), "chg": None, "chg_pct": None,
                 "positions": int(d["Positions"]), "saved": True}
+    from dashboard.data import intraday
+    spark = intraday(("QQQ", "SPY", "DIA"))
     cards = []
     if acct:
         cards += [("Portfolio", f"${acct['equity']:,.0f}",
-                   "Last saved close" if acct.get("saved") or acct["chg"] is None else f"{'-' if acct['chg'] < 0 else '+'}${abs(acct['chg']):,.0f} ({_sp(acct['chg_pct'])}) today",
-                   "off" if acct.get("saved") else "normal", "Alpaca account equity and today's change"),
+                   "Last saved close" if acct.get("saved") or acct["chg"] is None
+                   else f"{'-' if acct['chg'] < 0 else '+'}${abs(acct['chg']):,.0f} ({_sp(acct['chg_pct'])}) today",
+                   None if acct.get("saved") else acct["chg"], "Alpaca account equity and today's change", spark.get("PORTFOLIO"), ",.0f"),
                   ("Cash", f"{acct['cash'] / acct['equity']:.1%}" if acct["equity"] else "—",
-                   f"${acct['cash']:,.0f} · {acct['positions']} positions", "off", "Cash share of equity; open positions")]
+                   f"${acct['cash']:,.0f} · {acct['positions']} positions", None, "Cash share of equity; open positions", None, "")]
     for sym, name in (("QQQ", "Nasdaq 100 · QQQ"), ("SPY", "S&P 500 · SPY"), ("DIA", "Dow · DIA")):
         px, chg = q.get(sym, (None, None))
-        cards.append((name, f"${px:,.2f}" if px else "—", f"{_sp(chg)} today" if px else "Quote unavailable",
-                      "normal" if px else "off", "Live price (Alpaca SIP, IEX fallback), change vs the previous close"))
+        cards.append((name, f"${px:,.2f}" if px else "—", f"{_sp(chg)} today" if px else "Quote unavailable", chg,
+                      "Live price (Alpaca SIP, IEX fallback), change vs the previous close", spark.get(sym), ",.2f"))
     if live is not None:
         cards.append(("Live strategy", _sp(live["Total return %"]),
-                      f"Rank #{int(live['Rank'])} of {k['ranked']}" if pd.notna(live["Rank"]) else "Not ranked", "off",
-                      "Forward-test total return and rank (Strategy tab)"))
-    for col, (label, value, delta, dc, tip) in zip(box.columns(len(cards), gap="small"), cards):
-        col.metric(label, value, delta, delta_color=dc, help=tip)
+                      f"Rank #{int(live['Rank'])} of {k['ranked']}" if pd.notna(live["Rank"]) else "Not ranked", None,
+                      "Forward-test total return and rank (Strategy tab)", None, ""))
+    with box:
+        show_html('<div class="sa-kpis">' + "".join(kpi_card(*c) for c in cards) + "</div>")
+
+def sparkline(times, values, base, fmt_, w=260, h=90):
+    """Inline SVG of today's line: green above / red below the previous close (dashed), with the latest value."""
+    if len(values) < 2:
+        return '<div class="sa-pop-empty">No intraday data yet today</div>'
+    lo, hi = min(min(values), base), max(max(values), base)
+    span = (hi - lo) or 1
+    t0, t1 = times[0], times[-1] if times[-1] > times[0] else times[0] + 1
+    X = lambda t: 4 + (t - t0) / (t1 - t0) * (w - 8)
+    Y = lambda v: 6 + (hi - v) / span * (h - 12)
+    color = "#15803d" if values[-1] >= base else "#b91c1c"
+    pts = " ".join(f"{X(t):.1f},{Y(v):.1f}" for t, v in zip(times, values))
+    t_last = datetime.fromtimestamp(times[-1], tz=CT).strftime("%I:%M %p CT").lstrip("0")
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}"><line x1="0" x2="{w}" y1="{Y(base):.1f}" y2="{Y(base):.1f}" '
+            f'stroke="#94a3b8" stroke-dasharray="4 3" stroke-width="1"/><polyline points="{pts}" fill="none" stroke="{color}" '
+            f'stroke-width="1.8" stroke-linejoin="round"/><circle cx="{X(times[-1]):.1f}" cy="{Y(values[-1]):.1f}" r="3" fill="{color}"/></svg>'
+            f'<div class="sa-pop-foot"><span>Prev close ${format(base, fmt_)}</span>'
+            f'<b style="color:{color}">${format(values[-1], fmt_)} · {t_last}</b></div>')
+
+def kpi_card(label, value, delta, sign, tip, series=None, fmt_=""):
+    """One header card (all the same size); with `series` a pure-CSS hover popup holds today's intraday line."""
+    cls = "up" if sign is not None and sign == sign and sign > 0 else "down" if sign is not None and sign == sign and sign < 0 else ""
+    pop = (f'<div class="sa-pop"><div class="sa-pop-title">{esc(label)} · today (5-min)</div>{sparkline(*series, fmt_)}</div>'
+           if series else "")
+    return (f'<div class="sa-kpi{" has-pop" if series else ""}" title="{esc(tip) if not series else ""}">'
+            f'<div class="sa-kpi-label">{esc(label)}</div><div class="sa-kpi-value">{esc(value)}</div>'
+            f'<div class="sa-kpi-delta {cls}">{esc(delta)}</div>{pop}</div>')

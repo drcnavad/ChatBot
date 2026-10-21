@@ -9,7 +9,7 @@ from dashboard.data import last_next_earnings, live_quote, load_decisions
 from dashboard.history import (RS_COLORS, daily_status, event_hover,
     relative_strength_lines, strategy_events)
 from dashboard.settings import CT
-from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, HOLD_SHADE, MA_COLORS, MA_COLS, TEAL)
+from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, MA_COLORS, MA_COLS, TEAL)
 
 WINDOW = pd.Timedelta(days=730)          # chart data: 2 years (the range buttons zoom inside it)
 RANGES = [dict(count=1, label="1M", step="month", stepmode="backward"), dict(count=3, label="3M", step="month", stepmode="backward"),
@@ -25,7 +25,7 @@ def build_price_chart(ticker, tdata, bars=None):
     for col in ("Open", "High", "Low", "Close"):
         bars[col] = bars[col].fillna(chart['Close']) if col in bars else chart['Close']
     x_start, x_end = chart.index[0], chart.index[-1]
-    events, periods = strategy_events(tdata, load_decisions(), ticker)
+    events, _ = strategy_events(tdata, load_decisions(), ticker)
     rs_lines = relative_strength_lines(chart, ticker)
 
     panels = ["price", "vol", "rsi", "macd"] + (["rs"] if rs_lines else [])
@@ -67,10 +67,6 @@ def build_price_chart(ticker, tdata, bars=None):
         name = ma.upper().replace('_', ' ')
         fig.add_trace(go.Scatter(x=chart.index, y=chart[ma], name=name, line=dict(color=color, width=1), mode='lines',
                                  hovertemplate=f'<b>{name}</b> $%{{y:.2f}}<extra></extra>'), row=1, col=1)
-    if periods:
-        fig.add_trace(go.Scatter(x=[x_start], y=[None], mode="markers", name="Hold (shaded period)", hoverinfo="skip",
-                                 marker=dict(symbol="square", size=12, color="rgba(245,158,11,0.35)"),
-                                 showlegend=False), row=1, col=1)
 
     # Entry / exit markers on the session after the decision (hollow = decided at the latest close, orders pending)
     shown = events[events['Fill'].fillna(x_end) >= x_start] if len(events) else events
@@ -106,8 +102,8 @@ def build_price_chart(ticker, tdata, bars=None):
         ned = pd.Timestamp(ned)
         x_right = max(x_end, ned) + pd.Timedelta(days=4)
         fig.add_vline(x=ned, line=EARN_LINE | dict(width=1.5), row="all", col=1)
-        fig.add_annotation(x=ned, y=1, xref="x", yref="y domain", text=f"next earnings {ned:%b %-d}", showarrow=False,
-                           yanchor="bottom", xanchor="right", font=dict(size=10, color='#c2410c'))
+        fig.add_annotation(x=ned, y=0.99, xref="x", yref="y domain", text=f"next earnings {ned:%b %-d}", showarrow=False,
+                           yanchor="top", xanchor="right", font=dict(size=10, color='#c2410c'))
 
     # Live price marker (display only): a single dot at today's date so the price panel reaches the current
     # session. Bars, moving averages, and every strategy panel still end at the last completed bar.
@@ -146,19 +142,13 @@ def build_price_chart(ticker, tdata, bars=None):
                                  mode='lines', showlegend=False, hovertemplate='<b>Signal</b> %{y:.3f}<extra></extra>'), row=r, col=1)
         fig.add_hline(y=0, line_dash="dot", line_color="rgba(128, 128, 128, 0.4)", row=r, col=1)
 
-    # Held periods shaded on all panels (added last, with exclude_empty_subplots=False, or plotly drops them)
-    for start, end in periods:
-        if end >= x_start:
-            fig.add_vrect(x0=max(start, x_start), x1=end, fillcolor=HOLD_SHADE, line_width=0, layer="below",
-                          row="all", col=1, exclude_empty_subplots=False)
-
     grid = dict(showgrid=True, gridcolor='#f1f5f9', showline=False, tickfont=dict(size=10, color='#64748b'), zeroline=False)
     view = chart.index[chart.index >= x_end - pd.Timedelta(days=182)]          # opens on 6 months
     lo, hi = bars.loc[view, "Low"].min(), bars.loc[view, "High"].max()
     fig.update_layout(
-        height=int(620 + 120 * (len(panels) - 2)), hovermode='x unified', margin=dict(l=10, r=10, t=40, b=20),
+        height=int(620 + 120 * (len(panels) - 2)), hovermode='x unified', margin=dict(l=10, r=70, t=44, b=24),
         plot_bgcolor='#ffffff', paper_bgcolor='#ffffff', dragmode="zoom", bargap=0.15,
-        legend=dict(orientation="h", yanchor="bottom", y=1.005, xanchor="right", x=1, font=dict(size=10, color='#334155'),
+        legend=dict(orientation="h", yanchor="bottom", y=1.005, xanchor="center", x=0.5, font=dict(size=10, color='#334155'),
                     bgcolor="rgba(0,0,0,0)"),
         font=dict(family=CHART_FONT, size=11, color='#334155'),
         hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family=CHART_FONT))
@@ -167,9 +157,17 @@ def build_price_chart(ticker, tdata, bars=None):
                      rangebreaks=[dict(bounds=["sat", "mon"])], tickformat='%b %d', **(grid | dict(showgrid=False)))
     fig.update_xaxes(rangeselector=dict(buttons=RANGES, x=0, y=1.0, yanchor="bottom", bgcolor="#f1f5f9", activecolor="#99f6e4",
                                         font=dict(size=11)), row=1, col=1)
-    fig.update_yaxes(side="right", showspikes=True, spikemode="across", spikethickness=1, spikecolor="#cbd5e1", **grid)
-    fig.update_yaxes(tickformat='$,.0f', range=[lo - (hi - lo) * 0.06, hi + (hi - lo) * 0.06], row=1, col=1)
-    fig.update_yaxes(showticklabels=False, showgrid=False, row=row_of["vol"], col=1)
+    fig.update_yaxes(side="right", showticklabels=True, ticks="outside", ticklen=3, tickcolor="#e2e8f0", automargin=True,
+                     showspikes=True, spikemode="across", spikethickness=1, spikecolor="#cbd5e1",
+                     title_font=dict(size=10, color="#64748b"), **grid)
+    fig.update_yaxes(title_text="Price", tickformat='$,.2f', hoverformat='$,.2f', nticks=8,
+                     range=[lo - (hi - lo) * 0.06, hi + (hi - lo) * 0.06], row=1, col=1)
+    axis = {"vol": dict(title_text="Volume", tickformat="~s", nticks=3, showgrid=False),
+            "rsi": dict(title_text="RSI", tickvals=[30, 50, 70]), "macd": dict(title_text="MACD", tickformat=".2f", nticks=4),
+            "rs": dict(title_text="Perf. %", ticksuffix="%", tickformat="+.0f", nticks=5)}
+    for name, kw in axis.items():
+        if name in row_of:
+            fig.update_yaxes(row=row_of[name], col=1, **kw)
     return fig
 
 def account_trade_lines(ticker, ledger_csv=None):

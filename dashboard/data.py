@@ -230,3 +230,43 @@ def ohlcv(symbol):
     """Display only (the stock chart): one stock's daily Open/High/Low/Close/Volume by Date."""
     b = _bars(tuple(os.path.getmtime(p) if os.path.exists(p) else 0 for p in BAR_CACHES))
     return b[b["Symbol"] == symbol].set_index("Date").sort_index()[["Open", "High", "Low", "Close", "Volume"]]
+
+@st.cache_data(ttl=60, show_spinner=False)
+def intraday(symbols: tuple):
+    """Display only (header card popups): {symbol: (times, closes, previous close)} of today's 5-minute bars from the
+    open, Alpaca SIP first, IEX on any SIP error; "PORTFOLIO" = the account's 1-day, 5-minute equity history (GET
+    /account/portfolio/history). Cached 60 s; a series that cannot be read is left out."""
+    if _live_off():
+        return {}
+    out = {}
+    try:
+        import alpaca_paper as ap
+        h = ap.PaperAccount()._get("/account/portfolio/history", {"period": "1D", "timeframe": "5Min",
+                                                                   "intraday_reporting": "market_hours"})
+        pts = [(t, e) for t, e in zip(h.get("timestamp") or [], h.get("equity") or []) if e is not None]
+        if pts and h.get("base_value"):
+            out["PORTFOLIO"] = ([t for t, _ in pts], [float(e) for _, e in pts], float(h["base_value"]))
+    except Exception:
+        pass
+    try:
+        import backtest_engine as be
+        from alpaca.data.enums import DataFeed
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+        client = be.market_data_client()
+        start = pd.Timestamp.now(tz="America/New_York").normalize() + pd.Timedelta(hours=9, minutes=30)
+        prev = {s: v[1] for s, v in index_quotes(symbols).items()}
+        for feed in ("sip", "iex"):
+            try:
+                bars = client.get_stock_bars(StockBarsRequest(symbol_or_symbols=list(symbols), start=start.to_pydatetime(),
+                                                              timeframe=TimeFrame(5, TimeFrameUnit.Minute), feed=DataFeed(feed))).data
+                break
+            except Exception:
+                bars = {}
+        for s, rows in bars.items():
+            if rows and s in prev and prev[s] == prev[s]:
+                last = index_quotes(symbols)[s][0]
+                out[s] = ([r.timestamp.timestamp() for r in rows], [float(r.close) for r in rows], last / (1 + prev[s] / 100))
+    except Exception:
+        pass
+    return out
