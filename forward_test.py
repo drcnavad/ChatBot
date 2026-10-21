@@ -59,7 +59,11 @@ MARKED = MON
 LIVE = MON          # the line the verdict and the dashboard compare against
 # Removed Oct 20, 2026 (Chirag): "Live 50/50 combined (no overlap)" (was "Live rules (C6)"), a near-duplicate of MON;
 # its saved rows are dropped (REMOVED, purge_removed).
-REMOVED = {"Live 50/50 combined (no overlap)", "Live rules (C6)"}
+# Removed Oct 21, 2026 (Chirag): near-duplicates (MACD cross + TP20 = MACD cross so far; breakouts cut to 2 and 4 days;
+# Friday only ~ Oct 2 rules without Mon-Thu checks, Now: Friday only covers that).
+REMOVED = {"Live 50/50 combined (no overlap)", "Live rules (C6)", "MACD cross + TP20", "Friday only",
+           "200-day breakout, 1 day above, exit 2% below", "200-day breakout, 3 days above, exit 2% below",
+           "200-day breakout, 5 days above, exit 2% below"}
 # Renamed lines: saved rows take the new name (migrate_names, and the dashboard reads through this map).
 # A rule that changed (ATR dip buy, top 30 -> top 10) is a new name on purpose, so the old results are not relabeled.
 OLD_NAMES = {
@@ -169,9 +173,6 @@ STRATEGIES = [
     dict(name="Buy the dip", weights="dip", group="event",
          rule="The copy folder's dip test: buy a stock 8% below its 50-day average, sell when it is back at the average or "
               "after 30 days; 10% each, at most 10, deepest first, checked daily."),
-    dict(name="Friday only", calendar="weekly", group="blend",
-         rule="The Oct 2 rules (half technical, half relative strength, top 10) rebalanced on Friday only, with no Mon-Thu "
-              "swaps or exits. Now: Friday only is different: it uses the Oct 15 relative-strength rules and keeps the five defensive stocks."),
     dict(name="Monthly", calendar="monthly", group="blend",
          rule="The Oct 2 rules, rebalanced on the last trading day of each month only."),
     dict(name="Trend following 50/200", weights="trend", group="technical",
@@ -218,8 +219,7 @@ STRATEGIES = [
     # ---- the live rules of Oct 15, 2026 (pinned) with one change each (added Oct 15, computed from Oct 2)
     dict(name="Now: Friday only", **NOW, calendar="weekly", group="rs",
          rule="The Oct 15 rules (relative strength, top 10, the five defensive stocks) with the Friday rebalance only. "
-              "Mon-Thu does not sell or replace anything. Friday only, without the Now: prefix, is the older Oct 2 score "
-              "(half technical, half relative strength) and holds no defensive stocks."),
+              "Mon-Thu does not sell or replace anything."),
     dict(name="Now: top 15", **NOW, select={"n": 15}, group="rs",
          rule="The Oct 15 rules (relative strength only, Friday rebalance, Mon-Thu sell below rank 20) with 15 ranked stocks "
               "plus the five defensive stocks. Top 20 rank-weighted (70/30) is relative strength with 20 "
@@ -271,16 +271,10 @@ STRATEGIES = [
          group="combo",
          rule="50/50, the second half = 'Now: RS, calmer half of the list' (relative strength among stocks at or below the "
               "median 63-day volatility) rebalanced weekly, no Mon-Thu checks, no overlap."),
-    dict(name="200-day breakout, 1 day above, exit 2% below", b200=dict(tp=0.2, days=1, buffer=0.98), earnings=None, group="event",
-         rule="Buy a stock on the first close above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
     dict(name="200-day breakout, 2 days above, exit 2% below", b200=dict(tp=0.2, days=2, buffer=0.98), earnings=None, group="event",
          rule="Buy a stock on the 2nd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
-    dict(name="200-day breakout, 3 days above, exit 2% below", b200=dict(tp=0.2, days=3, buffer=0.98), earnings=None, group="event",
-         rule="Buy a stock on the 3rd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
     dict(name="200-day breakout, 4 days above, exit 2% below", b200=dict(tp=0.2, days=4, buffer=0.98), earnings=None, group="event",
          rule="Buy a stock on the 4th close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
-    dict(name="200-day breakout, 5 days above, exit 2% below", b200=dict(tp=0.2, days=5, buffer=0.98), earnings=None, group="event",
-         rule="Buy a stock on the 5th close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
     dict(name="Tech score 80/60 + TP20", event=dict(kind="tech80", tp=0.2), earnings=None, group="event",
          rule="Buy when the stock's Technical_Score percentile (among the day's stocks) crosses above 80; sell when it falls below 60 or at +20% from the entry (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="Tech score 70/60/90", event=dict(kind="tech70", tp=None), earnings=None, group="event",
@@ -301,8 +295,6 @@ STRATEGIES = [
          rule="Buy when the close is below the lower Bollinger band (20, 2) with the close above the 200-day average; sell when the close is at or above the middle band or 5% below the entry (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="EMA 9/21 cross", event=dict(kind="ema"), earnings=None, group="event",
          rule="Buy on the 2nd close after the 9-day EMA crosses above the 21-day EMA; sell when the 9-day crosses below the 21-day (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="MACD cross + TP20", event=dict(kind="macd", tp=0.2, stop=0.05), earnings=None, group="event",
-         rule="The MACD cross (above its signal, close above the 200-day); sell when MACD crosses below the signal, at +20% or 5% below the entry (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="MACD cross, weekly", event=dict(kind="macd_weekly"), earnings=None, group="event",
          rule="Weekly MACD(12,26,9) on weekly closes: buy on the week's last close when it crosses above its signal; sell when it crosses below (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="EMA 9/21 + ADX>25", event=dict(kind="ema_adx"), earnings=None, group="event",

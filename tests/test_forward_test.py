@@ -346,7 +346,7 @@ with tempfile.TemporaryDirectory() as tmp:
     for k in ("path", "hold_path"):
         d_ = rd(P("a")[k]); d_[d_["Date"] <= "2026-10-05"].to_csv(P("c")[k], index=False)
     hc = rd(P("c")["hold_path"])
-    FO = "Friday only"                                               # no decision on Tue Oct 6 (Mon-Thu checks would)
+    FO = "Now: Friday only"                                               # no decision on Tue Oct 6 (Mon-Thu checks would)
     L = (hc["Strategy"] == FO) & (hc["Date"] == "2026-10-05") & (hc["Shares"] > 0)
     alien = next(s for s in sorted(SIG["Symbol"].unique()) if s not in set(hc.loc[hc["Strategy"] == FO, "Symbol"]))
     gone = hc.loc[L, "Symbol"].iloc[0]
@@ -424,7 +424,7 @@ with tempfile.TemporaryDirectory() as tmp:
           abs(ht.at[pd.Timestamp("2026-10-07"), "Value"] - t7) < 1e-12 and (ht["Cash"] >= -1e-12).all(), ht.round(8).to_dict())
     rd = {c["name"]: ft.rebalance_days(c, {"weekly": "W", "monthly": "M"}) for c in ft.STRATEGIES}
     check("rebalance days: the calendar of each rule (Fridays, month ends, never for the dip and threshold rules)",
-          rd[ft.LIVE] == rd["Friday only"] == rd["Short-term reversal"] == "W" and rd["Monthly"] == "M"
+          rd[ft.LIVE] == rd["Now: Friday only"] == rd["Short-term reversal"] == "W" and rd["Monthly"] == "M"
           and rd["12-1 month momentum"] == "M" and rd["Buy the dip"] is None and set(rd.values()) <= {"W", "M", None}, rd)
 
 # 200-day breakout family (Oct 19, 2026): 3 closes above the 200-day after one below, bought on the 3rd; TP / stop / 200-day exit
@@ -452,7 +452,7 @@ check("breakout N days: bought on the Nth close above (A crosses on day 2)", w5[
       and w5[2][1:3] == [0, 0.1] and w5[4][3:5] == [0, 0.1], w5)
 w98 = ft.breakout200_weights(_c, _m, _e, _v, tp=0.20, buffer=0.98, start="2026-10-01")["B"].tolist()
 check("breakout 2% exit: held at 99.5 and 98 (not 2%+ below)... sold below 98", w98[3:7] == [0.1, 0.1, 0.1, 0.1], w98)
-check("breakout: 5 variants (N = 1-5), exit 2% below the 200-day, no calendar rebalance", [c["b200"].get("days") for c in ft.STRATEGIES if c.get("b200")] == [1, 2, 3, 4, 5] and all(c["b200"]["buffer"] == 0.98 for c in ft.STRATEGIES if c.get("b200"))
+check("breakout: 2 variants (N = 2, 4), exit 2% below the 200-day, no calendar rebalance", [c["b200"].get("days") for c in ft.STRATEGIES if c.get("b200")] == [2, 4] and all(c["b200"]["buffer"] == 0.98 for c in ft.STRATEGIES if c.get("b200"))
       and all(ft.rebalance_days(c, {"weekly": "W"}) is None for c in ft.STRATEGIES if c.get("b200")))
 
 # event lines (Oct 19, 2026): fresh crosses only, TP / exit signal, same slots as the breakouts
@@ -481,10 +481,10 @@ check("event signals: all 10 kinds build", all(ft.event_signals({**_ii, "ma10": 
 _dn = sorted(set(sector_mapping.do_not_buy) & set(full))
 check("do-not-buy: no paper strategy (all but the live rules) ever holds one",
       all((full[k][_dn].to_numpy() == 0).all() for k in full if not k.startswith("Live") and k != ft.LIVE), _dn)
-check("event lines: 17 named lines, no calendar rebalance",
+check("event lines: 16 named lines, no calendar rebalance",
       [c["name"] for c in ft.STRATEGIES if c.get("event")] == ["Tech score 80/60 + TP20", "Tech score 70/60/90", "MA10 x MA30",
        "MA10 & MA30 x MA50", "MA50 x MA200 (golden cross)", "MACD cross", "RSI pullback in uptrend",
-       "Donchian 20-day breakout", "Bollinger mean reversion", "EMA 9/21 cross", "MACD cross + TP20", "MACD cross, weekly",
+       "Donchian 20-day breakout", "Bollinger mean reversion", "EMA 9/21 cross", "MACD cross, weekly",
        "EMA 9/21 + ADX>25", "Minervini trend template", "52-week high momentum", "Dual MA + RSI filter", "Golden cross + MACD confirm"]
       and all(ft.rebalance_days(c, {"weekly": "W"}) is None for c in ft.STRATEGIES if c.get("event")))
 
