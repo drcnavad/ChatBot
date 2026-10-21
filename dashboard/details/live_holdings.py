@@ -73,12 +73,12 @@ def render_live_holdings():
 
 HALF_NAMES = {"lowvol": "Low Vol", "sector": "Sector"}
 
+MANUAL_BUYS = {"MNST"}   # bought on Chirag's request but run by the 9 AM fill check, so not in manual_orders.json
+
 def strategy_of(symbols, reports=None):
     """{symbol: strategy}: the half that owns it in Reports/sleeve_ledger.json (the bot's own tags); not tagged = Manual.
-    "(M)" (manual buy) is added when the latest filled BUY in live_trade_ledger.csv was not a bot order (Client_Order_ID not
-    starting with 'live-') or was placed through manual_orders.json."""
+    " (M)" = a manual buy: a BUY in Reports/manual_orders.json (manual_trade.py's log) or MANUAL_BUYS."""
     import json
-    import pandas as pd
     from dashboard.settings import ROOT
     reports = reports or os.path.join(ROOT, "Reports")
     try:
@@ -86,13 +86,10 @@ def strategy_of(symbols, reports=None):
         tag = {s: HALF_NAMES.get(h, h) for h, v in halves.items() for s in v.get("tags", [])}
     except Exception:
         return {s: "Unknown" for s in symbols}
-    manual = set()
+    manual = set(MANUAL_BUYS)
     try:
-        l = pd.read_csv(os.path.join(reports, "live_trade_ledger.csv"))
-        last = l[(l["Side"] == "BUY") & (l["Filled_Qty"] > 0)].sort_values("Filled_CT").groupby("Symbol").tail(1)
-        manual = set(last.loc[~last["Client_Order_ID"].astype(str).str.startswith("live-"), "Symbol"])
         mo = json.load(open(os.path.join(reports, "manual_orders.json")))
-        manual |= {o["symbol"] for o in mo if str(o.get("action", "")).startswith("buy")} & set(last["Symbol"])
+        manual |= {o["symbol"] for o in mo if str(o.get("action", "")).startswith("buy")}
     except Exception:
         pass
     return {s: (tag[s] + (" (M)" if s in manual else "")) if s in tag else "Manual" for s in symbols}
