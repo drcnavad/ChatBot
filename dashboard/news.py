@@ -1,4 +1,4 @@
-"""Breaking-news banner under the ticker strip: three headlines at a time, fading to the next three every 10 s (CSS only),
+"""Breaking-news banner under the ticker strip: three headlines at a time (one per row), fading to the next three every 10 s (CSS only),
 paused on hover, click opens the article. Display only and separate from the bot: free public RSS feeds (no API keys,
 nothing from the trading accounts), read with the standard library, cached 5 minutes, silent when a feed is down."""
 import email.utils
@@ -19,7 +19,7 @@ FEEDS = [("CNBC", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partne
          ("Google News", "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB"
                          "?hl=en-US&gl=US&ceid=US:en")]
 STOCK_FEED = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={sym}&region=US&lang=en-US"   # free, keyless
-MAX_ITEMS, PER_STOCK, PER_PAGE, SECONDS = 30, 2, 3, 10   # banner: 3 headlines at a time, 10 s each
+MAX_ITEMS, PER_STOCK, PER_PAGE, SECONDS = 30, 2, 3, 10   # banner: 3 headline rows at a time, 10 s each
 NY = ZoneInfo("America/New_York")
 
 def _one_line(p):
@@ -129,7 +129,7 @@ def render_news_banner(box):
     fade = min(1.5, show / 4)
     item = lambda i: (
         f'<a class="sa-news-item" href="{html.escape(i["link"], quote=True)}" target="_blank" rel="noopener" '
-        f'title="{html.escape(i["title"], quote=True)}">'
+        f'>'
         + (f'<span class="sa-news-sym">{html.escape(i["ticker"])}</span>' if i["ticker"] else "")
         + f'<span class="sa-news-t">{html.escape(i["title"])}</span>'
         f'<span class="sa-news-ago">{html.escape(i["source"])} · {_ago(i["time"])}</span></a>')
