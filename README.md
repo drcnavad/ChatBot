@@ -12,16 +12,16 @@ Keys live in `.env` (`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY`, never prin
 
 ## Live strategy (`backtest_engine.WINNER`, from Fri Oct 16, 2026)
 Two independent halves, each with its own cash, tracked in `Reports/sleeve_ledger.json` (`sleeves.py`); no stock in both:
-**Top 5 per half from Oct 21, 2026** (`WINNER['n'] = 5`; first used at the sector half's Mon Oct 26 and the low-vol
+**Top 5 per half from Oct 21, 2026** (`WINNER['n'] = 5`; first used at the sector half's Fri Oct 23 and the low-vol
 half's Fri Oct 30 rebalance; 10 per half before; forward row "Current Strategy (Live from Oct End)").
 - **50% Low volatility in uptrend (monthly):** the 5 calmest stocks (1 / 63-day volatility) whose close is above the
   200-day average, equal weight, max 2 per sector, 20% cap; rebalanced on the **last trading day of the month**
   (targets = `Provisional_Weight` in `Reports/strategy_picks.csv`). QQQ below its 200-day average: weights halved.
 - **50% Sector rotation (weekly):** top 5 by C6 score (inverse-volatility weights, 20% cap: the extra stays cash, max 2 per sector) in the 3 sectors with the best 63-day ETF return (not held by
-  the low-vol half), rebalanced **every Monday** at 2:30 PM CT (the week's first session: Tuesday after a Monday
-  holiday; `WINNER['sector_day']`, `backtest_engine.is_sector_day`). It was Fridays until Oct 16, 2026; the first Monday
-  run is Oct 19 (right after the Oct 16 rebalance). When the month's last trading day is a Monday (e.g. Nov 30), both
-  halves rebalance that day without overlap.
+  the low-vol half), rebalanced **every Friday** at 2:30 PM CT (the week's last session: Thursday when Friday is a
+  holiday; `WINNER['sector_day'] = "friday"`, `backtest_engine.is_sector_day`). Fridays until Oct 16, 2026, Mondays
+  Oct 19-22, Fridays again from Oct 23 (Chirag, Oct 21). When the month's last trading day is a Friday (e.g. Oct 30),
+  both halves rebalance that day without overlap.
 - Decisions use the ~2:30 PM CT bar. A session that is no decision **holds everything** (no Mon-Thu trading, no Friday
   falling check, no earnings rule). A holding within 1 point of its target is not traded. A position in no half of the
   ledger is sold at the next trade run.
@@ -46,10 +46,10 @@ above the ask (`manual_trade.queue_leftover_cash`, called by the trade run; neve
 
 **Removing a stock** (Oct 19, 2026): comment it out of `stock_symbols` in `sector_mapping.py`. It leaves the rankings,
 the dashboard lists and the forward test at once. If the account still holds it, nothing special happens until its half
-rebalances (sector = Mondays 2:30 PM CT, low volatility = last trading day of the month): it is no target there (both
+rebalances (sector = Fridays 2:30 PM CT, low volatility = last trading day of the month): it is no target there (both
 halves keep only `tradable_symbols`), so it is sold and never rebought. Until then it stays in `Reports/sleeve_ledger.json`
 (not an orphan) and is priced from Alpaca market data. No cleanup is needed after the sell. Removed Oct 19: PG
-(sector, sells Mon Oct 26), EMR and PFE (low vol, sell Fri Oct 30), plus ECL, SHW, NUE, URI, SHOP, PEP, VMC, CRCL, ETN (not held).
+(sector, sells Fri Oct 23), EMR and PFE (low vol, sell Fri Oct 30), plus ECL, SHW, NUE, URI, SHOP, PEP, VMC, CRCL, ETN (not held).
 
 ## Schedule (launchd, `launchd/*.plist`, installed by `launchd/install_schedule.sh`; times CT)
 | Job | When | What | Trades? |

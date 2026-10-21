@@ -72,7 +72,7 @@ WINNER = {
     # a normal full rebalance on Oct 16 and the last trading day of each month, + the Friday check below on every other
     # Friday. No Mon-Thu trading, no sleeve, no earnings rule.
     # Top 5 per half (Chirag, Oct 21, 2026) = forward_test's "Current Strategy (Live from Oct End)" (ft.TOP5): from each half's next
-    # rebalance (sector half Mon Oct 26, low vol half Fri Oct 30); max 2 per sector (sector_cap 0.4 x 5), 20% cap.
+    # rebalance (sector half Fri Oct 23, low vol half Fri Oct 30); max 2 per sector (sector_cap 0.4 x 5), 20% cap.
     # Non-rebalance days place no orders (unchanged). Was 10 (Oct 16-25).
     "n": 5,                 # stocks held per half (the low vol half here; sleeves.sector_args uses the same n)
     "score": "low_vol",     # winner_score: 1 / 63-day volatility (calmest first) while above the 200-day average, else -1
@@ -110,7 +110,8 @@ WINNER = {
     "sleeves": {"lowvol": 0.5, "sector": 0.5},
     # The sector-rotation half's weekly full rebalance (Chirag, Oct 16, 2026 evening): "monday" = the week's FIRST session
     # (Monday, or Tuesday after a Monday holiday), 2:30 PM CT, from Mon Oct 19; "friday" = the week's last session.
-    "sector_day": "monday",
+    # Fridays again from Fri Oct 23, 2026 (Chirag, Oct 21): the week's last session, Thursday when Friday is a holiday.
+    "sector_day": "friday",
     # Rebalance: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).
     "rebalance_band": 0.01,
 }
@@ -1710,11 +1711,13 @@ def is_week_start(d):
     prev = pd.date_range(d - pd.Timedelta(days=10), d - pd.Timedelta(days=1), freq=NYSE_SESSION)[-1]
     return prev.isocalendar()[:2] != d.isocalendar()[:2]
 
+MONDAY_SECTOR = (pd.Timestamp("2026-10-19"), pd.Timestamp("2026-10-22"))   # the sector half rebalanced on Mondays then
+
 def is_sector_day(d):
     """The sector-rotation half's weekly rebalance session (WINNER['sector_day']: 'monday' = week start, else week end)."""
     d = pd.Timestamp(d).normalize()
-    if WINNER.get("sector_day") == "monday":
-        return is_week_start(d)
+    if WINNER.get("sector_day") == "monday" or MONDAY_SECTOR[0] <= d <= MONDAY_SECTOR[1]:
+        return is_week_start(d)                          # (the live Monday rebalances Oct 19-22, 2026 stay in the history)
     return is_session(d) and next_sessions(d, 1)[0].isocalendar()[:2] != d.isocalendar()[:2]
 
 def next_decision(latest, days=None):

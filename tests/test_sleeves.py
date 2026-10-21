@@ -32,16 +32,20 @@ check(sleeves.LEDGER_JSON.startswith(tempfile.gettempdir()) or "tmp" in sleeves.
 
 # calendar
 kinds = {d.date().isoformat(): be.decision_kind(d) for d in pd.date_range("2026-10-15", "2026-12-04") if be.decision_kind(d)}
-check(kinds == {"2026-10-16": "full rebalance", "2026-10-19": be.SECTOR_KIND, "2026-10-26": be.SECTOR_KIND,
-                "2026-10-30": "full rebalance", "2026-11-02": be.SECTOR_KIND, "2026-11-09": be.SECTOR_KIND,
-                "2026-11-16": be.SECTOR_KIND, "2026-11-23": be.SECTOR_KIND, "2026-11-30": "full rebalance"},
-      "decisions: Oct 16 / Oct 30 / Nov 30 (a Monday: both halves) full, every other Monday the sector half, no Fridays", kinds)
-check(be.is_sector_day("2027-01-19") and not be.is_sector_day("2027-01-18") and be.is_sector_day("2026-11-30"),
-      "Monday holiday (MLK, Jan 18, 2027) -> the sector half on Tuesday; Nov 30 (month end, Monday) is a sector day too")
+# (Oct 21, 2026) the sector half on Fridays again from Fri Oct 23 (Mondays Oct 19-22 stay in the history)
+check(be.WINNER["sector_day"] == "friday" and kinds == {"2026-10-16": "full rebalance", "2026-10-19": be.SECTOR_KIND,
+                "2026-10-23": be.SECTOR_KIND, "2026-10-30": "full rebalance", "2026-11-06": be.SECTOR_KIND,
+                "2026-11-13": be.SECTOR_KIND, "2026-11-20": be.SECTOR_KIND, "2026-11-27": be.SECTOR_KIND,
+                "2026-11-30": "full rebalance", "2026-12-04": be.SECTOR_KIND},
+      "decisions: Oct 16 / Oct 30 (a Friday: both halves) / Nov 30 full, Mon Oct 19 then every Friday the sector half", kinds)
+check(be.is_sector_day("2026-12-24") and not be.is_sector_day("2026-12-25") and be.is_sector_day("2026-10-30")
+      and not be.is_sector_day("2026-10-26") and not be.is_sector_day("2026-11-30"),
+      "Friday holiday (Christmas, Fri Dec 25, 2026) -> the sector half on Thursday Dec 24; Oct 30 (month end, Friday) is a sector day; no Mon Oct 26")
 cal = dict(sleeves.calendar("2026-10-15", 40))
-check(cal[pd.Timestamp("2026-10-16")] == ["lowvol"] and cal[pd.Timestamp("2026-10-19")] == ["sector"]
-      and cal[pd.Timestamp("2026-11-30")] == ["lowvol", "sector"] and pd.Timestamp("2026-10-23") not in cal,
-      "halves: Oct 16 low vol (the switch bought both: ledger init), Mon Oct 19 sector, Nov 30 (Mon, month end) both, Fri Oct 23 none")
+check(cal[pd.Timestamp("2026-10-16")] == ["lowvol", "sector"] and cal[pd.Timestamp("2026-10-19")] == ["sector"]
+      and cal[pd.Timestamp("2026-10-23")] == ["sector"] and cal[pd.Timestamp("2026-10-30")] == ["lowvol", "sector"]
+      and pd.Timestamp("2026-10-26") not in cal and cal[pd.Timestamp("2026-11-30")] == ["lowvol"],
+      "halves: Oct 16 both (the switch: ledger init), Mon Oct 19 sector, Fri Oct 23 sector, Fri Oct 30 both, no Mon Oct 26, Nov 30 low vol")
 
 # the sector half's weights = the forward test's Sector rotation (the backtest's own selection)
 inp = sleeves.sector_inputs()

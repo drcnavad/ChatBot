@@ -53,7 +53,7 @@ PIN = {"n": 10, "vol_sizing": True, "sector_cap": 1.0, "max_pick_rank": None, "c
 EARN_DAYS = 5
 BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
-FRI = "Live 50/50, top 5, sector on Fridays"   # Oct 21: top 5 per half + manual blocks (was "..., sector rotation on Fridays")
+MON5 = "Live 50/50, top 5, sector on Mondays"   # Oct 21: the top-5 rules with the sector half on Mondays (live Oct 21 morning)
 MON = "Live 50/50, top 10 each half"    # the live rules Oct 19-25 (sector half on Mondays, 10 stocks per half)
 TOP5 = "Current Strategy (Live from Oct End)"   # = the current live rules (Chirag, Oct 21, 2026: 5 per half from Oct 26 / Oct 30)
 MARKED = TOP5
@@ -63,12 +63,12 @@ LIVE = TOP5         # the line the verdict and the dashboard compare against
 # Removed Oct 21, 2026 (Chirag): near-duplicates (MACD cross + TP20 = MACD cross so far; breakouts cut to 2 and 4 days;
 # Friday only ~ Oct 2 rules without Mon-Thu checks, Now: Friday only covers that).
 REMOVED = {"Live 50/50 combined (no overlap)", "Live rules (C6)", "MACD cross + TP20", "Friday only",
+           "Live 50/50, sector rotation on Fridays", "50/50: Low vol + SR weekly 63d (live combo from Oct 2)",   # old top-10 Friday rows
            "200-day breakout, 1 day above, exit 2% below", "200-day breakout, 3 days above, exit 2% below",
            "200-day breakout, 5 days above, exit 2% below"}
 # Renamed lines: saved rows take the new name (migrate_names, and the dashboard reads through this map).
 # A rule that changed (ATR dip buy, top 30 -> top 10) is a new name on purpose, so the old results are not relabeled.
 OLD_NAMES = {
-    "50/50: Low vol + SR weekly 63d (live combo from Oct 2)": FRI,
     "Quant Score": "Quant Score top 10",
     "Now: calmer half": "Now: RS, calmer half of the list",
     "Now: RS 10/21/63 days": "Now: shorter RS (10/21/63 days)",
@@ -77,16 +77,16 @@ OLD_NAMES = {
     "Now: exit below 15": "Now: Mon-Thu sell below rank 15",
     "Restored RS + sleeve, Mon-Thu checks (Oct 15 rules)": "Oct 15 rules (RS + sleeve, Mon-Thu)",
     "Live 50/50, sector rotation on Mondays": MON,   # Oct 21: the top-10 live line, kept as the previous rules
-    "Live 50/50, top 5 each half": TOP5,
-    "Live 50/50, sector rotation on Fridays": FRI,   # Oct 21: now top 5 per half (its rows recomputed from Oct 2)             # Oct 21: the new live rules (5 per half)
+    "Live 50/50, top 5 each half": MON5,             # Oct 21: the top-5 Monday line
+    "Live 50/50, top 5, sector on Fridays": TOP5,    # Oct 21 (Chirag): the live rules = top 5, sector half on Fridays
     "Live half: Sector rotation weekly (63d)": "Live half: Sector rotation Mondays (63d)",   # Oct 21: it rebalances Mondays
 }
 # the live 50/50 (be.WINNER "sleeves", from the Oct 16, 2026 switch): forward_combos legs, low-volatility half first
 # "+mb" = the live manual buy blocks too (Reports/manual_block.json, e.g. KO; Oct 21, 2026) on the live lines only
 PREV_LEGS = (("lowvol+mb", "full", "month", 0.5), ("sr63+mb", "full", "weekstart", 0.5))   # top 10 per half (Oct 19-25)
-LIVE_LEGS = (("lowvol@5+mb", "full", "month", 0.5), ("sr63@5+mb", "full", "weekstart", 0.5))  # top 5 per half (Oct 21 rule)
+LIVE_LEGS = (("lowvol@5+mb", "full", "month", 0.5), ("sr63@5+mb", "full", "week", 0.5))  # top 5 per half, sector half Fridays (Oct 21)
+MON5_LEGS = (LIVE_LEGS[0], ("sr63@5+mb", "full", "weekstart", 0.5))   # the same with the sector half on Mondays
 LV = ("lowvol", "full", "month", 0.5)   # the low vol half of the other 50/50 lines (no manual blocks)
-FRI_LEGS = (LIVE_LEGS[0], ("sr63@5+mb", "full", "week", 0.5))   # = the live top-5 rules, sector half on Fridays
 LIVE_SWITCH = "2026-10-16"
 C6 = "Oct 2 rules (pinned)" # the rules the forward test started with (pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, 50/50 score)
 # paper_trade's Mon-Thu spare-cash rule (forward_test never imports paper_trade; tests check these equal its constants)
@@ -258,18 +258,18 @@ STRATEGIES = [
          rule="The live account's sector-rotation half on its own (from the Oct 16 close, 1.0 then): the best C6-score "
               "stocks in the 3 sectors whose ETF has the best 63-day return, top 10, 1/volatility weights, max 20% of the "
               "half, rebalanced every Monday (the first session of the week); never buys a stock the low-volatility half holds. Not ranked (starts Oct 16)."),
-    dict(name=FRI, combo=dict(legs=FRI_LEGS), group="combo",
+    dict(name=MON5, combo=dict(legs=MON5_LEGS), group="combo",
          rule="The live top-5 rules (Current Strategy (Live from Oct End)) computed from Oct 2 with the sector half rebalanced "
-              "every Friday instead of Monday: top 5 per half, max 2 per sector, 20% max per stock, no overlap, do_not_buy and "
-              "the live manual buy blocks such as KO never bought (was top 10 per half until Oct 21, 2026)."),
+              "every Monday (Tuesday after a Monday holiday) instead of Friday: top 5 per half, max 2 per sector, 20% max per "
+              "stock, no overlap, do_not_buy and the live manual buy blocks such as KO never bought."),
     dict(name=MON, combo=dict(legs=PREV_LEGS), group="combo",
          rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
               "half rebalanced every Monday (Tuesday after a Monday holiday), no overlap, 10 stocks per half. The live rules Oct 19 "
-              "until the 5-per-half switch (sector half Mon Oct 26, low vol half Fri Oct 30)."),
+              "until the 5-per-half switch (sector half Fri Oct 23, low vol half Fri Oct 30)."),
     dict(name=TOP5, combo=dict(legs=LIVE_LEGS), group="combo",
-         rule="The live rules (Chirag, Oct 21, 2026; live from the sector half's Mon Oct 26 and the low vol half's Fri Oct 30 "
+         rule="The live rules (Chirag, Oct 21, 2026; live from the sector half's Fri Oct 23 and the low vol half's Fri Oct 30 "
               "rebalance): the 50/50 (low vol half on the last trading day of the month + sector rotation 63-day half every "
-              "Monday, no overlap, do_not_buy and the live manual buy blocks such as KO never bought) computed from Oct 2, with each half holding its top 5 instead of "
+              "Friday (Thursday when Friday is a holiday), no overlap, do_not_buy and the live manual buy blocks such as KO never bought) computed from Oct 2, with each half holding its top 5 instead of "
               "10: max 2 per sector (the 40% sector cap on 5 stocks), the same 20% max per stock (the extra stays cash)."),
     dict(name="50/50: Low vol + SR every 2 weeks 63d", combo=dict(legs=(LV, ("sr63", "full", "2week", 0.5))),
          group="combo",

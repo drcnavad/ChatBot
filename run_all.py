@@ -1,6 +1,6 @@
 """ONE command for the whole pipeline:   python run_all.py   (mode chosen by the US Central clock)
 
-FULL  on a decision day (Sector half: Monday; Low Vol half: the month's last trading day; holiday-shifted,
+FULL  on a decision day (Sector half: Friday, Thursday if Friday is a holiday; Low Vol half: the month's last trading day; holiday-shifted,
       backtest_engine.next_decision) after 2:30 PM CT,
       once a day: main (main_signal_analysis.ipynb: Alpaca bars, ranks, picks, mid-week check) -> validate (the report
       files), reading the latest supporting tables.

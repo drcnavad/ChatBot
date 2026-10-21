@@ -4,7 +4,7 @@
                the last trading day of each month (+ the Oct 16 switch).
   sector  50%: forward_test.py's "Sector rotation" (top 3 sector ETFs by 63-day return, then their top WINNER["n"] (5 from Oct 26, 2026; was 10) by the C6 score,
                inverse-volatility weights, max 2 per sector (4 with 10), 20% cap, QQQ halving, do_not_buy), full rebalance of this half
-               every Monday (the week's first session; Fridays until Oct 16, 2026). No overlap: it never buys a name the low-volatility half holds or
+               every Friday (the week's last session, Thursday when Friday is a holiday; Mondays Oct 19-22, 2026, Fridays before). No overlap: it never buys a name the low-volatility half holds or
                targets; when the low-volatility half buys a name this half holds, the shares move to the low-volatility half
                at the current price (no trade) and this half rebalances the same day without it.
 
@@ -45,8 +45,8 @@ def config():
     return dict(s) if s else None
 
 def sector_day(day):
-    """True when session `day` is the sector half's weekly rebalance (backtest_engine.is_sector_day: Monday = the week's
-    first session, Tuesday after a Monday holiday; from Mon Oct 19, 2026)."""
+    """True when session `day` is the sector half's weekly rebalance (backtest_engine.is_sector_day, WINNER['sector_day']:
+    'friday' = the week's last session, Thursday when Friday is a holiday; from Fri Oct 23, 2026; Mondays Oct 19-22)."""
     import backtest_engine as be
     return be.is_sector_day(day)
 
@@ -84,7 +84,7 @@ def sector_inputs(signal_csv=None, bench_csv=None):
 
 def sector_args(inp):
     """rank_targets settings of forward_test's Sector rotation (as forward_test.strategy_targets passes them), WINNER["n"]
-    stocks (5 from Oct 21, 2026: first used at the Mon Oct 26 rebalance; was 10)."""
+    stocks (5 from Oct 21, 2026: first used at the Fri Oct 23 rebalance; was 10)."""
     import backtest_engine as be
     import forward_test as ft
     cfg = next(c for c in ft.STRATEGIES if c["name"] == SECTOR_STRATEGY)
@@ -244,7 +244,10 @@ def plan(day, positions, equity, prices, lv_targets=None, lv_statuses=None, no_b
         lv_names = set(state["lowvol"]["shares"]) | set(lv_w)
         vs = half_value(state["sector"], px)
         held = {s: q * (_num(px.get(s)) or 0.0) / vs for s, q in state["sector"]["shares"].items()} if vs > 0 else {}
-        w = sector_weights(d, exclude=lv_names, held=held, inp=inp)
+        # (Oct 21, 2026) a buy-blocked stock (manual block, earnings stop) not held is no target: its slot goes to the
+        # next pick that same day, as in the forward test (it used to stay cash for the next-morning leftover buy)
+        nb = {str(x).upper() for x in (no_buy or {})} - set(held)
+        w = sector_weights(d, exclude=lv_names | nb, held=held, inp=inp)
         sec_w = {s: float(x) for s, x in w.items() if x > 0}
         missing = [s for s in sec_w if not _num(px.get(s))]
         if missing:
