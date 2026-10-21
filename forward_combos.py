@@ -4,7 +4,7 @@ swap-only halves, and the low-volatility cost-basis rules (keep winners; the Fri
 backtests (/tmp/combo bt.py + swap.py, /tmp/lvbt bt4.py) so the forward lines match what was backtested.
 
 Same conventions as forward_test: decide and trade at the day's close, be.COST (0.1%) per side, a holding within 1 point
-of its target is left alone, 99% invested, max 20% per stock (of its half), no margin, do_not_buy never bought, every
+of its target is left alone, 99% invested, equal weight (1/n of its half), no margin, do_not_buy never bought, every
 score/eligibility/regime from forward_test.strategy_inputs. Deterministic: a line is replayed from its start close on
 every run from the same saved data; forward_test appends only the days after its last saved one (saved days are never
 redone). Display only: none of these lines is ever traded.
@@ -12,7 +12,7 @@ redone). Display only: none of these lines is ever traded.
 A line = legs [(key, mode, calendar, share)]:
   key      ("<key>+mb" = that leg + the live manual buy blocks; "<key>@5" = that leg with its top 5 instead of 10; the sector cap scales: floor(0.4 x 5) = 2 per sector)
            "lowvol" (low volatility in uptrend, equal weight) / "sr<n>" (sector rotation: the C6 score in the 3 sectors
-           whose ETF has the best n-day return, 1/volatility weights) / "vam" (volatility-adjusted momentum, equal weight)
+           whose ETF has the best n-day return, equal weights) / "vam" (volatility-adjusted momentum, equal weight)
            / "calm" (the Oct 15 rules' calmer half, "Now: RS, calmer half of the list": relative strength, 63-day volatility at or below the median, no buys
            5 days before earnings)
   mode     "full" = the leg's top 10 on each calendar day (a full rebalance) / "swap<k>" = buy the top 10 once, then on
@@ -94,7 +94,7 @@ class Ctx:
         else:
             raise KeyError(key)
         a = be.winner_rank_args(inp["regime"])
-        a.update({"max_weight": ft.MAX_WEIGHT, **ft.PIN, **(cfg.get("select") or {}), "sleeve": ()})
+        a.update({**ft.PIN, **(cfg.get("select") or {}), "sleeve": ()})
         a["n"] = 10
         block = (self.e5.copy() if cfg.get("earnings", ft.EARN_DAYS) else
                  pd.DataFrame(np.nan, index=self.idx, columns=self.cols))
@@ -128,7 +128,7 @@ class Ctx:
             el.loc[day, [x for x in exclude if x in el.columns]] = False
         w = be.rank_targets(score.iloc[[t]], el, self.vol, rebalance_days=pd.Series(True, index=day), tiebreak_w=tb,
                             buy_block=block.iloc[[t]], start_holdings=held_w, **args).iloc[0]
-        return be.live_weights(w.clip(upper=self.ft.MAX_WEIGHT)).reindex(self.cols).fillna(0.0)
+        return be.live_weights(w).reindex(self.cols).fillna(0.0)
 
     def rank(self, key):
         """Date x Symbol rank of the leg's candidates (1 = best; NaN = not a candidate)."""
@@ -206,7 +206,7 @@ class Leg:
             self.trade(s, -self.sh[s], px[s])
             if cands:
                 b = cands.pop(0)
-                dollars = min(dollars * (1 - be.COST), self.x.ft.MAX_WEIGHT * 0.99 * self.value(px))
+                dollars = dollars * (1 - be.COST)                 # the sale's dollars (equal slots)
                 self.trade(b, dollars / (1 + be.COST) / px[b], px[b])
 
     # ---- swap-only (swap.py Swap)

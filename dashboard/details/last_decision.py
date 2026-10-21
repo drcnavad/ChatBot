@@ -280,7 +280,7 @@ def render_preview(positions, led, equity):
             t["Now %"] = (t["Now %"] * f).round(1)
             tot = sum(tg.values()) * 100 * f
             st.caption(f"Targets: {tot:.1f}% of account (half = {100 * f:.1f}%)"
-                       + (f"; {100 * f - tot:.1f}% stays cash (20% cap)" if 100 * f - tot > 1 else ""))
+                       + (f"; {100 * f - tot:.1f}% cash" if 100 * f - tot > 1 else ""))
             sty = toned(t, ["Plan"], fn=lambda v: GOOD if v == "Buy" else INK)
             st.dataframe(sty, hide_index=True, width="stretch", height=35 * (len(t) + 1) + 3, key=f"preview_{half}",
                          column_config={"Now %": PCT_COL, "Target %": PCT_COL,

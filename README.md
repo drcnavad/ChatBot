@@ -15,9 +15,9 @@ Two independent halves, each with its own cash, tracked in `Reports/sleeve_ledge
 **Top 5 per half from Oct 21, 2026** (`WINNER['n'] = 5`; first used at the sector half's Fri Oct 23 and the low-vol
 half's Fri Oct 30 rebalance; 10 per half before; forward row "Current Strategy (Live from Oct End)").
 - **50% Low volatility in uptrend (monthly):** the 5 calmest stocks (1 / 63-day volatility) whose close is above the
-  200-day average, equal weight, max 2 per sector, 20% cap; rebalanced on the **last trading day of the month**
+  200-day average, equal weight, max 2 per sector; rebalanced on the **last trading day of the month**
   (targets = `Provisional_Weight` in `Reports/strategy_picks.csv`). QQQ below its 200-day average: weights halved.
-- **50% Sector rotation (weekly):** top 5 by C6 score (inverse-volatility weights, 20% cap: the extra stays cash, max 2 per sector) in the 3 sectors with the best 63-day ETF return (not held by
+- **50% Sector rotation (weekly):** top 5 by C6 score (equal weight, 20% of the half each, max 2 per sector) in the 3 sectors with the best 63-day ETF return (not held by
   the low-vol half), rebalanced **every Friday** at 2:30 PM CT (the week's last session: Thursday when Friday is a
   holiday; `WINNER['sector_day'] = "friday"`, `backtest_engine.is_sector_day`). Fridays until Oct 16, 2026, Mondays
   Oct 19-22, Fridays again from Oct 23 (Chirag, Oct 21). When the month's last trading day is a Friday (e.g. Oct 30),

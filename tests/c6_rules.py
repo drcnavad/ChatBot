@@ -13,4 +13,4 @@ be.WINNER.update({k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(
                   for k, v in be.C6_RULES_OCT15.items()})
 be.WINNER["tag"], be.WINNER["name"] = be.winner_label(be.scored_stock_count())
 import paper_trade  # noqa: E402
-paper_trade.MAX_ORDER_PCT = be.WINNER["max_weight"]
+paper_trade.MAX_ORDER_PCT = 0.15   # the Oct 15 order backstop

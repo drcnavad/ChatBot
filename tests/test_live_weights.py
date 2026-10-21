@@ -31,7 +31,7 @@ check("target is 99%", be.LIVE_INVESTED == 0.99)
 rng = np.random.default_rng(7)
 over, worst = 0, 0.0
 for _ in range(5000):
-    inv = 1 / rng.uniform(0.01, 0.06, 10)          # inverse-volatility weights of 10 picks, summing to exactly 1
+    inv = 1 / rng.uniform(0.01, 0.06, 10)          # arbitrary fractions of 10 picks, summing to exactly 1 (rounding test)
     w = inv / inv.sum()
     over += np.round(w, 4).sum() > 1 + 1e-9
     live = be.live_weights(w)

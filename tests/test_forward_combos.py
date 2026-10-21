@@ -58,7 +58,7 @@ for legs, label in combos:
     check(not overlap, f"{label}: no stock in both halves at any close", overlap[:3])
     worst = max(max((q * p / v for q, p in l[2].values()), default=0) for leg in a["legs"] for (v, c, l) in [(e[0], e[1], e) for e in leg])
     # 5 stocks drift more between rebalances
-    check(worst <= ft.MAX_WEIGHT + (0.05 if label == "live top 5" else 0.012), f"{label}: no stock above 20% of its half (+ drift until a rebalance)", worst)
+    check(worst <= 0.2 + (0.05 if label == "live top 5" else 0.012), f"{label}: no stock above one equal slot of its half (+ drift)", worst)
     check(all(len(e[2]) <= 10 for leg in a["legs"] for e in leg), f"{label}: at most 10 names per half")
     check(min(e[1] for leg in a["legs"] for e in leg) >= -1e-9, f"{label}: cash never below zero")
     check(not any(set(e[2]) & never for leg in a["legs"] for e in leg), f"{label}: do_not_buy never held")

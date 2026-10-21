@@ -42,7 +42,6 @@ do_not_sell = []   # sleeve removed Oct 15 evening (Chirag): live = monthly low 
 # Defensive sleeve of Oct 15, 2026: NOT live any more (backtest_engine.WINNER['sleeve'] False); kept only for the pinned
 # forward-test 'Now' strategies (forward_test NOW sleeve=True).
 defensive = [s for s in ['LMT', 'NOC', 'ABBV', 'PFE', 'KO'] if s in stock_symbols]   # PFE removed Oct 19
-defensive_cap = 0.05   # max weight per sleeve stock; the trimmed weight goes to the top-10 picks pro rata (Chirag, 2026-10-15)
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
 sector_etfs = {

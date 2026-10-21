@@ -79,10 +79,10 @@ check("ranks 11-20 blocked: S09 unfilled (cash), S21 not bought; 9 stocks",
       and sorted(o.loc[~o.Side.str.startswith("SKIP") & (pd.to_numeric(o.Target_Shares) > 0), "Symbol"]) == SYMS[:8] + ["S10"]
       and "no eligible stock down to rank 20" in o.loc[o.Symbol == "S09", "Side"].iloc[0], (info, o.values.tolist()))
 
-# 6) cap: a 25% weight is capped at 14.85% (15% x 99%) for the replacement
+# 6) no cap (equal weights, Oct 21, 2026): the replacement takes the skipped pick's weight as is
 T25 = T.assign(Weight=[0.08] * 9 + [0.25])
 t, st, bl, info = pt.substitute_blocked_picks(T25, HELD8, R, {"S10": "earnings x"}, ST)
-check("replacement weight capped at 14.85%", info["replaced"][0][5] == 0.1485, info)
+check("replacement takes the skipped weight (no cap)", info["replaced"][0][5] == 0.25, info)
 
 # 7) a replacement the account already holds (an extra ranked 11) is kept and brought to the weight, not sold
 pos = {**HELD8, "S11": 30}

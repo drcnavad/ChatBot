@@ -44,7 +44,6 @@ if SLEEVES:
 REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day average"   # market filter off
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
-MAX_WEIGHT = WINNER.get("max_weight")                                # no stock above this weight; the extra stays cash
 try:                                                                 # Friday replacement down to this rank
     from paper_trade import FRIDAY_SUB_MAX_RANK
 except Exception:
@@ -66,7 +65,7 @@ def low_vol_rules_text():
             f"- **Picks:** the {N_PICKS} best, max {per_sector} per sector; do_not_buy stocks are never bought (the next "
             "stock takes the slot). No earnings rule.\n"
             f"- **Size:** equal weights, scaled to {LIVE_INVESTED:.0%} invested, each rounded down to 0.01%"
-            + (f"; max {MAX_WEIGHT:.0%} per stock" if MAX_WEIGHT else "") + ".\n"
+            + ".\n"
             + (f"- **Market filter:** with {REGIME_OFF} at a rebalance, every weight is {HALVED}.\n" if SCALE else "")
             + (f"- **Rebalance:** every pick is brought back to its weight unless within {band * 100:g} point of it.\n" if band else "")
             + ("- **Keep rule:** at a rebalance a holding that is no longer a pick is sold only if its price is below its "
@@ -76,13 +75,12 @@ def low_vol_rules_text():
             + ("- **Friday check:** every Friday that is not a rebalance day (2:30 PM CT), a holding is sold in full when it "
                "is below its Alpaca average entry price, its close is at/below its 200-day average, or it is no longer one of "
                f"the day's top-{WINNER.get('n', 5)} picks; each sale buys the best-ranked pick not held with the same dollars"
-               + (f" (max {MAX_WEIGHT * LIVE_INVESTED:.1%} of equity)" if MAX_WEIGHT else "")
                + ", do_not_buy skipped; none left = cash. No trims or top-ups.\n" if WINNER.get("friday_falling_check") else "")
             + ("- **Earnings-day stop:** off (no orders from earnings_stop.py).\n" if not WINNER.get("earnings_day_stop", True) else "")
             + (f"- **Two halves:** the account is split {SLEEVES['lowvol']:.0%} / {SLEEVES['sector']:.0%}. The rules above run the "
                "**low-volatility half** (weights are fractions of that half). The **sector-rotation half**: the 3 sector "
                "ETFs with the best 63-day return, then the best stocks of those sectors by the C6 score (50% technical + "
-               f"50% relative strength), top {N_PICKS}, weights ∝ 1 / 63-day volatility, max {max(1, int(0.4 * N_PICKS))} per sector, max 20% of the half (the extra stays cash), "
+               f"50% relative strength), top {N_PICKS}, equal weights, max {max(1, int(0.4 * N_PICKS))} per sector, "
                f"{HALVED} with {REGIME_OFF}, do_not_buy never bought; a full rebalance of that half every Friday 2:30 PM CT "
                "(the week's last trading day: Thursday when Friday is a holiday; Mondays Oct 19-22, 2026). When the month's last "
                "trading day is a Friday both halves rebalance that day, without overlap. **No overlap:** the sector half never buys a stock the low-volatility half "
@@ -108,10 +106,9 @@ def rules_text():
             "(newer stocks are listed as not traded yet).\n"
             f"- **Friday picks:** the {N_PICKS} best-ranked stocks by rank (no sector limit); fewer qualifying stocks = "
             "the rest in cash. Stocks that are not picked are sold.\n"
-            f"- **Size:** weights ∝ 1 / 63-day volatility (less volatile = larger), scaled to {LIVE_INVESTED:.0%} invested, "
+            f"- **Size:** equal weights, scaled to {LIVE_INVESTED:.0%} invested, "
             "each weight rounded down to 0.01%.\n"
             + (f"- **Market filter:** with {REGIME_OFF} at a rebalance, every weight is {HALVED}.\n" if SCALE else "")
-            + (f"- **Max per stock:** No single stock gets more than {MAX_WEIGHT:.0%}; any extra stays in cash.\n" if MAX_WEIGHT else "")
             + (f"- **Rebalance:** every pick is brought back to its weight unless it is within {band * 100:g} percentage point "
                "of it; overweight holdings are trimmed so new buys get their full weight.\n" if band else "")
             + (f"- **Earnings:** a stock that is not held is not bought when its next earnings date is within {EARNINGS} "
@@ -120,7 +117,7 @@ def rules_text():
             + (f"- **Friday replacement:** a new pick the account does not hold that is blocked (earnings within {EARNINGS} days, "
                "or no buy back after an earnings-day stop sale) gets no cash slot: the next best-ranked eligible stock that is not "
                f"already a pick (score above 0, not blocked, down to rank {FRIDAY_SUB_MAX_RANK}) is bought at the blocked "
-               f"pick's weight{f' (max {MAX_WEIGHT * LIVE_INVESTED:.1%})' if MAX_WEIGHT else ''}, so the account still ends "
+               "pick's weight, so the account still ends "
                f"with {N_PICKS} stocks; only if none is left does that weight stay in cash.\n" if EARNINGS else "")
             + "- **Earnings-day stop:** on a held stock's earnings day the price is checked every 30 seconds in the "
             "pre-market, regular and after-hours sessions; if it is ever 5% or more below the previous trading day's close, "

@@ -171,7 +171,7 @@ def queue_leftover_cash(dry_run=False, rankings=None, prices=None, positions=Non
         n_held = sum(1 for s, o in sleeves.owners(led).items() if o == h)
         if n_held >= be.WINNER["n"]:                    # (Oct 21, 2026) the half already holds its n stocks: cash left by
             out.append({**row, "status": f"half holds its {be.WINNER['n']} stocks (cash stays, as in the forward test)"})
-            continue                                     # the 20% cap stays cash; only a missing slot is refilled
+            continue                                     # only a missing slot is refilled
         lv_picks = set()
         if h == "sector":                                # no overlap: the low-volatility half's picks stay its own
             try:

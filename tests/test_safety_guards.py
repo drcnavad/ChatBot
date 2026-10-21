@@ -1,13 +1,13 @@
 """Live-bot safety guards (mocks and temp files only: no broker, no network; the real run log / run_state are never
 written):
-  * backtest_engine WINNER["max_weight"]: each target weight is clipped to 15% (Chirag, Oct 15, 2026; was 20%) after the
-    vol weights and the regime halving; the extra stays in cash (14.85% live after the 99% round-down)
+  * backtest_engine.rank_targets: equal weights, 1/n each (Oct 21, 2026; no vol sizing, no weight cap), halved with the regime off
   * paper_trade.MAX_ORDER_PCT (backstop): a BUY worth more than 15% of equity is refused - not sent, not staged for 9 AM, one
     plain run-log row; sells are never capped; today's plans stay under it
   * run_all: a scheduled decision that missed its 2:30 PM slot and waits for the market gets ONE run-log warning row
     (then the launchd runs stay quiet; the watchdog still sees 'idle:' as the last line); --dry-run writes nothing
 Run: python tests/run_tests.py  (or python tests/test_safety_guards.py)"""
 import csv
+import numpy as np
 import io
 import json
 import os
@@ -43,25 +43,19 @@ def t(s):
 
 # ------------------------------------------------------------------ 20% max weight per stock (engine)
 import backtest_engine as be
-check("max weight: WINNER says 15% and the rank args pass it on",
-      be.WINNER["max_weight"] == 0.15 and be.winner_rank_args(None)["max_weight"] == 0.15)
+check("equal weights: no max_weight / vol_sizing in WINNER or the rank args (Oct 21, 2026)",
+      "max_weight" not in be.WINNER and "vol_sizing" not in be.WINNER and "max_weight" not in be.winner_rank_args(None))
 d, cols = pd.bdate_range("2026-01-05", periods=2), [f"S{i}" for i in range(10)]
 score = pd.DataFrame([[10.0 - i for i in range(10)]] * 2, index=d, columns=cols)
-vol = pd.DataFrame([[0.005] + [0.02] * 9] * 2, index=d, columns=cols)   # S0: 1/4 the vol -> 4/13 = 30.8% unclipped
+vol = pd.DataFrame([[0.005] + [0.02] * 9] * 2, index=d, columns=cols)   # S0 calmer: still the same weight
 kw = dict(n=10, rebalance_days=pd.Series([True, False], index=d), sector_cap=1.0, regime_scale=0.5)
 for on in (True, False):
-    reg = pd.Series(on, index=d)
-    raw = be.rank_targets(score, score.notna(), vol, regime=reg, **kw).iloc[0]
-    cut = be.rank_targets(score, score.notna(), vol, regime=reg, max_weight=0.20, **kw).iloc[0]
-    want = raw.clip(upper=0.20)
-    check(f"max weight (regime {'on' if on else 'off'}): {raw['S0']:.2%} -> {cut['S0']:.2%}, the others unchanged, the extra in cash",
-          (cut - want).abs().max() < 1e-15 and cut.sum() <= raw.sum() and cut.max() <= 0.20, (raw.round(4).tolist(), cut.round(4).tolist()))
-live = be.live_weights(cut)
-check("max weight: after the 99% round-down the biggest live weight is 19.8% and the total stays <= 99%",
-      live.max() <= 0.198 and live.sum() <= 0.99, live.tolist())
+    w = be.rank_targets(score, score.notna(), vol, regime=pd.Series(on, index=d), **kw).iloc[0]
+    want = 0.1 if on else 0.05
+    check(f"equal weight (regime {'on' if on else 'off'}): every pick {want:.0%}", np.allclose(w, want), w.round(4).tolist())
 
 # ------------------------------------------------------------------ order cap (pure backstop)
-check("cap constant is 15% of equity (= WINNER max_weight)", pt.MAX_ORDER_PCT == 0.15 == be.WINNER["max_weight"])
+check("order backstop constant is 15% of equity here (tests/c6_rules pins it)", pt.MAX_ORDER_PCT == 0.15)
 o = pd.DataFrame([{"Symbol": "OK", "Side": "BUY", "Shares": 14.0, "Price": 100.0},
                   {"Symbol": "BIG", "Side": "BUY", "Shares": 21.0, "Price": 100.0},
                   {"Symbol": "OUT", "Side": "SELL", "Shares": 50.0, "Price": 100.0}], columns=pt.ORDER_COLUMNS)

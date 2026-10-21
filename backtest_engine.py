@@ -68,11 +68,11 @@ RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 # Change a rule here, then run `python run_all.py`.
 WINNER = {
     # LIVE from Fri Oct 16, 2026 (Chirag, final): "Low volatility in uptrend (monthly)" = forward_test.py's "Low volatility
-    # in uptrend" strategy (score low_vol, calendar monthly, select EQ, earnings None, 20% cap) + do_not_buy never bought:
+    # in uptrend" strategy (score low_vol, calendar monthly, select EQ, earnings None, equal weight) + do_not_buy never bought:
     # a normal full rebalance on Oct 16 and the last trading day of each month, + the Friday check below on every other
     # Friday. No Mon-Thu trading, no sleeve, no earnings rule.
     # Top 5 per half (Chirag, Oct 21, 2026) = forward_test's "Current Strategy (Live from Oct End)" (ft.TOP5): from each half's next
-    # rebalance (sector half Fri Oct 23, low vol half Fri Oct 30); max 2 per sector (sector_cap 0.4 x 5), 20% cap.
+    # rebalance (sector half Fri Oct 23, low vol half Fri Oct 30); max 2 per sector (sector_cap 0.4 x 5), equal weight 1/5 each.
     # Non-rebalance days place no orders (unchanged). Was 10 (Oct 16-25).
     "n": 5,                 # stocks held per half (the low vol half here; sleeves.sector_args uses the same n)
     "score": "low_vol",     # winner_score: 1 / 63-day volatility (calmest first) while above the 200-day average, else -1
@@ -81,8 +81,7 @@ WINNER = {
     "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
     "min_score": 0.0,       # only stocks with a score above 0 can be picked (low_vol: above the 200-day)
     "sector_cap": 0.4,      # max floor(0.4 x n) per sector = 2 with 5 stocks (forward_test EQ = PLAIN + equal weight)
-    "vol_sizing": False,    # equal weights: 5 x 20% (x 99% invested)
-    "max_weight": 0.20,     # no stock above 20% (forward_test MAX_WEIGHT); the extra stays in cash
+    # (Oct 21, 2026, Chirag) always equal weight: 1/n per stock (5 x 20% of a half x 99% invested); no vol sizing, no cap
     "buffer_rank": None,    # no rank buffer
     "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF (tiebreak only)
     "calendar": "monthly",  # rebalance on the last trading day of each month (forward_test "monthly") ...
@@ -98,12 +97,12 @@ WINNER = {
     "earnings_day_stop": False, # earnings_stop.py places no orders (not in the backtest; no Mon-Thu trading)
     # Friday check (tested; Chirag turned it OFF Oct 15, 8:28 PM -> live = plain monthly): every Friday that is not a rebalance day, sell each holding that is below its
     # Alpaca avg entry price, at/below its 200-day average, or no longer in the day's top-10 picks, and buy the best-ranked
-    # pick not held with the same dollars (max 20% x 99%; do_not_buy skipped). No trims / top-ups. (paper_trade
+    # pick not held with the same dollars (do_not_buy skipped). No trims / top-ups. (paper_trade
     # friday_falling_orders.) False = monthly rebalances only.
     "friday_falling_check": False,
     # Two halves (Chirag, Oct 15, 8:44 PM; live from Fri Oct 16): 50% of the account = the low-volatility rules above (monthly)
     # and 50% = forward_test's "Sector rotation" (63-day sector ETF return, top 3 sectors, its top n (5 from Oct 26, 2026) by the C6 score,
-    # inverse-volatility weights, max 2 per sector (4 with 10), 20% cap within the half, QQQ halving, do_not_buy) with a full
+    # equal weights, max 2 per sector (4 with 10), QQQ halving, do_not_buy) with a full
     # rebalance of that half every Friday (the week's last session); no overlap (the sector half never holds a name the
     # low-volatility half holds or targets). Two independent halves, each with its own cash (sleeves.py,
     # Reports/sleeve_ledger.json) = the backtested '50/50 + SR weekly, no overlap'. None = 100% low volatility.
@@ -125,7 +124,7 @@ SHORT_HISTORY_CSV = REPORTS_DIR / "short_history_reference.csv"   # stocks too n
 # monthly low-volatility rules. Only the tests of that machinery use it (tests/c6_rules.py); live reads WINNER.
 C6_RULES_OCT15 = {
     "n": 10, "w_tech": 0.0, "score": "rs", "use_regime": True, "regime_symbol": "QQQ", "regime_scale": 0.5, "min_score": 0.0,
-    "sector_cap": 1.0, "vol_sizing": True, "max_weight": 0.15, "buffer_rank": None, "rs_benchmark": "etf",
+    "sector_cap": 1.0, "buffer_rank": None, "rs_benchmark": "etf",
     "calendar": "weekly", "switch_days": [],
     "midweek_swap": {"enter_top": None, "exit_below": None, "days": ["Mon", "Tue", "Wed", "Thu"]},
     "midweek_exit_below": 20, "midweek_exit_to_top": 10, "max_pick_rank": None, "cap_soft": False,
@@ -202,10 +201,10 @@ def winner_rank_args(regime):
     """kwargs for rank_targets() implementing WINNER."""
     S = WINNER
     return dict(n=S["n"], regime=regime if S["use_regime"] else None, min_score=S["min_score"],
-                sector_cap=S["sector_cap"], vol_sizing=S["vol_sizing"], buffer_rank=S["buffer_rank"],
+                sector_cap=S["sector_cap"], buffer_rank=S["buffer_rank"],
                 regime_scale=S["regime_scale"] if S["use_regime"] else None,
-                max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")), max_weight=S.get("max_weight"),
-                **(dict(sleeve=list(sector_mapping.defensive), sleeve_cap=sector_mapping.defensive_cap) if S.get("sleeve") else {}))
+                max_pick_rank=S.get("max_pick_rank"), cap_soft=bool(S.get("cap_soft")),
+                **(dict(sleeve=list(sector_mapping.defensive)) if S.get("sleeve") else {}))
 
 def winner_score(rs, close, ma_200, vol):
     """The live score (WINNER["score"]). "low_vol": 1 / 63-day volatility (calmest first) while the close is above its
@@ -1217,14 +1216,14 @@ def deterministic_rank(score_w, eligible_w=None, tiebreak_w=None):
     return pd.DataFrame(out, index=score_w.index, columns=score_w.columns)
 
 def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=None, min_score=0.0,
-                 sector_cap=0.4, vol_sizing=True, buffer_rank=None, regime_scale=None, decision_log=None,
+                 sector_cap=0.4, buffer_rank=None, regime_scale=None, decision_log=None,
                  tiebreak_w=None, max_pick_rank=None, cap_soft=False, buy_block=None, held_w=None, start_holdings=None,
-                 max_weight=None, sleeve=(), sleeve_cap=None):
-    """Weekly top-N by score with sector cap and inverse-volatility weights.
+                 sleeve=()):
+    """Weekly top-N by score with sector cap, equal weights (1/n each; Oct 21, 2026: no vol sizing, no weight caps).
 
     On rebalance days: candidates = eligible & score > min_score, best first, at most floor(sector_cap*n)
     per sector. If the regime is off, no NEW names are bought (held names that still qualify are kept).
-    Total exposure = (#selected / n); within that, weights ~ 1/vol (63-day). Between rebalances the
+    Each pick = 1/n (fewer picks than n: the rest is cash). Between rebalances the
     target is carried forward unchanged.
     buffer_rank: keep a current holding while its rank among qualifying names is <= buffer_rank
                  (cuts turnover); free slots are then filled best-first.
@@ -1238,9 +1237,7 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
     buy_block: optional frame of days until earnings (earnings_days_ahead; NaN = no block): such a stock is not bought unless
                already held; its slot goes to the next candidate. held_w: holdings that count as "already held" (default:
                this function's own carried holdings). start_holdings: holdings before the first date (default: none).
-    max_weight: if given, each weight is clipped to it after the vol weights and the regime scaling; the extra stays cash.
-    sleeve: symbols always picked when they have data (score / vol), on top of the n best; weights are split over all picks.
-    sleeve_cap: max weight per sleeve stock (before the regime scaling); the trimmed weight goes to the other picks pro rata.
+    sleeve: symbols always picked when they have data (score / vol), on top of the n best; 1/(n + sleeve) each.
     """
     dates, cols = score_w.index, list(score_w.columns)
     S = score_w.to_numpy(float)
@@ -1314,19 +1311,9 @@ def rank_targets(score_w, eligible_w, vol_w, n=10, regime=None, rebalance_days=N
                         reason[j] = f"rank {rank_of[j]} worse than {max_pick_rank} (picks only from ranks 1-{max_pick_rank})"
             new = np.zeros(len(cols))
             if picked:
-                inv = 1 / Vv[t, picked] if vol_sizing else np.ones(len(picked))
-                new[picked] = inv / inv.sum() * (len(picked) / n_all)
-                if sleeve_cap is not None:         # sleeve capped, the rest to the other picks by their weights
-                    sl = [j for j in picked if j in sleeve_j]
-                    rest = [j for j in picked if j not in sleeve_j]
-                    extra = np.clip(new[sl] - sleeve_cap, 0, None).sum()
-                    new[sl] = np.minimum(new[sl], sleeve_cap)
-                    if rest and new[rest].sum() > 0:
-                        new[rest] += extra * new[rest] / new[rest].sum()
+                new[picked] = 1.0 / n_all          # equal weight
                 if soft and not R[t]:
                     new *= regime_scale
-                if max_weight:
-                    new = np.minimum(new, max_weight)
             if decision_log is not None:
                 for j in range(len(cols)):
                     if new[j] == 0 and current[j] == 0 and j not in reason:

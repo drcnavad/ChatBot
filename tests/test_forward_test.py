@@ -235,7 +235,7 @@ check("registry: WINNER untouched", be.WINNER == w0)
 # Forward-test safety (t187u): the strategies keep their own Mon/Wed rules (ft.MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, the Oct 2
 # rules); a change of the live WINNER Mon/Wed keys must not move any of them.
 FT_PINS = dict(midweek=ft.MIDWEEK, exit_all_below=ft.EXIT_BELOW, exit_to_top=ft.EXIT_TO_TOP,
-               selection={"sleeve": (), "max_weight": ft.MAX_WEIGHT})   # the paper strategies keep the 20% cap
+               selection={"sleeve": ()})
 check("forward-test pins = the Oct 2 mid-week rules (top-3 swap below 15, exit below 30, refill from the top 10), Mon-Thu",
       ft.MIDWEEK == {"enter_top": 3, "exit_below": 15, "days": ["Mon", "Tue", "Wed", "Thu"]} and (ft.EXIT_BELOW, ft.EXIT_TO_TOP) == (30, 10)
       and ft.NOW["midweek"] == {"enter_top": None, "exit_below": None, "days": ft.MON_THU} and ft.NOW["exit"] == (20, 10))
@@ -488,49 +488,6 @@ check("event lines: 16 named lines, no calendar rebalance",
        "EMA 9/21 + ADX>25", "Minervini trend template", "52-week high momentum", "Dual MA + RSI filter", "Golden cross + MACD confirm"]
       and all(ft.rebalance_days(c, {"weekly": "W"}) is None for c in ft.STRATEGIES if c.get("event")))
 
-# the forward test's spare-cash rule on target weights
-sd = pd.bdate_range("2026-10-05", periods=5)                                   # Mon..Fri
-sc = [f"S{k:02d}" for k in range(1, 9)] + ["AMD"] + [f"S{k:02d}" for k in range(9, 14)]   # AMD rank 9 (do_not_buy)
-sS = pd.DataFrame([list(range(14, 0, -1))] * 5, index=sd, columns=sc, dtype=float)
-st0 = pd.DataFrame(0.0, index=sd, columns=sc)
-st0.loc[:, sc[:8]] = 0.1                                                       # 80% held: 20% spare
-st0.loc[sd[4], :] = 0.0
-st0.loc[sd[4], sc[:10]] = 0.1                                                  # Friday: a new top 10
-
-def closes(up):
-    """Mon close 100 everywhere; from Tue the `up` stocks close at 101 (above their entry), the rest at 99."""
-    c = pd.DataFrame(100.0, index=sd, columns=sc)
-    c.loc[sd[1]:, :] = 99.0
-    c.loc[sd[1]:, up] = 101.0
-    return c
-
-sinp = {"scores": {"now": sS, "rs": sS}, "eligible": sS.notna(), "vol": sS * 0 + 0.2, "soon": st0 > 1,
-        "regime": pd.Series(True, index=sd), "weekly": pd.Series(sd.dayofweek == 4, index=sd), "close": closes(["S01", "S02"])}
-tue_thu = pd.Series((sd.dayofweek >= 1) & (sd.dayofweek < 4), index=sd)
-sp_ = ft.spare_cash(st0, tue_thu, sinp)
-check("spare cash: on Tue the spare 20% buys the unheld top 10 at the Friday-rule weight (do_not_buy AMD skipped), the "
-      "last 10% is split over the holdings above their entry close (S01, S02: 10% -> 15%); losers untouched; kept to Friday",
-      abs(sp_.iloc[1]["S09"] - 0.1) < 1e-12 and sp_.iloc[1][["AMD", "S10"]].sum() == 0 and abs(sp_.iloc[1].sum() - 1.0) < 1e-12
-      and np.allclose(sp_.iloc[1][["S01", "S02"]], 0.15, rtol=0, atol=1e-12)
-      and np.allclose(sp_.iloc[1][sc[2:8]], 0.1, rtol=0, atol=1e-12) and sp_.iloc[0].equals(st0.iloc[0])
-      and sp_.iloc[2:4].equals(pd.DataFrame([sp_.iloc[1]] * 2, index=sd[2:4])) and sp_.iloc[4].equals(st0.iloc[4]),
-      sp_.round(3).to_dict("index"))
-st1 = st0.copy()
-st1.loc[sd[:4], sc[:3]] = 0.145                                               # S01-S03 within 1 point of the 15% cap
-st1.loc[sd[:4], sc[3:8]] = 0.08
-st1.loc[sd[:4], "S09"] = 0.1                                                  # (rank 10 held: no unheld top-10 buy)
-sp1 = ft.spare_cash(st1, tue_thu, {**sinp, "close": closes(["S01", "S02", "S03", "S04"])})
-check("spare cash: in-profit S01-S03 too close to the 15% cap for a 1% buy, so the spare 6.5% goes to in-profit S04 "
-      "(8% -> 14.5%); losers S05-S08 none; never above 15%, 100% invested",
-      abs(sp1.iloc[1].sum() - 1.0) < 1e-12 and sp1.iloc[1].max() <= 0.15 + 1e-12 and abs(sp1.iloc[1]["S04"] - 0.145) < 1e-12
-      and sp1.iloc[1][sc[:3]].eq(0.145).all() and sp1.iloc[1][sc[4:8]].eq(0.08).all()
-      and sp1.iloc[1][["AMD", "S10"]].sum() == 0, sp1.iloc[1].round(4).to_dict())
-sp2 = ft.spare_cash(st1, tue_thu, {**sinp, "close": closes([])})
-check("spare cash: no holding above its entry -> the 6.5% is split over all held stocks with room (S04-S08, S09: +6.5%/6 each)",
-      abs(sp2.iloc[1].sum() - 1.0) < 1e-12 and np.allclose(sp2.iloc[1][sc[3:8]], 0.08 + 0.065 / 6, rtol=0, atol=1e-12)
-      and abs(sp2.iloc[1]["S09"] - (0.1 + 0.065 / 6)) < 1e-12
-      and sp2.iloc[1][sc[:3]].eq(0.145).all(), sp2.iloc[1].round(4).to_dict())
-
 # the rules that are not rankings, on tiny hand-made data
 ud = pd.bdate_range("2026-01-05", periods=8)
 uc = pd.DataFrame({"A": [100, 91, 90, 95, 100, 101, 90, 89.0], "B": [100, 100, 100, 100, 100, 100, 100, 91.0]}, index=ud)
@@ -560,14 +517,6 @@ check("ATR dip buy, sell on signal: no fixed hold, sold on its sell day, not bou
       d3["A"].tolist() == [0.5] * 5 + [0] and d3["C"].tolist() == [0, 0.5, 0, 0, 0, 0] and d3["B"].sum() == 0, d3.to_dict("list"))
 check("ATR dip buy: fewer rooms than positions -> the oldest is sold",
       d2["A"].tolist() == [0.5, 0.5, 0, 0.5, 0.5, 0.5] and d2["C"].tolist() == [0, 0.5, 0.5, 0.5, 0, 0], d2.to_dict("list"))
-r = rng.normal(0, 1, (80, 3)) * [0.01, 0.02, 0.04]
-rc = pd.DataFrame(100 * np.exp(np.cumsum(r, axis=0)), index=pd.bdate_range("2026-01-01", periods=80), columns=list("XYZ"))
-rt = pd.DataFrame(0.3, index=rc.index, columns=rc.columns)
-rp = ft.risk_parity(rt, rc, pd.Series(rc.index == rc.index[-1], index=rc.index)).iloc[-1]   # recomputed on the last day
-cov = rc.pct_change().iloc[-63:].cov().to_numpy()
-contrib = rp.to_numpy() * (cov @ rp.to_numpy())
-check("risk parity: same total, equal risk contributions, the calmest stock gets the most",
-      abs(rp.sum() - 0.9) < 1e-12 and np.allclose(contrib, contrib.mean(), rtol=1e-6) and rp["X"] > rp["Y"] > rp["Z"], rp.to_dict())
 vb = pd.DataFrame({"Symbol": "A", "Date": pd.bdate_range("2026-01-05", periods=20), "Open": 1.0, "High": 12.0, "Low": 8.0,
                    "Close": [10.0] * 19 + [10.5], "Volume": [100.0] * 19 + [300.0]})
 vf = ft.bar_features([vb], pd.DatetimeIndex(vb["Date"]), ["A"])
@@ -674,8 +623,5 @@ check("forward_test.py has no order code and never writes the live files or WINN
       not any(w in src for w in ("submit_order", "cancel_order", "OrderRequest", "TradingClient", "import paper_trade",
                                  "requests.post", "run_state", "live_pending_orders", "WINNER.update"))
       and "WINNER[" not in _src_wo_get)
-_t = pd.DataFrame([[0.3, 0.3, 0.3]], index=pd.to_datetime(["2026-10-02"]), columns=["ZZZ", "AAA", "MMM"])
-check("rank_tier: tied scores keep column order (not set order, which changes per process)",
-      ft.rank_tier(_t, _t * 0 + 1.0, np.array([0.5, 0.3, 0.2])).iloc[0].round(6).tolist() == [0.45, 0.27, 0.18])
 print(f"\n{len(FAIL)} failed" if FAIL else "\nFORWARD TEST OK")
 sys.exit(1 if FAIL else 0)

@@ -39,7 +39,7 @@ ORDER_COLUMNS = ["Symbol", "Side", "Shares", "Price", "Est_Value", "Current_Shar
                  "Target_Weight_%", "Target_Value"]
 NO_TRADE_BAND = 0.01   # Friday rebalance: a target holding within 1 percentage point of its weight is not traded
 MAX_ORDER_PCT = 0.20   # backstop: a BUY worth more than 20% of equity is refused (not sent, not carried to 9 AM).
-                       # Target weights are clipped to WINNER["max_weight"] x 99% (tests check it equals max_weight).
+                       # (a safety check only; sizing is equal weight, 1/n per stock, since Oct 21, 2026)
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
 INVESTED_CAP = 0.99   # a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED; a cap, not a scale-down)
 CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills a bit above the estimate still fit.
@@ -648,7 +648,7 @@ def substitute_blocked_picks(targets, positions, ranking, blocked, statuses=None
     its weight in cash: the next best-ranked eligible stock not already in the targets takes it. Candidates come from the
     latest ranking (`ranking`, see latest_ranking: score above 0), best rank first, down to rank `max_rank`
     (FRIDAY_SUB_MAX_RANK, 20), and must not be blocked themselves and must have a price. The replacement gets the skipped
-    pick's weight (already the regime-halved live weight), capped at WINNER['max_weight'] x 99% (14.85%); a candidate the
+    pick's weight (already the regime-halved live weight; equal weights); a candidate the
     account already holds is simply kept and brought to that weight. Blocked picks are taken in rank order. The skipped
     pick stays in the targets at weight 0 (its SKIP row names the replacement). Held picks with earnings soon are not
     touched (not topped up, as before). No candidate left -> that weight stays in cash (noted).
@@ -668,7 +668,6 @@ def substitute_blocked_picks(targets, positions, ranking, blocked, statuses=None
         return t, statuses, blocked, info
     gone.sort(key=lambda i: (rank.get(sym[i], 10 ** 9), sym[i]))
     in_targets = set(sym[w > 0])
-    cap = float(be.WINNER.get("max_weight") or 1.0) * be.LIVE_INVESTED
     cands = []
     for r in ranking.itertuples():
         s = str(r.Symbol).upper()
@@ -684,7 +683,7 @@ def substitute_blocked_picks(targets, positions, ranking, blocked, statuses=None
             info["skipped"].append((s, f"rank {rank[s]}: no price"))
     new = []
     for i in gone:
-        s, why, wt = sym[i], blocked[sym[i]], float(min(w[i], cap))
+        s, why, wt = sym[i], blocked[sym[i]], float(w[i])
         if not cands:
             info["unfilled"].append((s, rank.get(s), why))
             blocked[s] = f"{why}; no eligible stock down to rank {max_rank}, its weight stays in cash"

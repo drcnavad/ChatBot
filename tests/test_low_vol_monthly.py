@@ -1,5 +1,5 @@
 """The live rules from Fri Oct 16, 2026 (Chirag): Low volatility in uptrend (monthly) = forward_test.py's "Low volatility in
-uptrend" (score low_vol, monthly, equal weight, max 4 per sector, 20% cap, no earnings rule, no sleeve) + do_not_buy +
+uptrend" (score low_vol, monthly, equal weight, max 4 per sector, no earnings rule, no sleeve) + do_not_buy +
 the optional Friday check (WINNER['friday_falling_check'], OFF live; tested with the flag on): sell a holding below its entry price, at/below its 200-day
 average or out of the top 10, same dollars into the best pick not held; no Mon-Thu trading; the earnings-day stop off.
 Mocked: no broker calls, temporary files only."""
@@ -26,15 +26,15 @@ def check(ok, what, got=""):
 
 W = be.WINNER
 cfg = next(c for c in ft.STRATEGIES if c["name"] == "Low volatility in uptrend")
-sel = {"max_weight": ft.MAX_WEIGHT, **ft.PIN, **cfg["select"]}
+sel = {**ft.PIN, **cfg["select"]}
 check(cfg["score"] == W["score"] == "low_vol" and cfg["calendar"] == W["calendar"] == "monthly", "score / calendar = forward strategy")
-for k in ("vol_sizing", "sector_cap", "max_weight", "max_pick_rank", "cap_soft"):
+for k in ("sector_cap", "max_pick_rank", "cap_soft"):
     check(sel[k] == W[k], f"selection {k} = forward strategy", (sel[k], W[k]))
 check(cfg["earnings"] is None and not W["earnings_block_days"], "no earnings rule (forward strategy: earnings None)")
 check(not W["midweek_swap"] and not W["midweek_exit_below"], "no Mon-Thu checks")
 check(not W["sleeve"] and "sleeve" not in be.winner_rank_args(pd.Series(dtype=bool)) and sm.do_not_sell == [], "no sleeve, do_not_sell empty")
 check(not W["keep_profit_at_rebalance"] and not W["earnings_day_stop"] and not W["friday_falling_check"], "keep rule off, stop off, Friday check off (plain monthly)")
-check(pt.MAX_ORDER_PCT == W["max_weight"], "order backstop = 20% cap")
+check(pt.MAX_ORDER_PCT == 0.20, "order backstop = 20% of equity (safety only)")
 
 # calendar of the low-volatility rules alone (the sector half's Fridays: tests/test_sleeves.py): Oct 16 switch, then the
 # last trading day of each month; nothing in between

@@ -233,7 +233,7 @@ expect(len(_top) == 1 and len(_top_syms) == 10 and len({s for s, _, _ in _top_sy
 expect(any("flex-wrap: wrap" in m.value and "sa-tier-syms" in m.value for m in at.markdown),
        "stock-list rows (sa-tier-syms) must wrap onto more lines, not scroll")
 _rule = "Don't change the strategy until 12+ weeks of forward results (from Oct 2, 2026) compare against QQQ."
-for _rule in (_rule, "No single stock gets more than 15%; any extra stays in cash."):
+for _rule in (_rule,):
     expect(sum(_rule in m.value for m in at.markdown) + sum(_rule in c.value for c in at.caption) == 1, f"shown once: {_rule}")
 # short history: no Details section any more; the stocks sit in the clickable stock list (see the rank tiers test)
 expect(not any(l.startswith("Reference only") for l in labels), f"stale short-history Details section: {labels}")

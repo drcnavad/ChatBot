@@ -3,7 +3,7 @@
   lowvol  50%: the monthly low-volatility rules (the pipeline's Provisional_Weight in strategy_picks.csv), rebalanced on
                the last trading day of each month (+ the Oct 16 switch).
   sector  50%: forward_test.py's "Sector rotation" (top 3 sector ETFs by 63-day return, then their top WINNER["n"] (5 from Oct 26, 2026; was 10) by the C6 score,
-               inverse-volatility weights, max 2 per sector (4 with 10), 20% cap, QQQ halving, do_not_buy), full rebalance of this half
+               equal weights, max 2 per sector (4 with 10), QQQ halving, do_not_buy), full rebalance of this half
                every Friday (the week's last session, Thursday when Friday is a holiday; Mondays Oct 19-22, 2026, Fridays before). No overlap: it never buys a name the low-volatility half holds or
                targets; when the low-volatility half buys a name this half holds, the shares move to the low-volatility half
                at the current price (no trade) and this half rebalances the same day without it.
@@ -89,7 +89,7 @@ def sector_args(inp):
     import forward_test as ft
     cfg = next(c for c in ft.STRATEGIES if c["name"] == SECTOR_STRATEGY)
     a = be.winner_rank_args(inp["regime"])
-    a.update({"max_weight": ft.MAX_WEIGHT, **ft.PIN, **(cfg.get("select") or {}), "sleeve": ()})
+    a.update({**ft.PIN, **(cfg.get("select") or {}), "sleeve": ()})
     a["n"] = be.WINNER["n"]
     return a, cfg
 
@@ -122,7 +122,7 @@ def sector_weights(day, exclude=(), held=None, inp=None):
     w = be.rank_targets(score.iloc[[t]], el, inp["vol"], rebalance_days=pd.Series(True, index=idx[[t]]),
                         tiebreak_w=inp["scores"].get(cfg.get("tiebreak", "rs")), buy_block=block, start_holdings=hw,
                         **args).iloc[0]
-    return be.live_weights(w.clip(upper=ft.MAX_WEIGHT)).reindex(cols).fillna(0.0)
+    return be.live_weights(w).reindex(cols).fillna(0.0)                     # equal weight: 1/n each (Oct 21, 2026)
 
 # ----------------------------------------------------------------------------- ledger
 def load_ledger(path=None):
