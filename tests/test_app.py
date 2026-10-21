@@ -136,12 +136,9 @@ for sym in TICKERS:
     # 4ad4ef4 simplified the stock card: score + weight tiles (no rank/slot tiles); the rank sits in the dropdown label
     hero = next((m.value for m in at.markdown if 'class="sa-ident"' in m.value), "")
     sc = re.search(r'Strategy score</div><div class="sa-stat-val"[^>]*>([^<]*)<', hero)
-    wt = re.search(r'Portfolio weight</div><div class="sa-stat-val"[^>]*>([^<]*)<', hero)
-    s_, w_ = latest.loc[sym, "Strategy_Score"], latest.loc[sym, "Strategy_Weight"]
+    s_ = latest.loc[sym, "Strategy_Score"]
     want_sc = f"{s_:.1f}" if pd.notna(s_) else "—"
-    want_wt = f"{w_ * 100:.1f}%" if pd.notna(w_) and w_ > 0 else "—"
-    expect(sc and wt and sc.group(1) == want_sc and wt.group(1) == want_wt,
-           f"{sym}: header score/weight {sc and sc.group(1)!r}/{wt and wt.group(1)!r}, expected {want_sc!r}/{want_wt!r}")
+    expect(sc and sc.group(1) == want_sc and "Portfolio weight" not in hero, f"{sym}: header score {sc and sc.group(1)!r}, expected {want_sc!r}; no weight tile")
     r = latest.loc[sym, "Strategy_Rank"]
     lab = next((o for o in at.selectbox(key="ticker_dropdown").options if o.split("  ·  ")[0] == sym), "")
     expect((f"rank #{r:.0f}  ·" in lab) if pd.notna(r) else "rank #" not in lab, f"{sym}: dropdown label {lab!r} vs rank {r}")

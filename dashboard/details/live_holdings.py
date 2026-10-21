@@ -100,11 +100,12 @@ def render_positions(table, data):
     table.insert(1, "Strategy", [strat.get(s, "") if not str(s).startswith("Total") else "" for s in table["Stock"]])
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
     money, pct = st.column_config.NumberColumn(format="dollar"), st.column_config.NumberColumn(format="%+.2f%%")
+    table = table.drop(columns=["Weight %"], errors="ignore")   # equal weights: not shown (Oct 21, 2026)
     st.dataframe(toned(table, ["P/L $", "P/L %", "Today %"]), hide_index=True, width="stretch",
                  height=35 * (len(table) + 1) + 3,                  # every row visible, no inner scroll
                  column_config={"Shares": st.column_config.NumberColumn(format="%.2f"), "Avg price": money,
                                 "Cost basis": money, "Market value": money, "P/L $": money, "Price": money,
-                                "P/L %": pct, "Today %": pct, "Weight %": st.column_config.NumberColumn(format="%.2f%%")})
+                                "P/L %": pct, "Today %": pct})
     st.caption(f"As of {data['as_of']:%a %b %-d %I:%M:%S %p} CT, read from Alpaca (read-only). Updates by itself: every "
                "minute in market hours (8:30 AM-3:00 PM CT on trading days), every hour otherwise. "
                "Cost basis = what you paid; Market value = shares x the latest price; P/L \\$ and P/L % = market value vs "

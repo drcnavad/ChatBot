@@ -96,12 +96,12 @@ WINNER = {
     "keep_profit_at_rebalance": False,  # (tested, not live) keep a non-pick in profit + above its 200-day at a rebalance
     "earnings_day_stop": False, # earnings_stop.py places no orders (not in the backtest; no Mon-Thu trading)
     # Friday check (tested; Chirag turned it OFF Oct 15, 8:28 PM -> live = plain monthly): every Friday that is not a rebalance day, sell each holding that is below its
-    # Alpaca avg entry price, at/below its 200-day average, or no longer in the day's top-10 picks, and buy the best-ranked
+    # Alpaca avg entry price, at/below its 200-day average, or no longer in the day's top picks, and buy the best-ranked
     # pick not held with the same dollars (do_not_buy skipped). No trims / top-ups. (paper_trade
     # friday_falling_orders.) False = monthly rebalances only.
     "friday_falling_check": False,
     # Two halves (Chirag, Oct 15, 8:44 PM; live from Fri Oct 16): 50% of the account = the low-volatility rules above (monthly)
-    # and 50% = forward_test's "Sector rotation" (63-day sector ETF return, top 3 sectors, its top n (5 from Oct 26, 2026) by the C6 score,
+    # and 50% = forward_test's "Sector rotation" (63-day sector ETF return, top 3 sectors, its top n (5 from Fri Oct 23, 2026) by the C6 score,
     # equal weights, max 2 per sector (4 with 10), QQQ halving, do_not_buy) with a full
     # rebalance of that half every Friday (the week's last session); no overlap (the sector half never holds a name the
     # low-volatility half holds or targets). Two independent halves, each with its own cash (sleeves.py,
@@ -150,7 +150,7 @@ def winner_label(n_stocks):
                 f"max {winner_max_per_sector()} per sector, rebalanced on the last trading day of the month + soft QQQ regime "
                 f"({n_stocks} stocks)" + (" [at a rebalance a non-pick is sold only below its purchase price or at/below its 200-day average]"
                                           if S.get("keep_profit_at_rebalance") else "")
-                + (" + Friday check (sell a holding below its purchase price, at/below its 200-day or out of the top 10; "
+                + (" + Friday check (sell a holding below its purchase price, at/below its 200-day or out of the top picks; "
                    "same dollars into the best pick not held)" if S.get("friday_falling_check") else ""))
         if S.get("sleeves"):
             name = (f"{S['sleeves']['lowvol']:.0%} " + name + f" + {S['sleeves']['sector']:.0%} Sector rotation (top 3 sectors by "

@@ -109,7 +109,6 @@ def render_stock_section(p, ticker, tdata):
                      f'{esc(when + " plan: " + plan_text(p.plan, ticker))}</span>')
     stats = [
         stat_html("Strategy score", fmt(score, ".1f"), score_tone(score)),
-        stat_html("Portfolio weight", fmt(weight * 100 if weight > 0 else None, ".1f", suffix="%")),
         stat_html("Technical", fmt(num(latest.get('Technical_Score')), ".1f"), score_tone(num(latest.get('Technical_Score')))),
         stat_html("Strength vs sector/SPY", fmt(num(latest.get('RS_Score')), ".1f"), score_tone(num(latest.get('RS_Score')))),
         stat_html("Next earnings", pd.Timestamp(next_ed).strftime("%b %d") if next_ed else "—"),

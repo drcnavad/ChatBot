@@ -2,7 +2,7 @@
 
   lowvol  50%: the monthly low-volatility rules (the pipeline's Provisional_Weight in strategy_picks.csv), rebalanced on
                the last trading day of each month (+ the Oct 16 switch).
-  sector  50%: forward_test.py's "Sector rotation" (top 3 sector ETFs by 63-day return, then their top WINNER["n"] (5 from Oct 26, 2026; was 10) by the C6 score,
+  sector  50%: forward_test.py's "Sector rotation" (top 3 sector ETFs by 63-day return, then their top WINNER["n"] (5 from Fri Oct 23, 2026; was 10) by the C6 score,
                equal weights, max 2 per sector (4 with 10), QQQ halving, do_not_buy), full rebalance of this half
                every Friday (the week's last session, Thursday when Friday is a holiday; Mondays Oct 19-22, 2026, Fridays before). No overlap: it never buys a name the low-volatility half holds or
                targets; when the low-volatility half buys a name this half holds, the shares move to the low-volatility half

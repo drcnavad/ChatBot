@@ -8,7 +8,7 @@ import streamlit as st
 
 from dashboard.page import open_symbol
 from dashboard.settings import SIGNAL_CSV
-from dashboard.style import GOOD, INK, PCT_COL, toned
+from dashboard.style import GOOD, INK, toned
 
 SLEEVE = {"lowvol": "Low vol", "sector": "Sector rotation"}
 @st.cache_data(ttl=60, show_spinner=False)
@@ -113,11 +113,11 @@ def render_last_decision(p):
                 continue
             st.markdown(f"**{sleeves.LABEL[half]}** · ranks at its rebalance of {day:%a %b %-d}")
             t, others = ranking_table(half, day, positions, led, values=half_values(positions, led, equity))
+            t = t.drop(columns=["Weight in half %"])           # equal weights: no weight columns shown (Oct 21, 2026)
             sty = toned(t, ["Held by"], fn=lambda v: GOOD if str(v).startswith("✓") else INK)
             event = st.dataframe(sty, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
                                  key=f"rank_tbl_{half}", height=35 * (len(t) + 1) + 3,
-                                 column_config={"Weight in half %": PCT_COL,
-                                                "Score": st.column_config.NumberColumn(format="%.1f")})
+                                 column_config={"Score": st.column_config.NumberColumn(format="%.1f")})
             if others:
                 st.caption(f"Held, not in top 20: {', '.join(others)}")
             t = t.rename(columns={"Stock": "Symbol"})
@@ -274,29 +274,22 @@ def render_preview(positions, led, equity):
             plan = lambda s: "Blocked" if s in blocked else ("Keep" if s in mine[half] else
                               f"Take over from {SLEEVE[other]}" if s in mine[other] else "Buy") if s in tg else ""
             t.insert(1, "Plan", [plan(s) for s in t["Stock"]])
-            f = vals[half] / (sum(vals.values()) or 1.0)       # (Oct 21) % of the account, not of the half
-            t.insert(2, "Target %", [round(100 * tg[s] * f, 1) if s in tg else None for s in t["Stock"]])
-            t = t.rename(columns={"Weight in half %": "Now %"})
-            t["Now %"] = (t["Now %"] * f).round(1)
-            tot = sum(tg.values()) * 100 * f
-            st.caption(f"Targets: {tot:.1f}% of account (half = {100 * f:.1f}%)"
-                       + (f"; {100 * f - tot:.1f}% cash" if 100 * f - tot > 1 else ""))
+            t = t.drop(columns=["Weight in half %"])           # equal weights: no weight columns shown
             sty = toned(t, ["Plan"], fn=lambda v: GOOD if v == "Buy" else INK)
             st.dataframe(sty, hide_index=True, width="stretch", height=35 * (len(t) + 1) + 3, key=f"preview_{half}",
-                         column_config={"Now %": PCT_COL, "Target %": PCT_COL,
+                         column_config={
                                         "Score": st.column_config.NumberColumn(format="%.1f")})
             buys_out = sorted(set(tg) - set(t["Stock"]) - set(mine[half]) - blocked)
             sells = sell_table(half, day, sorted(set(mine[half]) - set(tg)), value, vals[half], ranks, targets)
             if len(sells):
-                sells = sells.rename(columns={"Weight in half %": "Now %"})
-                sells["Now %"] = (sells["Now %"] * f).round(1)
+                sells = sells.drop(columns=["Weight in half %"])
             st.markdown("Would sell" + ("" if len(sells) else ": nothing"))
             if len(sells):
                 st.dataframe(sells, hide_index=True, width="stretch", key=f"preview_sell_{half}",
-                             column_config={"Now %": PCT_COL,
+                             column_config={
                                             "Score": st.column_config.NumberColumn(format="%.1f")})
             if buys_out:
                 st.caption(f"Would also buy (ranked below 20): {', '.join(buys_out)}")
     st.caption(f"Ranks and targets at the {day:%a %b %-d} close, by the bot's own selection code (read-only; nothing is "
                "sent). Keep = target and held; Buy = target, not held; Take over = the low-vol half takes a stock the other "
-               "half holds (no trade); Now % / Target % = % of the whole account; Blocked = a stock on a buy block / do-not-buy list (not bought). The real rebalance uses the data of its own day, so the list can still change.")
+               "half holds (no trade); Blocked = a stock on a buy block / do-not-buy list (not bought). The real rebalance uses the data of its own day, so the list can still change.")

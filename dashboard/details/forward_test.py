@@ -153,8 +153,8 @@ def render_forward_rules(p=None):
         names = board["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)
         order = [n for n in names if n in by_name] + [n for n in order if n not in set(names)]
     rules = pd.DataFrame([{"Strategy": n, "Rule": by_name[n]["rule"],
-                           "Holdings now (target weight)": held.get(n, "cash")} for n in order])
-    sty = toned(rules, ["Holdings now (target weight)"], fn=lambda v: MUTED if v == "cash" else INK)
+                           "Holdings now": held.get(n, "cash")} for n in order])
+    sty = toned(rules, ["Holdings now"], fn=lambda v: MUTED if v == "cash" else INK)
     render_group_legend()
     st.dataframe(live_row(paint_strategy(sty, extra=("Rule",)), "Strategy", ft.LIVE), hide_index=True, width="stretch")
     if h is not None and len(h):

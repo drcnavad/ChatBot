@@ -53,7 +53,7 @@ BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of it
 WEEKS_TO_WIN = 12
 MON5 = "Live 50/50, top 5, sector on Mondays"   # Oct 21: the top-5 rules with the sector half on Mondays (live Oct 21 morning)
 MON = "Live 50/50, top 10 each half"    # the live rules Oct 19-25 (sector half on Mondays, 10 stocks per half)
-TOP5 = "Current Strategy (Live from Oct End)"   # = the current live rules (Chirag, Oct 21, 2026: 5 per half from Oct 26 / Oct 30)
+TOP5 = "Current Strategy (Live from Oct End)"   # = the current live rules (Chirag, Oct 21, 2026: 5 per half from Fri Oct 23 / Fri Oct 30)
 MARKED = TOP5
 LIVE = TOP5         # the line the verdict and the dashboard compare against
 # Removed Oct 20, 2026 (Chirag): "Live 50/50 combined (no overlap)" (was "Live rules (C6)"), a near-duplicate of MON;
@@ -68,6 +68,8 @@ REMOVED = {"Live 50/50 combined (no overlap)", "Live rules (C6)", "MACD cross + 
 # Renamed lines: saved rows take the new name (migrate_names, and the dashboard reads through this map).
 # A rule that changed (ATR dip buy, top 30 -> top 10) is a new name on purpose, so the old results are not relabeled.
 OLD_NAMES = {
+    "Worst sector 14d, +10%/-3%": "Worst 3 sectors 14d, +10%/-3%",   # Oct 21: 3 worst sectors, top 10 (rebuilt from Oct 2)
+    "Worst sector 1M, +10%/-3%": "Worst 3 sectors 1M, +10%/-3%",
     "Quant Score": "Quant Score top 10",
     "Now: calmer half": "Now: RS, calmer half of the list",
     "Now: RS 10/21/63 days": "Now: shorter RS (10/21/63 days)",
@@ -122,7 +124,7 @@ GROUP_LABEL = {
 # keys (n, sector_cap, regime, ...), "earnings" None drops the earnings skip, "calendar" is "mwf" / "weekly"
 # (Friday only) / "monthly" (last session of the month). "weights" = a rule that is not a ranking (its own weights below);
 # "stop" = the live rules + an ATR stop around earnings (STOPS);
-# "spare_dips" = the live rules + ATR dip buys with the cash they leave unused; "midweek" = other Mon-Thu swap settings;
+# "midweek" = other Mon-Thu swap settings;
 # "replay" = the live rules replayed day by day with a changed Mon-Thu exit (atr_stop_targets).
 #
 # The "Now" strategies (**NOW) = one change each to the live rules of Oct 15 (pinned): relative strength only, top 10 +
@@ -253,8 +255,8 @@ STRATEGIES = [
               "stocks in the 3 sectors whose ETF has the best 63-day return, top 10, equal weights, rebalanced every Monday (the first session of the week); never buys a stock the low-volatility half holds. Not ranked (starts Oct 16)."),
     dict(name=MON5, combo=dict(legs=MON5_LEGS), group="combo",
          rule="The live top-5 rules (Current Strategy (Live from Oct End)) computed from Oct 2 with the sector half rebalanced "
-              "every Monday (Tuesday after a Monday holiday) instead of Friday: top 5 per half, max 2 per sector, 20% max per "
-              "stock, no overlap, do_not_buy and the live manual buy blocks such as KO never bought."),
+              "every Monday (Tuesday after a Monday holiday) instead of Friday: top 5 per half, max 2 per sector, equal "
+              "weight, no overlap, do_not_buy and the live manual buy blocks such as KO never bought."),
     dict(name=MON, combo=dict(legs=PREV_LEGS), group="combo",
          rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
               "half rebalanced every Monday (Tuesday after a Monday holiday), no overlap, 10 stocks per half. The live rules Oct 19 "
@@ -312,10 +314,10 @@ STRATEGIES = [
          rule="Buy when the close gets within 5% of its 52-week high and is above the 200-day average; sell 8% below the entry or on a close below the SMA50 (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="Dual MA + RSI filter", event=dict(kind="ma_rsi"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and RSI(14) is 50-70; sell when RSI(14) falls below 40 (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="Worst sector 14d, +10%/-3%", worst=dict(look=10), earnings=None, group="event",
-         rule="Each day, find the sector (sector_mapping.py) with the worst average stock return over the last 14 days (10 sessions); buy its top-ranked stocks by the live score (top 5, 20% each). Sell at +10% or -3% from the entry close; freed cash buys the current worst sector's best stock not held. Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
-    dict(name="Worst sector 1M, +10%/-3%", worst=dict(look=21), earnings=None, group="event",
-         rule="Each day, find the sector (sector_mapping.py) with the worst average stock return over the last month (21 sessions); buy its top-ranked stocks by the live score (top 5, 20% each). Sell at +10% or -3% from the entry close; freed cash buys the current worst sector's best stock not held. Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
+    dict(name="Worst 3 sectors 14d, +10%/-3%", worst=dict(look=10), earnings=None, group="event",
+         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 14 days (10 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors. Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
+    dict(name="Worst 3 sectors 1M, +10%/-3%", worst=dict(look=21), earnings=None, group="event",
+         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last month (21 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors. Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
     dict(name="Golden cross + MACD confirm", event=dict(kind="golden_macd"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and MACD is above its signal; sell when MACD falls below the signal (10% each, at most 10, calmest first; checked at the close)."),
 ]
@@ -746,14 +748,14 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
             "bench": b, "up": up, "ma200": f["ma_200"], "ma10": f["ma_10"], "ma30": f["ma_30"], "ma50": f["ma_50"],
             "qqq50": (qqq > qqq.rolling(50).mean()).reindex(dates).fillna(False),
             "weekly": weekly, "live_cal": be.winner_rebalance_days(dates, live=True), "earnings": earnings, "atr": atr,
-            "dip_spare": dip_b & ~soon.reindex(index=dates, columns=cols).fillna(False), "open": bx["open_ratio"] * c,
+            "open": bx["open_ratio"] * c,
             "soon": soon.reindex(index=dates, columns=cols).fillna(False),          # earnings within 5 days (E5)
             "monthly": pd.Series([be.next_sessions(d, 1)[0].month != d.month for d in dates], index=dates),
             "through": have[have].index.max() if have.any() else pd.Timestamp(0)}
 
-def worst_sector_weights(c, score, eligible, look, tp=0.10, stop=0.03, n=5, start=None):
-    """Worst sector (Chirag, Oct 21, 2026): each close, the sector with the lowest mean stock return over `look` sessions;
-    free slots (1/n each, at most n) buy its best `score` stocks not held. Exit at a close +tp / -stop from the entry close;
+def worst_sector_weights(c, score, eligible, look, tp=0.10, stop=0.03, n=10, k=3, start=None):
+    """Worst sectors (Chirag, Oct 21, 2026): each close, the k sectors with the lowest mean stock return over `look` sessions;
+    free slots (1/n each, at most n) buy their best `score` stocks not held. Exit at a close +tp / -stop from the entry close;
     a stock sold that day is not bought back the same day. Entries only from `start`."""
     sect = pd.Series({x: be.sector_mapping.symbol_sector.get(x, "Other") for x in c.columns})
     ret = (c / c.shift(look) - 1).T.groupby(sect).mean().T          # Date x sector
@@ -769,7 +771,7 @@ def worst_sector_weights(c, score, eligible, look, tp=0.10, stop=0.03, n=5, star
                 sold.add(j)
         r = ret.iloc[t].dropna()
         if t >= t0 and len(held) < n and len(r):
-            inside = (sect == r.idxmin()).to_numpy()
+            inside = sect.isin(r.nsmallest(k).index).to_numpy()
             ok = [j for j in np.argsort(-np.nan_to_num(S[t], nan=-np.inf), kind="stable")
                   if inside[j] and E[t, j] and np.isfinite(S[t, j]) and j not in held and j not in sold]
             for j in ok[:n - len(held)]:
@@ -829,9 +831,6 @@ def strategy_targets(cfg, inp):
                                    earnings_block_days=cfg.get("earnings", EARN_DAYS), earnings=inp["earnings"],
                                    exit_all_below=below, exit_to_top=top,
                                    never_buy=be.sector_mapping.do_not_buy if cfg.get("never_buy") else ())
-        if cfg.get("spare_dips"):                         # the cash the live rules leave unused buys ATR dips (10% each)
-            tgt = tgt + atr_dip_weights(inp["dip_spare"][tgt.columns], inp["scores"]["live"], taken=(tgt > 0).to_numpy(),
-                                        room=np.floor((1 - tgt.sum(axis=1)).to_numpy() * 10 + 1e-9).astype(int))
     tgt = tgt.mask(_dnb(inp).reindex(index=tgt.index, columns=tgt.columns, fill_value=False), 0.0)   # its weight: cash
     return be.live_weights(tgt).reindex(columns=inp["close"].columns).fillna(0.0)
 
@@ -1112,9 +1111,7 @@ def verdict(board):
         return f"After {weeks} weeks the winner is {top}: it ranks first and beats {LIVE} and QQQ."
     return f"After {weeks} weeks no winner: {top} ranks first but does not beat both {LIVE} and QQQ. Keep the live rules."
 
-DECISION_DATE = "2026-12-24"   # the week-12 checkpoint (Thu: Fri Dec 25 is a holiday): stay only if the live line beats SPY
 LIVE_HALVES = ("Live half: Low vol monthly", "Live half: Sector rotation Mondays (63d)")
-SPY_RULE = "We must beat SPY to stay in the current strategy, otherwise switch to SPY (Chirag, Oct 15, 2026)."
 
 def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
     """Display only, never saved. A trading day is saved by the daily run's after-close step (from 3:05 PM CT) once it
@@ -1151,14 +1148,14 @@ def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
     return out, bench
 
 def holdings(path=HOLDINGS_CSV):
-    """Strategy -> 'NVDA 14.2%, ...' of its latest saved day (target weights, largest first)."""
+    """Strategy -> 'NVDA, AAPL, ...' of its latest saved day (largest first; equal weights, so no % shown)."""
     h = _read(path, parse_dates=["Date"])
     if h is None or h.empty:
         return {}
     h = h.assign(Strategy=h["Strategy"].replace(OLD_NAMES))
     h = h[h["Date"] == h.groupby("Strategy")["Date"].transform("max")]
     h = h[h["Weight"] > 0].sort_values(["Strategy", "Weight"], ascending=[True, False])
-    return {s: ", ".join(f"{r.Symbol} {r.Weight:.1%}" for r in g.itertuples()) for s, g in h.groupby("Strategy")}
+    return {s: ", ".join(r.Symbol for r in g.itertuples()) for s, g in h.groupby("Strategy")}
 
 def consensus(board, hold, ranks=None, n_strategies=5, n_stocks=10):
     """Display only (never saved, never traded): the stocks most held by the best forward-test strategies.

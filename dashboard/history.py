@@ -73,8 +73,6 @@ def event_hover(e):
     text = f"<b>{sig}</b>: {html.escape(plain_reason(sig, e.Reason, e.Rank, e.Score))}"
     text += f"<br>Decided at the close {e.Decision:%a %b %-d} · orders go out that day" + ("" if pd.notna(e.Fill) else " (pending)")
     bits = ([f"Rank #{e.Rank:.0f}"] if pd.notna(e.Rank) else []) + ([f"Score {e.Score:.1f}"] if pd.notna(e.Score) else [])
-    if pd.notna(e.Weight):
-        bits.append(f"{'Portfolio weight' if e.Kind == 'entry' else 'Weight sold'} {e.Weight * 100:.2f}%")
     if bits:
         text += "<br>" + " · ".join(bits)
     if e.Regime_On == 0:
