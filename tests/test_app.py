@@ -100,13 +100,17 @@ def _finite(v):
     return int(sum(1 for x in a if x is not None and not (isinstance(x, float) and np.isnan(x))))
 
 def price_chart_ok(at, sym):
-    specs = [json.loads(c.proto.spec) for c in at.get("plotly_chart")]
-    price = [f for f in specs if any(t.get("name") == "Close" for t in f["data"])]
+    """The stock chart is a custom component (dashboard/drawings.py) AppTest cannot read: check the figure it is given."""
+    from dashboard.data import ohlcv
+    from dashboard.stock_chart import build_price_chart
+    f = json.loads(build_price_chart(sym, SIG[SIG.Symbol == sym], ohlcv(sym)).to_json())
+    price = [f] if any(t.get("name") == "Close" for t in f["data"]) else []
     if not price:
         return expect(False, f"{sym}: no price chart")
     f = price[0]
     on_x = {t.get("name"): t for t in f["data"] if t.get("xaxis", "x") == "x" and t.get("yaxis", "y") == "y"}
-    probs = [n for n in ["Close"] + MA_NAMES if n not in on_x or _finite(on_x[n].get("y")) == 0 or _finite(on_x[n].get("x")) == 0]
+    probs = [n for n in ["Close"] + MA_NAMES if n not in on_x or _finite(on_x[n].get("close" if n == "Close" else "y")) == 0
+             or _finite(on_x[n].get("x")) == 0]
     if f["layout"].get("xaxis", {}).get("type") != "date":
         probs.append("x-axis not a date axis")
     expect(not probs, f"{sym}: price chart problems {probs}")
@@ -135,7 +139,7 @@ for sym in TICKERS:
     price_chart_ok(at, sym)
     # 4ad4ef4 simplified the stock card: score + weight tiles (no rank/slot tiles); the rank sits in the dropdown label
     hero = next((m.value for m in at.markdown if 'class="sa-ident"' in m.value), "")
-    sc = re.search(r'Strategy score</div><div class="sa-stat-val"[^>]*>([^<]*)<', hero)
+    sc = re.search(r'<td>Strategy score</td><td[^>]*>([^<]*)<', hero)
     s_ = latest.loc[sym, "Strategy_Score"]
     want_sc = f"{s_:.1f}" if pd.notna(s_) else "—"
     expect(sc and sc.group(1) == want_sc and "Portfolio weight" not in hero, f"{sym}: header score {sc and sc.group(1)!r}, expected {want_sc!r}; no weight tile")

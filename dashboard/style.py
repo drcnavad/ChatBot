@@ -39,6 +39,14 @@ CSS = """
         font-size: 0.82rem; font-variant-numeric: tabular-nums; border-right: 1px solid #1e293b; }
     .sa-tick b { color: #f8fafc; font-weight: 700; } .sa-tick span { color: #cbd5e1; }
     .sa-tick .up { color: #4ade80; } .sa-tick .down { color: #f87171; }
+    /* stock card: compact label / value tables side by side */
+    .sa-kv-grid { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 1.25rem; margin-top: 0.75rem; }
+    @media (max-width: 1000px) { .sa-kv-grid { grid-template-columns: 1fr; } }
+    .sa-kv table { width: 100%; border-collapse: collapse; margin-top: 0.3rem; font-size: 0.82rem; }
+    .sa-kv td { padding: 0.28rem 0.35rem; border-bottom: 1px solid #f1f5f9; color: var(--sa-muted); }
+    .sa-kv td:nth-child(even) { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; padding-right: 0.9rem; }
+    .sa-open, .sa-back { font-size: 0.8rem; font-weight: 600; color: var(--sa-brand); text-decoration: none; }
+    .sa-back { display: inline-block; margin: 0.2rem 0 0.6rem; }
     /* KPI cards */
     [data-testid="stMetric"] { background: #fff; border: 1px solid var(--sa-line); border-radius: 14px; padding: 0.9rem 1.1rem;
         box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: box-shadow .15s ease, transform .15s ease;
@@ -111,9 +119,6 @@ CSS = """
     .sa-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 0.5rem; margin-top: 0.8rem; }
     .sa-stat { background: #f8fafc; border: 1px solid #eef2f7; border-radius: 10px; padding: 0.45rem 0.7rem; }
     .sa-stats .sa-stat-label { white-space: normal; }
-    .sa-group { padding: 0.75rem 0 0.25rem; border-top: 1px solid #f1f5f9; }
-    .sa-section-divider { height: 1px; background: linear-gradient(to right, transparent, #e2e8f0 20%, #e2e8f0 80%, transparent);
-        margin: 1rem 0 0.25rem; }
     .sa-group-title { font-size: 0.7rem; font-weight: 700; letter-spacing: .09em; color: #64748b; text-transform: uppercase; }
     .sa-stat-label { font-size: 0.66rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
     .sa-stat-val { font-size: 0.95rem; font-weight: 700; color: #0f172a; font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
@@ -188,11 +193,6 @@ def live_row(sty, col, name):
 def md_tone(text, color):
     """Markdown text in the tone color (st.caption / st.markdown color syntax)."""
     return {GOOD: f":green[{text}]", CAUTION: f":orange[{text}]", BAD: f":red[{text}]"}.get(color, text)
-
-def stat_html(label, value, color="#0f172a"):
-    """One label/value pair in the stock header."""
-    return (f'<div class="sa-stat"><div class="sa-stat-label">{esc(label)}</div>'
-            f'<div class="sa-stat-val" style="color:{color};">{esc(str(value))}</div></div>')
 
 def caption_text(text):
     """st.caption with literal dollar signs (Streamlit reads $...$ as math)."""

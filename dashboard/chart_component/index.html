@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><script src="plotly.min.js"></script>
+<style>html,body{margin:0;background:#fff;font-family:Inter,system-ui,sans-serif}#c{width:100%}</style></head>
+<body><div id="c"></div><script>
+// The stock chart as a Streamlit component: draws the figure, sends your own shapes back (to be saved per stock)
+// and rescales the price axis to the candles in view. Streamlit's component protocol, no extra JS library.
+const div = document.getElementById("c");
+const send = (type, data) => window.parent.postMessage(Object.assign({isStreamlitMessage: true, type}, data), "*");
+let spec = null, ohlc = null, busy = false;
+function mine() { return (div.layout.shapes || []).filter(s => s.name !== "sys").map(s => JSON.parse(JSON.stringify(s))); }
+function rescale() {
+  const r = div.layout.xaxis.range; if (!r || !ohlc) return;
+  const a = new Date(r[0]), b = new Date(r[1]); let lo = Infinity, hi = -Infinity;
+  ohlc.x.forEach((x, i) => { const d = new Date(x); if (d >= a && d <= b) { lo = Math.min(lo, ohlc.low[i]); hi = Math.max(hi, ohlc.high[i]); } });
+  if (lo < hi) { const p = (hi - lo) * 0.06; busy = true; Plotly.relayout(div, {"yaxis.range": [lo - p, hi + p]}).then(() => busy = false); }
+}
+window.addEventListener("message", e => {
+  if (e.data.type !== "streamlit:render") return;
+  const args = e.data.args;
+  if (args.spec === spec) return;
+  spec = args.spec; ohlc = args.ohlc;
+  const fig = JSON.parse(spec);
+  Plotly.react(div, fig.data, fig.layout, fig.config || {}).then(() => {
+    send("streamlit:setFrameHeight", {height: fig.layout.height + 8});
+    if (div._sa) return; div._sa = true;
+    div.on("plotly_relayout", ev => {
+      if (busy) return;
+      const k = Object.keys(ev);
+      if (k.some(x => x.startsWith("xaxis"))) rescale();
+      if (k.some(x => x.startsWith("shapes"))) send("streamlit:setComponentValue", {value: {shapes: mine(), t: Date.now()}, dataType: "json"});
+    });
+  });
+});
+send("streamlit:componentReady", {apiVersion: 1});
+</script></body></html>

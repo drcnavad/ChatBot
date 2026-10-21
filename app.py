@@ -33,18 +33,36 @@ from dashboard.notes import render_notes  # noqa: E402
 from dashboard.page import build_page, render_kpis, render_ticker, render_top_bar  # noqa: E402
 from dashboard.sector_table import render_sector_table  # noqa: E402
 from dashboard.short_stock import render_short_stock  # noqa: E402
-from dashboard.stock_chart import render_stock_figure, stock_chart_inputs  # noqa: E402
+from dashboard.stock_chart import render_stock_chart  # noqa: E402
 from dashboard.stock_view import render_stock_picker, render_stock_section  # noqa: E402
-from dashboard.style import setup_page  # noqa: E402
+from dashboard.style import setup_page, show_html  # noqa: E402
 
 load_dotenv()
 setup_page()      # the first Streamlit call, on every run
 new_run()
 
+def render_stock(p, ticker, tdata):
+    """One stock: its card and chart (short-history stocks: their own short view)."""
+    if ticker in p.short.index:
+        render_short_stock(ticker, p.short.loc[ticker])
+    else:
+        render_stock_section(p, ticker, tdata)
+        render_stock_chart(ticker, tdata)
+
+def stock_page(p, sym):
+    """?stock=SYM: the stock on its own page (shareable link; the ticker strip opens it)."""
+    show_html('<a class="sa-back" href="./" target="_self">← Dashboard</a>')
+    pick = st.selectbox("Stock", p.options, index=p.options.index(sym), key="stock_page_pick", label_visibility="collapsed")
+    if pick != sym:
+        st.query_params["stock"] = pick
+        st.rerun()
+    render_stock(p, sym, p.df[p.df["Symbol"] == sym])
+
 def main():
     with st.spinner("Loading data..."):
         p = build_page()
-    # ?symbol=X opens that stock (table clicks and the Telegram messages use this)
+    page_sym = str(st.query_params.get("stock", "")).strip().upper()
+    # ?symbol=X opens that stock in the Home tab (table clicks and the Telegram messages use this)
     q_symbol = str(st.query_params.get("symbol", "")).strip().upper()
     jumped = q_symbol in p.options
     if jumped:
@@ -52,17 +70,17 @@ def main():
         del st.query_params["symbol"]
 
     ticker_box, kpi_box = render_top_bar(p)
+    if page_sym in p.options:
+        stock_page(p, page_sym)
+        render_kpis(kpi_box)
+        render_ticker(ticker_box)
+        return
     tab_home, tab_strategy, tab_trading = st.tabs(["Home", "Strategy", "Trading Account"])
     with tab_home:
         with st.expander("My notes", expanded=True):
             render_notes()
         ticker, tdata = render_stock_picker(p, jumped)
-        if ticker in p.short.index:
-            render_short_stock(ticker, p.short.loc[ticker])
-        else:
-            render_stock_section(p, ticker, tdata)
-            fig = stock_chart_inputs(ticker, tdata)
-            render_stock_figure(fig, ticker)
+        render_stock(p, ticker, tdata)
         render_sector_table(p)
     with tab_strategy:
         render_strategy_tab(p)

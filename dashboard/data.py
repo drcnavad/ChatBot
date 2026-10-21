@@ -6,7 +6,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from dashboard.settings import (APP_FILES, BENCH_CSV, COMPANY_XLSX, CT, DECISIONS_CSV, EARNINGS_CSV, FRESHNESS,
+from dashboard.settings import (APP_FILES, BAR_CACHES, BENCH_CSV, COMPANY_XLSX, CT, DECISIONS_CSV, EARNINGS_CSV, FRESHNESS,
     NEWS_CSV, REPORTS, SIGNAL_CSV)
 
 @st.cache_data(ttl=3600)
@@ -217,3 +217,16 @@ def index_quotes(symbols: tuple):
         except Exception:
             continue
     return {}
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _bars(mtimes: tuple):
+    """Daily OHLCV of every stock: the long bar cache with the forward-test bars (fresher, from May 2026) on top."""
+    parts = [pd.read_pickle(p) for p in BAR_CACHES if os.path.exists(p)]
+    b = pd.concat(parts) if parts else pd.DataFrame(columns=["Symbol", "Date", "Open", "High", "Low", "Close", "Volume"])
+    b["Date"] = pd.to_datetime(b["Date"])
+    return b.drop_duplicates(["Symbol", "Date"], keep="last")
+
+def ohlcv(symbol):
+    """Display only (the stock chart): one stock's daily Open/High/Low/Close/Volume by Date."""
+    b = _bars(tuple(os.path.getmtime(p) if os.path.exists(p) else 0 for p in BAR_CACHES))
+    return b[b["Symbol"] == symbol].set_index("Date").sort_index()[["Open", "High", "Low", "Close", "Volume"]]

@@ -100,7 +100,7 @@ def render_ticker(box):
             px = float(x.get("current_price") or "nan")
             chg = float(x.get("change_today") or "nan") * 100
         cls = "up" if chg == chg and chg > 0 else "down" if chg == chg and chg < 0 else ""
-        items.append(f'<a class="sa-tick" href="?symbol={esc(x["symbol"])}" target="_self"><b>{esc(x["symbol"])}</b>'
+        items.append(f'<a class="sa-tick" href="?stock={esc(x["symbol"])}" target="_self"><b>{esc(x["symbol"])}</b>'
                      f'<span>${px:,.2f}</span><span class="{cls}">{"▲" if cls == "up" else "▼" if cls == "down" else ""}'
                      f'{abs(chg):.2f}%</span></a>' if px == px else "")
     row = "".join(items)

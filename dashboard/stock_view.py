@@ -12,7 +12,7 @@ from dashboard.settings import CT, HOLDINGS_CSV, symbol_sector
 from dashboard.signals import PLAN_BADGE, SIGNAL_BADGE, plan_text
 from dashboard.stock_groups import dnb_symbols, stock_groups
 from dashboard.style import (BAD, GOOD, INK, MA_COLS, TONE_CLASS, esc, fmt, num, score_tone,
-    show_html, stat_html, symbol_link, tone)
+    show_html, symbol_link, tone)
 
 def ticker_label(p, s):
     if s in p.short.index:
@@ -105,17 +105,16 @@ def render_stock_section(p, ticker, tdata):
         plan_html = (f'<span class="sa-badge {PLAN_BADGE.get(action, "sa-badge-grey")}" title="{esc(tip)}">'
                      f'{esc(when + " plan: " + plan_text(p.plan, ticker))}</span>')
     stats = [
-        stat_html("Strategy score", fmt(score, ".1f"), score_tone(score)),
-        stat_html("Technical", fmt(num(latest.get('Technical_Score')), ".1f"), score_tone(num(latest.get('Technical_Score')))),
-        stat_html("Strength vs sector/SPY", fmt(num(latest.get('RS_Score')), ".1f"), score_tone(num(latest.get('RS_Score')))),
-        stat_html("Next earnings", pd.Timestamp(next_ed).strftime("%b %d") if next_ed else "—"),
+        ("Strategy score", fmt(score, ".1f"), score_tone(score)),
+        ("Technical", fmt(num(latest.get('Technical_Score')), ".1f"), score_tone(num(latest.get('Technical_Score')))),
+        ("Strength vs sector/SPY", fmt(num(latest.get('RS_Score')), ".1f"), score_tone(num(latest.get('RS_Score')))),
+        ("Next earnings", pd.Timestamp(next_ed).strftime("%b %d") if next_ed else "—", INK),
     ]
     hold = row_for(HOLDINGS_CSV, ticker) if weight > 0 else None
     if hold is not None:
         stats += [
-            stat_html("Held since", f"{pd.Timestamp(hold['Entry_Date']):%b %-d}"
-                      if pd.notna(hold['Entry_Date']) else "—"),
-            stat_html("P&L since entry", fmt(num(hold['PnL_%']), "+.1f", suffix="%"), tone(num(hold['PnL_%']))),
+            ("Held since", f"{pd.Timestamp(hold['Entry_Date']):%b %-d}" if pd.notna(hold['Entry_Date']) else "—", INK),
+            ("P&L since entry", fmt(num(hold['PnL_%']), "+.1f", suffix="%"), tone(num(hold['PnL_%']))),
         ]
     close = num(latest['Close'])
     ma_stats = [(ma.upper().replace('_', ' '), fmt(num(latest[ma]), ",.2f", "$"),     # green = the close is above it
@@ -148,12 +147,12 @@ def render_stock_section(p, ticker, tdata):
         ("Net margin", fmt(comp.get('net_margin'), ".1f", suffix="%"), tone(comp.get('net_margin'))),
         ("Debt/Eq", fmt(comp.get('debt_to_equity'), ".2f"), INK),
     ]
-    groups = _detail_group("Moving averages (green = the close is above it)", ma_stats)
-    groups += _detail_group("Fundamentals & news", fund_stats)
+    groups = ('<div class="sa-kv-grid">' + kv_table("Score", stats) + kv_table("Moving averages", ma_stats, "Green = the close is above it")
+              + kv_table("Fundamentals & news", fund_stats, cols=2) + "</div>")
     show_html(f"""
         <div class="sa-card">
           <div class="sa-ident">
-            <div class="sa-sym">{esc(ticker)}</div>
+            <div class="sa-sym">{esc(ticker)}</div><a class="sa-open" href="?stock={esc(ticker)}" target="_self" title="Open this stock on its own page">Full page ↗</a>
             <div class="sa-price" title="Latest completed daily bar — the strategy's official price">{fmt(num(latest['Close']), ",.2f", "$")}</div>
             {live_html}
             <span class="sa-badge {SIGNAL_BADGE.get(status, 'sa-badge-grey')}" title="The strategy's decision in force (last decision)">{esc(badge)}</span>
@@ -161,12 +160,12 @@ def render_stock_section(p, ticker, tdata):
             {chips_html}
           </div>
           <div class="sa-why">{esc(status + ": " + why) if why else ""}</div>
-          <div class="sa-stats">{"".join(stats)}</div>
-          <div class="sa-section-divider"></div>
           {groups}
         </div>""")
 
-def _detail_group(title, stats):
-    """One titled row of stat tiles inside the stock detail card; stats = [(label, value, color)]."""
-    return (f'<div class="sa-group"><div class="sa-group-title">{esc(title)}</div><div class="sa-stats" style="margin-top:0.5rem;">'
-            + "".join(stat_html(l, "\u2014" if v is None else v, c) for l, v, c in stats) + "</div></div>")
+def kv_table(title, rows, tip="", cols=1):
+    """A compact label / value table (rows = [(label, value, color)]), `cols` pairs per line."""
+    cells = [f'<td>{esc(l)}</td><td style="color:{c}">{esc("—" if v is None else str(v))}</td>' for l, v, c in rows]
+    body = "".join("<tr>" + "".join(cells[i:i + cols]) + "</tr>" for i in range(0, len(cells), cols))
+    return (f'<div class="sa-kv"><div class="sa-group-title" title="{esc(tip)}">{esc(title)}</div>'
+            f'<table>{body}</table></div>')
