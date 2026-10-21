@@ -68,8 +68,10 @@ REMOVED = {"Live 50/50 combined (no overlap)", "Live rules (C6)", "MACD cross + 
 # Renamed lines: saved rows take the new name (migrate_names, and the dashboard reads through this map).
 # A rule that changed (ATR dip buy, top 30 -> top 10) is a new name on purpose, so the old results are not relabeled.
 OLD_NAMES = {
-    "Worst sector 14d, +10%/-3%": "Worst 3 sectors 14d, +10%/-3%",   # Oct 21: 3 worst sectors, top 10 (rebuilt from Oct 2)
-    "Worst sector 1M, +10%/-3%": "Worst 3 sectors 1M, +10%/-3%",
+    "Worst sector 14d, +10%/-3%": "Worst 2 sectors 14d, +10%/-3%",   # Oct 21: 2 worst sectors, top 10 (rebuilt from Oct 2)
+    "Worst sector 1M, +10%/-3%": "Worst 2 sectors 1M, +10%/-3%",
+    "Worst 3 sectors 14d, +10%/-3%": "Worst 2 sectors 14d, +10%/-3%",
+    "Worst 3 sectors 1M, +10%/-3%": "Worst 2 sectors 1M, +10%/-3%",
     "Quant Score": "Quant Score top 10",
     "Now: calmer half": "Now: RS, calmer half of the list",
     "Now: RS 10/21/63 days": "Now: shorter RS (10/21/63 days)",
@@ -314,10 +316,10 @@ STRATEGIES = [
          rule="Buy when the close gets within 5% of its 52-week high and is above the 200-day average; sell 8% below the entry or on a close below the SMA50 (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="Dual MA + RSI filter", event=dict(kind="ma_rsi"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and RSI(14) is 50-70; sell when RSI(14) falls below 40 (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="Worst 3 sectors 14d, +10%/-3%", worst=dict(look=10), earnings=None, group="event",
-         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 14 days (10 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors. Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
-    dict(name="Worst 3 sectors 1M, +10%/-3%", worst=dict(look=21), earnings=None, group="event",
-         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last month (21 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors. Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
+    dict(name="Worst 2 sectors 14d, +10%/-3%", worst=dict(look=10), earnings=None, group="event",
+         rule="Each day, find the 2 sectors (sector_mapping.py) with the worst average stock return over the last 14 days (10 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 2 worst sectors (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
+    dict(name="Worst 2 sectors 1M, +10%/-3%", worst=dict(look=21), earnings=None, group="event",
+         rule="Each day, find the 2 sectors (sector_mapping.py) with the worst average stock return over the last month (21 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 2 worst sectors (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
     dict(name="Golden cross + MACD confirm", event=dict(kind="golden_macd"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and MACD is above its signal; sell when MACD falls below the signal (10% each, at most 10, calmest first; checked at the close)."),
 ]
@@ -753,7 +755,7 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
             "monthly": pd.Series([be.next_sessions(d, 1)[0].month != d.month for d in dates], index=dates),
             "through": have[have].index.max() if have.any() else pd.Timestamp(0)}
 
-def worst_sector_weights(c, score, eligible, look, tp=0.10, stop=0.03, n=10, k=3, start=None):
+def worst_sector_weights(c, score, eligible, look, tp=0.10, stop=0.03, n=10, k=2, start=None):
     """Worst sectors (Chirag, Oct 21, 2026): each close, the k sectors with the lowest mean stock return over `look` sessions;
     free slots (1/n each, at most n) buy their best `score` stocks not held. Exit at a close +tp / -stop from the entry close;
     a stock sold that day is not bought back the same day. Entries only from `start`."""
