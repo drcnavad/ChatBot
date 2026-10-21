@@ -87,7 +87,7 @@ def build_price_chart(ticker, tdata, bars=None):
                              line=EARN_LINE, hoverinfo="skip", showlegend=False), row=1, col=1)
     for ma, color in zip(MA_COLS, MA_COLORS):
         name = ma.upper().replace('_', ' ')
-        fig.add_trace(go.Scatter(x=chart.index, y=chart[ma], name=name, line=dict(color=color, width=1), mode='lines', opacity=0.6,
+        fig.add_trace(go.Scatter(x=chart.index, y=chart[ma], name=name, line=dict(color=color, width=1), mode='lines', opacity=0.4,
                                  hovertemplate=f'<b>{name}</b> $%{{y:.2f}}<extra></extra>'), row=1, col=1)
 
     # Entry / exit markers on the session after the decision (hollow = decided at the latest close, orders pending)
