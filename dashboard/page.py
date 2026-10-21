@@ -83,7 +83,33 @@ def account_now():
 def _sp(v, d=2, unit="%"):
     return f"{v:+,.{d}f}{unit}" if v is not None and v == v else "—"
 
+def render_ticker(box):
+    """The scrolling strip of held stocks (this run's Alpaca positions): live price and day change from
+    data.index_quotes (Alpaca SIP / IEX, 30 s cache), else the position's own current price and change_today."""
+    from dashboard.data import index_quotes
+    from dashboard.details.live_holdings import holdings_this_run
+    data, err = holdings_this_run()
+    pos = sorted((data or {}).get("positions") or [], key=lambda x: x["symbol"]) if not err else []
+    if not pos:
+        return
+    q = index_quotes(tuple(x["symbol"] for x in pos))
+    items = []
+    for x in pos:
+        px, chg = q.get(x["symbol"], (None, None))
+        if px is None:
+            px = float(x.get("current_price") or "nan")
+            chg = float(x.get("change_today") or "nan") * 100
+        cls = "up" if chg == chg and chg > 0 else "down" if chg == chg and chg < 0 else ""
+        items.append(f'<a class="sa-tick" href="?symbol={esc(x["symbol"])}" target="_self"><b>{esc(x["symbol"])}</b>'
+                     f'<span>${px:,.2f}</span><span class="{cls}">{"▲" if cls == "up" else "▼" if cls == "down" else ""}'
+                     f'{abs(chg):.2f}%</span></a>' if px == px else "")
+    row = "".join(items)
+    secs = max(20, 3 * len(items))                       # the same speed for any number of stocks
+    box.markdown(f'<div class="sa-ticker"><div class="sa-ticker-track" style="animation-duration:{secs}s">'
+                 f'{row}{row}</div></div>', unsafe_allow_html=True)
+
 def render_top_bar(p):
+    ticker = st.container()          # the held-stock strip, filled at the end of the run (render_ticker)
     stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()
     updated = datetime.fromtimestamp(p.mtime, tz=CT).strftime("%b %-d, %I:%M %p CT")
     c1, c2, c3 = st.columns([5, 3, 1.2], vertical_alignment="center")
@@ -101,7 +127,7 @@ def render_top_bar(p):
             st.cache_data.clear()
             st.cache_resource.clear()
             st.rerun()
-    return st.container()          # the KPI cards, filled by render_kpis at the end of the run
+    return ticker, st.container()          # the KPI cards, filled by render_kpis at the end of the run
 
 def render_kpis(box):
     """The header cards, drawn last (into render_top_bar's container) so they reuse this run's holdings read."""
