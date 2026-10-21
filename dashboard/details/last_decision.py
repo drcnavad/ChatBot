@@ -144,6 +144,40 @@ def _preview_targets(day, lv_held, sec_held):
     lv = picks[pd.to_numeric(picks["Provisional_Weight"], errors="coerce").fillna(0) > 0]["Symbol"].astype(str).str.upper()
     return {"sector": set(w[w > 0].index), "lowvol": set(lv) & set(sm.tradable_symbols)}
 
+def _scores(half, day):
+    """{symbol: score} at close `day`: Strategy_Score (low vol) / the sector-rotation score (sector)."""
+    import sleeves
+    if half == "lowvol":
+        sig = pd.read_csv(SIGNAL_CSV, usecols=["Date", "Symbol", "Strategy_Score"], parse_dates=["Date"])
+        return sig[sig["Date"] == day].drop_duplicates("Symbol").set_index("Symbol")["Strategy_Score"].to_dict()
+    return sleeves.sector_inputs()["scores"]["sector_rot"].loc[day].dropna().to_dict()
+
+def sell_table(half, day, sells, value, half_v, ranks, targets):
+    """Stock, Sector, Rank, Score, Weight in half %, Reason for each holding the half would sell at its next rebalance."""
+    import sector_mapping as sm
+    from dashboard.settings import symbol_sector
+    col = "Rank_Vol" if half == "lowvol" else "Rank_Sector"
+    score = _scores(half, day)
+    other = "lowvol" if half == "sector" else "sector"
+    def reason(x, rk, sc):
+        if x not in set(sm.tradable_symbols):
+            return "Removed from the stock list"
+        if half == "lowvol" and sc is not None and pd.notna(sc) and sc < 0:
+            return "Below its 200-day average"
+        why = ("Sector not in the top 3" if half == "sector" else "Not ranked") if pd.isna(rk) else "Out of the top picks"
+        return why + (f" ({SLEEVE[other]} targets it at its rebalance)" if x in targets[other] else "")
+    rows = []
+    for x in sells:
+        rk = ranks[col].get(x, pd.NA) if col in ranks else pd.NA
+        sc = score.get(x)
+        rows.append({"Stock": x, "Sector": symbol_sector.get(x, "—"), "Rank": rk,
+                     "Score": round(float(sc), 1) if sc is not None and pd.notna(sc) else None,
+                     "Weight in half %": round(100 * value.get(x, 0.0) / half_v, 1) if half_v else None,
+                     "Reason": reason(x, rk, sc)})
+    t = pd.DataFrame(rows, columns=["Stock", "Sector", "Rank", "Score", "Weight in half %", "Reason"])
+    t["Rank"] = pd.array(pd.to_numeric(t["Rank"], errors="coerce"), dtype="Int64")
+    return t
+
 def render_preview(positions, led, equity):
     """Next rebalance preview: each half's top 20 at the latest close with Keep / Buy / Blocked, and what it would sell."""
     import decision_ranks
@@ -162,6 +196,7 @@ def render_preview(positions, led, equity):
         st.info(f"Next rebalance preview unavailable: {str(e)[:150]}")
         return
     blocked = set(pt.manual_list("buy"))
+    ranks = decision_ranks.ranks_on(day)[1].set_index("Symbol")
     cal = sleeves.calendar(pd.Timestamp.now().normalize() + pd.Timedelta(days=1), 45)
     cols = st.columns(2)
     for c, half in zip(cols, ("sector", "lowvol")):
@@ -180,9 +215,14 @@ def render_preview(positions, led, equity):
                          column_config={"Weight in half %": PCT_COL,
                                         "Score": st.column_config.NumberColumn(format="%.1f")})
             buys_out = sorted(tg - set(t["Stock"]) - set(mine[half]) - blocked)
-            sells = sorted(set(mine[half]) - tg)
-            st.caption(f"Would sell: {', '.join(sells) or 'nothing'}"
-                       + (f" · would also buy (ranked below 20): {', '.join(buys_out)}" if buys_out else ""))
+            sells = sell_table(half, day, sorted(set(mine[half]) - tg), value, vals[half], ranks, targets)
+            st.markdown("Would sell" + ("" if len(sells) else ": nothing"))
+            if len(sells):
+                st.dataframe(sells, hide_index=True, width="stretch", key=f"preview_sell_{half}",
+                             column_config={"Weight in half %": PCT_COL,
+                                            "Score": st.column_config.NumberColumn(format="%.1f")})
+            if buys_out:
+                st.caption(f"Would also buy (ranked below 20): {', '.join(buys_out)}")
     st.caption(f"Ranks and targets at the {day:%a %b %-d} close, by the bot's own selection code (read-only; nothing is "
                "sent). Keep = target and held; Buy = target, not held; Take over = the low-vol half takes a stock the other "
                "half holds (no trade); Blocked = a target on a buy block / do-not-buy list (not bought). The real rebalance uses the data of its own day, so the list can still change.")
