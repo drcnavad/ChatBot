@@ -41,6 +41,19 @@ check(be.WINNER["sector_day"] == "friday" and kinds == {"2026-10-16": "full reba
 check(be.is_sector_day("2026-12-24") and not be.is_sector_day("2026-12-25") and be.is_sector_day("2026-10-30")
       and not be.is_sector_day("2026-10-26") and not be.is_sector_day("2026-11-30"),
       "Friday holiday (Christmas, Fri Dec 25, 2026) -> the sector half on Thursday Dec 24; Oct 30 (month end, Friday) is a sector day; no Mon Oct 26")
+def _easter(y):                                    # anonymous Gregorian algorithm (independent of pandas)
+    a, b, c = y % 19, y // 100, y % 100
+    d, e = b // 4, b % 4
+    g = (8 * b + 13) // 25
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 19 * l) // 433
+    return pd.Timestamp(y, (h + l - 7 * m + 90) // 25, (h + l - 7 * m + 33 * ((h + l - 7 * m + 90) // 25) + 19) % 32)
+_gf = [_easter(y) - pd.Timedelta(days=2) for y in range(2026, 2036)]
+check(all(not be.is_session(g) and not be.is_sector_day(g) and be.is_sector_day(g - pd.Timedelta(days=1)) for g in _gf)
+      and _gf[1] == pd.Timestamp("2027-03-26"),
+      "Good Friday (Easter - 2 days, 2026-2035; Mar 26, 2027) is no session: that week's sector rebalance is the Thursday", _gf)
 cal = dict(sleeves.calendar("2026-10-15", 40))
 check(cal[pd.Timestamp("2026-10-16")] == ["lowvol", "sector"] and cal[pd.Timestamp("2026-10-19")] == ["sector"]
       and cal[pd.Timestamp("2026-10-23")] == ["sector"] and cal[pd.Timestamp("2026-10-30")] == ["lowvol", "sector"]
