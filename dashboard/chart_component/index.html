@@ -23,7 +23,25 @@ function rescale() {
   const r = div.layout.xaxis.range; if (!r || !ohlc) return;
   const a = new Date(r[0]), b = new Date(r[1]); let lo = Infinity, hi = -Infinity;
   ohlc.x.forEach((x, i) => { const d = new Date(x); if (d >= a && d <= b) { lo = Math.min(lo, ohlc.low[i]); hi = Math.max(hi, ohlc.high[i]); } });
-  if (lo < hi) { const p = (hi - lo) * 0.06; busy = true; Plotly.relayout(div, {"yaxis.range": [lo - p, hi + p]}).then(() => busy = false); }
+  const upd = {};
+  if (lo < hi) { const p = (hi - lo) * 0.06; upd["yaxis.range"] = [lo - p, hi + p]; }
+  // the lower panels too: volume from 0 to the highest bar in view, RSI keeps 30-70 in view, the others fit with a pad
+  const per = {};
+  (div._fullData || []).forEach(t => {
+    const ax = t.yaxis || "y"; if (ax === "y" || !t.x || !t.y || t.visible === false) return;
+    const e = per[ax] = per[ax] || {lo: Infinity, hi: -Infinity, vol: false, rsi: false};
+    if (t.name === "Volume") e.vol = true; if (t.name === "RSI") e.rsi = true;
+    for (let i = 0; i < t.x.length; i++) { const d = new Date(t.x[i]), v = +t.y[i];
+      if (d >= a && d <= b && v === v && t.y[i] !== null) { e.lo = Math.min(e.lo, v); e.hi = Math.max(e.hi, v); } }
+  });
+  Object.entries(per).forEach(([ax, e]) => {
+    if (!(e.lo <= e.hi)) return;
+    const key = "yaxis" + ax.slice(1) + ".range";
+    if (e.vol) upd[key] = [0, e.hi * 1.08];
+    else { if (e.rsi) { e.lo = Math.min(e.lo, 30); e.hi = Math.max(e.hi, 70); }
+      const p = Math.max((e.hi - e.lo) * 0.08, 1e-9); upd[key] = [e.lo - p, e.hi + p]; }
+  });
+  if (Object.keys(upd).length) { busy = true; Plotly.relayout(div, upd).then(() => busy = false); }
 }
 window.addEventListener("message", e => {
   if (e.data.type !== "streamlit:render") return;
@@ -44,7 +62,7 @@ window.addEventListener("message", e => {
     if (saving) { hist[hist.length - 1] = mine(); saving = false; }   // our own save coming back (same shapes, re-serialised)
     else if (JSON.stringify(mine()) !== JSON.stringify(hist[hist.length - 1])) hist.push(mine());   // first load, or a change made outside (Add level / Clear)
     send("streamlit:setFrameHeight", {height: fig.layout.height + 8});
-    buildIndex(); applyMode(); paintButtons();
+    buildIndex(); applyMode(); paintButtons(); setTimeout(rescale, 0);
     if (changed && !intraday) { const r = RANGES.find(x => x[0] === curView); if (r && r[0] !== "1Y") setRange(r[0], r[1]); }
     show(idx.days[idx.days.length - 1]);
     if (div._sa) return; div._sa = true;
