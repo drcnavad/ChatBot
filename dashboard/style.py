@@ -152,14 +152,15 @@ CSS = """
 .sa-news-tag:before{content:"";width:7px;height:7px;border-radius:50%;background:#fff;animation:sa-blink 1.4s infinite}
 @keyframes sa-blink{50%{opacity:.25}}
 .sa-news-box{position:relative;flex:1;height:46px}
-.sa-news-item{position:absolute;inset:0;display:flex;align-items:center;gap:10px;opacity:0;visibility:hidden;
-  text-decoration:none!important;color:#f8fafc!important;font-size:15.5px;font-weight:600;white-space:nowrap;overflow:hidden}
-.sa-news:hover .sa-news-item{animation-play-state:paused!important}
+.sa-news-page{position:absolute;inset:0;display:flex;align-items:center;opacity:0;visibility:hidden}
+.sa-news-item{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:8px;padding:0 14px;border-left:1px solid rgba(255,255,255,.18);
+  text-decoration:none!important;color:#f8fafc!important;font-size:14px;font-weight:600;white-space:nowrap}
+.sa-news-item:first-child{border-left:0;padding-left:0}
+.sa-news:hover .sa-news-page{animation-play-state:paused!important}
 .sa-news-item:hover .sa-news-t{text-decoration:underline}
-.sa-news-src{font-weight:700;color:#5eead4;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
-.sa-news-sym{font:700 12px Inter,system-ui,sans-serif;color:#0b1f3a;background:#fcd34d;border-radius:4px;padding:2px 6px}
-.sa-news-t{overflow:hidden;text-overflow:ellipsis}
-.sa-news-ago{color:#cbd5e1;font-size:12px;font-weight:500;margin-left:auto;padding-left:10px}
+.sa-news-sym{flex:none;font:700 11px Inter,system-ui,sans-serif;color:#0b1f3a;background:#fcd34d;border-radius:4px;padding:2px 6px}
+.sa-news-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.sa-news-ago{flex:none;color:#94a3b8;font-size:11px;font-weight:500}
 /* one stock's news, above its chart */
 .sa-snews{border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;margin:6px 0 8px;background:#fff}
 .sa-snews-h{font-size:12px;font-weight:700;color:#334155;margin-bottom:4px}.sa-snews-h span{font-weight:500;color:#64748b}

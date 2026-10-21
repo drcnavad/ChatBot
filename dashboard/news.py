@@ -1,4 +1,4 @@
-"""Breaking-news banner under the ticker strip: one headline at a time, fading to the next every 6 s (CSS only),
+"""Breaking-news banner under the ticker strip: three headlines at a time, fading to the next three every 10 s (CSS only),
 paused on hover, click opens the article. Display only and separate from the bot: free public RSS feeds (no API keys,
 nothing from the trading accounts), read with the standard library, cached 5 minutes, silent when a feed is down."""
 import email.utils
@@ -19,7 +19,7 @@ FEEDS = [("CNBC", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partne
          ("Google News", "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB"
                          "?hl=en-US&gl=US&ceid=US:en")]
 STOCK_FEED = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={sym}&region=US&lang=en-US"   # free, keyless
-MAX_ITEMS, PER_STOCK, SECONDS = 30, 2, 6
+MAX_ITEMS, PER_STOCK, PER_PAGE, SECONDS = 30, 2, 3, 10   # banner: 3 headlines at a time, 10 s each
 NY = ZoneInfo("America/New_York")
 
 def _one_line(p):
@@ -123,16 +123,19 @@ def render_news_banner(box):
         return
     if not items:
         return
-    n, total = len(items), len(items) * SECONDS
-    show = 100 / n                                             # each headline's share of the cycle, in %
+    pages = [items[k:k + PER_PAGE] for k in range(0, len(items), PER_PAGE)]
+    n, total = len(pages), len(pages) * SECONDS
+    show = 100 / n                                             # each page's share of the cycle, in %
     fade = min(1.5, show / 4)
-    rows = "".join(
+    item = lambda i: (
         f'<a class="sa-news-item" href="{html.escape(i["link"], quote=True)}" target="_blank" rel="noopener" '
-        f'style="animation-delay:{k * SECONDS}s"><span class="sa-news-src">{html.escape(i["source"])}</span>'
+        f'title="{html.escape(i["title"], quote=True)}">'
         + (f'<span class="sa-news-sym">{html.escape(i["ticker"])}</span>' if i["ticker"] else "")
-        + f'<span class="sa-news-t">{html.escape(i["title"])}</span><span class="sa-news-ago">{_ago(i["time"])}</span></a>'
-        for k, i in enumerate(items))
-    css = (f'<style>.sa-news .sa-news-item{{animation:sa-news {total}s linear infinite}}'
+        + f'<span class="sa-news-t">{html.escape(i["title"])}</span>'
+        f'<span class="sa-news-ago">{html.escape(i["source"])} · {_ago(i["time"])}</span></a>')
+    rows = "".join(f'<div class="sa-news-page" style="animation-delay:{k * SECONDS}s">{"".join(map(item, pg))}</div>'
+                   for k, pg in enumerate(pages))
+    css = (f'<style>.sa-news .sa-news-page{{animation:sa-news {total}s linear infinite}}'
            f'@keyframes sa-news{{0%{{opacity:0;visibility:visible}}{fade:.2f}%{{opacity:1}}{show - fade:.2f}%{{opacity:1}}'
            f'{show:.2f}%{{opacity:0;visibility:hidden}}100%{{opacity:0;visibility:hidden}}}}</style>')
     with box:
