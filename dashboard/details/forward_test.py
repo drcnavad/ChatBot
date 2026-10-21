@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import load_benchmarks, read_report_csv
-from dashboard.style import INK, MUTED, PCT_COL, drawdown_tone, esc, live_row, show_html, symbol_link, toned
+from dashboard.style import INK, MUTED, drawdown_tone, esc, live_row, show_html, symbol_link, toned
 
 def _board(daily, values):
     """(leaderboard, values) with the provisional close rows (forward_test.provisional), as shown on the dashboard."""
@@ -27,14 +27,15 @@ def render_forward_test():
     if values is not None and "Provisional" in values and values["Provisional"].fillna(False).astype(bool).any():
         marked = (f" {pd.Timestamp(values['Date'].max()):%a %b %-d}: each strategy's holdings from the last saved day marked "
                   "to that day's close (provisional, no trades yet); the daily run's 3:05 PM CT step saves that day with its trades.")
-    board = board.rename(columns={"Total return %": f"Total return since {start[:-6]} %"}).assign(
-        Rank=lambda b: b["Rank"].map(lambda r: "–" if pd.isna(r) else str(r)))   # – = not ranked (comparison)
-    sty = toned(toned(board, [c for c in board.columns if "return" in c or c.startswith("Week ")]), ["Max drawdown %"],
-                fn=drawdown_tone)
+    board = tidy_board(board, start[:-6])
+    pct = [c for c in board.columns if c not in ("Rank", "Strategy")]
+    sty = toned(toned(board, [c for c in pct if c != "Max drawdown"]), ["Max drawdown"], fn=drawdown_tone)
     render_group_legend()
-    st.dataframe(live_row(paint_strategy(sty), "Strategy", ft.LIVE), hide_index=True, width="stretch",
+    st.dataframe(highlight_rows(paint_strategy(sty)), hide_index=True, width="stretch",
                  height=35 * (len(board) + 1) + 3,                                                # every row, no scrolling
-                 column_config={c: PCT_COL for c in board.columns if c.endswith("%")})
+                 column_config={"Rank": st.column_config.NumberColumn(format="%d", width="small"),
+                                "Strategy": st.column_config.TextColumn(width="large"),
+                                **{c: st.column_config.NumberColumn(format="%+.2f%%") for c in pct}})
     acct = ""
     if daily is not None and len(daily):
         last = daily.iloc[-1]
@@ -49,6 +50,25 @@ def render_forward_test():
                "comparison only (not ranked). Week k = Friday close to Friday close (week 1 = Oct 2-9); '(so far)' = the week in "
                "progress, Friday's close to the latest close; later weeks are blank." + acct
                + marked + " Saved daily by the daily run's 3:05 PM CT step after the signal refresh (no orders); each strategy's rule and holdings are in the next section.")
+
+HIGHLIGHT_BG = "background-color: #e2e8f0; font-weight: 700"   # subtle slate on the white table
+
+def tidy_board(board, start):
+    """Leaderboard for display: short column names (Total since <start>, Today, Max drawdown, Wk 1..), integer Rank
+    (blank = not ranked), weeks that have not started dropped."""
+    weeks = [c for c in board.columns if c.startswith("Week ") and board[c].notna().any()]
+    b = board[["Rank", "Strategy", "Total return %", "Daily return %", "Max drawdown %", *weeks]].copy()
+    b["Rank"] = pd.array(pd.to_numeric(b["Rank"], errors="coerce"), dtype="Int64")
+    names = {"Total return %": f"Total since {start}", "Daily return %": "Today", "Max drawdown %": "Max drawdown",
+             **{w: w.replace("Week ", "Wk ").replace(" %", "") for w in weeks}}
+    return b.rename(columns=names)
+
+def highlight_rows(sty):
+    """Darker rows: your Alpaca account, the current (live) strategy, Low volatility in uptrend, Sector rotation."""
+    import forward_test as ft
+    keys = ("My Alpaca account", "Low volatility in uptrend", "Sector rotation")
+    on = lambda name: str(name).startswith(ft.LIVE) or str(name) in keys
+    return sty.apply(lambda r: [HIGHLIGHT_BG if on(r["Strategy"]) else ""] * len(r), axis=1)
 
 CONSENSUS_GOOD, CONSENSUS_WARN, EXIT_RANK = 3, 2, 30   # chip colors: held by 3+ / 2 of the 5; ranked worse than 30
 

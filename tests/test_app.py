@@ -204,17 +204,17 @@ labels = [e.label for e in at.expander if e.label != "My notes"]   # the notes t
 expect(len(labels) >= 3 and labels[0] == exp_titles[0] and labels[1:3] == exp_titles[1:3]
        and set(exp_titles[3:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
 expect(sum("forward test" in l.lower() for l in labels) == 1, f"the forward test is in one place only: {labels}")
-_ft = [d.value for d in at.dataframe if "Total return since Oct 2 %" in d.value.columns]
+_ft = [d.value for d in at.dataframe if "Total since Oct 2" in d.value.columns]
 expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Strategy"]} if _ft else
        any("Forward test started Oct 2, 2026" in i.value for i in at.info), "forward test leaderboard (QQQ + SPY rows) or empty state")
-_wk = [c for c in _ft[0].columns if c.startswith("Week ")] if _ft else []
+_wk = [c for c in _ft[0].columns if c.startswith("Wk ")] if _ft else []
 def _ranked_ok(b):
     """Ranked rows = the ranked strategies (cfg "ranked" not False) that have a total return; the rest show '–'."""
     rk = {c["name"] for c in ft.STRATEGIES if c.get("ranked", True)}
     names = b["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)
-    want = names.isin(rk) & b["Total return since Oct 2 %"].notna()
-    return bool(((b["Rank"] != "–") == want).all()) or not (b["Rank"] != "–").any()
-expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Total return since Oct 2 %", "Daily return %", *_wk, "Max drawdown %"] and [w.replace(" (so far)", "") for w in _wk] == [f"Week {k} %" for k in range(1, 13)]
+    want = names.isin(rk) & b["Total since Oct 2"].notna()
+    return bool((b["Rank"].notna() == want).all()) or not b["Rank"].notna().any()
+expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Total since Oct 2", "Today", "Max drawdown", *_wk] and [w.replace(" (so far)", "") for w in _wk] == [f"Wk {k}" for k in range(1, len(_wk) + 1)]
                    and (_ft[0]["Strategy"] == ft.MARKED + ft.LIVE_MARK).sum() == 1 and _ranked_ok(_ft[0])),
        f"leaderboard: columns, one marked live row, every ranked strategy with data ranked (the Oct 16 live halves not): {_ft[0].to_dict('list') if _ft else None}")
 expect(not _ft or sum(ft.RANK_RULE in c.value for c in at.caption) == 1, "the ranking rule is written once in the caption")
