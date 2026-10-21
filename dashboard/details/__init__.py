@@ -32,7 +32,7 @@ def render_trading_tab(p):
     ranks are in the Strategy tab's Last decision)."""
     with st.expander("Live holdings (Alpaca account)", expanded=True):
         render_live_holdings()
-    with st.expander("Trade audit · every order vs its plan price, buy / sell prices, checks (read-only)", expanded=False):
+    with st.expander("Trade audit · gain / loss per sale (read-only)", expanded=False):
         render_trade_audit()
     import tax_lots as tl
     with st.expander(f"Tax view · live account since {tl.TAX_START:%b %-d, %Y} (estimate, not tax advice)", expanded=False):

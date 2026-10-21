@@ -169,10 +169,6 @@ def render_live_table():
     pcts = ["Today %"] + list(LIVE_WINDOWS)
     st.dataframe(toned(t.round(2), pcts), hide_index=True, width="stretch",
                  column_config={"Live price": st.column_config.NumberColumn(format="$%.2f"), **{k: PCT_COL for k in pcts}})
-    st.caption(f"Live price = latest Alpaca trade ({feed.upper()}), refreshed every minute, "
-               f"{pd.Timestamp.now(tz='America/Chicago'):%-I:%M:%S %p} CT. Indexes and commodities via ETFs; futures rows (crude $/barrel, gold/silver $/oz) from Yahoo Finance. "
-               "Our portfolio = Alpaca account equity, returns time-weighted (deposits excluded), blank = before the bot "
-               "start (Oct 2). Today % vs yesterday's close; other columns = live price vs the daily close that far back.")
 
 def render_sector_table(p):
     section("Sector performance")
@@ -180,5 +176,3 @@ def render_sector_table(p):
     t = _cached(p.df, p.mtime)
     st.dataframe(toned(t.round(2), list(WINDOWS)), hide_index=True, width="stretch",
                  column_config={k: PCT_COL for k in WINDOWS})
-    st.caption(f"Each sector = the average price return of its stocks (equal weight), to the {p.df['Date'].max():%a %b %-d} "
-               "close. Sorted by the 1-month return.")

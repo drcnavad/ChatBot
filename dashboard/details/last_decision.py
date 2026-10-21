@@ -122,11 +122,6 @@ def render_last_decision(p):
                 st.caption(f"Held, not in top 20: {', '.join(others)}")
             t = t.rename(columns={"Stock": "Symbol"})
             open_symbol(t, event, f"rank_{half}")
-    st.caption("Ranks saved by the trade run (Reports/decision_ranks.csv). Sector rotation: rank of the sector score among "
-               "the stocks of the 3 sectors with the best 63-day ETF return; the bot then skips stocks the low-vol half owns "
-               "(no overlap), blocked stocks and a 3rd stock of one sector (max 2 per sector with 5 stocks), so a held stock can rank below a skipped one. "
-               "Low vol: calmest first, above the 200-day only; Score = its strategy score. Top 20 ranks (Sector can have fewer: "
-               "only stocks of its 3 sectors with a positive score are ranked); Weight in half = live value / the half's value (stocks + its cash).")
     st.markdown("##### Next rebalance preview · based on yesterday's close")
     render_preview(positions, led, equity)
 
@@ -282,6 +277,3 @@ def render_preview(positions, led, equity):
                                             "Score": st.column_config.NumberColumn(format="%.1f")})
             if buys_out:
                 st.caption(f"Would also buy (ranked below 20): {', '.join(buys_out)}")
-    st.caption(f"Ranks and targets at the {day:%a %b %-d} close, by the bot's own selection code (read-only; nothing is "
-               "sent). Keep = target and held; Buy = target, not held; Take over = the low-vol half takes a stock the other "
-               "half holds (no trade); Blocked = a stock on a buy block / do-not-buy list (not bought). The real rebalance uses the data of its own day, so the list can still change.")

@@ -20,13 +20,9 @@ def render_forward_test():
     start = f"{pd.Timestamp(FORWARD_START):%b %-d, %Y}"
     daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
     if (daily is None or daily.empty) and (values is None or values.empty):
-        st.info(f"Forward test started {start}; the first daily row is saved after the close (the daily run's 3:05 PM CT step on trading days, after the signal refresh).")
+        st.info(f"No forward-test rows yet (started {start}).")
         return
     board, values = _board(daily, values)
-    marked = ""
-    if values is not None and "Provisional" in values and values["Provisional"].fillna(False).astype(bool).any():
-        marked = (f" {pd.Timestamp(values['Date'].max()):%a %b %-d}: each strategy's holdings from the last saved day marked "
-                  "to that day's close (provisional, no trades yet); the daily run's 3:05 PM CT step saves that day with its trades.")
     board = tidy_board(board, start[:-6])
     pct = [c for c in board.columns if c not in ("Rank", "Strategy", "Rule")]
     sty = toned(toned(board, [c for c in pct if c != "Max drawdown"]), ["Max drawdown"], fn=drawdown_tone)
@@ -36,21 +32,6 @@ def render_forward_test():
                                 "Strategy": st.column_config.TextColumn(width="large"), "Rule": st.column_config.TextColumn(),
                                 **{c: st.column_config.NumberColumn(format="%+.2f%%") for c in pct},
                                 "Last EOD": st.column_config.NumberColumn(format="%+.2f%%", help="EOD = end of day close")})
-    st.caption("Last EOD = the return on the last end-of-day close (EOD = end of day close).")
-    acct = ""
-    if daily is not None and len(daily):
-        last = daily.iloc[-1]
-        n, w, traded, cost = int(last["Closed_Picks"]), int(last["Winning_Picks"]), float(last["Traded_USD"]), float(last["Cost_USD"])
-        acct = (f" Your account as of {last['Date']} {last['Time_CT']} CT: "
-                + (f"closed picks {n}, win rate {w / n:.0%}" if n else "no closed picks yet")
-                + f", traded \\${traded:,.0f}, cost vs the decision price {'-' if cost < 0 else ''}\\${abs(cost):,.2f}"
-                + (f" ({cost / traded * 1e4:+.1f} bps; + = it cost money)" if traded else "") + ".")
-    st.caption(f"{ft.RANK_RULE} Every strategy is paper only (never traded): it decides at the "
-               "day's close, pays 0.1% per trade side, holds no stock above 20% (the live-rules strategy: the live cap, 20%), invests at most 99% and earns nothing on cash; each "
-               f"starts at 1.0 on the {start} close. Your account = time-weighted (deposits and withdrawals are not returns); QQQ / SPY = closes, "
-               "comparison only (not ranked). Week k = Friday close to Friday close (week 1 = Oct 2-9); '(so far)' = the week in "
-               "progress, Friday's close to the latest close; later weeks are blank." + acct
-               + marked + " Saved daily by the daily run's 3:05 PM CT step after the signal refresh (no orders); each strategy's rule and holdings are in the next section.")
 
 HIGHLIGHT_BG = "background-color: #e2e8f0; font-weight: 700"   # subtle slate on the white table
 
@@ -93,7 +74,7 @@ def render_group_legend():
     """The family colors used on strategy names (forward_test.GROUPS)."""
     import forward_test as ft
     chips = " · ".join(f'<span style="color:{ft.GROUPS[k]};font-weight:700">{esc(ft.GROUP_LABEL[k])}</span>' for k in ft.GROUPS)
-    show_html(f'<div class="sa-note">Name color is the kind of rule: {chips}.</div>')
+    show_html(f'<div class="sa-note">{chips}</div>')
 
 def paint_strategy(sty, extra=()):
     """Color the Strategy column (and `extra` columns) by the strategy's family."""
@@ -126,17 +107,9 @@ def render_top10(ranks=None):
                 f'{symbol_link(r.Symbol, cls)} {r.Count}/{n} strategies</span>')
     strats = " ".join(f'<span>{i}. {esc(nm)}' + (f' <i title="{esc(", ".join(tw))}">(+{len(tw)} same holdings)</i>' if tw else "")
                       + "</span>" for i, (nm, tw) in enumerate(c["strategies"], 1))
-    order = "total return since Oct 2" if c["by"] == "Total return %" else c["by"].replace(" %", " return")
-    show_html(f'<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>the {len(c["stocks"])} stocks most held by the '
-              f'{n} best strategies ({order}) · holdings at the {c["day"]:%a %b %-d} close</span></div>'
+    show_html(f'<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>{c["day"]:%a %b %-d} close</span></div>'
               f'<div class="sa-tier"><b>Stocks</b><div class="sa-tier-syms">{" ".join(chip(r) for r in c["stocks"].itertuples())}</div></div>'
               f'<div class="sa-tier"><b>Strategies</b><div class="sa-tier-syms">{strats}</div></div></div>')
-    st.caption("The 5 strategies are the best by the most recent week's return: the week in progress (Friday's close to the "
-               "latest close) once it has a day, else the latest finished week; a tie goes to the smaller drawdown. The "
-               "leaderboard's Rank (total return since Oct 2) is not used here. "
-               + "Strategies with the same stocks at the same weights count once (the better-placed one). Order: most "
-               "strategies, then summed weight, then latest rank. Green = held by 3+ of them, yellow = 2, red = ranked "
-               f"worse than {EXIT_RANK} at the latest close. Display only: updated with the leaderboard, never traded.")
 
 def render_forward_rules(p=None):
     """Strategy tab: the Top 5 consensus card, then each forward-test strategy's one-line rule and its holdings,
@@ -144,7 +117,7 @@ def render_forward_rules(p=None):
     import forward_test as ft
     ranks = p.by_symbol["Strategy_Rank"].to_dict() if p is not None and "Strategy_Rank" in p.by_symbol else None
     render_top10(ranks)
-    held, h = ft.holdings(), read_report_csv(ft.HOLDINGS_CSV)
+    held = ft.holdings()
     by_name = {c["name"]: c for c in ft.STRATEGIES}
     daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
     order = [c["name"] for c in ft.STRATEGIES]
@@ -157,13 +130,9 @@ def render_forward_rules(p=None):
     sty = toned(rules, ["Holdings now"], fn=lambda v: MUTED if v == "cash" else INK)
     render_group_legend()
     st.dataframe(live_row(paint_strategy(sty, extra=("Rule",)), "Strategy", ft.LIVE), hide_index=True, width="stretch")
-    if h is not None and len(h):
-        st.caption(f"Holdings as of the {pd.Timestamp(h['Date'].max()):%a %b %-d} close (Reports/forward_strategies_holdings.csv "
-                   "has every day). Ordered like the leaderboard above. Paper only: none of these is traded.")
 
 def render_strategy_guide():
     """Bottom of the Strategy tab: one or two lines for what each paper strategy holds."""
     import forward_test as ft
     guide = pd.DataFrame([{"Strategy": c["name"], "What it does": c["rule"]} for c in ft.STRATEGIES])
-    st.caption("The stock count in each line is the book that strategy holds. A defensive sleeve, where a line names one, is held on top of that count.")
     st.dataframe(paint_strategy(guide.style, extra=("What it does",)), hide_index=True, width="stretch")

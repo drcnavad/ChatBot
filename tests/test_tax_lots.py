@@ -353,17 +353,12 @@ try:
           "Tax view · live account since Oct 2, 2026 (estimate, not tax advice)" in labels
           and labels[-1] == "Strategy rules", labels)
     md = " ".join(m.value for m in at.markdown)
-    check("app: 'Estimate, not tax advice' note and card numbers (realized since Oct 2)",
-          "Estimate, not tax advice." in md and "Realized since Oct 2 short-term" in md and "Wash-sale loss deferred since Oct 2" in md
+    check("app: card numbers (realized since Oct 2)",
+          "Realized since Oct 2 short-term" in md and "Wash-sale loss deferred since Oct 2" in md
           and "Realized 2026" not in md and "deferred 2025" not in md, md[:400])
-    infos = " ".join(i.value for i in at.info)
-    check("app: fresh-start note: start date, older activities ignored, AAA 15 sh from before the start left out",
-          "Fresh start: only activity on or after Fri Oct 2, 2026 counts" in infos and "AAA 15 sh" in infos
-          and "not carried in" in infos, infos[:400])
-    caps = " ".join(c.value for c in at.caption)
-    check("app: dated captions (As of ... CT) and the 1099-B note", "lot method FIFO" in caps and "1099-B check" in caps
-          and "Wash-sale rule" in caps)
-    check("app: data checks passed caption (lots = Alpaca positions)", "Data checks passed" in caps, caps[:300])
+    text = md + " ".join(i.value for i in at.info) + " ".join(c.value for c in at.caption)
+    check("app: no explanation notes (disclaimer, fresh start, as-of, 1099-B)", not any(
+          k in text for k in ("Estimate, not tax advice", "Fresh start", "1099-B check", "Wash-sale rule", "Data checks passed")))
     frames = [d.value for d in at.dataframe]
     check("app: by-year, open-lots, 8949 and lot-method tables", any("Short-term gain" in f.columns for f in frames)
           and any("Holding from" in f.columns for f in frames) and any("Adjustment code" in f.columns for f in frames)

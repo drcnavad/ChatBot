@@ -187,7 +187,7 @@ for sym in dict.fromkeys(cases):
     lab = next((o for o in at.selectbox(key="ticker_dropdown").options if o.split("  ·  ")[0] == sym), "")
     tiers = next((m.value for m in at.markdown if "Stock list<span>" in m.value), "")
     rk = re.search(r"rank #(\d+)", lab)
-    expect(rk and int(rk.group(1)) == int(r) and f"ranks at the {fmt(SIG.Date.max())} close" in tiers,
+    expect(rk and int(rk.group(1)) == int(r) and f"<span>{fmt(SIG.Date.max())} close" in tiers,
            f"{sym}: rank label {lab!r} / stock list date vs latest {fmt(SIG.Date.max())} rank {r}")
     rk = (fmt(SIG.Date.max()), rk and rk.group(1))
     print(f"   {sym}: {badges} · rank {rk} OK")
@@ -214,7 +214,6 @@ def _ranked_ok(b):
 expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Rule", "Total since Oct 2", "Last EOD", *_wk, "Max drawdown"] and [w.replace(" (so far)", "") for w in _wk] == [f"Wk {k}" for k in range(len(_wk), 0, -1)]
                    and (_ft[0]["Strategy"] == "Current Strategy (Live from Oct End)").sum() == 1 and _ranked_ok(_ft[0])),
        f"leaderboard: columns, one marked live row, every ranked strategy with data ranked (the Oct 16 live halves not): {_ft[0].to_dict('list') if _ft else None}")
-expect(not _ft or sum(ft.RANK_RULE in c.value for c in at.caption) == 1, "the ranking rule is written once in the caption")
 _rules = [d.value for d in at.dataframe if "Rule" in d.value.columns and "Total since Oct 2" not in d.value.columns]
 _shown = [ft.MARKED if s == "Current Strategy (Live from Oct End)" else s.replace(ft.LIVE_MARK, "") for s in _ft[0]["Strategy"]] if _ft else []
 _board_names = [s for s in _shown if s in {c["name"] for c in ft.STRATEGIES}] if _ft else [c["name"] for c in ft.STRATEGIES]

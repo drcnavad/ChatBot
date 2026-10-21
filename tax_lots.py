@@ -45,11 +45,6 @@ PRE_START = "before start"       # Lot.source of the shares held from before TAX
 EPS = 1e-9
 WASH_DAYS = 30
 NIIT_RATE = 0.038
-DISCLAIMER = ("Estimate, not tax advice. Rebuilt from your Alpaca account history; Alpaca's Form 1099 is the official record, "
-              "and wash sales across other accounts (IRAs, a spouse, other brokers) are not seen here. Check with a tax professional.")
-NOTE_1099B = ("1099-B check: Alpaca reports these sales as covered (Form 8949 box A short-term / box D long-term, basis reported "
-              "to the IRS). Compare the totals by term with the 1099-B when it arrives (usually mid-February); if they differ, the "
-              "1099-B wins unless it is wrong, and differences usually come from fees, wash-sale matching or corporate actions.")
 METHODS = ("FIFO", "HIFO", "LIFO")
 DIV_TYPES = {"DIV": "Dividend", "DIVCGL": "Capital gain distribution (long-term)", "DIVCGS": "Capital gain distribution (short-term)",
              "CGD": "Capital gain distribution", "DIVROC": "Return of capital", "DIVTXEX": "Tax-exempt dividend",

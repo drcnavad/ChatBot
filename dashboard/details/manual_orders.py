@@ -21,5 +21,4 @@ def render_manual_orders():
         st.markdown("**Manual orders** (newest first, last 20)")
         st.dataframe(t[cols], hide_index=True, width="stretch")
     else:
-        st.caption("No manual orders yet. `python manual_trade.py sell KO --block-until-drop 10` / "
-                   "`python manual_trade.py buy XYZ --amount 1000` (add --dry-run to test).")
+        st.caption("No manual orders yet.")

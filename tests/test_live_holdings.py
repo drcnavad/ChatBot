@@ -158,10 +158,7 @@ try:
               columns={"Return %": "Return", "Gain $": "Gain", "Value now": "Value"}).itertuples()), bm)
     check("app: the account's return nets out the $100 Oct 5 deposit ((980 - 100) / 880 = +0%, then 990 / 980, 1000 / 990)",
           len(bm) == 1 and math.isclose(bm[0]["Return %"].iloc[0], (990 / 980 * 1000 / 990 - 1) * 100), bm)
-    check("app: the comparison caption explains the same deposits and the money return",
-          any("each deposit or withdrawal bought or sold at the close of its date" in c.value and "Return % = Gain" in c.value
-              for c in at.caption))
-    check("app: as-of time and how-to-read note", any(c.value.startswith("As of ") and "every hour otherwise" in c.value for c in at.caption))
+    check("app: no as-of / comparison captions", not any(c.value.startswith(("As of ", "The same money")) for c in at.caption))
     check("app: only read-only GET paths used", FakeAccount.calls and all(p in ("/positions", "/account", "/account/activities", "/orders", "/clock", "/account/portfolio/history")
                                                                           for p, _ in FakeAccount.calls), FakeAccount.calls)
     at.run()

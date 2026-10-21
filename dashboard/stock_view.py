@@ -42,8 +42,7 @@ def render_rank_tiers(p):
         tip = f' title="{esc(note)}"' if note else ""
         rows.append(f'<div class="sa-tier"><b{tip}>{title} ({len(syms)}):</b><div class="sa-tier-syms">{links or "\u2014"}</div></div>')
     day = p.df["Date"].max()
-    show_html(f'<div class="sa-card"><div class="sa-card-title">Stock list<span>ranks at the {day:%a %b %-d} close · '
-              'click a stock to open it · green = Keep / Buy next, red = Sell next (Next rebalance preview)</span></div>' + "".join(rows) + '</div>')
+    show_html(f'<div class="sa-card"><div class="sa-card-title">Stock list<span>{day:%a %b %-d} close</span></div>' + "".join(rows) + '</div>')
 
 def render_stock_picker(p, jumped):
     """Stock list (click a symbol to open it) + dropdown for manual typing + AI button.

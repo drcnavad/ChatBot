@@ -250,17 +250,13 @@ try:
     at = AppTest.from_file("app.py", default_timeout=180).run()
     labels = [e.label for e in at.expander]
     check("app: no exceptions, trade audit section before the data settings, rules still last", not at.exception
-          and "Trade audit · every order vs its plan price, buy / sell prices, checks (read-only)" in labels and labels[-1] == "Strategy rules",
+          and "Trade audit · gain / loss per sale (read-only)" in labels and labels[-1] == "Strategy rules",
           ([str(e) for e in at.exception], labels))
     frames = [x.value for x in at.dataframe]
-    led_tbl = next((x for x in frames if "Plan_Price" in x.columns), None)
-    check("app: order ledger with plan price $100, fill $101, +$10 vs plan", led_tbl is not None and close(led_tbl["Plan_Price"].iloc[0], 100)
-          and close(led_tbl["Slippage_vs_Plan_$"].iloc[0], 10), None if led_tbl is None else led_tbl.to_dict("list"))
-    check("app: reconciliation table and dated caption", any("Result" in x.columns for x in frames)
-          and any("plan price" in c.value and c.value.startswith("As of ") for c in at.caption))
-    check("app: AAA held but not in the strategy -> a check line above the cards; no Alpaca-unreadable alert",
-          any("AAA 10 sh is held but not in the strategy" in x.value for x in at.warning)
-          and not any("could not be read" in x.value for x in at.warning), [x.value for x in at.warning])
+    check("app: trade audit shows only the gain / loss per sale (no order ledger, reconciliation or alerts; one buy = no sales)",
+          not any("Plan_Price" in x.columns or "Result" in x.columns for x in frames)
+          and not any("held but not in the strategy" in x.value for x in at.warning)
+          and any(c.value == "No sales yet." for c in at.caption), [list(x.columns) for x in frames])
     check("app: only allow-listed GET paths; /positions read once (the holdings read is reused)",
           set(Fake.calls) <= set(ap.ALLOWED_PATHS) and Fake.calls.count("/positions") == 1, Fake.calls)
 finally:

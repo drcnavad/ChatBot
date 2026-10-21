@@ -198,7 +198,7 @@ check("forward test: fresh bars are taken from 3:05 PM CT (AFTER_CLOSE_BAR_MIN)"
       "close_buffer_min=be.AFTER_CLOSE_BAR_MIN" in open(os.path.join(ROOT, "forward_test.py")).read())
 check("forward test: no --wait guard any more (the daily run orders the steps)", not hasattr(ft, "wait_for_inputs"))
 ds = open(os.path.join(ROOT, "dashboard", "details", "forward_test.py")).read()
-check("dashboard text says 3:05 PM CT (no stale 3:00 PM job / 4:15)", "3:05 PM CT" in ds and "3:00 PM CT job" not in ds and "4:15" not in ds)
+check("dashboard text has no stale 3:00 PM job / 4:15", "3:00 PM CT job" not in ds and "4:15" not in ds)
 
 nb = json.load(open(os.path.join(ROOT, "main_signal_analysis.ipynb")))
 code = "\n".join(line.split("#")[0] for c in nb["cells"] if c["cell_type"] == "code" for line in "".join(c["source"]).splitlines())

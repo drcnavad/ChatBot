@@ -106,12 +106,6 @@ def render_positions(table, data):
                  column_config={"Shares": st.column_config.NumberColumn(format="%.2f"), "Avg price": money,
                                 "Cost basis": money, "Market value": money, "P/L $": money, "Price": money,
                                 "P/L %": pct, "Today %": pct})
-    st.caption(f"As of {data['as_of']:%a %b %-d %I:%M:%S %p} CT, read from Alpaca (read-only). Updates by itself: every "
-               "minute in market hours (8:30 AM-3:00 PM CT on trading days), every hour otherwise. "
-               "Cost basis = what you paid; Market value = shares x the latest price; P/L \\$ and P/L % = market value vs "
-               "cost basis; Today % = price change since the last close; Weight % = share of the account's equity (the rest "
-               "is cash). First bought = the earliest buy still in the position (sells use up the oldest shares first). "
-               "Strategy = Low Vol or Sector half (bot's sleeve ledger); (M) = latest buy was manual; Manual = in neither half.")
 
 def render_benchmarks(data):
     """The account vs QQQ / SPY / IWM / DIA since the forward-test start close, the same deposits on the same days, all
@@ -129,8 +123,3 @@ def render_benchmarks(data):
     st.dataframe(sty, hide_index=True, width="stretch", height=35 * (len(table) + 1) + 3,
                  column_config={"Return %": pct, "Value now": money, "Gain $": money,
                                 "Account ahead by (pts)": st.column_config.NumberColumn(format="%+.2f")})
-    st.caption(f"The same money in each ETF instead: your {start:%b %-d} closing balance plus every later deposit "
-               f"(\\${put_in:,.2f} in total), each deposit or withdrawal bought or sold at the close of its date, valued at "
-               "the latest price (ETF closes adjusted for dividends, from yfinance; display only). Gain \\$ = value now - "
-               "money put in; Return % = Gain \\$ / money put in, so a loss on a bigger balance weighs more. Account "
-               "ahead by: green = your account beats that ETF, red = it trails.")

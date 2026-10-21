@@ -6,7 +6,7 @@
      and low-volatility lines of forward_combos; never traded), built from the saved
      Reports files (signal_analysis, factor_history, earnings_date, benchmark_prices) + Alpaca daily volume
      (forward_bars) -> Reports/forward_strategies.csv (Value, 1.0 at the start; Cash) + forward_strategies_holdings.csv.
-leaderboard(): every strategy + the account + QQQ / SPY, ranked by RANK_RULE, with one column per week.
+leaderboard(): every strategy + the account + QQQ / SPY, ranked by total return, with one column per week.
 Same accounting for all: decide at the day's close (the 2:30 PM bar on decision days), trade only names whose target
 changed (all back to target on the strategy's rebalance day, 1-point band, earnings rule), be.COST per side, equal weight per
 stock (1/n), 99% invested, buys never exceed the cash (no margin), cash earns 0. Saved days are never redone; missed days are
@@ -95,9 +95,6 @@ C6 = "Oct 2 rules (pinned)" # the rules the forward test started with (pinned: M
 # paper_trade's Mon-Thu spare-cash rule (forward_test never imports paper_trade; tests check these equal its constants)
 LIVE_MARK = " · Current strategy (live)"
 ACCOUNT = "My Alpaca account"
-RANK_RULE = (f"After {WEEKS_TO_WIN} full weeks the top strategy is the winner only if its total "
-             f"return beats both {LIVE} and QQQ; otherwise the live rules stay. Nothing switches on its own: the live "
-             "rules change only when you ask.")
 
 # Name color on the Strategy tab (dashboard/details/forward_test.py). One family per strategy.
 GROUPS = {
@@ -1068,7 +1065,7 @@ def _stats(v):
 
 def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
     """One row per strategy (STRATEGIES order) + the real account (time-weighted, alpaca_paper.account_twr_index:
-    deposits and withdrawals are not returns) + QQQ / SPY (closes, comparison only), sorted by RANK_RULE. Rank counts
+    deposits and withdrawals are not returns) + QQQ / SPY (closes, comparison only), sorted by total return. Rank counts
     strategies only; the account and QQQ / SPY show where they would sit."""
     daily = _read(DAILY_CSV, parse_dates=["Date"]) if daily is None else daily
     bench = _read(BENCH_CSV, parse_dates=["Date"]) if bench is None else bench
@@ -1097,13 +1094,13 @@ def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
     weeks = [f"Week {k}" + (" (so far)" if so_far and k == done + 1 else "") + " %" for k in range(1, WEEKS_TO_WIN + 1)]
     t = pd.DataFrame([{"Strategy": n, "ranked": r, **dict(zip(cols, x)), **dict(zip(weeks, x[4]))} for n, r, x in stats],
                      columns=["Strategy", "ranked"] + cols + weeks)        # Week k % = the k-th Friday-to-Friday week
-    t = t.sort_values(["Total return %", "Max drawdown %"], ascending=False, na_position="last", kind="stable")   # RANK_RULE
+    t = t.sort_values(["Total return %", "Max drawdown %"], ascending=False, na_position="last", kind="stable")
     ok = t["ranked"] & t["Total return %"].notna()
     t["Rank"] = ok.cumsum().where(ok).astype("Int64")
     return t[["Rank", "Strategy"] + cols[:2] + weeks + cols[2:]].reset_index(drop=True)
 
 def verdict(board):
-    """One plain line: too early / the winner / no winner (RANK_RULE)."""
+    """One plain line: too early / the winner / no winner. """
     by = board.set_index(board["Strategy"].str.replace(LIVE_MARK, "", regex=False))
     weeks = int(by.loc[LIVE, [c for c in by.columns if c.startswith("Week ") and "so far" not in c]].notna().sum()) \
         if LIVE in by.index else 0                                    # finished weeks of the live row
@@ -1169,7 +1166,7 @@ def consensus(board, hold, ranks=None, n_strategies=5, n_stocks=10):
     board = leaderboard() as the dashboard shows it (incl. provisional rows); hold = saved holdings rows (Date, Strategy,
     Symbol, Weight); ranks = {symbol: latest Strategy_Rank} (tie-break). The strategies are taken by the most recent
     week's return: the board's last Week column (the unfinished week so far, else the latest finished week; Chirag,
-    Oct 15), total return since the start before any week column; a tie: smaller drawdown. Not RANK_RULE (the table). Twins (same stocks at the same target weights on the holdings day) count once: the
+    Oct 15), total return since the start before any week column; a tie: smaller drawdown.  Twins (same stocks at the same target weights on the holdings day) count once: the
     better-placed one stays. Each strategy's holdings = its latest saved day (what the board's values come from; a
     provisional close keeps them, so nothing past the shown day is used). Stocks: held (target weight > 0) by the most of those strategies; ties -> larger summed weight, then the
     better latest rank. Returns dict(day, by, strategies=[(name, [twins])], stocks=DataFrame(Symbol, Count, Weight,
