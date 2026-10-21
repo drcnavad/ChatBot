@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import load_benchmarks, read_report_csv
-from dashboard.style import INK, MUTED, drawdown_tone, esc, live_row, show_html, symbol_link, toned
+from dashboard.style import drawdown_tone, esc, show_html, symbol_link, toned
 
 def _board(daily, values):
     """(leaderboard, values) with the provisional close rows (forward_test.provisional), as shown on the dashboard."""
@@ -88,7 +88,7 @@ def paint_strategy(sty, extra=()):
 
 def render_top10(ranks=None):
     """Top 5 consensus card (display only): the 10 stocks most held by the 5 best forward-test strategies
-    (forward_test.consensus), same leaderboard as the table above (provisional close included)."""
+    (forward_test.consensus): the leaderboard's Rank 1-5 above (total return since Oct 2, provisional close included)."""
     import forward_test as ft
     daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
     c = None
@@ -107,7 +107,7 @@ def render_top10(ranks=None):
                 f'{symbol_link(r.Symbol, cls)} {r.Count}/{n} strategies</span>')
     strats = " ".join(f'<span>{i}. {esc(nm)}' + (f' <i title="{esc(", ".join(tw))}">(+{len(tw)} same holdings)</i>' if tw else "")
                       + "</span>" for i, (nm, tw) in enumerate(c["strategies"], 1))
-    show_html(f'<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>{c["day"]:%a %b %-d} close</span></div>'
+    show_html(f'<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>forward-test Rank 1–5 (total return since Oct 2) · holdings at {c["day"]:%a %b %-d} close</span></div>'
               f'<div class="sa-tier"><b>Stocks</b><div class="sa-tier-syms">{" ".join(chip(r) for r in c["stocks"].itertuples())}</div></div>'
               f'<div class="sa-tier"><b>Strategies</b><div class="sa-tier-syms">{strats}</div></div></div>')
 
@@ -120,16 +120,21 @@ def render_forward_rules(p=None):
     held = ft.holdings()
     by_name = {c["name"]: c for c in ft.STRATEGIES}
     daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
-    order = [c["name"] for c in ft.STRATEGIES]
+    order, rank = [c["name"] for c in ft.STRATEGIES], {}
     if values is not None and not values.empty:
-        board = _board(daily, values)[0]
+        board = _board(daily, values)[0]                     # the same leaderboard (and Rank) as the table above
         names = board["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)
+        rank = dict(zip(names, board["Rank"]))
         order = [n for n in names if n in by_name] + [n for n in order if n not in set(names)]
-    rules = pd.DataFrame([{"Strategy": n, "Rule": by_name[n]["rule"],
-                           "Holdings now": held.get(n, "cash")} for n in order])
-    sty = toned(rules, ["Holdings now"], fn=lambda v: MUTED if v == "cash" else INK)
-    render_group_legend()
-    st.dataframe(live_row(paint_strategy(sty, extra=("Rule",)), "Strategy", ft.LIVE), hide_index=True, width="stretch")
+    rules = pd.DataFrame([{"Rank": rank.get(n, pd.NA), "Strategy": CURRENT if n == ft.LIVE else n,
+                           "Rule": by_name[n]["rule"], "Holdings now": held.get(n, "cash")} for n in order])
+    rules["Rank"] = pd.array(pd.to_numeric(rules["Rank"], errors="coerce"), dtype="Int64")
+    st.dataframe(rules, hide_index=True, width="stretch",
+                 column_config={"Rank": st.column_config.NumberColumn(format="%d", width="small",
+                                    help="Forward-test leaderboard rank: total return since Oct 2, smaller max drawdown breaks ties"),
+                                "Strategy": st.column_config.TextColumn(width="medium"),
+                                "Rule": st.column_config.TextColumn(width="large"),
+                                "Holdings now": st.column_config.TextColumn(width="large")})
 
 def render_strategy_guide():
     """Bottom of the Strategy tab: one or two lines for what each paper strategy holds."""

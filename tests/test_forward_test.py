@@ -608,8 +608,8 @@ check("Top 5 consensus: stocks by count, then summed weight, then latest rank; w
       _c["stocks"].to_dict("list"))
 _c2 = ft.consensus(_bd.assign(Rank=pd.array([2, 1, 3, pd.NA, pd.NA, 4], dtype="Int64"), **{"Week 1 %": [5.0, 1.0, 1.0, 1.0, 9.0, 0.0],
                                 "Week 2 (so far) %": [0.5, 0.1, 2.0, 3.0, 9.0, 0.0]}), _hd, None, n_strategies=2)
-check("Top 5 consensus: by the latest week column (the week so far), not Rank; twins once",
-      _c2["by"] == "Week 2 (so far) %" and [n for n, _ in _c2["strategies"]] == [_N[3], _N[2]] and _c2["strategies"][0][1] == [_N[1]],
+check("Top 5 consensus: the leaderboard's Rank order (not the latest week); unranked after; twins once",
+      _c2["by"] == "Total return %" and [n for n, _ in _c2["strategies"]] == [_N[1], _N[0]] and _c2["strategies"][0][1] == [_N[3]],
       _c2["strategies"])
 import inspect
 _sig = inspect.signature(ft.consensus)

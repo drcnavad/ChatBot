@@ -155,8 +155,7 @@ STRATEGIES = [
     dict(name="Quant Score top 10", score="quant", tiebreak=None, group="quant",
          rule="Quant Score only, 10 stocks. The score is 0-100 from the trend, the moving averages, the 20-day VWAP, RSI, MACD "
               "and Bollinger bands (a missing part counts as 50). It holds the 10 highest scores above 50, on the Oct 2 calendar "
-              "(Friday rebalance and Mon-Thu checks), equal weights. The old name was Quant Score; that line was already "
-              "these 10 stocks. Quant Score top 5 is the same score with 5 stocks."),
+              "(Friday rebalance and Mon-Thu checks), equal weights. Quant Score top 5 is the same score with 5 stocks."),
     dict(name="Quant Score top 5", score="quant", tiebreak=None, select={"n": 5}, group="quant",
          rule="The same Quant Score as Quant Score top 10 (the 0-100 trend, moving-average, VWAP, RSI, MACD and Bollinger score, "
               "above 50), holding 5 stocks instead of 10."),
@@ -172,7 +171,7 @@ STRATEGIES = [
               "How far the price rose is not the rank. Equal weight, monthly. Volatility-adjusted momentum is a different "
               "line: it ranks 6-month return divided by 6-month volatility, every Friday, with no 200-day filter."),
     dict(name="Buy the dip", weights="dip", group="event",
-         rule="The copy folder's dip test: buy a stock 8% below its 50-day average, sell when it is back at the average or "
+         rule="Buy a stock at the close when it is 8% or more below its 50-day average; sell when it is back at the average or "
               "after 30 days; 10% each, at most 10, deepest first, checked daily."),
     dict(name="Monthly", calendar="monthly", group="blend",
          rule="The Oct 2 rules, rebalanced on the last trading day of each month only."),
@@ -187,8 +186,7 @@ STRATEGIES = [
               "line: it holds the calmest stocks above their 200-day average and does not rank the size of the gain."),
     dict(name="200-day high", score="high_200", calendar="monthly", select={**EQ, "n": 20}, earnings=None, group="momentum",
          rule="The 20 stocks closest to their highest close of the last 200 trading days (today's close divided by that "
-              "high; 1 means the stock is at the high). Equal weight, monthly, at most 8 per sector (the 40% sector cap on a 20-stock book), half size while QQQ "
-              "is below its 200-day average. Now: top 15 is relative strength plus the defensive sleeve."),
+              "high; 1 means the stock is at the high). Equal weight, monthly."),
     dict(name="Quality + momentum", score="quality_mom", calendar="monthly", **SIMPLE, group="fundamental",
          rule="Top 10 by half the company-report score (Fundamental_Weight, the quality rank) and half the 12-1 month momentum "
               "rank (return from 12 months ago to 1 month ago). Monthly, equal weights."),
@@ -214,7 +212,7 @@ STRATEGIES = [
               "Mon-Thu does not sell or replace anything."),
     dict(name="Now: top 15", **NOW, select={"n": 15}, group="rs",
          rule="The Oct 15 rules (relative strength only, Friday rebalance, Mon-Thu sell below rank 20) with 15 ranked stocks "
-              "plus the five defensive stocks. 200-day high is the 20 stocks closest to their own 200-day high, monthly, equal weight."),
+              "plus the five defensive stocks."),
     dict(name="Now: shorter RS (10/21/63 days)", **{**NOW, "score": "rs_short"}, group="rs",
          rule="The Oct 15 rules, with relative strength measured over 10, 21 and 63 trading days (about 2 weeks, 1 month and "
               "3 months). The Oct 15 windows are 21, 63 and 126 days (about 1, 3 and 6 months). Same blend on each window: "
@@ -297,17 +295,31 @@ STRATEGIES = [
     dict(name="Dual MA + RSI filter", event=dict(kind="ma_rsi"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and RSI(14) is 50-70; sell when RSI(14) falls below 40 (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="Worst 3 sectors 14d, +10%/-3%", worst=dict(look=10), earnings=None, group="event",
-         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 14 days (10 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
+         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 14 days (10 sessions); hold the top 10 stocks across them by Strategy_Score (the signal-analysis score, relative strength since Oct 13), 10% each. Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (not one sold that same day) (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
     dict(name="Worst 3 sectors 1M, +10%/-3%", worst=dict(look=21), earnings=None, group="event",
-         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last month (21 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
+         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last month (21 sessions); hold the top 10 stocks across them by Strategy_Score (the signal-analysis score, relative strength since Oct 13), 10% each. Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (not one sold that same day) (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
     dict(name="Worst 3 sectors 2M, +10%/-3%", worst=dict(look=42), earnings=None, group="event",
-         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 2 months (42 sessions); hold the top 10 stocks across them by the live score (10% each). Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
+         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 2 months (42 sessions); hold the top 10 stocks across them by Strategy_Score (the signal-analysis score, relative strength since Oct 13), 10% each. Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (not one sold that same day) (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
     dict(name="Golden cross + MACD confirm", event=dict(kind="golden_macd"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and MACD is above its signal; sell when MACD falls below the signal (10% each, at most 10, calmest first; checked at the close)."),
 ]
-for _c in STRATEGIES:                                     # the limits the plain rankings keep (said once, here)
-    if (_c.get("select") is PLAIN or _c.get("select") is EQ) and not _c["rule"].startswith("The Oct 2 rules"):
-        _c["rule"] += " At most 4 per sector; like live: half size while QQQ is below its 200-day average, score above 0."
+def _common_rules(c):
+    """The limits a line inherits from strategy_targets / be.winner_targets, said once (appended to its rule)."""
+    if c.get("combo"):
+        return "" if c["name"].startswith("Live") or c["name"] == LIVE else " do_not_buy stocks are never held."
+    if c.get("event") or c.get("b200") or c.get("weights"):
+        return " do_not_buy stocks are never held."
+    if c.get("worst"):
+        return ""
+    sel = {**PIN, **(c.get("select") or {})}
+    cap = int(np.floor(sel["sector_cap"] * sel["n"] + 1e-9))
+    earn = c.get("earnings", EARN_DAYS)
+    return (f" Common rules: equal weight; {'no sector limit' if sel['sector_cap'] >= 1 else f'at most {cap} per sector'}; "
+            f"{f'no new buy within {earn} trading days before earnings' if earn else 'earnings dates never block a buy'}; "
+            "only scores above 0 are picked; weights halved at a rebalance while QQQ is below its 200-day average; "
+            "do_not_buy stocks are never held.")
+for _c in STRATEGIES:                                     # the limits the code applies (said once, here)
+    _c["rule"] += _common_rules(_c)
     if _c.get("group") not in GROUPS:
         raise ValueError(f"{_c['name']}: missing color group")
 GROUP_OF = {c["name"]: c["group"] for c in STRATEGIES}
@@ -1128,9 +1140,9 @@ def consensus(board, hold, ranks=None, n_strategies=5, n_stocks=10):
     """Display only (never saved, never traded): the stocks most held by the best forward-test strategies.
 
     board = leaderboard() as the dashboard shows it (incl. provisional rows); hold = saved holdings rows (Date, Strategy,
-    Symbol, Weight); ranks = {symbol: latest Strategy_Rank} (tie-break). The strategies are taken by the most recent
-    week's return: the board's last Week column (the unfinished week so far, else the latest finished week; Chirag,
-    Oct 15), total return since the start before any week column; a tie: smaller drawdown.  Twins (same stocks at the same target weights on the holdings day) count once: the
+    Symbol, Weight); ranks = {symbol: latest Strategy_Rank} (tie-break). The strategies are taken in the leaderboard's
+    own order (Chirag, Oct 21; was the latest week's return): its Rank (total return since the start, smaller drawdown
+    breaks ties), unranked rows after, so the Top 5 are the table's Rank 1-5.  Twins (same stocks at the same target weights on the holdings day) count once: the
     better-placed one stays. Each strategy's holdings = its latest saved day (what the board's values come from; a
     provisional close keeps them, so nothing past the shown day is used). Stocks: held (target weight > 0) by the most of those strategies; ties -> larger summed weight, then the
     better latest rank. Returns dict(day, by, strategies=[(name, [twins])], stocks=DataFrame(Symbol, Count, Weight,
@@ -1140,9 +1152,10 @@ def consensus(board, hold, ranks=None, n_strategies=5, n_stocks=10):
     names = {c["name"] for c in STRATEGIES}
     b = board.assign(Strategy=board["Strategy"].str.replace(LIVE_MARK, "", regex=False))
     b = b[b["Strategy"].isin(names)]
-    wk = [c for c in b.columns if str(c).startswith("Week ") and ("so far" in c or b[c].notna().any())]
-    by = ([c for c in wk if "so far" in c] or wk or ["Total return %"])[-1]
-    b = b.sort_values([by, "Max drawdown %"], ascending=False, na_position="last", kind="stable")
+    by = "Total return %"
+    rk = pd.to_numeric(b["Rank"], errors="coerce").astype(float) if "Rank" in b else pd.Series(np.nan, index=b.index)
+    b = b.assign(_rk=rk.fillna(np.inf)).sort_values(["_rk", by, "Max drawdown %"], ascending=[True, False, False],
+                                                   na_position="last", kind="stable")
     h = hold.assign(Date=pd.to_datetime(hold["Date"]), Strategy=hold["Strategy"].replace(OLD_NAMES))
     h = h[h["Strategy"].isin(names)]
     if h.empty:
