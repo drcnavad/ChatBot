@@ -77,9 +77,10 @@ def portfolio_row(today):
     """'Our portfolio' row from the Alpaca LIVE account (read-only GETs): Live = equity now; % columns = time-weighted
     growth (alpaca_paper.account_twr_index, so deposits/withdrawals are not returns) vs the daily equity that far back."""
     import alpaca_paper as ap
+    import backtest_engine as be
     acct = ap.PaperAccount()
     h = acct._get("/account/portfolio/history", {"timeframe": "1D", "pnl_reset": "no_reset", "cashflow_types": "CSD,CSW,JNLC",
-                  "start": f"{today - pd.DateOffset(years=2, days=7):%Y-%m-%d}", "end": f"{today:%Y-%m-%d}"})
+                  "start": f"{pd.Timestamp(be.FORWARD_START) - pd.DateOffset(days=7):%Y-%m-%d}", "end": f"{today:%Y-%m-%d}"})
     # (daily_history sends only a start, and Alpaca then returns about one month; an end gives the whole range)
     days = pd.to_datetime(h["timestamp"], unit="s", utc=True).tz_convert("America/New_York").tz_localize(None).normalize()
     flows = pd.DataFrame({k: pd.to_numeric(pd.Series(v), errors="coerce") for k, v in (h.get("cashflow") or {}).items()})
@@ -92,9 +93,13 @@ def portfolio_row(today):
     idx = ap.account_twr_index(d[["Date", "Equity", "Net_Deposits"]])
     row = {"Group": "Portfolio", "Name": "Our portfolio", "Symbol": "Alpaca", "Live price": live,
            "Today %": (idx.iloc[-1] / idx.iloc[-2] - 1) * 100 if len(idx) > 1 else None}
+    start = pd.Timestamp(be.FORWARD_START)          # bot start: older lookbacks stay blank
     for col, off in LIVE_WINDOWS.items():
         past = idx[idx.index <= today - off]
-        row[col] = (idx.iloc[-1] / past.iloc[-1] - 1) * 100 if len(past) else None
+        row[col] = (idx.iloc[-1] / past.iloc[-1] - 1) * 100 if len(past) and today - off >= start else None
+    base = idx[idx.index <= start]
+    if len(base):
+        row["Name"] = f"Our portfolio ({(idx.iloc[-1] / base.iloc[-1] - 1) * 100:+.2f}% since {start:%b %-d})"
     return row
 
 FUTURES = {"CL=F": "Crude oil WTI (US)", "BZ=F": "Crude oil Brent (global)", "GC=F": "Gold futures",
@@ -166,8 +171,8 @@ def render_live_table():
                  column_config={"Live price": st.column_config.NumberColumn(format="$%.2f"), **{k: PCT_COL for k in pcts}})
     st.caption(f"Live price = latest Alpaca trade ({feed.upper()}), refreshed every minute, "
                f"{pd.Timestamp.now(tz='America/Chicago'):%-I:%M:%S %p} CT. Indexes and commodities via ETFs; futures rows (crude $/barrel, gold/silver $/oz) from Yahoo Finance. "
-               "Our portfolio = Alpaca account equity, returns time-weighted (deposits excluded), blank = before the account's "
-               "history. Today % vs yesterday's close; other columns = live price vs the daily close that far back.")
+               "Our portfolio = Alpaca account equity, returns time-weighted (deposits excluded), blank = before the bot "
+               "start (Oct 2). Today % vs yesterday's close; other columns = live price vs the daily close that far back.")
 
 def render_sector_table(p):
     section("Sector performance")
