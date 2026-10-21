@@ -5,7 +5,6 @@ from dashboard.details.data_settings import render_data_and_settings
 from dashboard.details.forward_test import render_forward_rules, render_forward_test, render_strategy_guide
 from dashboard.details.last_decision import render_last_decision
 from dashboard.details.live_holdings import render_live_holdings
-from dashboard.details.live_vs_benchmark import render_live_vs_benchmark
 from dashboard.details.manual_orders import render_manual_orders
 from dashboard.details.tax_view import render_tax_view
 from dashboard.details.trade_audit import render_trade_audit
@@ -16,8 +15,6 @@ def render_strategy_tab(p):
     with st.expander(f"Last decision · {p.off_date:%a %b %-d} · portfolio and both strategies' ranks", expanded=True):
         render_last_decision(p)
     import forward_test as ft
-    with st.expander("Live vs benchmark · your account vs QQQ and SPY", expanded=True):
-        render_live_vs_benchmark()
     with st.expander(f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
                      expanded=True):
         render_forward_test()
