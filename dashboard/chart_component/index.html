@@ -14,13 +14,14 @@
 #chy{background:#334155;color:#fff;font-size:10px;padding:1px 4px;border-radius:2px;transform:translateY(-50%)}
 @media (max-width:600px){                       /* phones: wrapping, smaller buttons and read-outs */
  #rng{left:4px;right:4px;top:4px;flex-wrap:wrap;gap:3px}#rng button{font-size:11px;padding:3px 7px}
- .lg{font-size:9.5px;padding:0 3px}#ask{right:8px;left:8px}.modebar{transform:scale(.85);transform-origin:top right}}</style></head>
+ .lg{font-size:9.5px;padding:0 3px;white-space:normal;right:46px}#ask{right:8px;left:8px}.modebar{transform:scale(.85);transform-origin:top right}}</style></head>
 <body><div id="c"><div id="chh" class="ch"></div><div id="chv" class="ch"></div><div id="chy" class="ch"></div><div id="rng"></div><div id="ask"><span id="askt"></span><button class="del" id="askyes">Delete</button><button id="askno">Cancel</button></div></div><script>
 // The stock chart as a Streamlit component: draws the figure, sends your own shapes back (to be saved per stock)
 // and rescales the price axis to the candles in view. Streamlit's component protocol, no extra JS library.
 const div = document.getElementById("c");
 const send = (type, data) => window.parent.postMessage(Object.assign({isStreamlitMessage: true, type}, data), "*");
 let spec = null, ohlc = null, busy = false, K = 10, curView = "1Y", mode = "Candles", intraday = false;
+let plain = false, ranges = null;   // plain: a read-only line chart (the portfolio): no drawing, no toolbar, its own range list
 function mine() { return (div.layout.shapes || []).filter(s => s.name !== "sys").map(s => JSON.parse(JSON.stringify(s))); }
 function rescale() {
   const r = div.layout.xaxis.range; if (!r || !ohlc) return;
@@ -31,7 +32,7 @@ function rescale() {
   // the lower panels too: volume from 0 to the highest bar in view, RSI keeps 30-70 in view, the others fit with a pad
   const per = {};
   (div._fullData || []).forEach(t => {
-    const ax = t.yaxis || "y"; if (ax === "y" || !t.x || !t.y || t.visible === false) return;
+    const ax = t.yaxis || "y"; if ((ax === "y" && !plain) || !t.x || !t.y || t.visible === false) return;
     const e = per[ax] = per[ax] || {lo: Infinity, hi: -Infinity, vol: false, rsi: false};
     if (t.name === "Volume") e.vol = true; if (t.name === "RSI") e.rsi = true;
     for (let i = 0; i < t.x.length; i++) { const d = new Date(t.x[i]), v = +t.y[i];
@@ -59,6 +60,7 @@ function draw(args) {
   spec = args.spec; ohlc = args.ohlc;
   const newView = args.view || "1Y", changed = newView !== curView || !!args.intraday !== intraday;
   curView = newView; intraday = !!args.intraday; mode = args.mode || mode; K = intraday ? 16 : 10;
+  plain = !!args.plain; ranges = args.ranges || null;
   const fig = JSON.parse(spec);
   delete fig.layout.width; fig.layout.autosize = true;                 // always the full frame width
   if (div.clientWidth < 600) {                     // phones: thinner margins, smaller fonts, a shorter chart
@@ -78,14 +80,16 @@ function draw(args) {
   }
   if (div._fullLayout && typeof div._fullLayout.dragmode === "string" && div._fullLayout.dragmode.startsWith("draw"))
     fig.layout.dragmode = div._fullLayout.dragmode;      // a drawing tool stays on through the save / redraw
-  const cfg = Object.assign({}, fig.config || {}, {displaylogo: false, scrollZoom: false, displayModeBar: true, responsive: true,
-    modeBarButtons: [["drawline", "drawrect", UNDO, REDO, DEL, "eraseshape"]]});
+  const cfg = plain ? {displaylogo: false, scrollZoom: false, displayModeBar: false, responsive: true, doubleClick: false}
+    : Object.assign({}, fig.config || {}, {displaylogo: false, scrollZoom: false, displayModeBar: true, responsive: true,
+      modeBarButtons: [["drawline", "drawrect", UNDO, REDO, DEL, "eraseshape"]]});
+  if (plain) fig.layout.dragmode = false;
   Plotly.react(div, fig.data, fig.layout, cfg).then(() => {
     if (saving) { hist[hist.length - 1] = mine(); saving = false; }   // our own save coming back (same shapes, re-serialised)
     else if (JSON.stringify(mine()) !== JSON.stringify(hist[hist.length - 1])) hist.push(mine());   // first load, or a change made outside (Add level / Clear)
     send("streamlit:setFrameHeight", {height: fig.layout.height + 8});
     buildIndex(); applyMode(); paintButtons(); setTimeout(rescale, 0);
-    if (changed && !intraday) { const r = RANGES.find(x => x[0] === curView); if (r && r[0] !== "1Y") setRange(r[0], r[1]); }
+    if (changed && !intraday) { const r = RANGES.find(x => x[0] === curView); if (r && (plain || r[0] !== "1Y")) setRange(r[0], r[1]); }
     show(idx.days[idx.days.length - 1]);
     if (div._sa) return; div._sa = true;
     div.on("plotly_relayout", ev => {
@@ -131,6 +135,7 @@ function nearest(ms) {
 }
 function show(key) {
   const c = idx.candle; if (!c || !key) return;
+  if (plain) return showPlain(key);
   const i = c._m[key];
   if (i !== undefined) {
     const o = +c.open[i], h = +c.high[i], l = +c.low[i], cl = +c.close[i], pc = i > 0 ? +c.close[i - 1] : o, ch = cl - pc;
@@ -148,6 +153,20 @@ function show(key) {
       const txt = t.name === "Volume" ? (v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : (v / 1e3).toFixed(0) + "K") :
         t.name === "RSI" ? v.toFixed(1) : t.name.startsWith("MACD") ? v.toFixed(3) : (v >= 0 ? "+" : "") + v.toFixed(1) + "%";
       return `<span style="color:${col}">${t.name} <b>${txt}</b></span>`; }).filter(Boolean).join(" &nbsp;");
+  });
+}
+function showPlain(key) {   // the portfolio: date, then each line's value (and the change since the first point shown)
+  const dt = new Date(intraday ? key + ":00" : key + "T12:00:00");
+  const when = dt.toLocaleDateString("en-US", {month: "short", day: "numeric", year: "numeric"}) +
+    (intraday ? " " + dt.toLocaleTimeString("en-US", {hour: "numeric", minute: "2-digit"}) + " ET" : "");
+  Object.entries(idx.panels).forEach(([ax, ts]) => {
+    const parts = ts.map(t => { const j = t._m[key]; if (j === undefined || t.y[j] == null) return "";
+      const v = +t.y[j], col = (t.line && t.line.color) || "#334155";
+      if (ax !== "y") return `<span style="color:${col}">${t.name} <b>${v.toFixed(2)}%</b></span>`;
+      const v0 = +t.y.find(y => y != null), ch = v - v0, k = ch >= 0 ? "up" : "dn";
+      return `<span style="color:${col}">${t.name} <b>${fmt$(v)}</b></span> <span class="${k}">${ch >= 0 ? "+" : "-"}${fmt$(Math.abs(ch))}</span>`; })
+      .filter(Boolean).join(" &nbsp;");
+    if (idx.lg[ax]) idx.lg[ax].innerHTML = (ax === "y" ? `<b>${when}</b> &nbsp;` : "") + parts;
   });
 }
 function crosshair(ev) {
@@ -178,7 +197,9 @@ const rng = document.getElementById("rng");
 function setRange(label, m) {
   if (!idx || !idx.days.length) return;
   const last = new Date(idx.days[idx.days.length - 1] + "T00:00:00Z"), a = new Date(last), b = new Date(last);
-  if (m) a.setUTCMonth(a.getUTCMonth() - m); else a.setTime(new Date(idx.days[0] + "T00:00:00Z").getTime());
+  const first = new Date(idx.days[0] + "T00:00:00Z");
+  if (m) a.setUTCMonth(a.getUTCMonth() - m); else a.setTime(first.getTime());
+  if (plain && a < first) a.setTime(first.getTime());          // no empty space before the first point
   b.setTime(b.getTime() + (b - a) * AHEAD);
   curView = label; paintButtons();
   const r = [a.toISOString().slice(0, 10), b.toISOString().slice(0, 16).replace("T", " ")], upd = {};
@@ -200,9 +221,12 @@ const sep = document.createElement("span"); sep.style.cssText = "width:10px"; rn
     send("streamlit:setComponentValue", {value: {mode, t: Date.now()}, dataType: "json"}); };
   rng.appendChild(b); });
 function paintButtons() {
+  [...rng.querySelectorAll("button")].forEach(b => b.style.display =
+    (b.dataset.mode && plain) || (b.dataset.view && ranges && !ranges.includes(b.dataset.view)) ? "none" : "");
   [...rng.querySelectorAll("button")].forEach(b => b.classList.toggle("on", b.dataset.view ? b.dataset.view === curView : b.dataset.mode === mode));
 }
 function applyMode() {   // Candles / Line: show one of the two price traces
+  if (plain) return;
   const ci = div.data.findIndex(t => t.type === "candlestick"), li = div.data.findIndex(t => t.name === "Close line");
   if (ci < 0 || li < 0) return;
   busy = true; Plotly.restyle(div, {visible: [mode === "Candles", mode === "Line"]}, [ci, li]).then(() => busy = false);

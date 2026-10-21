@@ -13,7 +13,11 @@ from dashboard.style import BAD, CHART_FONT, GOOD, show_html, usd
 START = pd.Timestamp("2026-10-09")          # the live account's history starts here; nothing earlier is shown
 BENCH = {"QQQ": "#64748b", "SPY": "#d97706", "DIA": "#7c3aed"}   # comparisons: Nasdaq-100, S&P 500, Dow
 SINCE = f"Since {START:%b %-d}"
-PERIODS = {"1D": ("1D", "5Min"), "5D": ("5D", "15Min"), SINCE: ("3M", "1D")}
+PERIODS = {"1D": ("1D", "5Min"), "5D": ("5D", "15Min"), SINCE: ("1A", "1D")}
+# the chart's range buttons (the stock chart's component, read-only): 1D / 1W load intraday data, the rest zoom the
+# daily line (which starts Oct 9, so a longer button never shows empty space before it)
+VIEWS = ["1D", "1W", "1M", "3M", "1Y", "2Y"]
+DATA = {"1D": "1D", "1W": "5D"}             # view -> PERIODS key; any other view: SINCE
 
 @st.cache_data(ttl=60, show_spinner=False)
 def equity_series(key):
@@ -81,6 +85,10 @@ def _bench(sym, index, tf):
 def equity_figure(d, bench, shown=("QQQ",), show_dd=True, intraday=False):
     """The actual equity in $ (green / red fill vs a dashed line at the period's start value), QQQ / SPY / DIA from the
     same start (plus any later deposits, on the same days), and the drawdown of the time-weighted return."""
+    d = d.copy()
+    if intraday:                                       # the component's clock: New York time, no zone (as the stock chart)
+        d.index = d.index.tz_convert("America/New_York").tz_localize(None)
+        bench = {k: (v.set_axis(d.index) if v is not None and len(v) == len(d) else v) for k, v in (bench or {}).items()}
     eq = d["equity"]
     base = float(eq.iloc[0])
     up = gains(d)["gain"] >= 0
@@ -90,7 +98,7 @@ def equity_figure(d, bench, shown=("QQQ",), show_dd=True, intraday=False):
     fig.add_trace(go.Scatter(x=eq.index, y=[base] * len(eq), mode="lines", line=dict(width=0), hoverinfo="skip",
                              showlegend=False), row=1, col=1)
     fig.add_trace(go.Scatter(x=eq.index, y=eq.values, mode="lines", name="Portfolio", fill="tonexty", fillcolor=fill,
-                             line=dict(color=color, width=2.2), hovertemplate="Portfolio $%{y:,.2f}<extra></extra>"), row=1, col=1)
+                             line=dict(color=color, width=2.2), hoverinfo="none"), row=1, col=1)
     fig.add_hline(y=base, line=dict(color="#94a3b8", width=1, dash="dash"), row=1, col=1)   # the period's start value
     for sym in shown:                                  # same starting money and the same deposits, in the index fund
         px = (bench or {}).get(sym)
@@ -99,27 +107,22 @@ def equity_figure(d, bench, shown=("QQQ",), show_dd=True, intraday=False):
         px = px.ffill().bfill()
         qv = ((eq.iloc[0] / px.iloc[0]) + (d["flow"] / px).cumsum()) * px
         fig.add_trace(go.Scatter(x=qv.index, y=qv.values, mode="lines", name=f"{sym} (same start)",
-                                 line=dict(color=BENCH[sym], width=1.4, dash="dot"),
-                                 hovertemplate=f"{sym} $%{{y:,.2f}}<extra></extra>"), row=1, col=1)
+                                 line=dict(color=BENCH[sym], width=1.4, dash="dot"), hoverinfo="none"), row=1, col=1)
     if show_dd:
         dd = (d["twr"] / d["twr"].cummax() - 1) * 100
         fig.add_trace(go.Scatter(x=dd.index, y=dd.values, mode="lines", name="Drawdown", fill="tozeroy",
                                  line=dict(color=BAD, width=1), fillcolor="rgba(185,28,28,0.12)", showlegend=False,
-                                 hovertemplate="Drawdown %{y:.2f}%<extra></extra>"), row=2, col=1)
+                                 hoverinfo="none"), row=2, col=1)
         fig.update_yaxes(title_text="Drawdown", ticksuffix="%", tickformat=".1f", row=2, col=1)
-    fig.update_layout(height=430 if show_dd else 340, margin=dict(l=10, r=70, t=10, b=10), hovermode="x unified",
-                      plot_bgcolor="#fff", paper_bgcolor="#fff", font=dict(family=CHART_FONT, size=11, color="#334155"),
-                      legend=dict(orientation="h", x=0, y=1.02, yanchor="bottom", font=dict(size=11)),
-                      hoverlabel=dict(bgcolor="#fff", bordercolor="#e2e8f0", font_family=CHART_FONT))
-    fig.update_xaxes(showgrid=False, showspikes=True, spikemode="across", spikethickness=1, spikecolor="#94a3b8",
-                     spikedash="dot", tickformat="%-I:%M %p" if intraday else "%b %-d",
-                     rangebreaks=[dict(bounds=["sat", "mon"])] + ([dict(bounds=[15, 8.5], pattern="hour")] if intraday else []))
-    fig.update_yaxes(side="right", gridcolor="#f1f5f9", zeroline=False, tickfont=dict(size=10, color="#64748b"),
-                     showspikes=True, spikemode="across+toaxis", spikesnap="cursor", spikethickness=1, spikecolor="#64748b",
-                     spikedash="dot", fixedrange=True)          # the stock chart's crosshair, with the price at the right axis
-    fig.update_xaxes(fixedrange=True, spikesnap="cursor")       # no drag / scroll zoom: the period buttons pick the range
-    fig.update_layout(dragmode=False, spikedistance=-1, hoverdistance=-1)
-    fig.update_yaxes(tickformat="$,.0f", hoverformat="$,.2f", row=1, col=1)
+    fig.update_layout(height=470 if show_dd else 380, margin=dict(l=10, r=70, t=44, b=24), hovermode="closest",
+                      dragmode=False, plot_bgcolor="#fff", paper_bgcolor="#fff",
+                      font=dict(family=CHART_FONT, size=11, color="#334155"),
+                      legend=dict(orientation="h", x=1, xanchor="right", y=1.0, yanchor="bottom", font=dict(size=10),
+                                  bgcolor="rgba(0,0,0,0)"))
+    fig.update_xaxes(showgrid=False, fixedrange=True, tickformat="%-I:%M %p" if intraday else "%b %-d",
+                     rangebreaks=[dict(bounds=["sat", "mon"])] + ([dict(bounds=[16, 9.5], pattern="hour")] if intraday else []))
+    fig.update_yaxes(side="right", gridcolor="#f1f5f9", zeroline=False, fixedrange=True, tickfont=dict(size=10, color="#64748b"))
+    fig.update_yaxes(tickformat="$,.0f", row=1, col=1)
     return fig
 
 @st.fragment
@@ -127,9 +130,9 @@ def render_equity_chart():
     if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off":
         st.info("Portfolio chart is turned off here (STOCK_ANALYSIS_LIVE_HOLDINGS=off).")
         return
-    c1, *tg = st.columns([5, 0.9, 0.9, 0.9, 1.2], vertical_alignment="center")
-    key = c1.radio("Period", list(PERIODS), index=list(PERIODS).index(SINCE), key="eq_period", horizontal=True,
-                   label_visibility="collapsed")   # radio, not segmented_control: AppTest cannot rerun button groups
+    view = st.session_state.get("eq_view", "1Y")
+    key = DATA.get(view, SINCE)
+    tg = st.columns(4)
     shown = [sym for c, sym in zip(tg, BENCH) if c.toggle(sym, value=sym == "QQQ", key=f"eq_{sym.lower()}")]
     show_dd = tg[3].toggle("Drawdown", value=True, key="eq_dd")
     try:
@@ -145,6 +148,18 @@ def render_equity_chart():
                    for sym, px in bench.items() if px is not None and px.notna().sum() > 1)
     show_html(f'<div class="sa-eq-head"><span class="sa-eq-val">${m["end"]:,.2f}</span>'
               f'<span class="sa-eq-chg" style="color:{GOOD if m["gain"] >= 0 else BAD}">{usd(m["gain"])} ({m["twr_pct"]:+.2f}%)</span>'
-              f'<span class="sa-eq-sub">{key} · net of {usd(m["net_flows"])} deposits / withdrawals · time-weighted{qtxt}</span></div>')
-    st.plotly_chart(equity_figure(d, bench, shown, show_dd, intraday=PERIODS[key][1] != "1D"), width="stretch",
-                    config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}, key="eq_chart")
+              f'<span class="sa-eq-sub">{view if view in DATA else SINCE} · net of {usd(m["net_flows"])} deposits / withdrawals · time-weighted{qtxt}</span></div>')
+    intraday = PERIODS[key][1] != "1D"
+    fig = equity_figure(d, bench, shown, show_dd, intraday=intraday)
+    x = d.index.tz_convert("America/New_York").tz_localize(None) if intraday else d.index
+    fmt = "%Y-%m-%dT%H:%M" if intraday else "%Y-%m-%d"           # as the stock chart
+    eq = [float(v) for v in d["equity"]]
+    from dashboard.drawings import _chart                 # the stock chart's component, as a read-only line chart
+    out = _chart(spec=fig.to_json(), ohlc={"x": [t.strftime(fmt) for t in x], "open": eq, "high": eq, "low": eq, "close": eq},
+                 view=view, mode="Line", intraday=intraday, plain=True, ranges=VIEWS, key="eq_chart", default=None)
+    if out and out.get("view") in VIEWS and out.get("t") != st.session_state.get("_eq_t"):
+        st.session_state["_eq_t"] = out["t"]
+        if out["view"] != view:
+            st.session_state["eq_view"] = out["view"]
+            if DATA.get(out["view"], SINCE) != key:            # other data (intraday <-> daily): redraw
+                st.rerun(scope="fragment")
