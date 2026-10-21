@@ -10,7 +10,8 @@ every run from the same saved data; forward_test appends only the days after its
 redone). Display only: none of these lines is ever traded.
 
 A line = legs [(key, mode, calendar, share)]:
-  key      "lowvol" (low volatility in uptrend, equal weight) / "sr<n>" (sector rotation: the C6 score in the 3 sectors
+  key      ("<key>@5" = that leg with its top 5 instead of 10; the sector cap scales: floor(0.4 x 5) = 2 per sector)
+           "lowvol" (low volatility in uptrend, equal weight) / "sr<n>" (sector rotation: the C6 score in the 3 sectors
            whose ETF has the best n-day return, 1/volatility weights) / "vam" (volatility-adjusted momentum, equal weight)
            / "calm" (the Oct 15 rules' calmer half, "Now: RS, calmer half of the list": relative strength, 63-day volatility at or below the median, no buys
            5 days before earnings)
@@ -67,6 +68,11 @@ class Ctx:
         if key in self._legs:
             return self._legs[key]
         ft, inp = self.ft, self.inp
+        base, _, n_top = key.partition("@")                # "<key>@5" = the same leg holding its top 5 (default 10)
+        if base != key:
+            score, tb, a, block = self.leg(base)
+            self._legs[key] = (score, tb, {**a, "n": int(n_top)}, block)
+            return self._legs[key]
         if key == "lowvol":
             cfg, score = _cfg("Low volatility in uptrend"), inp["scores"]["low_vol"]
         elif key == "vam":

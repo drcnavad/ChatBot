@@ -93,6 +93,10 @@ starts = new.groupby("Strategy")["Date"].min()
 halves = list(ft.LIVE_HALVES)
 check(set(starts.drop(halves, errors="ignore")) == {"2026-10-02"}, "the new lines (not the live halves) start on Oct 2", starts.to_dict())
 check(all(abs(v - 1.0) < 1e-12 for v in new[new["Date"] == "2026-10-02"]["Value"]), "each new line is 1.0 at the Oct 2 close")
+T5 = "Live 50/50, top 5 each half"
+h5 = h1[(h1["Strategy"] == T5) & (h1["Shares"] > 0)]
+check(T5 in starts and starts[T5] == "2026-10-02" and len(h5) and h5.groupby("Date")["Symbol"].nunique().max() <= 10,
+      "top 5 each half: from Oct 2, at most 5 + 5 stocks", h5.groupby("Date")["Symbol"].nunique().to_dict())
 lb = ft.leaderboard(values=v1.assign(Date=pd.to_datetime(v1["Date"])))
 check(lb.set_index("Strategy").loc[halves, "Rank"].isna().all(), "the live halves are not ranked")
 again = ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)

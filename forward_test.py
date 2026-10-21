@@ -257,6 +257,11 @@ STRATEGIES = [
     dict(name=MON, combo=dict(legs=LIVE_LEGS), group="combo",
          rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
               "half rebalanced every Monday (Tuesday after a Monday holiday), no overlap. Current live rules from Oct 19."),
+    dict(name="Live 50/50, top 5 each half", combo=dict(legs=((LIVE_LEGS[0][0] + "@5",) + LIVE_LEGS[0][1:],
+                                                             (LIVE_LEGS[1][0] + "@5",) + LIVE_LEGS[1][1:])), group="combo",
+         rule="The current live 50/50 (low vol half on the last trading day of the month + sector rotation 63-day half every "
+              "Monday, no overlap, do_not_buy never bought) computed from Oct 2, with each half holding its top 5 instead of "
+              "10: max 2 per sector (the 40% sector cap on 5 stocks), the same 20% max per stock (the extra stays cash)."),
     dict(name="50/50: Low vol + SR every 2 weeks 63d", combo=dict(legs=(LIVE_LEGS[0], ("sr63", "full", "2week", 0.5))),
          group="combo",
          rule="50/50, the sector-rotation half (63 days) rebalanced every other Friday (from Oct 2), no overlap."),
