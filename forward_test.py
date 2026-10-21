@@ -78,8 +78,10 @@ OLD_NAMES = {
     "Live half: Sector rotation weekly (63d)": "Live half: Sector rotation Mondays (63d)",   # Oct 21: it rebalances Mondays
 }
 # the live 50/50 (be.WINNER "sleeves", from the Oct 16, 2026 switch): forward_combos legs, low-volatility half first
-LIVE_LEGS = (("lowvol", "full", "month", 0.5), ("sr63", "full", "weekstart", 0.5))   # sector half on Mondays (Oct 19 on)
-FRI_LEGS = (LIVE_LEGS[0], ("sr63", "full", "week", 0.5))
+# "+mb" = the live manual buy blocks too (Reports/manual_block.json, e.g. KO; Oct 21, 2026) on the live lines only
+LIVE_LEGS = (("lowvol+mb", "full", "month", 0.5), ("sr63+mb", "full", "weekstart", 0.5))   # sector half on Mondays (Oct 19 on)
+LV = ("lowvol", "full", "month", 0.5)   # the low vol half of the other 50/50 lines (no manual blocks)
+FRI_LEGS = (LV, ("sr63", "full", "week", 0.5))
 LIVE_SWITCH = "2026-10-16"
 C6 = "Oct 2 rules (pinned)" # the rules the forward test started with (pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, 50/50 score)
 # paper_trade's Mon-Thu spare-cash rule (forward_test never imports paper_trade; tests check these equal its constants)
@@ -257,22 +259,22 @@ STRATEGIES = [
     dict(name=MON, combo=dict(legs=LIVE_LEGS), group="combo",
          rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
               "half rebalanced every Monday (Tuesday after a Monday holiday), no overlap. Current live rules from Oct 19."),
-    dict(name="Live 50/50, top 5 each half", combo=dict(legs=((LIVE_LEGS[0][0] + "@5",) + LIVE_LEGS[0][1:],
-                                                             (LIVE_LEGS[1][0] + "@5",) + LIVE_LEGS[1][1:])), group="combo",
+    dict(name="Live 50/50, top 5 each half", combo=dict(legs=(("lowvol@5+mb",) + LIVE_LEGS[0][1:],
+                                                             ("sr63@5+mb",) + LIVE_LEGS[1][1:])), group="combo",
          rule="The current live 50/50 (low vol half on the last trading day of the month + sector rotation 63-day half every "
-              "Monday, no overlap, do_not_buy never bought) computed from Oct 2, with each half holding its top 5 instead of "
+              "Monday, no overlap, do_not_buy and the live manual buy blocks such as KO never bought) computed from Oct 2, with each half holding its top 5 instead of "
               "10: max 2 per sector (the 40% sector cap on 5 stocks), the same 20% max per stock (the extra stays cash)."),
-    dict(name="50/50: Low vol + SR every 2 weeks 63d", combo=dict(legs=(LIVE_LEGS[0], ("sr63", "full", "2week", 0.5))),
+    dict(name="50/50: Low vol + SR every 2 weeks 63d", combo=dict(legs=(LV, ("sr63", "full", "2week", 0.5))),
          group="combo",
          rule="50/50, the sector-rotation half (63 days) rebalanced every other Friday (from Oct 2), no overlap."),
-    dict(name="50/50: Low vol + SR Friday swap, keep top 10", combo=dict(legs=(LIVE_LEGS[0], ("sr63", "swap10", "week", 0.5))),
+    dict(name="50/50: Low vol + SR Friday swap, keep top 10", combo=dict(legs=(LV, ("sr63", "swap10", "week", 0.5))),
          group="combo",
          rule="50/50, the sector-rotation half swap-only (keep top 10) checked on Fridays only."),
-    dict(name="50/50: Low vol + Vol-adjusted momentum weekly", combo=dict(legs=(LIVE_LEGS[0], ("vam", "full", "week", 0.5))),
+    dict(name="50/50: Low vol + Vol-adjusted momentum weekly", combo=dict(legs=(LV, ("vam", "full", "week", 0.5))),
          group="combo",
          rule="50/50, the second half = volatility-adjusted momentum (6-month return / 6-month volatility), top 10, equal "
               "weight, weekly, no overlap."),
-    dict(name="50/50: Low vol + Calmer half weekly", combo=dict(legs=(LIVE_LEGS[0], ("calm", "full", "week", 0.5))),
+    dict(name="50/50: Low vol + Calmer half weekly", combo=dict(legs=(LV, ("calm", "full", "week", 0.5))),
          group="combo",
          rule="50/50, the second half = 'Now: RS, calmer half of the list' (relative strength among stocks at or below the "
               "median 63-day volatility) rebalanced weekly, no Mon-Thu checks, no overlap."),

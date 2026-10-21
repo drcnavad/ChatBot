@@ -103,6 +103,27 @@ again = ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)
 check(again == 0, "a second update adds nothing (saved days never redone)", again)
 shutil.rmtree(tmp, ignore_errors=True)
 
+# the live manual buy blocks ("+mb", Reports/manual_block.json): a blocked stock is never bought from the session after
+# it was added on (a held one sold that day, the live manual sale) until a close at or below block_until_price
+import json
+import manual_trade as mt
+_bj, mt.BLOCK_JSON = mt.BLOCK_JSON, os.path.join(tempfile.mkdtemp(), "b.json")
+json.dump({}, open(mt.BLOCK_JSON, "w"))
+ref = fc.simulate(inp, ft.LIVE_LEGS, start); fc._CACHE.clear()
+day = ref["days"][len(ref["days"]) // 2]
+held = sorted(set(ref["legs"][0][len(ref["days"]) // 2][2]) | set(ref["legs"][1][len(ref["days"]) // 2][2]))
+bs = held[0]
+json.dump({bs: {"added": f"{day:%Y-%m-%d}", "block_until_price": None}},
+          open(mt.BLOCK_JSON, "w"))
+y = fc.Ctx(inp)
+mb = fc.simulate({**inp, "_combo_ctx": y}, ft.LIVE_LEGS, start); fc._CACHE.clear()
+after = [d for i, d in enumerate(mb["days"]) if d >= day and any(bs in leg[i][2] for leg in mb["legs"])]
+check(not after and y.mblock[bs].loc[day:].all() and not y.mblock[bs].loc[:day].iloc[:-1].any(),
+      "manual block: sold that day, never held after", (bs, after[:3]))
+k = len(ref["days"]) // 2
+check(all(mb["legs"][j][:k] == ref["legs"][j][:k] for j in (0, 1)) and len(mb["legs"][0][k][2]) + len(mb["legs"][1][k][2]) >= len(held) - 1,
+      "manual block: days before it unchanged, the slot refilled")
+mt.BLOCK_JSON = _bj
 src = open(os.path.join(ROOT, "forward_combos.py")).read()
 check(not any(k in src for k in ("submit", "alpaca", "requests", "to_csv", "WINNER[")), "forward_combos: no orders, no writes")
 

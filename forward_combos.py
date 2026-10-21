@@ -10,7 +10,7 @@ every run from the same saved data; forward_test appends only the days after its
 redone). Display only: none of these lines is ever traded.
 
 A line = legs [(key, mode, calendar, share)]:
-  key      ("<key>@5" = that leg with its top 5 instead of 10; the sector cap scales: floor(0.4 x 5) = 2 per sector)
+  key      ("<key>+mb" = that leg + the live manual buy blocks; "<key>@5" = that leg with its top 5 instead of 10; the sector cap scales: floor(0.4 x 5) = 2 per sector)
            "lowvol" (low volatility in uptrend, equal weight) / "sr<n>" (sector rotation: the C6 score in the 3 sectors
            whose ETF has the best n-day return, 1/volatility weights) / "vam" (volatility-adjusted momentum, equal weight)
            / "calm" (the Oct 15 rules' calmer half, "Now: RS, calmer half of the list": relative strength, 63-day volatility at or below the median, no buys
@@ -55,6 +55,7 @@ class Ctx:
             index=self.idx, columns=self.cols)
         self.sect = {s: sm.symbol_sector.get(s, "Other") for s in self.cols}
         self._legs, self._rank = {}, {}
+        self.mblock = self.manual_block()
 
     def calendar(self, name, start):
         if name == "2week":
@@ -68,6 +69,10 @@ class Ctx:
         if key in self._legs:
             return self._legs[key]
         ft, inp = self.ft, self.inp
+        if key.endswith("+mb"):                            # + the live manual buy blocks (manual_trade, Reports/manual_block.json)
+            score, tb, a, block = self.leg(key[:-3])
+            self._legs[key] = (score, tb, a, block.where(~self.mblock, 999.0))
+            return self._legs[key]
         base, _, n_top = key.partition("@")                # "<key>@5" = the same leg holding its top 5 (default 10)
         if base != key:
             score, tb, a, block = self.leg(base)
@@ -96,6 +101,23 @@ class Ctx:
         block[self.never] = 999.0
         self._legs[key] = (score, inp["scores"].get(cfg.get("tiebreak", "rs")), a, block)
         return self._legs[key]
+
+    def manual_block(self):
+        """Date x Symbol True while a live manual buy block (manual_trade.load_blocks) is active: from the session it was
+        added (the live manual sale that day) until a close at or below block_until_price."""
+        import manual_trade as mt
+        m = pd.DataFrame(False, index=self.idx, columns=self.cols)
+        for sym, e in mt.load_blocks().items():
+            if sym not in m:
+                continue
+            first = self.idx[self.idx >= pd.Timestamp(e["added"])]
+            if not len(first):
+                continue
+            on = pd.Series(self.idx >= first[0], index=self.idx)
+            if e.get("block_until_price") is not None:
+                on &= ~(on & self.c[sym].le(e["block_until_price"])).cummax()
+            m[sym] = on.to_numpy()
+        return m
 
     def pick(self, key, t, held_w=None, exclude=()):
         score, tb, args, block = self.leg(key)
@@ -264,6 +286,11 @@ def simulate(inp, legs, start, no_overlap=True, through=None):
                 L[1].swap_check(t, px, L[0].held())
             else:
                 L[1].rebalance(t, px, L[0].held())
+        for j, leg in enumerate(L):                # "+mb": a held blocked stock is sold that day (the live manual sale) and
+            if leg.key.endswith("+mb") and i > 0:  # its slot refilled by a rebalance of that half (the next in line)
+                bad = {s for s in leg.held() if x.mblock.iloc[t][s]}
+                if bad:
+                    leg.rebalance(t, px, (L[0].held() if (no_overlap and j > 0) else set()) | bad)
         for j, leg in enumerate(L):
             out["legs"][j].append((leg.value(px), leg.cash, {s: (leg.sh[s], float(px[s])) for s in leg.held()}))
     _CACHE[key] = out
