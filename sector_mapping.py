@@ -284,7 +284,7 @@ tradable_symbols = [s for s in stock_symbols if s not in BENCHMARK_SYMBOLS]
 # tradable stocks plus these.
 fundamentals_extra = [
     'ABNB', 'ASML', 'AXON', 'BAC', 'BBAI', 'CDW', 'CELH', 'CRSP', 'CRWD', 'CVX', 'DDOG', 'DUOL',
-    'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'IT', 'KLAC', 'KVYO', 'LLY', 'MA',
+    'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'IT', 'KLAC', 'KVYO', 'LLY',
     'MELI', 'MNDY', 'NEE', 'NEM', 'NET', 'NKE', 'NVO', 'PATH', 'PAYX', 'PCTY',
     'PLTR', 'POOL', 'RTX', 'SYM', 'TMO', 'TOST', 'TTD', 'WDAY', 'XOM', 'ZBRA', 'ZENA',
 ]

@@ -193,22 +193,16 @@ for sym in dict.fromkeys(cases):
     expect(rk and int(rk.group(1)) == int(r) and f"ranks at the {fmt(SIG.Date.max())} close" in tiers,
            f"{sym}: rank label {lab!r} / stock list date vs latest {fmt(SIG.Date.max())} rank {r}")
     rk = (fmt(SIG.Date.max()), rk and rk.group(1))
-    tabs = {tuple(d.value.columns): d.value for d in at.dataframe}
-    ld = next((v for c, v in tabs.items() if "Rank Vol today" in c), None)    # Oct 16: the one portfolio view
-    if ld is not None and sym in set(ld["Symbol"]):
-        a = ld.set_index("Symbol").loc[sym]
-        expect(int(a["Rank Vol today"]) == int(r), f"{sym}: Last decision Rank Vol today {a.to_dict()} != rank {r}")
     print(f"   {sym}: {badges} · rank {rk} OK")
 import forward_test as ft  # noqa: E402
 # 4ad4ef4 order: Last decision, Forward test, Strategy rules and holdings first; live holdings and latest signals further down
-exp_titles = [f"Last decision · {fmt(dec_day)}",
-              "Live vs benchmark · your account vs QQQ and SPY",   # Oct 16: the real account (Alpaca), no simulated lines
+exp_titles = ["Last decision · portfolio and both strategies' ranks",   # Oct 21: no date (each half shows its own)
               f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
               "Strategy rules and holdings (paper strategies)",
               "Live holdings (Alpaca account)"]
 labels = [e.label for e in at.expander if e.label != "My notes"]   # the notes table sits on top (daf6f89)
-expect(len(labels) >= 3 and labels[0].startswith(exp_titles[0]) and labels[1:4] == exp_titles[1:4]
-       and set(exp_titles[4:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
+expect(len(labels) >= 3 and labels[0] == exp_titles[0] and labels[1:3] == exp_titles[1:3]
+       and set(exp_titles[3:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
 expect(sum("forward test" in l.lower() for l in labels) == 1, f"the forward test is in one place only: {labels}")
 _ft = [d.value for d in at.dataframe if "Total return since Oct 2 %" in d.value.columns]
 expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Strategy"]} if _ft else
@@ -246,13 +240,9 @@ expect(not any(l.startswith("Reference only") for l in labels), f"stale short-hi
 expect(not any(l.startswith(("Latest signals", "Two halves")) for l in labels), f"stale duplicate views: {labels}")
 expect(not any("Signal today" in d.value.columns or "Weight_in_half_%" in d.value.columns for d in at.dataframe),
        "stale Latest signals / halves targets tables")
-if sleeves.load_ledger() is not None:
-    at = at.radio(key="decision_filter").set_value("All stocks (both strategies' ranks)").run(); page_ok(at, "decision_filter all")
-    _ld = next((d.value for d in at.dataframe if "Rank Vol today" in d.value.columns), pd.DataFrame())
-    expect(list(_ld.columns) == ["Symbol", "Action", "Sleeve", "Rank Vol at decision", "Rank Vol today",
-                                 "Rank Sector at decision", "Rank Sector today", "Current weight %"]
-           and set(latest.index) - {"QQQ"} <= set(_ld["Symbol"]) and _ld["Symbol"].is_unique,
-           f"Last decision (all stocks): columns / every stock once: {list(_ld.columns)}")
+# Oct 21, 2026: Last decision = one top-20 ranking table per half (tests/test_strategy_tab.py has the math); the old
+# "Show" radio (decision_filter) and the all-stocks table are gone
+expect(not any(r.key == "decision_filter" for r in at.radio), "stale decision_filter radio (old Last decision view)")
 
 # ---------------------------------------------------------------- Strategy tab widgets and captions
 # the "if rebalanced at latest close" / "if the week ended today" preview views were removed from the app
@@ -263,16 +253,16 @@ expect(not any(r.key == "signals_view" for r in at.radio), "stale signals_view p
 # Alpaca is off here, so it and Live vs benchmark show the plain off message
 expect(not any(r.key == "signals_filter" for r in at.radio), "stale signals_filter radio (old Last decision view)")
 _infos = [i.value for i in at.info]
-expect(any(x.startswith("Last decision ·") and "turned off" in x or x.startswith("No trade run yet") for x in _infos)
-       and any(x.startswith("Live vs benchmark:") and "turned off" in x for x in _infos),
-       f"Last decision / Live vs benchmark: the plain message when Alpaca is not read: {_infos}")
+expect(any(x.startswith("Last decision:") and "turned off" in x or x.startswith("No trade run yet") for x in _infos)
+       and not any(x.startswith("Live vs benchmark") for x in _infos),
+       f"Last decision: the plain message when Alpaca is not read (Live vs benchmark removed Oct 21): {_infos}")
 # ONE decision view: the old "What changed at the latest decision" table (rules area) is merged into "Last decision"
 expect(not any(c.key == "changes_all" for c in at.checkbox), "stale 'What changed' checkbox still present")
 expect(not any("What changed at the latest decision" in m.value for m in at.markdown), "duplicate 'What changed' view is back")
 old_cols = {"Weight before %", "Next rebalance plan", "Rank change"}
 expect(not any(old_cols & set(d.value.columns) for d in at.dataframe), "stale Last decision columns still shown")
 dec_labels = [e.label for e in at.expander if "decision" in e.label.lower()]
-expect(len(dec_labels) == 1 and dec_labels[0].startswith(f"Last decision · {fmt(dec_day)}"), f"decision expanders: {dec_labels}")
+expect(dec_labels == [exp_titles[0]], f"decision expanders: {dec_labels}")
 expect([e.label for e in at.expander][-1] == "Strategy rules", f"the rules must be the last Details section: {[e.label for e in at.expander]}")
 # the Holdings risk and Order preview expanders were removed from the Details tab
 expect(not any(t.key == "order_positions" for t in at.text_area), "stale order preview positions box still present")
