@@ -116,9 +116,11 @@ def ranking_table(half, day, positions, ledger, top=20):
         score = sleeves.sector_inputs()["scores"]["sector_rot"].loc[day]
     r = r[(r[col] <= top) | r["Symbol"].isin(mine)]
     extra = sorted(set(mine) - set(r["Symbol"]))                  # held by the half but not ranked that day
-    r = pd.concat([r, pd.DataFrame({"Symbol": extra, col: pd.NA})], ignore_index=True)
+    if extra:
+        r = pd.concat([r, pd.DataFrame({"Symbol": extra, col: pd.array([pd.NA] * len(extra), dtype="Int64")})],
+                      ignore_index=True)
     held = lambda x: ("✓ " + SLEEVE[owner[x]]) if x in value and owner.get(x) in SLEEVE else ("✓ (untagged)" if x in value else "")
-    return pd.DataFrame({"Rank": r[col].astype("Int64").to_numpy(), "Stock": r["Symbol"].to_numpy(),
+    return pd.DataFrame({"Rank": pd.array(pd.to_numeric(r[col], errors="coerce").round(), dtype="Int64"), "Stock": r["Symbol"].to_numpy(),
                          "Sector": [symbol_sector.get(x, "—") for x in r["Symbol"]],
                          "Score": [round(float(score.get(x)), 1) if pd.notna(score.get(x)) else None for x in r["Symbol"]],
                          "Held by": [held(x) for x in r["Symbol"]],
@@ -153,7 +155,8 @@ def render_last_decision(p):
             sty = toned(t, ["Held by"], fn=lambda v: GOOD if str(v).startswith("✓") else INK)
             event = st.dataframe(sty, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
                                  key=f"rank_tbl_{half}", height=35 * (len(t) + 1) + 3,
-                                 column_config={"Weight in half %": PCT_COL})
+                                 column_config={"Weight in half %": PCT_COL,
+                                                "Score": st.column_config.NumberColumn(format="%.1f")})
             t = t.rename(columns={"Stock": "Symbol"})
             open_symbol(t, event, f"rank_{half}")
     st.caption("Ranks saved by the trade run (Reports/decision_ranks.csv). Sector rotation: rank of the sector score among "
