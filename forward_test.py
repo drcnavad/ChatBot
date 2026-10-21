@@ -71,6 +71,7 @@ OLD_NAMES = {
     "Now: 30% technical": "Now: 30% technical + 70% RS",
     "Now: exit below 15": "Now: Mon-Thu sell below rank 15",
     "Restored RS + sleeve, Mon-Thu checks (Oct 15 rules)": "Oct 15 rules (RS + sleeve, Mon-Thu)",
+    "Live half: Sector rotation weekly (63d)": "Live half: Sector rotation Mondays (63d)",   # Oct 21: it rebalances Mondays
 }
 # the live 50/50 (be.WINNER "sleeves", from the Oct 16, 2026 switch): forward_combos legs, low-volatility half first
 LIVE_LEGS = (("lowvol", "full", "month", 0.5), ("sr63", "full", "weekstart", 0.5))   # sector half on Mondays (Oct 19 on)
@@ -185,7 +186,7 @@ STRATEGIES = [
     dict(name="200-day high", score="high_200", calendar="monthly", select={**EQ, "n": 20}, earnings=None, group="momentum",
          rule="The 20 stocks closest to their highest close of the last 200 trading days (today's close divided by that "
               "high; 1 means the stock is at the high). Equal weight, monthly, at most 8 per sector (the 40% sector cap on a 20-stock book), half size while QQQ "
-              "is below its 200-day average. Top 20 ranks the Oct 2 score instead. Now: top 15 is relative strength plus the defensive sleeve."),
+              "is below its 200-day average. Top 20 rank-weighted (70/30) ranks relative strength instead. Now: top 15 is relative strength plus the defensive sleeve."),
     dict(name="Short-term reversal", score="reversal", calendar="weekly", select=EQ, earnings=None, group="event",
          rule="The 10 biggest 1-week losers among stocks above their 200-day average, equal weight, every Friday."),
     dict(name="Quality + momentum", score="quality_mom", calendar="monthly", **SIMPLE, group="fundamental",
@@ -221,8 +222,8 @@ STRATEGIES = [
               "(half technical, half relative strength) and holds no defensive stocks."),
     dict(name="Now: top 15", **NOW, select={"n": 15}, group="rs",
          rule="The Oct 15 rules (relative strength only, Friday rebalance, Mon-Thu sell below rank 20) with 15 ranked stocks "
-              "plus the five defensive stocks. Top 20 is the Oct 2 score (half technical, half relative strength) with 20 stocks "
-              "and no sleeve. 200-day high is the 20 stocks closest to their own 200-day high, monthly, equal weight."),
+              "plus the five defensive stocks. Top 20 rank-weighted (70/30) is relative strength with 20 "
+              "stocks weighted by rank and no sleeve. 200-day high is the 20 stocks closest to their own 200-day high, monthly, equal weight."),
     dict(name="Now: shorter RS (10/21/63 days)", **{**NOW, "score": "rs_short"}, group="rs",
          rule="The Oct 15 rules, with relative strength measured over 10, 21 and 63 trading days (about 2 weeks, 1 month and "
               "3 months). The Oct 15 windows are 21, 63 and 126 days (about 1, 3 and 6 months). Same blend on each window: "
@@ -245,11 +246,11 @@ STRATEGIES = [
          rule="The live account's low-volatility half on its own (from the Oct 16 close, 1.0 then): the 10 calmest stocks "
               "above their 200-day average, max 4 per sector, equal weight, rebalanced on Oct 16 and then the last trading "
               "day of each month; do_not_buy never bought. Not ranked (starts Oct 16)."),
-    dict(name="Live half: Sector rotation weekly (63d)", combo=dict(legs=LIVE_LEGS, start=LIVE_SWITCH, which=1), ranked=False,
+    dict(name="Live half: Sector rotation Mondays (63d)", combo=dict(legs=LIVE_LEGS, start=LIVE_SWITCH, which=1), ranked=False,
          group="sector",
          rule="The live account's sector-rotation half on its own (from the Oct 16 close, 1.0 then): the best C6-score "
               "stocks in the 3 sectors whose ETF has the best 63-day return, top 10, 1/volatility weights, max 20% of the "
-              "half, rebalanced every Friday; never buys a stock the low-volatility half holds. Not ranked (starts Oct 16)."),
+              "half, rebalanced every Monday (the first session of the week); never buys a stock the low-volatility half holds. Not ranked (starts Oct 16)."),
     dict(name=FRI, combo=dict(legs=FRI_LEGS), group="combo",
          rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
               "(63-day ETF return, top 3 sectors) half rebalanced every Friday, no overlap (the live rules until Oct 16)."),
@@ -1177,7 +1178,7 @@ def verdict(board):
     return f"After {weeks} weeks no winner: {top} ranks first but does not beat both {LIVE} and QQQ. Keep the live rules."
 
 DECISION_DATE = "2026-12-24"   # the week-12 checkpoint (Thu: Fri Dec 25 is a holiday): stay only if the live line beats SPY
-LIVE_HALVES = ("Live half: Low vol monthly", "Live half: Sector rotation weekly (63d)")
+LIVE_HALVES = ("Live half: Low vol monthly", "Live half: Sector rotation Mondays (63d)")
 SPY_RULE = "We must beat SPY to stay in the current strategy, otherwise switch to SPY (Chirag, Oct 15, 2026)."
 
 def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
