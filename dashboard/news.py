@@ -50,10 +50,24 @@ EVENT = re.compile(_one_line(r"""earnings|results|revenue|profit|loss|quarter|\b
     |split|buyback|dividend|bankrupt|default|downgrad|outage|hack|breach|halt"""), re.I)
 TRUSTED = {"CNBC", "Reuters", "AP", "Associated Press", "BBC", "Bloomberg", "The Wall Street Journal", "Financial Times", "CNN", "WSJ", "Axios", "MarketWatch"}
 
+TRANSCRIPT = re.compile(r"\btranscripts?\b|\bearnings call\b|\bconference call\b", re.I)
+FILLER = re.compile(r"^\s*(live updates?|live|live blog|live coverage|watch live|breaking)\s*[:\-–—|]\s*"
+                    r"|\s*[:\-–—|(]\s*(live updates?|live blog|live coverage)\s*\)?\s*$", re.I)
+
+QUESTION = re.compile(r"\?|^(why|how|what|is|are|should|can|will|could|does|do|which)\b", re.I)   # questions are not news
+
+def clean_title(title):
+    """The headline without filler such as "Live updates:" / "LIVE:" / "(Live blog)"."""
+    t = (title or "").strip()
+    for _ in range(2):
+        t = FILLER.sub("", t).strip()
+    return t
+
 def is_news(title, source=""):
     """True for a headline that reports an event (see DROP / EVENT / TRUSTED)."""
-    t = (title or "").strip()
-    if not t or DROP.search(t):
+    t = clean_title(title)
+    q = re.sub(r"\s+[-|–—]\s+[A-Z][\w.&' ]{1,40}$", "", t)          # "... - Reuters" before the question check
+    if not t or DROP.search(t) or TRANSCRIPT.search(t) or QUESTION.search(q):   # transcripts, questions: not news
         return False
     return bool(EVENT.search(t)) or source in TRUSTED
 
@@ -127,7 +141,7 @@ def _read(source, url, ticker=""):
         else:
             ticker_ = ticker
         if title and link:
-            out.append({"title": html.unescape(title), "link": link, "source": src, "feed": source, "time": t, "ticker": ticker_})
+            out.append({"title": clean_title(html.unescape(title)), "link": link, "source": src, "feed": source, "time": t, "ticker": ticker_})
     return out
 
 def _safe(args):

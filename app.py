@@ -69,7 +69,7 @@ def main():
     tab_home, tab_stock, tab_strategy, tab_trading = st.tabs(
         ["Home", "Stock Analysis", "Strategy", "Trading Account"], default="Stock Analysis" if opening else None)
     with tab_home:
-        kpi_box = st.container()          # the market cards (filled at the end of the run, Home only)
+        render_kpis()                     # the market cards (Home only; refresh themselves every 30 s)
         render_sector_table(p)
     with tab_stock:
         with st.expander("My notes", expanded=True):
@@ -80,7 +80,6 @@ def main():
         render_strategy_tab(p)
     with tab_trading:
         render_trading_tab(p)
-    render_kpis(kpi_box)
     render_ticker(ticker_box)
     render_news_banner(ticker_box)
 

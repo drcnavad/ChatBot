@@ -11,7 +11,10 @@
 #ask{position:absolute;right:80px;top:40px;z-index:7;display:none;background:#fff;border:1px solid #cbd5e1;border-radius:6px;padding:8px 10px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.12)}
 #ask button{margin-left:6px;font-size:12px;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;padding:2px 8px;cursor:pointer}
 #ask button.del{background:#dc2626;color:#fff;border-color:#dc2626}
-#chy{background:#334155;color:#fff;font-size:10px;padding:1px 4px;border-radius:2px;transform:translateY(-50%)}</style></head>
+#chy{background:#334155;color:#fff;font-size:10px;padding:1px 4px;border-radius:2px;transform:translateY(-50%)}
+@media (max-width:600px){                       /* phones: wrapping, smaller buttons and read-outs */
+ #rng{left:4px;right:4px;top:4px;flex-wrap:wrap;gap:3px}#rng button{font-size:11px;padding:3px 7px}
+ .lg{font-size:9.5px;padding:0 3px}#ask{right:8px;left:8px}.modebar{transform:scale(.85);transform-origin:top right}}</style></head>
 <body><div id="c"><div id="chh" class="ch"></div><div id="chv" class="ch"></div><div id="chy" class="ch"></div><div id="rng"></div><div id="ask"><span id="askt"></span><button class="del" id="askyes">Delete</button><button id="askno">Cancel</button></div></div><script>
 // The stock chart as a Streamlit component: draws the figure, sends your own shapes back (to be saved per stock)
 // and rescales the price axis to the candles in view. Streamlit's component protocol, no extra JS library.
@@ -58,6 +61,16 @@ function draw(args) {
   curView = newView; intraday = !!args.intraday; mode = args.mode || mode; K = intraday ? 16 : 10;
   const fig = JSON.parse(spec);
   delete fig.layout.width; fig.layout.autosize = true;                 // always the full frame width
+  if (div.clientWidth < 600) {                     // phones: thinner margins, smaller fonts, a shorter chart
+    const L = fig.layout;
+    L.margin = Object.assign({}, L.margin, {l: 4, r: 44, t: 64, b: 20});
+    L.font = Object.assign({}, L.font, {size: 9});
+    L.height = Math.round(L.height * 0.8);
+    Object.keys(L).filter(k => /^[xy]axis\d*$/.test(k)).forEach(k => {
+      L[k].tickfont = Object.assign({}, L[k].tickfont, {size: 9}); if (L[k].title) L[k].title.font = Object.assign({}, (L[k].title || {}).font, {size: 9}); });
+    (L.annotations || []).forEach(a => a.font = Object.assign({}, a.font, {size: 9}));
+    L.showlegend = false;                         // the read-outs at each panel's top-left carry the names
+  }
   if (!changed && div.layout && div.layout.xaxis && div.layout.xaxis.range) {          // a re-render after a save keeps your view
     Object.keys(fig.layout).filter(k => /^xaxis\d*$/.test(k))
       .forEach(k => fig.layout[k].range = div.layout.xaxis.range.slice());   // every shared x-axis, or they disagree

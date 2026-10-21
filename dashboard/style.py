@@ -46,15 +46,17 @@ CSS = """
     .sa-kv td { padding: 0.28rem 0.35rem; border-bottom: 1px solid #f1f5f9; color: var(--sa-muted); }
     .sa-kv td:nth-child(even) { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; padding-right: 0.9rem; }
     /* header cards (dashboard/page.py kpi_card): one grid, every card the same size; hover = today's intraday line */
-    /* tab names in the title row (dashboard/page.py NAV_JS) */
-    .sa-has-nav { position: relative; }
-    /* script-only frames (nav placement, news voice) take no space */
+    /* tab names in the title row: the st.tabs right after the title row lifts its tab bar into the row's middle gap
+       (relative to the tabs themselves, so the ticker strip and news band above never matter) */
+    [data-testid="stLayoutWrapper"]:has(.sa-brand) { min-height: 52px; }
+    [data-testid="stLayoutWrapper"]:has(.sa-brand) + [data-testid="stTabs"] { position: relative; }
+    [data-testid="stLayoutWrapper"]:has(.sa-brand) + [data-testid="stTabs"] > div > div:has(> [data-baseweb="tab-list"]) {
+        position: absolute; top: calc(-52px - 1rem); height: 52px; left: 22%; right: 30%; z-index: 5;
+        display: flex; align-items: center; justify-content: center; }
+    [data-testid="stLayoutWrapper"]:has(.sa-brand) + [data-testid="stTabs"] [data-baseweb="tab-border"] { display: none; }
+    [data-testid="stLayoutWrapper"]:has(.sa-brand) + [data-testid="stTabs"] [data-baseweb="tab"] { font-weight: 600; padding: 0.35rem 0.7rem; }
+    /* script-only frames (news voice) take no space */
     [data-testid="stElementContainer"]:has(> iframe[height="0"]), [data-testid="stElementContainer"]:has(iframe[data-testid="stCustomComponentV1"][height="0"]) { position: absolute; width: 0; height: 0; overflow: hidden; }
-    .sa-nav { position: absolute; z-index: 20; transform: translateY(-50%); display: flex; justify-content: flex-end; }
-    .sa-nav [data-baseweb="tab-list"] { gap: 0.4rem; }
-    .sa-nav [data-baseweb="tab"] { font-weight: 600; padding: 0.35rem 0.7rem; }
-    [data-testid="stTabs"]:has(.sa-nav) [data-baseweb="tab-border"] { display: none; }
-    .sa-nav-slot { height: 40px; }
     .sa-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.6rem; margin-bottom: 0.6rem; }
     @media (max-width: 1100px) { .sa-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     .sa-kpi { position: relative; border: 1px solid var(--sa-line); border-left: 4px solid #cbd5e1; border-radius: 14px;
@@ -195,6 +197,47 @@ CSS = """
 .sa-snews a:first-of-type{border-top:0}.sa-snews a:hover .t{text-decoration:underline}
 .sa-snews .t{flex:1;font-weight:500}.sa-snews .s{color:#0f766e;font-size:11.5px;font-weight:600;white-space:nowrap}
 .sa-snews .a{color:#64748b;font-size:11.5px;white-space:nowrap}
+/* ---- phones and tablets ---- */
+@media (hover: none) { .sa-pop { display: none !important; } .sa-kpi:hover { transform: none; } }   /* touch: no hover popups */
+@media (max-width: 900px) {
+  [data-testid="stMainBlockContainer"] { padding-left: 0.8rem !important; padding-right: 0.8rem !important; }
+  /* title row: title, chip and Refresh wrap; the tab menu drops below it and scrolls sideways */
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: 0.5rem; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stColumn"] { min-width: 0 !important; flex: 1 1 auto !important; width: auto !important; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stColumn"]:nth-child(2) { display: none; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) + [data-testid="stTabs"] > div > div:has(> [data-baseweb="tab-list"]) {
+      position: static; height: auto; justify-content: flex-start; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  [data-baseweb="tab-list"] { flex-wrap: nowrap; }
+  [data-baseweb="tab"] { white-space: nowrap; }
+  .sa-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 0.5rem; }
+  .sa-news { flex-wrap: wrap; padding: 8px 10px; gap: 8px; }
+  .sa-news-box { flex-basis: 100%; order: 3; }
+  .sa-news-voice { margin-left: auto; width: 36px; height: 36px; }
+  .sa-news-item { font-size: 13.5px; flex-wrap: wrap; row-gap: 2px; }
+  .sa-news-ago { flex-basis: 100%; }
+  [data-testid="stDataFrame"], [data-testid="stTable"], .sa-card { max-width: 100%; overflow-x: auto; }
+  .sa-snews-item, .sa-kv-grid { min-width: 0; }
+  iframe { max-width: 100%; }
+  [data-testid="stPlotlyChart"] .modebar-container { display: none; }   /* Plotly charts: no toolbar on phones */
+}
+@media (max-width: 640px) {      /* rows of widgets wrap instead of squeezing (e.g. the portfolio chart's toggles) */
+  [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; row-gap: 0.4rem; }
+  [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { min-width: min(100%, 120px) !important; flex: 1 1 auto !important; width: auto !important; }
+}
+@media (max-width: 480px) {
+  .sa-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .sa-kpi { padding: 0.45rem 0.5rem 0.3rem; }
+  .sa-kpi-value { font-size: 1.05rem; }
+  .sa-kpi-label { font-size: 0.62rem; }
+  .sa-kpi-foot { font-size: 9px; }
+  .sa-brand-sub { display: none; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stColumn"]:nth-child(1) { flex: 1 1 100% !important; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stColumn"]:nth-child(3) { flex: 1 1 auto !important; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stColumn"]:nth-child(4) { flex: 0 0 auto !important; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) .sa-chip { font-size: 0.68rem; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) button { padding: 0.25rem 0.8rem; min-height: 0; }
+  [data-baseweb="tab"] { padding: 0.35rem 0.55rem !important; font-size: 0.85rem; }
+}
 </style>
 """
 

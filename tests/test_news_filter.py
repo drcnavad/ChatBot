@@ -6,7 +6,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from dashboard.news import is_news, tag  # noqa: E402
+from dashboard.news import clean_title, is_news, tag  # noqa: E402
 
 KEEP = [("Meta posts Q3 revenue beat and strong guidance: Live updates", "CNBC"),
         ("Tesla beats on earnings and sales even as auto revenue declines", "CNBC"),
@@ -45,6 +45,18 @@ DROP = [("How low can Super Micro stock go?", "Yahoo Finance"),
         ("HAL Q3 2026 Deep Dive: International Growth and Margin Expansion Shape Outlook", "Yahoo Finance"),
         ("How WMT, TGT & BJ Are Betting Big on AI-Powered Shopping", "Yahoo Finance")]
 
+DROP += [("Tesla (TSLA) Q3 2026 Earnings Call Transcript", "Yahoo Finance"),
+         ("Meta Platforms Q3 2026 Earnings Call: Live Updates", "Yahoo Finance"),
+         ("IBM earnings call transcript: revenue beats", "Nasdaq"),
+         ("Is Nvidia stock a buy after earnings", "Yahoo Finance"), ("Will the Fed cut rates in December - Reuters", "CNBC"),
+         ("Tesla beats on revenue, but can margins hold? - CNBC", "CNBC"), ("which chip stocks rose most today", "Nasdaq"),
+         ("Does Apple's buyback signal a top", "Yahoo Finance"), ("Bubble? Nvidia jumps 5% on new chip deal", "CNBC")]
+assert is_news("Fed cuts rates; what comes next for banks", "CNBC") and is_news("Isabella Bank posts record quarter", "Nasdaq")
+for raw, want in [("Live updates: Fed cuts rates by a quarter point", "Fed cuts rates by a quarter point"),
+                  ("LIVE: Stocks rally after jobs report", "Stocks rally after jobs report"),
+                  ("Tesla Earnings Mixed, FSD Revenue Strong - Live blog", "Tesla Earnings Mixed, FSD Revenue Strong"),
+                  ("Live Nation posts record revenue", "Live Nation posts record revenue")]:
+    assert clean_title(raw) == want, (raw, clean_title(raw))
 bad = [(t, "should keep") for t, s in KEEP if not is_news(t, s)] + [(t, "should drop") for t, s in DROP if is_news(t, s)]
 for t, why in bad:
     print("FAIL", why, ":", t)

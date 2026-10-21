@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 from dashboard.data import data_freshness, latest_rows, load_signals
 from dashboard.settings import CT, SIGNAL_CSV
@@ -77,31 +76,12 @@ def render_ticker(box):
     box.markdown(f'<div class="sa-ticker"><div class="sa-ticker-track" style="animation-duration:{secs}s">'
                  f'{row}{row}</div></div>', unsafe_allow_html=True)
 
-# Lays the st.tabs tab bar over #sa-nav-slot in the title row: CSS only (absolute position from the slot's box, kept
-# in step every 250 ms), the tab bar itself is not moved in the DOM, so Streamlit keeps owning it.
-NAV_JS = """<script>
-const P = window.parent, D = P.document;
-function place() {
-  const slot = D.getElementById("sa-nav-slot"), main = D.querySelector('[data-testid="stMainBlockContainer"]'),
-        bar = D.querySelector('[data-testid="stTabs"] [data-baseweb="tab-list"]');
-  if (!slot || !main || !bar) return;
-  const holder = bar.parentElement, s = slot.getBoundingClientRect(), m = main.getBoundingClientRect();
-  main.classList.add("sa-has-nav"); holder.classList.add("sa-nav");
-  holder.style.top = (s.top - m.top + s.height / 2) + "px"; holder.style.left = (s.left - m.left) + "px"; holder.style.width = s.width + "px";
-}
-P.saNavPlace = place;                 // the strip, news and cards above fill in late: follow the slot as it moves
-if (!P.saNavTimer) P.saNavTimer = P.setInterval(() => P.saNavPlace(), 250);
-place();
-</script>"""
-
 def render_top_bar(p):
     ticker = st.container()          # the held-stock strip, filled at the end of the run (render_ticker)
     stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()
     updated = datetime.fromtimestamp(p.mtime, tz=CT).strftime("%b %-d, %I:%M %p CT")
-    c1, nav, c2, c3 = st.columns([2.2, 4.6, 1.9, 1.1], vertical_alignment="center")
-    with nav:                       # the tab names are shown here, nav-bar style (NAV_JS lays them over this slot)
-        show_html('<div id="sa-nav-slot" class="sa-nav-slot"></div>')
-        components.html(NAV_JS, height=0)
+    # the tab names sit in the middle of this row: st.tabs comes right after it and CSS lifts its tab bar up here
+    c1, _, c2, c3 = st.columns([2.2, 4.6, 1.9, 1.1], vertical_alignment="center")
     with c1:
         show_html('<div class="sa-brand"><div class="sa-logo">SA</div><div><div class="sa-brand-name">Stock Analysis</div>'
                   '<div class="sa-brand-sub">Signals · forward test · live account</div></div></div>')
@@ -131,20 +111,39 @@ HOLDINGS = {"XLK": "NVDA AAPL MSFT AMD AVGO", "XLF": "BRK-B JPM V MA BAC", "XLV"
             "XLRE": "WELL PLD EQIX AMT SPG", "XLC": "META GOOGL WBD DIS TTWO", "DBC": "Brent WTI Diesel Gasoline Gold"}
 YF = ("CL=F", "BTC-USD")                     # not on Alpaca stock data: yfinance (free, keyless)
 
-def render_kpis(box):
-    """The header cards: indexes, crude and bitcoin, then the 11 SPDR sector ETFs and commodities (DBC); live price,
-    day %, an inline line and a hover intraday popup. (Portfolio figures live on the Trading Account tab.)"""
+@st.cache_data(ttl=300, show_spinner=False)
+def market_open():
+    """True during the regular session: Alpaca's clock (read-only GET /clock; knows holidays), else Mon-Fri
+    9:30-16:00 New York."""
+    try:
+        import alpaca_paper as ap
+        return bool(ap.PaperAccount()._get("/clock").get("is_open"))
+    except Exception:
+        now = pd.Timestamp.now(tz="America/New_York")
+        return now.weekday() < 5 and 570 <= now.hour * 60 + now.minute < 960
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _card_data(syms, slot):
+    """Quotes and intraday lines of the cards, fetched once per `slot` (a 30 s step in market hours, 30 min outside)."""
     from dashboard.data import index_quotes, intraday, yf_intraday
-    syms = tuple(s for s in (*INDEXES, *SECTORS) if s not in YF)
-    q, spark = index_quotes(syms), intraday(syms)
+    alp = tuple(s for s in syms if s not in YF)
+    q, spark = dict(index_quotes(alp)), dict(intraday(alp))
     for s, (quote, series) in yf_intraday(YF).items():
         q[s], spark[s] = quote, series
+    return q, spark
+
+@st.fragment(run_every=30)
+def render_kpis():
+    """The header cards: indexes, crude and bitcoin, then the 11 SPDR sector ETFs and commodities (DBC); live price,
+    day %, an inline line and a hover intraday popup. (Portfolio figures live on the Trading Account tab.)
+    A fragment: only the cards rerun, every 30 s; new quotes every 30 s in market hours, every 30 min outside."""
+    step = 30 if market_open() else 1800                # reruns every 30 s; new data every 30 s open, 30 min closed
+    q, spark = _card_data((*INDEXES, *SECTORS), int(datetime.now().timestamp() // step))
     def card(sym, name):
         px, chg = q.get(sym, (None, None))
         return kpi_card(f"{name}", f"${px:,.2f}" if px else "—", f"{_sp(chg)} today" if px else "Quote unavailable",
                         chg, spark.get(sym), ",.2f", sym.replace("=F", "").replace("-USD", ""), HOLDINGS.get(sym, ""))
-    with box:
-        show_html("".join('<div class="sa-kpis">' + "".join(card(*x) for x in group.items()) + "</div>" for group in (INDEXES, SECTORS)))
+    show_html("".join('<div class="sa-kpis">' + "".join(card(*x) for x in group.items()) + "</div>" for group in (INDEXES, SECTORS)))
 
 def _line(times, values, base, w, h, dot=True):
     """SVG body of an intraday line: dashed previous close, green above / red below."""

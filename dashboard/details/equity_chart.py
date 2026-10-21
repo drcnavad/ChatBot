@@ -114,7 +114,11 @@ def equity_figure(d, bench, shown=("QQQ",), show_dd=True, intraday=False):
     fig.update_xaxes(showgrid=False, showspikes=True, spikemode="across", spikethickness=1, spikecolor="#94a3b8",
                      spikedash="dot", tickformat="%-I:%M %p" if intraday else "%b %-d",
                      rangebreaks=[dict(bounds=["sat", "mon"])] + ([dict(bounds=[15, 8.5], pattern="hour")] if intraday else []))
-    fig.update_yaxes(side="right", gridcolor="#f1f5f9", zeroline=False, tickfont=dict(size=10, color="#64748b"))
+    fig.update_yaxes(side="right", gridcolor="#f1f5f9", zeroline=False, tickfont=dict(size=10, color="#64748b"),
+                     showspikes=True, spikemode="across+toaxis", spikesnap="cursor", spikethickness=1, spikecolor="#64748b",
+                     spikedash="dot", fixedrange=True)          # the stock chart's crosshair, with the price at the right axis
+    fig.update_xaxes(fixedrange=True, spikesnap="cursor")       # no drag / scroll zoom: the period buttons pick the range
+    fig.update_layout(dragmode=False, spikedistance=-1, hoverdistance=-1)
     fig.update_yaxes(tickformat="$,.0f", hoverformat="$,.2f", row=1, col=1)
     return fig
 
@@ -143,4 +147,4 @@ def render_equity_chart():
               f'<span class="sa-eq-chg" style="color:{GOOD if m["gain"] >= 0 else BAD}">{usd(m["gain"])} ({m["twr_pct"]:+.2f}%)</span>'
               f'<span class="sa-eq-sub">{key} · net of {usd(m["net_flows"])} deposits / withdrawals · time-weighted{qtxt}</span></div>')
     st.plotly_chart(equity_figure(d, bench, shown, show_dd, intraday=PERIODS[key][1] != "1D"), width="stretch",
-                    config={"displaylogo": False, "modeBarButtonsToRemove": ["select2d", "lasso2d"]}, key="eq_chart")
+                    config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False}, key="eq_chart")

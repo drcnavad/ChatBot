@@ -73,35 +73,6 @@ def _daily_closes(syms):
     c.index = c.index.tz_convert("America/New_York").normalize().tz_localize(None)
     return c
 
-def portfolio_row(today):
-    """'Our portfolio' row from the Alpaca LIVE account (read-only GETs): Live = equity now; % columns = time-weighted
-    growth (alpaca_paper.account_twr_index, so deposits/withdrawals are not returns) vs the daily equity that far back."""
-    import alpaca_paper as ap
-    import backtest_engine as be
-    acct = ap.PaperAccount()
-    h = acct._get("/account/portfolio/history", {"timeframe": "1D", "pnl_reset": "no_reset", "cashflow_types": "CSD,CSW,JNLC",
-                  "start": f"{pd.Timestamp(be.FORWARD_START) - pd.DateOffset(days=7):%Y-%m-%d}", "end": f"{today:%Y-%m-%d}"})
-    # (daily_history sends only a start, and Alpaca then returns about one month; an end gives the whole range)
-    days = pd.to_datetime(h["timestamp"], unit="s", utc=True).tz_convert("America/New_York").tz_localize(None).normalize()
-    flows = pd.DataFrame({k: pd.to_numeric(pd.Series(v), errors="coerce") for k, v in (h.get("cashflow") or {}).items()})
-    d = pd.DataFrame({"Date": days, "Equity": pd.to_numeric(pd.Series(h["equity"]), errors="coerce").to_numpy(),
-                      "Cashflow": flows.fillna(0).sum(axis=1).to_numpy() if len(flows.columns) else 0.0})
-    d = d[d["Date"] < today].assign(Net_Deposits=lambda x: x["Cashflow"].cumsum())
-    d = d[d["Equity"].fillna(0) > 0]                      # days before the account was funded
-    live = acct.account_summary()["Equity"]
-    d = pd.concat([d, pd.DataFrame([{"Date": today, "Equity": live, "Net_Deposits": d["Net_Deposits"].iloc[-1]}])])
-    idx = ap.account_twr_index(d[["Date", "Equity", "Net_Deposits"]])
-    row = {"Group": "Portfolio", "Name": "Our portfolio", "Symbol": "Alpaca", "Live price": live,
-           "Today %": (idx.iloc[-1] / idx.iloc[-2] - 1) * 100 if len(idx) > 1 else None}
-    start = pd.Timestamp(be.FORWARD_START)          # bot start: older lookbacks stay blank
-    for col, off in LIVE_WINDOWS.items():
-        past = idx[idx.index <= today - off]
-        row[col] = (idx.iloc[-1] / past.iloc[-1] - 1) * 100 if len(past) and today - off >= start else None
-    base = idx[idx.index <= start]
-    if len(base):
-        row["Name"] = f"Our portfolio ({(idx.iloc[-1] / base.iloc[-1] - 1) * 100:+.2f}% since {start:%b %-d})"
-    return row
-
 FUTURES = {"CL=F": "Crude oil WTI (US)", "BZ=F": "Crude oil Brent (global)", "GC=F": "Gold futures",
            "SI=F": "Silver futures"}
 
@@ -148,10 +119,6 @@ def live_table():
             past = c[c.index <= today - off]
             row[col] = (live / past.iloc[-1] - 1) * 100 if live and len(past) else None
         rows.append(row)
-    try:
-        rows.insert(0, portfolio_row(today))
-    except Exception:
-        pass   # account unavailable: the ETF rows still show
     try:
         rows[len(rows) - len(sector_etfs):len(rows) - len(sector_etfs)] = futures_rows(today)   # before the sectors
     except Exception:
