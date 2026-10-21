@@ -12,10 +12,8 @@ from dashboard.settings import CT
 from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, MA_COLORS, MA_COLS, TEAL)
 
 WINDOW = pd.Timedelta(days=366 * 7)     # chart data: all cached daily bars, up to ~7 years (range buttons zoom inside)
-RANGES = [dict(count=1, label="1M", step="month", stepmode="backward"), dict(count=3, label="3M", step="month", stepmode="backward"),
-          dict(count=6, label="6M", step="month", stepmode="backward"), dict(count=1, label="1Y", step="year", stepmode="backward"),
-          dict(count=2, label="2Y", step="year", stepmode="backward"), dict(count=5, label="5Y", step="year", stepmode="backward"),
-          dict(step="all", label="ALL")]
+FUTURE = pd.Timedelta(days=92)           # blank space after the last bar, to draw lines into the future
+# range buttons 1M..ALL: drawn by the chart component (chart_component/index.html), each with FUTURE added
 
 def _with_bar_history(tdata, bars):
     """The signal rows (from Aug 2024) plus every older cached daily bar, with MAs / RSI / MACD worked out from the
@@ -57,7 +55,7 @@ def build_price_chart(ticker, tdata, bars=None):
                   f'<span style="color:{RS_COLORS[k]};">━ {name}</span>' for k, (name, _s) in rs_lines.items())}
     heights = [height_of[x] for x in panels]
     row_of = {x: i + 1 for i, x in enumerate(panels)}
-    fig = make_subplots(rows=len(panels), cols=1, shared_xaxes=True, vertical_spacing=0.035,
+    fig = make_subplots(rows=len(panels), cols=1, shared_xaxes=True, vertical_spacing=0.04,
                         row_heights=[h / sum(heights) for h in heights], subplot_titles=[titles[x] for x in panels])
     fig.update_annotations(font=dict(size=11, color='#64748b', family=CHART_FONT), xanchor="left", x=0, yshift=-2)
 
@@ -174,10 +172,11 @@ def build_price_chart(ticker, tdata, bars=None):
                     bgcolor="rgba(0,0,0,0)"),
         font=dict(family=CHART_FONT, size=11, color='#334155'),
         hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family=CHART_FONT))
+    x_right = max(x_right, x_end + FUTURE)
     fig.update_xaxes(type="date", range=[view[0], x_right], showspikes=False, rangeslider_visible=False,
                      rangebreaks=[dict(bounds=["sat", "mon"])], tickformat='%b %d', **(grid | dict(showgrid=False)))
-    fig.update_xaxes(rangeselector=dict(buttons=RANGES, x=0, y=1.0, yanchor="bottom", bgcolor="#f1f5f9", activecolor="#5eead4",
-                                        bordercolor="#cbd5e1", borderwidth=1, font=dict(size=12, color="#0f172a")), row=1, col=1)
+    # dates under the price panel too; the range buttons (RANGES) are drawn by the chart component (future space)
+    fig.update_xaxes(showticklabels=True, ticks="outside", ticklen=3, tickcolor="#e2e8f0", row=1, col=1)
     fig.update_yaxes(side="right", showticklabels=True, ticks="outside", ticklen=3, tickcolor="#e2e8f0", automargin=True,
                      showspikes=False,
                      title_font=dict(size=10, color="#64748b"), **grid)

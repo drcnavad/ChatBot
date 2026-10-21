@@ -5,8 +5,14 @@
 .lg b{font-weight:600}.lg .up{color:#16a34a}.lg .dn{color:#dc2626}
 .ch{position:absolute;pointer-events:none;z-index:4;display:none}
 #chh{border-top:1px dotted #64748b;height:0}#chv{border-left:1px dotted #64748b;width:0}
+#rng{position:absolute;left:10px;top:6px;z-index:6;display:flex;gap:4px}
+#rng button{font:600 12px Inter,system-ui,sans-serif;color:#0f172a;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 8px;cursor:pointer}
+#rng button.on{background:#5eead4;border-color:#14b8a6}
+#ask{position:absolute;right:80px;top:40px;z-index:7;display:none;background:#fff;border:1px solid #cbd5e1;border-radius:6px;padding:8px 10px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.12)}
+#ask button{margin-left:6px;font-size:12px;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;padding:2px 8px;cursor:pointer}
+#ask button.del{background:#dc2626;color:#fff;border-color:#dc2626}
 #chy{background:#334155;color:#fff;font-size:10px;padding:1px 4px;border-radius:2px;transform:translateY(-50%)}</style></head>
-<body><div id="c"><div id="chh" class="ch"></div><div id="chv" class="ch"></div><div id="chy" class="ch"></div></div><script>
+<body><div id="c"><div id="chh" class="ch"></div><div id="chv" class="ch"></div><div id="chy" class="ch"></div><div id="rng"></div><div id="ask"><span id="askt"></span><button class="del" id="askyes">Delete</button><button id="askno">Cancel</button></div></div><script>
 // The stock chart as a Streamlit component: draws the figure, sends your own shapes back (to be saved per stock)
 // and rescales the price axis to the candles in view. Streamlit's component protocol, no extra JS library.
 const div = document.getElementById("c");
@@ -25,7 +31,16 @@ window.addEventListener("message", e => {
   if (args.spec === spec) return;
   spec = args.spec; ohlc = args.ohlc;
   const fig = JSON.parse(spec);
-  Plotly.react(div, fig.data, fig.layout, fig.config || {}).then(() => {
+  if (div.layout && div.layout.xaxis && div.layout.xaxis.range) {          // a re-render after a save keeps your view
+    Object.keys(fig.layout).filter(k => /^xaxis\d*$/.test(k))
+      .forEach(k => fig.layout[k].range = div.layout.xaxis.range.slice());   // every shared x-axis, or they disagree
+    if (div.layout.yaxis && div.layout.yaxis.range) fig.layout.yaxis.range = div.layout.yaxis.range.slice();
+  }
+  const cfg = Object.assign({}, fig.config || {}, {displaylogo: false, scrollZoom: false, displayModeBar: true,
+    modeBarButtons: [["drawline", "drawrect", UNDO, REDO, DEL, "eraseshape"]]});
+  Plotly.react(div, fig.data, fig.layout, cfg).then(() => {
+    if (saving) { hist[hist.length - 1] = mine(); saving = false; }   // our own save coming back (same shapes, re-serialised)
+    else if (JSON.stringify(mine()) !== JSON.stringify(hist[hist.length - 1])) hist.push(mine());   // first load, or a change made outside (Add level / Clear)
     send("streamlit:setFrameHeight", {height: fig.layout.height + 8});
     buildIndex(); show(idx.days[idx.days.length - 1]);
     if (div._sa) return; div._sa = true;
@@ -34,7 +49,7 @@ window.addEventListener("message", e => {
       const k = Object.keys(ev);
       if (k.some(x => x.startsWith("xaxis"))) rescale();
       buildIndex();
-      if (k.some(x => x.startsWith("shapes"))) send("streamlit:setComponentValue", {value: {shapes: mine(), t: Date.now()}, dataType: "json"});
+      if (k.some(x => x.startsWith("shapes"))) record();
     });
   });
 });
@@ -108,5 +123,55 @@ function crosshair(ev) {
 }
 div.addEventListener("mousemove", crosshair);
 div.addEventListener("mouseleave", () => { ["chh", "chv", "chy"].forEach(i => document.getElementById(i).style.display = "none"); if (idx) show(idx.days[idx.days.length - 1]); });
+// Range buttons: the last N months plus ~3 months of blank future, so lines can be drawn ahead
+const RANGES = [["1M", 1], ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["5Y", 60], ["ALL", 0]], AHEAD_DAYS = 92;
+const rng = document.getElementById("rng");
+function setRange(label, m) {
+  if (!idx || !idx.days.length) return;
+  const last = new Date(idx.days[idx.days.length - 1] + "T00:00:00Z"), a = new Date(last), b = new Date(last);
+  if (m) a.setUTCMonth(a.getUTCMonth() - m); else a.setTime(new Date(idx.days[0] + "T00:00:00Z").getTime());
+  b.setUTCDate(b.getUTCDate() + AHEAD_DAYS);
+  [...rng.children].forEach(x => x.classList.toggle("on", x.textContent === label));
+  const r = [a.toISOString().slice(0, 10), b.toISOString().slice(0, 10)], upd = {};
+  Object.keys(div._fullLayout).filter(k => /^xaxis\d*$/.test(k)).forEach(k => upd[k + ".range"] = r);   // shared axes: all
+  Plotly.relayout(div, upd);
+}
+RANGES.forEach(([l, m]) => { const b = document.createElement("button"); b.textContent = l; b.onclick = () => setRange(l, m);
+  if (l === "1Y") b.className = "on"; rng.appendChild(b); });
+
+// Drawing history: every shape change is a snapshot; undo / redo step through them and save at once
+const hist = [], redo = []; let replaying = false, saving = false;
+function save() { saving = true; send("streamlit:setComponentValue", {value: {shapes: mine(), t: Date.now()}, dataType: "json"}); }
+function record() {
+  if (replaying) return;
+  const now = mine();
+  if (JSON.stringify(now) === JSON.stringify(hist[hist.length - 1])) return;
+  hist.push(now); redo.length = 0; save();
+}
+function apply(state) {
+  replaying = true;
+  const sys = (div.layout.shapes || []).filter(s => s.name === "sys");
+  Plotly.relayout(div, {shapes: sys.concat(JSON.parse(JSON.stringify(state)))}).then(() => { replaying = false; save(); });
+}
+const icon = p => ({width: 24, height: 24, path: p});
+const UNDO = {name: "Undo", title: "Undo", icon: icon("M12.5 8c-2.65 0-5.05 1-6.9 2.6L2 7v9h9l-3.62-3.62A7.95 7.95 0 0 1 12.5 10.5c3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"),
+  click: () => { if (hist.length > 1) { redo.push(hist.pop()); apply(hist[hist.length - 1]); } }};
+const REDO = {name: "Redo", title: "Redo", icon: icon("M11.5 8c2.65 0 5.05 1 6.9 2.6L22 7v9h-9l3.62-3.62A7.95 7.95 0 0 0 11.5 10.5c-3.54 0-6.55 2.31-7.6 5.5l-2.37-.78C2.92 11.03 6.85 8 11.5 8z"),
+  click: () => { if (redo.length) { const s = redo.pop(); hist.push(s); apply(s); } }};
+const DEL = {name: "Delete", title: "Delete the selected drawing (or all drawings)", icon: icon("M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"),
+  click: () => {
+    const all = mine(), sel = div._fullLayout._activeShapeIndex;
+    const own = sel !== undefined && sel !== null && (div.layout.shapes[sel] || {}).name !== "sys";
+    if (!all.length) return;
+    const ask = document.getElementById("ask");
+    document.getElementById("askt").textContent = own ? "Delete the selected drawing?" : `Delete all ${all.length} drawing${all.length > 1 ? "s" : ""}?`;
+    ask.style.display = "block";
+    document.getElementById("askno").onclick = () => ask.style.display = "none";
+    document.getElementById("askyes").onclick = () => {
+      ask.style.display = "none";
+      const keep = own ? mine().filter(s => JSON.stringify(s) !== JSON.stringify(JSON.parse(JSON.stringify(div.layout.shapes[sel])))) : [];
+      hist.push(keep); redo.length = 0; apply(keep);
+    };
+  }};
 send("streamlit:componentReady", {apiVersion: 1});
 </script></body></html>

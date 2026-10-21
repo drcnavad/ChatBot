@@ -1,5 +1,5 @@
 """Trading Account tab: the account's equity over a chosen period (Alpaca portfolio history, read-only GET), with the
-period's gain, QQQ / SPY / DIA bought with the same cash flows and the drawdown. The line is the real equity in $ (from Oct 2); the
+period's gain, QQQ / SPY / DIA bought with the same cash flows and the drawdown. The line is the real equity in $ (from Oct 9); the
 $ gain and the % return leave deposits / withdrawals out, so money moved in is never a gain (nor out a loss)."""
 import os
 
@@ -10,14 +10,14 @@ from plotly.subplots import make_subplots
 
 from dashboard.style import BAD, CHART_FONT, GOOD, show_html, usd
 
-START = pd.Timestamp("2026-10-02")          # the live account's history starts here; nothing earlier is shown
+START = pd.Timestamp("2026-10-09")          # the live account's history starts here; nothing earlier is shown
 BENCH = {"QQQ": "#64748b", "SPY": "#d97706", "DIA": "#7c3aed"}   # comparisons: Nasdaq-100, S&P 500, Dow
 SINCE = f"Since {START:%b %-d}"
-PERIODS = {"1D": ("1D", "5Min"), "5D": ("5D", "15Min"), "14D": ("2W", "1D"), SINCE: ("3M", "1D")}
+PERIODS = {"1D": ("1D", "5Min"), "5D": ("5D", "15Min"), SINCE: ("3M", "1D")}
 
 @st.cache_data(ttl=60, show_spinner=False)
 def equity_series(key):
-    """(DataFrame equity (actual $), flow (deposits - withdrawals on that bar), twr (time-weighted growth), invested,
+    """(DataFrame equity (actual $), flow (deposits - withdrawals on that bar), twr (time-weighted growth),
     {QQQ, SPY, DIA: closes on the same clock}) for PERIODS[key]."""
     import alpaca_paper as ap
     period, tf = PERIODS[key]
@@ -44,11 +44,10 @@ def equity_series(key):
     keep = (raw > 0) & raw.notna()                                            # before funding / after closing: left out
     raw, ratio, flow = raw[keep], ratio[keep], flow[keep]
     if len(raw) < 2:
-        return pd.DataFrame(columns=["equity", "flow", "twr", "invested"]), pd.Series(dtype=float)
+        return pd.DataFrame(columns=["equity", "flow", "twr"]), pd.Series(dtype=float)
     ratio.iloc[0] = 1.0
     flow.iloc[0] = 0.0                                 # money already in at the start is the starting balance
     out = pd.DataFrame({"equity": raw, "flow": flow, "twr": ratio.cumprod()})
-    out["invested"] = raw.iloc[0] + flow.cumsum()      # starting balance + deposits - withdrawals since
     return out, {sym: _bench(sym, out.index, tf) for sym in BENCH}
 
 def gains(d):
@@ -86,25 +85,26 @@ def _bench(sym, index, tf):
         return pd.Series(dtype=float)
 
 def equity_figure(d, bench, shown=("QQQ",), show_dd=True, intraday=False):
-    """The actual equity in $ (green / red fill vs the money put in), the dashed money-put-in line (start balance +
-    deposits - withdrawals), QQQ / SPY / DIA bought with the same cash flows, and the drawdown of the time-weighted return."""
-    eq, inv = d["equity"], d["invested"]
-    up = eq.iloc[-1] >= inv.iloc[-1]
+    """The actual equity in $ (green / red fill vs a dashed line at the period's start value), QQQ / SPY / DIA from the
+    same start (plus any later deposits, on the same days), and the drawdown of the time-weighted return."""
+    eq = d["equity"]
+    base = float(eq.iloc[0])
+    up = gains(d)["gain"] >= 0
     color, fill = (GOOD, "rgba(21,128,61,0.10)") if up else (BAD, "rgba(185,28,28,0.10)")
     fig = make_subplots(rows=2 if show_dd else 1, cols=1, shared_xaxes=True, vertical_spacing=0.04,
                         row_heights=[0.75, 0.25] if show_dd else [1])
-    fig.add_trace(go.Scatter(x=inv.index, y=inv.values, mode="lines", name="Start + net deposits",
-                             line=dict(color="#94a3b8", width=1.2, dash="dash", shape="hv"),
-                             hovertemplate="Start + net deposits $%{y:,.2f}<extra></extra>"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=eq.index, y=[base] * len(eq), mode="lines", line=dict(width=0), hoverinfo="skip",
+                             showlegend=False), row=1, col=1)
     fig.add_trace(go.Scatter(x=eq.index, y=eq.values, mode="lines", name="Portfolio", fill="tonexty", fillcolor=fill,
                              line=dict(color=color, width=2.2), hovertemplate="Portfolio $%{y:,.2f}<extra></extra>"), row=1, col=1)
+    fig.add_hline(y=base, line=dict(color="#94a3b8", width=1, dash="dash"), row=1, col=1)   # the period's start value
     for sym in shown:                                  # same starting money and the same deposits, in the index fund
         px = (bench or {}).get(sym)
         if px is None or not px.notna().any():
             continue
         px = px.ffill().bfill()
         qv = ((eq.iloc[0] / px.iloc[0]) + (d["flow"] / px).cumsum()) * px
-        fig.add_trace(go.Scatter(x=qv.index, y=qv.values, mode="lines", name=f"{sym} (same start + deposits)",
+        fig.add_trace(go.Scatter(x=qv.index, y=qv.values, mode="lines", name=f"{sym} (same start)",
                                  line=dict(color=BENCH[sym], width=1.4, dash="dot"),
                                  hovertemplate=f"{sym} $%{{y:,.2f}}<extra></extra>"), row=1, col=1)
     if show_dd:
