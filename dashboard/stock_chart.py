@@ -3,6 +3,7 @@ from datetime import datetime
 
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 from plotly.subplots import make_subplots
 
 from dashboard.data import last_next_earnings, live_quote, load_decisions
@@ -11,9 +12,9 @@ from dashboard.history import (RS_COLORS, daily_status, event_hover,
 from dashboard.settings import CT
 from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, MA_COLORS, MA_COLS, TEAL)
 
-WINDOW = pd.Timedelta(days=366 * 7)     # chart data: all cached daily bars, up to ~7 years (range buttons zoom inside)
-FUTURE = pd.Timedelta(days=92)           # blank space after the last bar, to draw lines into the future
-# range buttons 1M..ALL: drawn by the chart component (chart_component/index.html), each with FUTURE added
+WINDOW = pd.Timedelta(days=740)          # chart data: 2 years (buttons up to 2Y); MAs / RSI / MACD use the full history
+FUTURE = 0.015                           # a small blank margin after the last bar (share of the shown span)
+# range buttons 1D..2Y: drawn by the chart component (chart_component/index.html), each with the FUTURE margin
 
 def _with_bar_history(tdata, bars):
     """The signal rows (from Aug 2024) plus every older cached daily bar, with MAs / RSI / MACD worked out from the
@@ -69,6 +70,7 @@ def build_price_chart(ticker, tdata, bars=None):
     fig.add_trace(go.Candlestick(x=chart.index, open=bars["Open"], high=bars["High"], low=bars["Low"], close=bars["Close"],
                                  name="Close", text=status_txt, increasing=dict(line=dict(color=GOOD, width=1), fillcolor=GOOD),
                                  decreasing=dict(line=dict(color=BAD, width=1), fillcolor=BAD), showlegend=False), row=1, col=1)
+    fig.add_trace(close_line(chart.index, bars["Close"]), row=1, col=1)
     if "Volume" in bars and bars["Volume"].notna().any():
         up = bars["Close"] >= bars["Open"]
         fig.add_trace(go.Bar(x=chart.index, y=bars["Volume"], name="Volume", showlegend=False,
@@ -120,7 +122,6 @@ def build_price_chart(ticker, tdata, bars=None):
     ned = last_next_earnings([ticker])['Next ED'].iloc[0]
     if ned and pd.Timestamp(ned) - x_end <= pd.Timedelta(days=62):
         ned = pd.Timestamp(ned)
-        x_right = max(x_end, ned) + pd.Timedelta(days=4)
         fig.add_vline(x=ned, line=EARN_LINE | dict(width=1.5), row="all", col=1)
         fig.add_annotation(x=ned, y=0.99, xref="x", yref="y domain", text=f"next earnings {ned:%b %-d}", showarrow=False,
                            yanchor="top", xanchor="right", font=dict(size=10, color='#c2410c'))
@@ -168,11 +169,11 @@ def build_price_chart(ticker, tdata, bars=None):
     fig.update_layout(
         height=int(620 + 120 * (len(panels) - 2)), hovermode='closest', margin=dict(l=10, r=70, t=44, b=24),
         plot_bgcolor='#ffffff', paper_bgcolor='#ffffff', dragmode="zoom", bargap=0.15,
-        legend=dict(orientation="h", yanchor="bottom", y=1.005, xanchor="center", x=0.5, font=dict(size=10, color='#334155'),
+        legend=dict(orientation="h", yanchor="bottom", y=1.005, xanchor="right", x=0.9, font=dict(size=10, color='#334155'),
                     bgcolor="rgba(0,0,0,0)"),
         font=dict(family=CHART_FONT, size=11, color='#334155'),
         hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family=CHART_FONT))
-    x_right = max(x_right, x_end + FUTURE)
+    x_right = max(x_right, x_end) + (x_end - view[0]) * FUTURE
     fig.update_xaxes(type="date", range=[view[0], x_right], showspikes=False, rangeslider_visible=False,
                      rangebreaks=[dict(bounds=["sat", "mon"])], tickformat='%b %d', **(grid | dict(showgrid=False)))
     # dates under the price panel too; the range buttons (RANGES) are drawn by the chart component (future space)
@@ -190,7 +191,7 @@ def build_price_chart(ticker, tdata, bars=None):
             fig.update_yaxes(row=row_of[name], col=1, **kw)
     # No floating tooltip for the series: the chart component shows their values in a top-left legend per panel and
     # draws a dotted crosshair with the price at the cursor on the right axis (chart_component/index.html).
-    legend_traces = {"Close", "Volume", "RSI", "MACD", "MACD signal"} | {n for n, _s in rs_lines.values()}
+    legend_traces = {"Close", "Close line", "Volume", "RSI", "MACD", "MACD signal"} | {n for n, _s in rs_lines.values()}
     fig.for_each_trace(lambda t: t.update(hoverinfo="none", hovertemplate=None)
                        if t.name in legend_traces or (t.name or "").startswith("MA ") else None)
     return fig
@@ -225,11 +226,61 @@ def account_trade_lines(ticker, ledger_csv=None):
         return {"Entry": (lots[0][0].normalize(), round(sum(x[1] * x[2] for x in lots) / sh, 2))}
     return {"Exit": (last_sell[0].normalize(), round(last_sell[1], 2))} if last_sell else {}
 
+def close_line(x, close):
+    """The close as a line (the Candles / Line switch shows this or the candles; the component sets which)."""
+    return go.Scatter(x=x, y=close, mode="lines", name="Close line", visible=False, showlegend=False,
+                      line=dict(color="#0f172a", width=1.6), hoverinfo="none")
+
+def build_intraday_chart(ticker, bars, view):
+    """1D / 1W buttons: today's 5-minute or the week's 15-minute candles (data.intraday_ohlcv) with volume; nights and
+    weekends left out of the axis. Same look, legend and crosshair as the daily chart."""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.78, 0.22],
+                        subplot_titles=["", "Volume"])
+    fig.update_annotations(font=dict(size=11, color='#64748b', family=CHART_FONT), xanchor="left", x=0, yshift=-2)
+    fig.add_trace(go.Candlestick(x=bars.index, open=bars["Open"], high=bars["High"], low=bars["Low"], close=bars["Close"],
+                                 name="Close", increasing=dict(line=dict(color=GOOD, width=1), fillcolor=GOOD),
+                                 decreasing=dict(line=dict(color=BAD, width=1), fillcolor=BAD), showlegend=False,
+                                 hoverinfo="none"), row=1, col=1)
+    fig.add_trace(close_line(bars.index, bars["Close"]), row=1, col=1)
+    up = bars["Close"] >= bars["Open"]
+    fig.add_trace(go.Bar(x=bars.index, y=bars["Volume"], name="Volume", showlegend=False, hoverinfo="none",
+                         marker=dict(color=[("rgba(21,128,61,.45)" if u else "rgba(185,28,28,.45)") for u in up], line_width=0)),
+                  row=2, col=1)
+    pad = (bars["High"].max() - bars["Low"].min()) * 0.06
+    grid = dict(showgrid=True, gridcolor='#f1f5f9', showline=False, tickfont=dict(size=10, color='#64748b'), zeroline=False)
+    fig.update_layout(height=620, hovermode='closest', margin=dict(l=10, r=70, t=44, b=24), plot_bgcolor='#fff',
+                      paper_bgcolor='#fff', bargap=0.15, font=dict(family=CHART_FONT, size=11, color='#334155'))
+    fig.update_xaxes(type="date", rangeslider_visible=False, showspikes=False, tickformat="%b %d %H:%M" if view != "1D" else "%H:%M",
+                     rangebreaks=[dict(bounds=["sat", "mon"]), dict(bounds=[16, 9.5], pattern="hour")],
+                     **(grid | dict(showgrid=False)))
+    fig.update_xaxes(showticklabels=True, ticks="outside", ticklen=3, tickcolor="#e2e8f0", row=1, col=1)
+    fig.update_yaxes(side="right", ticks="outside", ticklen=3, tickcolor="#e2e8f0", automargin=True, showspikes=False,
+                     title_font=dict(size=10, color="#64748b"), **grid)
+    fig.update_yaxes(title_text="Price", tickformat='$,.2f', hoverformat='$,.2f', nticks=8,
+                     range=[bars["Low"].min() - pad, bars["High"].max() + pad], row=1, col=1)
+    fig.update_yaxes(title_text="Volume", tickformat="~s", nticks=3, showgrid=False, row=2, col=1)
+    return fig
+
 def render_stock_chart(ticker, tdata):
-    """The stock chart (with your saved drawings, dashboard/drawings.py)."""
-    from dashboard.data import ohlcv
+    """The stock chart (with your saved drawings, dashboard/drawings.py). Range buttons 1D / 1W show intraday candles,
+    the rest the daily chart; Candles / Line and the range are remembered for the session."""
+    from dashboard.data import INTRADAY_VIEWS, intraday_ohlcv, ohlcv
     from dashboard.drawings import render_chart
+    view = st.session_state.get(f"chart_view_{ticker}", "1Y")
+    mode = st.session_state.get("chart_mode", "Candles")
+    if view in INTRADAY_VIEWS:
+        b = intraday_ohlcv(ticker, view)
+        if len(b) > 1:
+            fig = build_intraday_chart(ticker, b, view)
+            render_chart(fig, ticker, {"x": [f"{d:%Y-%m-%dT%H:%M}" for d in b.index], **_ohlc_lists(b)},
+                         view=view, mode=mode, intraday=True)
+            return
+        st.caption("Intraday bars are not available right now; showing the daily chart.")
+        view = "1Y"
     bars = ohlcv(ticker)
     fig = build_price_chart(ticker, tdata, bars)
     b = bars[bars.index >= tdata['Date'].max() - WINDOW]
-    render_chart(fig, ticker, {"x": [f"{d:%Y-%m-%d}" for d in b.index], "low": b["Low"].tolist(), "high": b["High"].tolist()})
+    render_chart(fig, ticker, {"x": [f"{d:%Y-%m-%d}" for d in b.index], **_ohlc_lists(b)}, view=view, mode=mode)
+
+def _ohlc_lists(b):
+    return {k.lower(): [float(v) for v in b[k]] for k in ("Open", "High", "Low", "Close")}

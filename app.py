@@ -30,6 +30,7 @@ sys.path.insert(0, ROOT)  # project modules (backtest_engine, sector_mapping, da
 from dashboard.details import render_strategy_tab, render_trading_tab  # noqa: E402
 from dashboard.details.live_holdings import new_run  # noqa: E402
 from dashboard.notes import render_notes  # noqa: E402
+from dashboard.news import render_news_banner  # noqa: E402
 from dashboard.page import build_page, render_kpis, render_ticker, render_top_bar  # noqa: E402
 from dashboard.sector_table import render_sector_table  # noqa: E402
 from dashboard.short_stock import render_short_stock  # noqa: E402
@@ -74,6 +75,7 @@ def main():
         stock_page(p, page_sym)
         render_kpis(kpi_box)
         render_ticker(ticker_box)
+        render_news_banner(ticker_box)
         return
     tab_home, tab_strategy, tab_trading = st.tabs(["Home", "Strategy", "Trading Account"])
     with tab_home:
@@ -88,5 +90,6 @@ def main():
         render_trading_tab(p)
     render_kpis(kpi_box)
     render_ticker(ticker_box)
+    render_news_banner(ticker_box)
 
 main()

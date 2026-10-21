@@ -40,8 +40,9 @@ def level(price):
     return dict(type="line", xref="x domain", x0=0, x1=1, yref="y", y0=price, y1=price, line=LEVEL, editable=True,
                 label=dict(text=f"${price:,.2f}", textposition="end", font=dict(size=10, color=LEVEL["color"])))
 
-def render_chart(fig, sym, ohlc):
-    """The chart with your saved shapes; a drawn / moved / erased shape is saved at once."""
+def render_chart(fig, sym, ohlc, view="1Y", mode="Candles", intraday=False):
+    """The chart with your saved shapes; a drawn / moved / erased shape is saved at once. The component also reports
+    a range button that needs other data (1D / 1W intraday <-> daily) and the Candles / Line choice (kept per session)."""
     for s in fig.layout.shapes:
         s.name = "sys"                            # the chart's own shapes (earnings lines, held periods) are never saved
     shapes = load(sym)
@@ -50,10 +51,16 @@ def render_chart(fig, sym, ohlc):
     spec = json.loads(fig.to_json())
     spec["config"] = {"displaylogo": False, "scrollZoom": False, "modeBarButtonsToAdd": TOOLS,
                       "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d", "zoom2d", "pan2d", "zoomIn2d", "zoomOut2d"]}
-    out = _chart(spec=json.dumps(spec), ohlc=ohlc, key=f"chart_{sym}", default=None)
+    out = _chart(spec=json.dumps(spec), ohlc=ohlc, view=view, mode=mode, intraday=intraday, key=f"chart_{sym}",
+                 default=None)
     if out and out.get("t") != st.session_state.get(f"_drawn_{sym}"):
         st.session_state[f"_drawn_{sym}"] = out["t"]
-        if out["shapes"] != shapes:
+        if out.get("mode") and out["mode"] != mode:
+            st.session_state["chart_mode"] = out["mode"]
+        if out.get("view") and out["view"] != view:
+            st.session_state[f"chart_view_{sym}"] = out["view"]
+            st.rerun()
+        if "shapes" in out and out["shapes"] != shapes:
             save(sym, out["shapes"])
             st.rerun()
     c1, c2, c3 = st.columns([2, 1, 1], vertical_alignment="bottom")

@@ -17,7 +17,7 @@
 // and rescales the price axis to the candles in view. Streamlit's component protocol, no extra JS library.
 const div = document.getElementById("c");
 const send = (type, data) => window.parent.postMessage(Object.assign({isStreamlitMessage: true, type}, data), "*");
-let spec = null, ohlc = null, busy = false;
+let spec = null, ohlc = null, busy = false, K = 10, curView = "1Y", mode = "Candles", intraday = false;
 function mine() { return (div.layout.shapes || []).filter(s => s.name !== "sys").map(s => JSON.parse(JSON.stringify(s))); }
 function rescale() {
   const r = div.layout.xaxis.range; if (!r || !ohlc) return;
@@ -30,8 +30,10 @@ window.addEventListener("message", e => {
   const args = e.data.args;
   if (args.spec === spec) return;
   spec = args.spec; ohlc = args.ohlc;
+  const newView = args.view || "1Y", changed = newView !== curView || !!args.intraday !== intraday;
+  curView = newView; intraday = !!args.intraday; mode = args.mode || mode; K = intraday ? 16 : 10;
   const fig = JSON.parse(spec);
-  if (div.layout && div.layout.xaxis && div.layout.xaxis.range) {          // a re-render after a save keeps your view
+  if (!changed && div.layout && div.layout.xaxis && div.layout.xaxis.range) {          // a re-render after a save keeps your view
     Object.keys(fig.layout).filter(k => /^xaxis\d*$/.test(k))
       .forEach(k => fig.layout[k].range = div.layout.xaxis.range.slice());   // every shared x-axis, or they disagree
     if (div.layout.yaxis && div.layout.yaxis.range) fig.layout.yaxis.range = div.layout.yaxis.range.slice();
@@ -42,7 +44,9 @@ window.addEventListener("message", e => {
     if (saving) { hist[hist.length - 1] = mine(); saving = false; }   // our own save coming back (same shapes, re-serialised)
     else if (JSON.stringify(mine()) !== JSON.stringify(hist[hist.length - 1])) hist.push(mine());   // first load, or a change made outside (Add level / Clear)
     send("streamlit:setFrameHeight", {height: fig.layout.height + 8});
-    buildIndex(); show(idx.days[idx.days.length - 1]);
+    buildIndex(); applyMode(); paintButtons();
+    if (changed && !intraday) { const r = RANGES.find(x => x[0] === curView); if (r && r[0] !== "1Y") setRange(r[0], r[1]); }
+    show(idx.days[idx.days.length - 1]);
     if (div._sa) return; div._sa = true;
     div.on("plotly_relayout", ev => {
       if (busy) return;
@@ -56,20 +60,22 @@ window.addEventListener("message", e => {
 // TradingView-style read-out: a legend at the top-left of each panel, updated on mouse move, and a dotted crosshair
 // with the price at the cursor on the right axis (no floating tooltip over the candles).
 const fmt$ = v => "$" + v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
-const day = x => String(x).slice(0, 10);
+const day = x => String(x).slice(0, K);
 let idx = null;
 function buildIndex() {
   const fd = div._fullData, fl = div._fullLayout; idx = {panels: {}, candle: null};
+  if (ohlc) { const m = {}; ohlc.x.forEach((x, i) => m[day(x)] = i); idx.candle = Object.assign({_m: m}, ohlc); }
   fd.forEach(t => {
-    if (t.hoverinfo !== "none") return;
+    if (t.hoverinfo !== "none" || t.type === "candlestick" || t.name === "Close line") return;   // OHLC comes from args
     const ax = t.yaxis || "y", m = {};
-    if (t.type === "candlestick") { idx.candle = t; t.x.forEach((x, i) => m[day(x)] = i); t._m = m; return; }
     t.x.forEach((x, i) => m[day(x)] = i); t._m = m;
     (idx.panels[ax] = idx.panels[ax] || []).push(t);
   });
   idx.days = idx.candle ? idx.candle.x.map(day) : [];
   idx.lg = {};
-  ["y"].concat(Object.keys(idx.panels)).forEach(ax => {
+  const axes = ["y"].concat(Object.keys(idx.panels));
+  div.querySelectorAll(".lg").forEach(el => { if (!axes.includes(el.dataset.ax)) el.remove(); });   // from the other view
+  axes.forEach(ax => {
     let el = div.querySelector(`.lg[data-ax="${ax}"]`);
     if (!el) { el = document.createElement("div"); el.className = "lg"; el.dataset.ax = ax; div.appendChild(el); }
     const ya = fl[ax === "y" ? "yaxis" : "yaxis" + ax.slice(1)], sz = fl._size;
@@ -78,7 +84,7 @@ function buildIndex() {
   });
 }
 function nearest(ms) {
-  const d = idx.days; if (!d.length) return null; let lo = 0, hi = d.length - 1; const t = new Date(ms).toISOString().slice(0, 10);
+  const d = idx.days; if (!d.length) return null; let lo = 0, hi = d.length - 1; const t = new Date(ms).toISOString().slice(0, K);
   while (lo < hi) { const m = (lo + hi) >> 1; if (d[m] < t) lo = m + 1; else hi = m; }
   if (lo > 0 && Math.abs(new Date(d[lo - 1]) - ms) < Math.abs(new Date(d[lo]) - ms)) lo--;
   return d[lo];
@@ -88,10 +94,12 @@ function show(key) {
   const i = c._m[key];
   if (i !== undefined) {
     const o = +c.open[i], h = +c.high[i], l = +c.low[i], cl = +c.close[i], pc = i > 0 ? +c.close[i - 1] : o, ch = cl - pc;
-    const k = ch >= 0 ? "up" : "dn", dt = new Date(key + "T12:00:00");
+    const k = ch >= 0 ? "up" : "dn", dt = new Date(intraday ? key + ":00" : key + "T12:00:00");
+    const when = dt.toLocaleDateString("en-US", {month: "short", day: "numeric", year: "numeric"}) +
+      (intraday ? " " + dt.toLocaleTimeString("en-US", {hour: "numeric", minute: "2-digit"}) + " ET" : "");
     let ma = (idx.panels["y"] || []).map(t => t._m[key] !== undefined && t.y[t._m[key]] != null ?
       `<span style="color:${t.line.color}">${t.name} ${fmt$(+t.y[t._m[key]])}</span>` : "").filter(Boolean).join(" &nbsp;");
-    idx.lg.y.innerHTML = `<b>${dt.toLocaleDateString("en-US", {month: "short", day: "numeric", year: "numeric"})}</b> &nbsp;O <b class="${k}">${fmt$(o)}</b> H <b class="${k}">${fmt$(h)}</b> L <b class="${k}">${fmt$(l)}</b> C <b class="${k}">${fmt$(cl)}</b> <span class="${k}">${ch >= 0 ? "+" : ""}${ch.toFixed(2)} (${ch >= 0 ? "+" : ""}${(ch / pc * 100).toFixed(2)}%)</span>` + (ma ? "<br>" + ma : "");
+    idx.lg.y.innerHTML = `<b>${when}</b> &nbsp;O <b class="${k}">${fmt$(o)}</b> H <b class="${k}">${fmt$(h)}</b> L <b class="${k}">${fmt$(l)}</b> C <b class="${k}">${fmt$(cl)}</b> <span class="${k}">${ch >= 0 ? "+" : ""}${ch.toFixed(2)} (${ch >= 0 ? "+" : ""}${(ch / pc * 100).toFixed(2)}%)</span>` + (ma ? "<br>" + ma : "");
   }
   Object.entries(idx.panels).forEach(([ax, ts]) => {
     if (ax === "y") return;
@@ -123,21 +131,42 @@ function crosshair(ev) {
 }
 div.addEventListener("mousemove", crosshair);
 div.addEventListener("mouseleave", () => { ["chh", "chv", "chy"].forEach(i => document.getElementById(i).style.display = "none"); if (idx) show(idx.days[idx.days.length - 1]); });
-// Range buttons: the last N months plus ~3 months of blank future, so lines can be drawn ahead
-const RANGES = [["1M", 1], ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["5Y", 60], ["ALL", 0]], AHEAD_DAYS = 92;
+// Range buttons: the last N months, filling the width (data to the right edge but for a small margin)
+const INTRA = ["1D", "1W"];
+const RANGES = [["1M", 1], ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24]], AHEAD = 0.015;   // a small margin after the last bar (share of the span); drawings can still reach the edge
 const rng = document.getElementById("rng");
 function setRange(label, m) {
   if (!idx || !idx.days.length) return;
   const last = new Date(idx.days[idx.days.length - 1] + "T00:00:00Z"), a = new Date(last), b = new Date(last);
   if (m) a.setUTCMonth(a.getUTCMonth() - m); else a.setTime(new Date(idx.days[0] + "T00:00:00Z").getTime());
-  b.setUTCDate(b.getUTCDate() + AHEAD_DAYS);
-  [...rng.children].forEach(x => x.classList.toggle("on", x.textContent === label));
-  const r = [a.toISOString().slice(0, 10), b.toISOString().slice(0, 10)], upd = {};
+  b.setTime(b.getTime() + (b - a) * AHEAD);
+  curView = label; paintButtons();
+  const r = [a.toISOString().slice(0, 10), b.toISOString().slice(0, 16).replace("T", " ")], upd = {};
   Object.keys(div._fullLayout).filter(k => /^xaxis\d*$/.test(k)).forEach(k => upd[k + ".range"] = r);   // shared axes: all
-  Plotly.relayout(div, upd);
+  Plotly.relayout(div, upd).then(() => { busy = false; rescale(); buildIndex(); });
 }
-RANGES.forEach(([l, m]) => { const b = document.createElement("button"); b.textContent = l; b.onclick = () => setRange(l, m);
-  if (l === "1Y") b.className = "on"; rng.appendChild(b); });
+function ask(view) { send("streamlit:setComponentValue", {value: {view, mode, t: Date.now()}, dataType: "json"}); }
+INTRA.concat(RANGES.map(r => r[0])).forEach(l => {
+  const b = document.createElement("button"); b.textContent = l; b.dataset.view = l;
+  b.onclick = () => {
+    if (INTRA.includes(l) || intraday) { if (l !== curView) ask(l); return; }     // other data: Python redraws
+    const r = RANGES.find(x => x[0] === l); setRange(r[0], r[1]); ask(l);   // remembered for the session
+  };
+  rng.appendChild(b);
+});
+const sep = document.createElement("span"); sep.style.cssText = "width:10px"; rng.appendChild(sep);
+["Candles", "Line"].forEach(l => { const b = document.createElement("button"); b.textContent = l; b.dataset.mode = l;
+  b.onclick = () => { if (mode === l) return; mode = l; applyMode(); paintButtons();
+    send("streamlit:setComponentValue", {value: {mode, t: Date.now()}, dataType: "json"}); };
+  rng.appendChild(b); });
+function paintButtons() {
+  [...rng.querySelectorAll("button")].forEach(b => b.classList.toggle("on", b.dataset.view ? b.dataset.view === curView : b.dataset.mode === mode));
+}
+function applyMode() {   // Candles / Line: show one of the two price traces
+  const ci = div.data.findIndex(t => t.type === "candlestick"), li = div.data.findIndex(t => t.name === "Close line");
+  if (ci < 0 || li < 0) return;
+  busy = true; Plotly.restyle(div, {visible: [mode === "Candles", mode === "Line"]}, [ci, li]).then(() => busy = false);
+}
 
 // Drawing history: every shape change is a snapshot; undo / redo step through them and save at once
 const hist = [], redo = []; let replaying = false, saving = false;

@@ -146,6 +146,19 @@ CSS = """
     .sa-group-title { font-size: 0.7rem; font-weight: 700; letter-spacing: .09em; color: #64748b; text-transform: uppercase; }
     .sa-stat-label { font-size: 0.66rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
     .sa-stat-val { font-size: 0.95rem; font-weight: 700; color: #0f172a; font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+/* breaking-news banner (dashboard/news.py): one headline at a time, CSS fade, paused on hover */
+.sa-news{display:flex;align-items:center;gap:10px;height:30px;margin:2px 0 8px;padding:0 10px;border:1px solid #e2e8f0;
+  border-radius:6px;background:#f8fafc;overflow:hidden}
+.sa-news-tag{font:700 10px Inter,system-ui,sans-serif;letter-spacing:.06em;color:#fff;background:#dc2626;border-radius:3px;padding:2px 6px}
+.sa-news-box{position:relative;flex:1;height:30px}
+.sa-news-item{position:absolute;inset:0;display:flex;align-items:center;gap:8px;opacity:0;visibility:hidden;
+  text-decoration:none!important;color:#0f172a!important;font-size:13px;white-space:nowrap;overflow:hidden}
+.sa-news:hover .sa-news-item{animation-play-state:paused!important}
+.sa-news-item:hover .sa-news-t{text-decoration:underline}
+.sa-news-src{font-weight:600;color:#0f766e;font-size:12px}
+.sa-news-sym{font:700 11px Inter,system-ui,sans-serif;color:#1d4ed8;background:#dbeafe;border-radius:3px;padding:1px 5px}
+.sa-news-t{overflow:hidden;text-overflow:ellipsis}
+.sa-news-ago{color:#64748b;font-size:11px;margin-left:auto;padding-left:8px}
 </style>
 """
 

@@ -270,3 +270,42 @@ def intraday(symbols: tuple):
     except Exception:
         pass
     return out
+
+INTRADAY_VIEWS = {"1D": (5, 1), "1W": (15, 5)}      # range button -> (minutes per candle, sessions shown)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def intraday_ohlcv(symbol, view):
+    """Display only (stock chart 1D / 1W buttons): Open/High/Low/Close/Volume candles of the last session (5-minute)
+    or the last 5 sessions (15-minute), regular hours, index = New York time without zone. Alpaca SIP, IEX on any SIP
+    error; cached 60 s; empty when it cannot be read."""
+    cols = ["Open", "High", "Low", "Close", "Volume"]
+    if _live_off() or view not in INTRADAY_VIEWS:
+        return pd.DataFrame(columns=cols)
+    minutes, sessions = INTRADAY_VIEWS[view]
+    try:
+        import backtest_engine as be
+        from alpaca.data.enums import DataFeed
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+        client = be.market_data_client()
+        start = pd.Timestamp.now(tz="America/New_York").normalize() - pd.Timedelta(days=4 + sessions * 2)
+        rows = []
+        for feed in ("sip", "iex"):
+            try:
+                rows = client.get_stock_bars(StockBarsRequest(symbol_or_symbols=symbol, start=start.to_pydatetime(),
+                                                              timeframe=TimeFrame(minutes, TimeFrameUnit.Minute),
+                                                              feed=DataFeed(feed))).data.get(symbol, [])
+                break
+            except Exception:
+                rows = []
+        df = pd.DataFrame([(r.timestamp, r.open, r.high, r.low, r.close, r.volume) for r in rows], columns=["t"] + cols)
+        if df.empty:
+            return pd.DataFrame(columns=cols)
+        t = pd.to_datetime(df.pop("t"), utc=True).dt.tz_convert("America/New_York").dt.tz_localize(None)
+        df.index = t
+        hm = df.index.hour * 60 + df.index.minute
+        df = df[(hm >= 570) & (hm < 960)].astype(float)                       # 9:30 to 16:00 only
+        days = sorted(set(df.index.normalize()))[-sessions:]
+        return df[df.index.normalize().isin(days)]
+    except Exception:
+        return pd.DataFrame(columns=cols)
