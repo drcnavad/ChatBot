@@ -319,6 +319,10 @@ STRATEGIES = [
          rule="Buy when the close gets within 5% of its 52-week high and is above the 200-day average; sell 8% below the entry or on a close below the SMA50 (10% each, at most 10, calmest first; checked at the close)."),
     dict(name="Dual MA + RSI filter", event=dict(kind="ma_rsi"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and RSI(14) is 50-70; sell when RSI(14) falls below 40 (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="Worst sector 14d, +10%/-3%", worst=dict(look=10), earnings=None, group="event",
+         rule="Each day, find the sector (sector_mapping.py) with the worst average stock return over the last 14 days (10 sessions); buy its top-ranked stocks by the live score (top 5, 20% each). Sell at +10% or -3% from the entry close; freed cash buys the current worst sector's best stock not held. Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
+    dict(name="Worst sector 1M, +10%/-3%", worst=dict(look=21), earnings=None, group="event",
+         rule="Each day, find the sector (sector_mapping.py) with the worst average stock return over the last month (21 sessions); buy its top-ranked stocks by the live score (top 5, 20% each). Sell at +10% or -3% from the entry close; freed cash buys the current worst sector's best stock not held. Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
     dict(name="Golden cross + MACD confirm", event=dict(kind="golden_macd"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and MACD is above its signal; sell when MACD falls below the signal (10% each, at most 10, calmest first; checked at the close)."),
 ]
@@ -851,6 +855,45 @@ def spare_cash(tgt, chk, inp):
         prev = T[t].copy()
     return pd.DataFrame(T, index=tgt.index, columns=cols)
 
+def worst_sector_weights(c, score, eligible, look, tp=0.10, stop=0.03, n=5, start=None):
+    """Worst sector (Chirag, Oct 21, 2026): each close, the sector with the lowest mean stock return over `look` sessions;
+    free slots (1/n each, at most n) buy its best `score` stocks not held. Exit at a close +tp / -stop from the entry close;
+    a stock sold that day is not bought back the same day. Entries only from `start`."""
+    sect = pd.Series({x: be.sector_mapping.symbol_sector.get(x, "Other") for x in c.columns})
+    ret = (c / c.shift(look) - 1).T.groupby(sect).mean().T          # Date x sector
+    C, S = c.to_numpy(float), score.reindex_like(c).to_numpy(float)
+    E = eligible.reindex_like(c).fillna(False).to_numpy(bool)
+    out, held = np.zeros(C.shape), {}
+    t0 = int(np.searchsorted(c.index.values, np.datetime64(pd.Timestamp(start)))) if start is not None else 0
+    for t in range(len(C)):
+        sold = set()
+        for j in list(held):
+            if C[t, j] >= held[j] * (1 + tp) or C[t, j] <= held[j] * (1 - stop):
+                del held[j]
+                sold.add(j)
+        r = ret.iloc[t].dropna()
+        if t >= t0 and len(held) < n and len(r):
+            inside = (sect == r.idxmin()).to_numpy()
+            ok = [j for j in np.argsort(-np.nan_to_num(S[t], nan=-np.inf), kind="stable")
+                  if inside[j] and E[t, j] and np.isfinite(S[t, j]) and j not in held and j not in sold]
+            for j in ok[:n - len(held)]:
+                held[j] = C[t, j]
+        out[t, list(held)] = 1 / n
+    return pd.DataFrame(out, index=c.index, columns=c.columns)
+
+def _mblock(inp):
+    """Date x Symbol True while a live manual buy block is on (manual_trade.load_blocks: from its day until the release)."""
+    import manual_trade as mt
+    c = inp["close"]
+    m = pd.DataFrame(False, index=c.index, columns=c.columns)
+    for sym, e in mt.load_blocks().items():
+        if sym in m:
+            on = pd.Series(c.index >= pd.Timestamp(e["added"]).normalize(), index=c.index)
+            if e.get("block_until_price") is not None:
+                on &= ~(on & c[sym].le(e["block_until_price"])).cummax()
+            m[sym] = on.to_numpy()
+    return m
+
 def _dnb(inp):
     """Date x Symbol True for sector_mapping.do_not_buy (skipped by every paper strategy from Oct 19, 2026)."""
     c = inp["close"]
@@ -874,6 +917,9 @@ def strategy_targets(cfg, inp):
         en, ex = event_signals(inp, cfg["event"]["kind"])
         tgt = event_slot_weights(inp["close"], en, ex, inp["eligible"] & ~_dnb(inp), inp["vol"], tp=cfg["event"].get("tp"),
                                  stop=cfg["event"].get("stop"), max_days=cfg["event"].get("days"), start=be.FORWARD_START)
+    elif cfg.get("worst"):                             # worst sector lines (Oct 21): only entries / exits trade
+        tgt = worst_sector_weights(inp["close"], inp["scores"]["now"], inp["eligible"] & ~_dnb(inp) & ~_mblock(inp),
+                                   start=be.FORWARD_START, **cfg["worst"])
     elif cfg.get("b200"):                              # 200-day breakout family (no calendar: only entries / exits trade)
         tgt = breakout200_weights(inp["close"], inp["ma200"], inp["eligible"] & ~_dnb(inp), inp["vol"], start=be.FORWARD_START, **cfg["b200"])
     elif cfg.get("weights"):
