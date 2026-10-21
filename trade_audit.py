@@ -266,7 +266,7 @@ def reconcile(data, pending=None, stop_state=None, picks=None):
         sells = {str(r.get("symbol")).upper() for r in rows if isinstance(r, dict) and str(r.get("side")).upper() == "SELL"}
         buys = {str(r.get("symbol")).upper() for r in rows if isinstance(r, dict) and str(r.get("side")).upper() == "BUY"}
         stopped = {k.split("|")[0] for k in ((stop_state or {}).get("sold") or {})}
-        # The live account also holds today's top-10 rule picks (Provisional_Weight: Mon-Thu refills and spare-cash buys).
+        # The live account also holds today's top-n rule picks (Provisional_Weight: Mon-Thu refills and spare-cash buys).
         prov = pd.to_numeric(picks.reindex(columns=["Provisional_Weight"])["Provisional_Weight"], errors="coerce").fillna(0)
         live = set(target) | {str(s).upper() for s, w in zip(picks["Symbol"], prov) if w > 0}
         try:                                    # two halves (sleeves.py): the targets are the ledger's planned holdings

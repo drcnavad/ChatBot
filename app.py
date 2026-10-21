@@ -4,7 +4,7 @@ Stock Analysis dashboard (Streamlit).
 Page layout, top to bottom:
   1. Title bar.
   2. "Home" tab: your notes table first (editable, saved to Reports/my_notes.csv), then the single-stock view
-     (clickable stock list: holdings, next in line (waiting list), buy zone, remaining; stock picker, chart;
+     (clickable stock list: Keep, Buy next, Sell next, Next in line, Others; stock picker, chart;
      sector performance table at the bottom). Open any stock directly with http://localhost:8502/?symbol=NVDA
   3. "Strategy" tab: last decision, forward test, strategy rules and holdings, data freshness and settings.
   4. "Trading Account" tab: live holdings, latest signals, trade audit, tax view, strategy rules.

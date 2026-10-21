@@ -9,7 +9,7 @@
 leaderboard(): every strategy + the account + QQQ / SPY, ranked by RANK_RULE, with one column per week.
 Same accounting for all: decide at the day's close (the 2:30 PM bar on decision days), trade only names whose target
 changed (all back to target on the strategy's rebalance day, 1-point band, earnings rule), be.COST per side, max 20% per
-stock (the live one: be.WINNER's cap, 15% from Oct 15), 99% invested, buys never exceed the cash (no margin), cash earns 0. Saved days are never redone; missed days are
+stock (the live one: be.WINNER's cap, 20%), 99% invested, buys never exceed the cash (no margin), cash earns 0. Saved days are never redone; missed days are
 caught up from the saved bars. On Oct 15, 2026 all but the live one were recomputed from Oct 2 (Mon-Thu checks, 11 new);
 later on Oct 15, 19 more (forward_combos: two independent halves, swap-only halves, the low-volatility keep / Friday
 falling rules) - the two live halves start at the Oct 16 close, the rest are computed from Oct 2 like the others. The
@@ -45,7 +45,7 @@ DAILY_COLS = ["Date", "Time_CT", "Equity", "Cash", "Net_Deposits", "Positions", 
               "Traded_USD", "Cost_USD"]
 SIG_COLS = ["Date", "Symbol", "Close", "ma_50", "ma_10", "ma_30", "ma_100", "ma_200", "RSI", "macd", "MACD Signal",
             "Technical_Score", "RS_Score", "Strategy_Score", "Regime_On", "final_trade"]
-MAX_WEIGHT = 0.20            # paper strategies: no stock above 20% (pinned; LIVE uses the be.WINNER max_weight, 15% from Oct 15)
+MAX_WEIGHT = 0.20            # paper strategies: no stock above 20% (pinned; LIVE uses the be.WINNER max_weight, 20%)
 # The paper strategies' base selection = the live WINNER of Oct 15, 2026 (pinned when live moved to the monthly low-volatility
 # rules on Oct 16): 1/volatility weights, no sector limit, no rank gate, the sleeve's 5% cap, earnings rule E5.
 PIN = {"n": 10, "vol_sizing": True, "sector_cap": 1.0, "max_pick_rank": None, "cap_soft": False, "sleeve": (),

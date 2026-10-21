@@ -1,4 +1,5 @@
-"""Home tab stock list: every stock once, in three rows (Chirag, Oct 16, 2026).
+"""Home tab stock list: every stock once (Chirag, Oct 16, 2026). Oct 21: with the Next rebalance preview readable the
+first row splits into Keep / Buy next / Sell next (last_decision.next_plan); rows 2-3 are now "Next in line" / "Others".
 
   1. Holdings: the live Alpaca positions (read-only GET, the Trading Account tab's read); when Alpaca is not readable
      (tests, an outage) the planned shares in Reports/sleeve_ledger.json (both halves) stand in.
@@ -71,13 +72,21 @@ def _alternate(a, b):
     return out
 
 def stock_groups(p):
-    """[(title, symbols, note)] - the three rows, every symbol once."""
+    """[(title, symbols, note)] - every symbol once: Keep / Buy next / Sell next from the Next rebalance preview (Oct 21,
+    2026), then Next in line and Others; Holdings / Next in line / Others when the preview cannot be read."""
     held, src = held_symbols()
+    pl = {}
+    try:
+        from dashboard.details.last_decision import next_plan
+        pl = (next_plan() or {}).get("plan", {})
+    except Exception:
+        pass
+    pick = lambda acts: sorted((s for s, a in pl.items() if a[0] in acts), key=lambda s: -pl[s][1])
     try:
         lv_t, sec_t, lv_rk, sr_rk = _rankings()
     except Exception:
         lv_t = sec_t = lv_rk = sr_rk = []
-    seen = set(held)
+    seen = set(held) | {s for s, a in pl.items() if a[0] != "Blocked"}
     cand = []
     for s in _alternate(lv_t, sec_t) + _alternate(lv_rk, sr_rk):
         if s not in seen and len(cand) < N_CANDIDATES:
@@ -87,9 +96,12 @@ def stock_groups(p):
     universe = list(tradable_symbols) + [s for s in p.options if s not in tradable_symbols and s != "QQQ"]
     rest = sorted({s for s in universe if s not in seen},
                   key=lambda s: (pd.isna(rank.get(s)), rank.get(s, 0) if pd.notna(rank.get(s)) else 0, s))
-    return [("Holdings", held, src),
-            ("Next in line (waiting list)", cand, "the next picks of the two halves, not held"),
-            ("Remaining", rest, "")]
+    nxt = ("Next in line", cand, "the next picks of the two halves")
+    if not pl:
+        return [("Holdings", held, src), nxt, ("Others", rest, "")]
+    return [("Keep", pick(("Keep", "Take over")), "held, still a target"),
+            ("Buy next", pick(("Buy",)), "targets not held yet"),
+            ("Sell next", pick(("Sell",)), "held, no longer a target"), nxt, ("Others", rest, "")]
 
 def dnb_symbols():
     """sector_mapping.do_not_buy, upper case: tagged DNB in the stock list."""

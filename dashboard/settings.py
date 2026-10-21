@@ -75,7 +75,7 @@ def low_vol_rules_text():
                if WINNER.get("keep_profit_at_rebalance") else "")
             + ("- **Friday check:** every Friday that is not a rebalance day (2:30 PM CT), a holding is sold in full when it "
                "is below its Alpaca average entry price, its close is at/below its 200-day average, or it is no longer one of "
-               "the day's top-10 picks; each sale buys the best-ranked pick not held with the same dollars"
+               f"the day's top-{WINNER.get('n', 5)} picks; each sale buys the best-ranked pick not held with the same dollars"
                + (f" (max {MAX_WEIGHT * LIVE_INVESTED:.1%} of equity)" if MAX_WEIGHT else "")
                + ", do_not_buy skipped; none left = cash. No trims or top-ups.\n" if WINNER.get("friday_falling_check") else "")
             + ("- **Earnings-day stop:** off (no orders from earnings_stop.py).\n" if not WINNER.get("earnings_day_stop", True) else "")

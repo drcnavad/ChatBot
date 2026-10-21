@@ -27,8 +27,8 @@ def ticker_label(p, s):
 
 @st.fragment(run_every=300)   # re-renders every 5 min, so an open tab never shows a stale list (Oct 19)
 def render_rank_tiers(p):
-    """Horizontal clickable stock list, three rows, every stock once (dashboard/stock_groups.py): Holdings, Next in line
-    (waiting list), Remaining; do-not-buy stocks carry a small DNB tag.
+    """Horizontal clickable stock list, every stock once (dashboard/stock_groups.py): Keep / Buy next / Sell
+    next (or Holdings), Next in line, Others; do-not-buy stocks carry a small DNB tag.
 
     Each symbol is a ?symbol= link, handled in main() exactly like a table click
     (opens the stock in the stock view below). The dropdown underneath stays for manual typing."""
@@ -100,10 +100,11 @@ def render_stock_section(p, ticker, tdata):
     badge = f"Strategy decision · {p.off_date:%a %b %-d}: {status}" + (f" ({p.tag_off[ticker]})" if p.tag_off.get(ticker) else "")
     plan_html = ""
     if ticker in symbol_sector or ticker in p.plan:                      # tradable stocks only (not the QQQ benchmark)
-        action = p.plan.get(ticker, ("not picked",))[0]
-        when = f"{p.plan_day:%a %b %-d}" if p.plan_day is not None else "Next rebalance"
-        tip = (f"Full rebalance computed at the {p.plan_asof:%a %b %-d} close (strategy_picks.csv, the numbers the trade "
-               f"step uses). Final at the {when} close; orders go out that day at 2:30 PM CT." if p.plan_asof is not None else "")
+        entry = p.plan.get(ticker, ("not picked",))
+        action, day = entry[0], (entry[2] if len(entry) > 2 and entry[2] is not None else p.plan_day)
+        when = f"{day:%a %b %-d}" if day is not None else "Next rebalance"
+        tip = (f"Next rebalance preview at the {p.plan_asof:%a %b %-d} close (the bot's own selection code; % of "
+               f"account). Final at the {when} close; orders go out that day at 2:30 PM CT." if p.plan_asof is not None else "")
         plan_html = (f'<span class="sa-badge {PLAN_BADGE.get(action, "sa-badge-grey")}" title="{esc(tip)}">'
                      f'{esc(when + " plan: " + plan_text(p.plan, ticker))}</span>')
     stats = [

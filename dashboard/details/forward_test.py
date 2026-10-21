@@ -46,7 +46,7 @@ def render_forward_test():
                 + f", traded \\${traded:,.0f}, cost vs the decision price {'-' if cost < 0 else ''}\\${abs(cost):,.2f}"
                 + (f" ({cost / traded * 1e4:+.1f} bps; + = it cost money)" if traded else "") + ".")
     st.caption(f"{ft.RANK_RULE} Every strategy is paper only (never traded): it decides at the "
-               "day's close, pays 0.1% per trade side, holds no stock above 20% (the live-rules strategy: the live cap, 15% from Oct 15), invests at most 99% and earns nothing on cash; each "
+               "day's close, pays 0.1% per trade side, holds no stock above 20% (the live-rules strategy: the live cap, 20%), invests at most 99% and earns nothing on cash; each "
                f"starts at 1.0 on the {start} close. Your account = time-weighted (deposits and withdrawals are not returns); QQQ / SPY = closes, "
                "comparison only (not ranked). Week k = Friday close to Friday close (week 1 = Oct 2-9); '(so far)' = the week in "
                "progress, Friday's close to the latest close; later weeks are blank." + acct

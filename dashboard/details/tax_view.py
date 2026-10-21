@@ -122,7 +122,7 @@ def render_tax_view(p):
                        "counts as long-term. Basis includes fees and wash-sale adjustments (Alpaca's position basis does not "
                        "include wash-sale adjustments, so it can be lower).")
     with tabs[2]:
-        planned = {s for s, (a, w) in (p.plan or {}).items() if a in ("Buy", "Keep")}
+        planned = {s for s, a in (p.plan or {}).items() if a[0] in ("Buy", "Keep", "Take over")}
         ok, excluded = tl.harvest(rep, planned)
         if ok.empty:
             st.success("No position to harvest right now: " + ("nothing is at a loss." if excluded.empty else

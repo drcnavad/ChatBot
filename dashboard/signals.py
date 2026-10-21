@@ -8,7 +8,7 @@ from dashboard.settings import CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, N
 
 SIGNAL_BADGE = {"Buy": "sa-badge-bull", "Hold": "sa-badge-hold", "Sold": "sa-badge-bear",
                 "Score below 0": "sa-badge-bear", "Watch": "sa-badge-hold", "Not ranked": "sa-badge-grey"}
-PLAN_BADGE = {"Buy": "sa-badge-bull", "Keep": "sa-badge-hold", "Sell": "sa-badge-bear", "Blocked": "sa-badge-bear"}
+PLAN_BADGE = {"Buy": "sa-badge-bull", "Keep": "sa-badge-hold", "Take over": "sa-badge-hold", "Sell": "sa-badge-bear", "Blocked": "sa-badge-bear"}
 
 def plain_reason(signal, reason, rank=None, score=None):
     """Engine reason string -> short plain-English explanation for the given display signal."""
@@ -105,6 +105,18 @@ def next_full_rebalance(day):
     return None
 
 def rebalance_plan(df):
+    """The Next rebalance preview (both halves, Oct 21, 2026): (next rebalance, as-of, {SYMBOL: (action, % of account,
+    day)}); falls back to the pipeline's low-vol plan below when Alpaca cannot be read."""
+    try:
+        from dashboard.details.last_decision import next_plan
+        np_ = next_plan()
+        if np_ is not None:
+            return min(d for d in np_["days"].values() if d is not None), np_["asof"], np_["plan"]
+    except Exception:
+        pass
+    return _pipeline_plan(df)
+
+def _pipeline_plan(df):
     """(rebalance date, as-of date, {SYMBOL: (action, weight %)}) for the next full rebalance.
 
     Provisional_Weight in strategy_picks.csv = the full rebalance computed at the latest close - the numbers the trade
@@ -133,5 +145,5 @@ def rebalance_plan(df):
 
 def plan_text(plan, sym):
     """'Buy 14.23%' / 'Keep 9.14%' / 'Sell' / 'not picked'."""
-    action, w = plan.get(sym, (None, 0.0))
-    return f"{action} {w:.2f}%" if action in ("Buy", "Keep") else (action or "not picked")
+    action, w = plan.get(sym, (None, 0.0))[:2]
+    return f"{action} {w:.2f}%" if action in ("Buy", "Keep", "Take over") else (action or "not picked")

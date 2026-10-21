@@ -133,7 +133,7 @@ def render_last_decision(p):
 # ---------------------------------------------------------------- next rebalance preview (read-only, no orders)
 @st.cache_data(ttl=600, show_spinner=False)
 def _preview_targets(day, lv_held, sec_held):
-    """{half: set of target symbols} at the close `day`, by the bot's own selection: the sector half =
+    """{half: {symbol: target weight in the half}} at the close `day`, by the bot's own selection: the sector half =
     sleeves.sector_weights (the low-vol half's names excluded, as in sleeves.plan); the low-vol half = the pipeline's
     Provisional_Weight in strategy_picks.csv when it holds n (5) names, else the same low_vol ranking (top n, max per
     sector); a manually blocked stock is skipped for the next in line (the leftover-cash rule). Stock list only."""
@@ -146,8 +146,10 @@ def _preview_targets(day, lv_held, sec_held):
     import backtest_engine as be
     p = picks[pd.to_numeric(picks["Provisional_Weight"], errors="coerce").fillna(0) > 0]
     n, cap, per, lv = be.WINNER["n"], be.winner_max_per_sector(), {}, []
+    sw = {s: float(x) for s, x in w.items() if x > 0}
     if len(p) == n:                                     # the pipeline already wrote the top-n targets
-        return {"sector": set(w[w > 0].index), "lowvol": set(p["Symbol"].astype(str).str.upper()) & set(sm.tradable_symbols)}
+        return {"sector": sw, "lowvol": {str(s).upper(): float(x) for s, x in zip(p["Symbol"], p["Provisional_Weight"])
+                                          if str(s).upper() in set(sm.tradable_symbols) and str(s).upper() not in blocked}}
     inp = sleeves.sector_inputs()                       # else (Oct 21, until its next run): the same low_vol ranking,
     d = pd.Timestamp(day) if pd.Timestamp(day) in inp["close"].index else inp["close"].index[-1]   # top n, max per sector
     sc = inp["scores"]["low_vol"].loc[d].where(inp["eligible"].loc[d])
@@ -156,7 +158,7 @@ def _preview_targets(day, lv_held, sec_held):
         if s in set(sm.tradable_symbols) and s not in set(sm.do_not_buy) | blocked and len(lv) < n and per.get(sec, 0) < cap:
             lv.append(s)
             per[sec] = per.get(sec, 0) + 1
-    return {"sector": set(w[w > 0].index), "lowvol": set(lv)}
+    return {"sector": sw, "lowvol": {s: 0.99 / n for s in lv}}   # equal weight, 99% invested
 
 def _scores(half, day):
     """{symbol: score} at close `day`: Strategy_Score (low vol) / the sector-rotation score (sector)."""
@@ -192,10 +194,10 @@ def sell_table(half, day, sells, value, half_v, ranks, targets):
     t["Rank"] = pd.array(pd.to_numeric(t["Rank"], errors="coerce"), dtype="Int64")
     return t
 
-def preview_marks():
-    """(targets, sells) of the Next rebalance preview at the latest close (Home stock list colors, Oct 21, 2026): targets =
-    both halves' targets (5 + 5), sells = held stocks no half targets. Same cached _preview_targets; (set(), set()) when
-    Alpaca or the ledger cannot be read. Display only."""
+def next_plan():
+    """The Next rebalance preview for the whole page (Oct 21, 2026), or None when Alpaca / the ledger cannot be read:
+    {"asof", "days": {half: next rebalance}, "targets": {half: {sym: weight in half}}, "plan": {sym: (action, % of
+    account, day)}} - action Keep / Buy / Take over / Sell. Same cached _preview_targets. Display only."""
     import decision_ranks
     import sleeves
     from dashboard.details.live_holdings import holdings_this_run
@@ -203,20 +205,42 @@ def preview_marks():
         led = sleeves.load_ledger()
         data, _ = holdings_this_run()
         if led is None or data is None:
-            return set(), set()
+            return None
         positions, equity = data["positions"], data["equity"]
-        day, _ = decision_ranks.ranks_on()
+        asof, _ = decision_ranks.ranks_on()
         owner = sleeves.owners(led)
         value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
         mine = {h: [x for x, o in owner.items() if o == h and x in value] for h in SLEEVE}
-        vs = half_values(positions, led, equity)["sector"]
+        vals = half_values(positions, led, equity)
+        vs = vals["sector"]
         sec_held = tuple(sorted((x, value[x] / vs) for x in mine["sector"])) if vs else ()
-        t = _preview_targets(day, tuple(sorted(mine["lowvol"])), sec_held)
+        t = _preview_targets(asof, tuple(sorted(mine["lowvol"])), sec_held)
+        cal = sleeves.calendar(pd.Timestamp.now().normalize() + pd.Timedelta(days=1), 45)
     except Exception:
-        return set(), set()
+        return None
+    days = {h: next((d for d, hs in cal if h in hs), None) for h in SLEEVE}
+    tot = sum(vals.values()) or 1.0
+    plan = {}
+    for h in ("sector", "lowvol"):                      # the low-vol half last: it takes over what it targets
+        other = "lowvol" if h == "sector" else "sector"
+        for s, w in t[h].items():
+            act = "Keep" if s in mine[h] else "Take over" if s in mine[other] else "Buy"
+            plan[s] = (act, 100 * w * vals[h] / tot, days[h])
+    for h in SLEEVE:
+        for s in mine[h]:
+            plan.setdefault(s, ("Sell", 0.0, days[h]))
     import paper_trade as pt
-    tg = set(t["lowvol"]) | set(t["sector"])
-    return tg - set(pt.manual_list("buy")), {s for s, v in value.items() if v > 0} - tg
+    for s in pt.manual_list("buy"):
+        plan.setdefault(s, ("Blocked", 0.0, min(d for d in days.values() if d is not None)))
+    return {"asof": asof, "days": days, "targets": t, "plan": plan}
+
+def preview_marks():
+    """(targets, sells) for the Home stock list colors: both halves' targets (5 + 5) and the held stocks no half targets."""
+    np_ = next_plan()
+    if np_ is None:
+        return set(), set()
+    pl = np_["plan"]
+    return {s for s, a in pl.items() if a[0] != "Sell"}, {s for s, a in pl.items() if a[0] == "Sell"}
 
 def render_preview(positions, led, equity):
     """Next rebalance preview: each half's top 20 at the latest close with Keep / Buy / Blocked, and what it would sell."""
@@ -247,15 +271,16 @@ def render_preview(positions, led, equity):
             t, _ = ranking_table(half, day, positions, led, path="__live__", values=vals)
             tg = targets[half]
             other = "lowvol" if half == "sector" else "sector"
-            plan = lambda s: ("Keep" if s in mine[half] else f"Take over from {SLEEVE[other]}" if s in mine[other]
-                              else "Blocked" if s in blocked else "Buy") if s in tg else ""
+            plan = lambda s: "Blocked" if s in blocked else ("Keep" if s in mine[half] else
+                              f"Take over from {SLEEVE[other]}" if s in mine[other] else "Buy") if s in tg else ""
             t.insert(1, "Plan", [plan(s) for s in t["Stock"]])
+            t.insert(2, "Target %", [100 * tg[s] if s in tg else None for s in t["Stock"]])   # weight in the half
             sty = toned(t, ["Plan"], fn=lambda v: GOOD if v == "Buy" else INK)
             st.dataframe(sty, hide_index=True, width="stretch", height=35 * (len(t) + 1) + 3, key=f"preview_{half}",
-                         column_config={"Weight in half %": PCT_COL,
+                         column_config={"Weight in half %": PCT_COL, "Target %": PCT_COL,
                                         "Score": st.column_config.NumberColumn(format="%.1f")})
-            buys_out = sorted(tg - set(t["Stock"]) - set(mine[half]) - blocked)
-            sells = sell_table(half, day, sorted(set(mine[half]) - tg), value, vals[half], ranks, targets)
+            buys_out = sorted(set(tg) - set(t["Stock"]) - set(mine[half]) - blocked)
+            sells = sell_table(half, day, sorted(set(mine[half]) - set(tg)), value, vals[half], ranks, targets)
             st.markdown("Would sell" + ("" if len(sells) else ": nothing"))
             if len(sells):
                 st.dataframe(sells, hide_index=True, width="stretch", key=f"preview_sell_{half}",
@@ -265,4 +290,4 @@ def render_preview(positions, led, equity):
                 st.caption(f"Would also buy (ranked below 20): {', '.join(buys_out)}")
     st.caption(f"Ranks and targets at the {day:%a %b %-d} close, by the bot's own selection code (read-only; nothing is "
                "sent). Keep = target and held; Buy = target, not held; Take over = the low-vol half takes a stock the other "
-               "half holds (no trade); Blocked = a target on a buy block / do-not-buy list (not bought). The real rebalance uses the data of its own day, so the list can still change.")
+               "half holds (no trade); Target % = target weight in the half; Blocked = a stock on a buy block / do-not-buy list (not bought). The real rebalance uses the data of its own day, so the list can still change.")
