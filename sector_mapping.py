@@ -23,6 +23,7 @@ stock_symbols = [
     'WULF',   # TeraWulf (Chirag, 2026-10-15)
     'LIN', 'STLD', 'MLM',   # Materials (2026-10-17)
     'COST', 'WMT', 'MNST',   # Consumer Staples (2026-10-17)
+    'LYV', 'OMC', 'DIS', 'C', 'V', 'JPM', 'MA', 'TXN', 'CSCO', 'AMAT',   # Comm Services / Financials / Technology (Chirag, 2026-10-21)
     # Removed by Chirag 2026-10-19 (uncomment to re-add). PG / EMR / PFE were still held: their half sells them at its
     # next rebalance (not in the universe = no target; priced from Alpaca market data until then):
     # 'PG', 'EMR', 'PFE', 'ECL', 'SHW', 'NUE', 'URI', 'SHOP', 'PEP', 'VMC', 'CRCL', 'ETN',
@@ -52,6 +53,7 @@ sector_etfs = {
 
 # Sector of every stock (also the stocks only used for the fundamentals list below).
 symbol_sector = {
+    'LYV': 'Communication Services', 'OMC': 'Communication Services', 'CSCO': 'Technology', 'AMAT': 'Technology',
     'ANF': 'Consumer Discretionary',
     'JCI': 'Industrials',
     'DAL': 'Industrials',
@@ -141,6 +143,8 @@ symbol_sector = {
 
 # Company names (dashboard and news search).
 symbol_name = {
+    'LYV': 'Live Nation Entertainment, Inc.', 'OMC': 'Omnicom Group Inc.', 'CSCO': 'Cisco Systems, Inc.',
+    'AMAT': 'Applied Materials, Inc.',
     'ANF': 'Abercrombie & Fitch Co.',
     'JCI': 'Johnson Controls International plc',
     'DAL': 'Delta Air Lines, Inc.',
