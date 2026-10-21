@@ -6,7 +6,7 @@ import streamlit as st
 
 from dashboard.details.live_holdings import holdings_this_run
 from dashboard.settings import CT
-from dashboard.style import (BAD, CAUTION, GOOD, INK, MONEY, caption_text, info_text, stat_cards, tone, toned, usd,
+from dashboard.style import (BAD, CAUTION, GOOD, INK, INT, MONEY, SHARES, caption_text, info_text, stat_cards, table, tone, usd,
     warning_text)
 
 # ---------------------------------------------------------------------------- tax view (estimate, read-only)
@@ -54,7 +54,7 @@ def render_tax_view(p):
     issues = rep["issues"]
     if len(issues):
         warning_text(f"Data check: {len(issues)} issue(s) found, so some numbers below may be off. Details in the table.")
-        st.dataframe(issues, hide_index=True, width="stretch", height=min(400, 35 * (len(issues) + 1) + 3))
+        table(issues, max_h=400)
     stat_cards([(f"Realized {scope} short-term", usd(y["realized_st"]), tone(y["realized_st"])),
                 (f"Realized {scope} long-term", usd(y["realized_lt"]), tone(y["realized_lt"])),
                 ("Unrealized short-term", usd(y["unrealized_st"]), tone(y["unrealized_st"])),
@@ -70,8 +70,8 @@ def render_tax_view(p):
         by = tl.realized_by_year(sales)
         if by.empty:
             info_text(f"No sales of lots bought {when} yet, so nothing is realized.")
-        st.dataframe(toned(by.round(2), ["Short-term gain", "Long-term gain", "Total gain"]), hide_index=True, width="stretch",
-                     column_config={c: MONEY for c in by.columns if c not in ("Year", "Lot sales")} | {"Year": st.column_config.NumberColumn(format="%d")})
+        table(by.round(2), ["Short-term gain", "Long-term gain", "Total gain"],
+              cols={c: MONEY for c in by.columns if c not in ("Year", "Lot sales")} | {"Year": INT})
     with tabs[1]:
         lots = tl.open_lots_view(rep["lots"])
         if lots.empty:
@@ -79,9 +79,8 @@ def render_tax_view(p):
         else:
             shown = lots.assign(**{c: [f"{d:%b %-d, %Y}" for d in lots[c]] for c in ("Bought", "Holding from", "Long-term on")})
             shown["Gain"] = shown["Gain"].round(2) + 0.0                        # no "-$0.00"
-            st.dataframe(toned(shown, ["Gain"]), hide_index=True, width="stretch",
-                         column_config={"Basis / share": MONEY, "Basis": MONEY, "Price": MONEY, "Value": MONEY, "Gain": MONEY,
-                                        "Shares": st.column_config.NumberColumn(format="%.4g"), "Note": st.column_config.TextColumn(width="medium")})
+            table(shown, ["Gain"], cols={**dict.fromkeys(("Basis / share", "Basis", "Price", "Value", "Gain"), MONEY),
+                                         "Shares": SHARES, "Note": st.column_config.TextColumn(width="medium")})
             soon = tl.turning_long_term(rep, 60)
             if len(soon):
                 warning_text(f"{len(soon)} lot(s) turn long-term within 60 days: "
@@ -94,22 +93,19 @@ def render_tax_view(p):
             st.success("No position to harvest right now: " + ("nothing is at a loss." if excluded.empty else
                                                                "every position at a loss is excluded (wash-sale risk, below)."))
         else:
-            st.dataframe(toned(_harvest_view(ok), ["Loss", "Short-term loss", "Long-term loss"]), hide_index=True, width="stretch",
-                         column_config=HARVEST_COLS)
+            table(_harvest_view(ok), ["Loss", "Short-term loss", "Long-term loss"], cols=HARVEST_COLS)
         if len(excluded):
             caption_text("Excluded (selling now would likely be a wash sale):")
-            st.dataframe(toned(_harvest_view(excluded), ["Loss"]), hide_index=True, width="stretch", column_config=HARVEST_COLS)
+            table(_harvest_view(excluded), ["Loss"], cols=HARVEST_COLS)
     with tabs[3]:
         summ, w = tl.wash_summary(rep["washes"], year)
         if summ.empty:
             st.success(f"No wash sales on sales {when}.")
         else:
-            st.dataframe(summ.round(2).assign(**{"Last loss sale": [f"{d:%b %-d, %Y}" for d in summ["Last loss sale"]]}),
-                         hide_index=True, width="stretch", height=min(420, 35 * (len(summ) + 1) + 3),
-                         column_config={"Disallowed loss": MONEY, "Shares": st.column_config.NumberColumn(format="%.4g")})
+            wash = {"Disallowed loss": MONEY, "Shares": SHARES}
+            table(summ.round(2).assign(**{"Last loss sale": [f"{d:%b %-d, %Y}" for d in summ["Last loss sale"]]}), max_h=420, cols=wash)
             detail = w.assign(**{c: [f"{d:%b %-d, %Y}" for d in w[c]] for c in ("Loss sale", "Replacement bought")}).drop(columns="Replacement lot")
-            st.dataframe(detail.round(2).iloc[::-1], hide_index=True, width="stretch", height=300,
-                         column_config={"Disallowed loss": MONEY, "Shares": st.column_config.NumberColumn(format="%.4g")})
+            table(detail.round(2).iloc[::-1], height=300, cols=wash)
     with tabs[4]:
         c = st.columns(3)
         filing = c[0].selectbox("Filing status (default: Single)", list(tl.FILING), format_func=tl.FILING.get, key="tax_filing")
@@ -141,13 +137,11 @@ def render_tax_view(p):
             by = inc.groupby(["Year", "Type"], as_index=False).agg(Amount=("Amount", "sum"), **{"Qualified (est.)": ("Qualified (est.)", "sum")})
             fees = rep["fees"].assign(Year=[d.year for d in rep["fees"]["Date"]]).groupby(["Year", "Type"], as_index=False)["Amount"].sum()
             fees["Amount"] = -fees["Amount"]
-            table = pd.concat([by, fees], ignore_index=True).sort_values(["Year", "Type"], ascending=[False, True])
-            st.dataframe(toned(table.round(2), ["Amount"]), hide_index=True, width="stretch",
-                         column_config={"Amount": MONEY, "Qualified (est.)": MONEY, "Year": st.column_config.NumberColumn(format="%d")})
-            st.dataframe(inc.assign(Date=[f"{d:%b %-d, %Y}" for d in inc["Date"]]).iloc[::-1].round(2), hide_index=True,
-                         width="stretch", height=min(300, 35 * (len(inc) + 1) + 3),
-                         column_config={"Amount": MONEY, "Qualified (est.)": MONEY, "Year": st.column_config.NumberColumn(format="%d"),
-                                        "Note": st.column_config.TextColumn(width="large")})
+            income = pd.concat([by, fees], ignore_index=True).sort_values(["Year", "Type"], ascending=[False, True])
+            money = {"Amount": MONEY, "Qualified (est.)": MONEY, "Year": INT}
+            table(income.round(2), ["Amount"], cols=money)
+            table(inc.assign(Date=[f"{d:%b %-d, %Y}" for d in inc["Date"]]).iloc[::-1].round(2), max_h=300,
+                  cols={**money, "Note": st.column_config.TextColumn(width="large")})
     with tabs[6]:
         rows = []
         for m in tl.METHODS:
@@ -158,13 +152,11 @@ def render_tax_view(p):
                          f"{year} total": v["realized_st"] + v["realized_lt"], "Wash sale disallowed": v["wash_disallowed"],
                          "Unrealized": v["unrealized_st"] + v["unrealized_lt"]})
         cmp_ = pd.DataFrame(rows)
-        st.dataframe(toned(cmp_.round(2), [c for c in cmp_.columns if c.startswith(str(year))]), hide_index=True, width="stretch",
-                     column_config={c: MONEY for c in cmp_.columns if c != "Method"})
+        table(cmp_.round(2), [c for c in cmp_.columns if c.startswith(str(year))], cols={c: MONEY for c in cmp_.columns if c != "Method"})
     with tabs[7]:
         years = sorted({int(v) for v in sales["Year"]}, reverse=True) if len(sales) else [year]
         fy = st.selectbox("Tax year", years, key="tax_8949_year")
         form = tl.form_8949(sales, fy)
-        st.dataframe(form.head(200), hide_index=True, width="stretch", height=300,
-                     column_config={"Proceeds": MONEY, "Cost basis": MONEY, "Adjustment amount": MONEY, "Gain or loss": MONEY})
+        table(form.head(200), height=300, cols=dict.fromkeys(("Proceeds", "Cost basis", "Adjustment amount", "Gain or loss"), MONEY))
         st.download_button(f"Download Form 8949-style CSV ({fy}, {len(form)} rows)", form.to_csv(index=False).encode(),
                            file_name=f"form8949_estimate_{fy}.csv", mime="text/csv", key="tax_8949_dl")

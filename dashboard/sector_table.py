@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.settings import symbol_sector
-from dashboard.style import PCT_COL, section, toned
+from dashboard.style import PCT_COL, section, table
 
 try:
     from sector_mapping import tradable_symbols
@@ -167,12 +167,10 @@ def render_live_table():
         st.warning(f"Live prices unavailable: {str(e)[:150]}")
         return
     pcts = ["Today %"] + list(LIVE_WINDOWS)
-    st.dataframe(toned(t.round(2), pcts), hide_index=True, width="stretch",
-                 column_config={"Live price": st.column_config.NumberColumn(format="$%.2f"), **{k: PCT_COL for k in pcts}})
+    table(t.round(2), pcts, cols={"Live price": st.column_config.NumberColumn(format="$%.2f"), **{k: PCT_COL for k in pcts}})
 
 def render_sector_table(p):
     section("Sector performance")
     render_live_table()
     t = _cached(p.df, p.mtime)
-    st.dataframe(toned(t.round(2), list(WINDOWS)), hide_index=True, width="stretch",
-                 column_config={k: PCT_COL for k in WINDOWS})
+    table(t.round(2), WINDOWS, cols={k: PCT_COL for k in WINDOWS})

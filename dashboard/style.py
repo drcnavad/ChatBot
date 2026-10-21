@@ -14,28 +14,51 @@ import streamlit as st
 
 CSS = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
-    .stApp, .main { background: #f1f5f9; }
-    .main .block-container, [data-testid="stMainBlockContainer"] { padding: 1.25rem 2rem 2.5rem 2rem !important; max-width: 1400px; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap');
+    :root { --sa-ink: #0f172a; --sa-muted: #64748b; --sa-line: #e2e8f0; --sa-brand: #0f766e; --sa-bg: #f6f8fb; }
+    .stApp, .main { background: var(--sa-bg); }
+    .main .block-container, [data-testid="stMainBlockContainer"] { padding: 0.75rem 2.25rem 3rem 2.25rem !important; max-width: 1480px; }
     .stApp > header, header[data-testid="stHeader"], [data-testid="stDecoration"] { display: none !important; height: 0 !important; }
     #MainMenu, footer, header { visibility: hidden; }
-    html, body, [class*="css"] { font-family: 'DM Sans', system-ui, sans-serif; }
-    h1, h2, h3 { color: #0f172a; font-weight: 600; letter-spacing: -0.02em; }
-    [data-testid="stMetricValue"] { color: #0f172a; font-weight: 700; font-size: 1.05rem; font-family: 'JetBrains Mono', monospace; }
-    [data-testid="stMetricLabel"] { color: #64748b; font-weight: 500; font-size: 0.8rem; }
-    .stButton > button { background: #0f766e; color: #fff; border: none; border-radius: 10px; font-weight: 600; }
+    html, body, [class*="css"], .stApp { font-family: 'Inter', system-ui, -apple-system, sans-serif; color: var(--sa-ink); }
+    h1, h2, h3, h4, h5 { color: var(--sa-ink); font-weight: 700; letter-spacing: -0.02em; }
+    /* brand bar */
+    .sa-brand { display: flex; align-items: center; gap: 0.7rem; }
+    .sa-logo { width: 2.1rem; height: 2.1rem; border-radius: 10px; background: linear-gradient(135deg, #0f766e, #14b8a6);
+               color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.95rem;
+               box-shadow: 0 4px 12px rgba(15,118,110,.25); }
+    .sa-brand-name { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.03em; color: var(--sa-ink); line-height: 1.1; }
+    .sa-brand-sub { font-size: 0.75rem; color: var(--sa-muted); font-weight: 500; }
+    /* KPI cards */
+    [data-testid="stMetric"] { background: #fff; border: 1px solid var(--sa-line); border-radius: 14px; padding: 0.8rem 1rem;
+        box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: box-shadow .15s ease, transform .15s ease; }
+    [data-testid="stMetric"]:hover { box-shadow: 0 6px 18px rgba(15,23,42,.08); transform: translateY(-1px); }
+    [data-testid="stMetricValue"] { color: var(--sa-ink); font-weight: 700; font-size: 1.35rem; font-family: 'Inter', sans-serif;
+        font-variant-numeric: tabular-nums; }
+    [data-testid="stMetricLabel"] { color: var(--sa-muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .05em; }
+    [data-testid="stMetricDelta"] { font-weight: 600; font-size: 0.8rem; }
+    /* buttons */
+    .stButton > button { background: var(--sa-brand); color: #fff; border: none; border-radius: 10px; font-weight: 600;
+        padding: 0.45rem 1rem; box-shadow: 0 1px 2px rgba(15,23,42,.08); }
     .stButton > button:hover { background: #0d9488; color: #fff; }
-    [data-testid="stExpander"] { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; }
-    [data-baseweb="tab-list"] { background: #e2e8f0; border-radius: 14px; padding: 6px; gap: 6px; }
-    [data-baseweb="tab"] { border-radius: 10px; font-weight: 700; font-size: 0.95rem; color: #475569;
-        background: #ffffff; border: 1px solid #cbd5e1; padding: 10px 28px; }
-    [data-baseweb="tab"]:hover { color: #0f766e; border-color: #0f766e; }
-    [data-baseweb="tab"][aria-selected="true"] { background: #0f766e; color: #ffffff; border-color: #0f766e;
-        box-shadow: 0 2px 8px rgba(15, 118, 110, 0.35); }
-    [data-testid="stExpander"] summary p { font-weight: 600; color: #0f172a; }
-    [data-testid="stDataFrame"] { border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
-    [data-testid="stCaptionContainer"] { color: #64748b; line-height: 1.45; }
-    .js-plotly-plot { border-radius: 12px; background: #fff; border: 1px solid #e2e8f0; padding: 4px; }
+    /* navigation tabs: a clean underline nav bar */
+    [data-baseweb="tab-list"] { background: transparent; border-bottom: 1px solid var(--sa-line); gap: 0.25rem; padding: 0; margin-bottom: 0.75rem; }
+    [data-baseweb="tab"] { border-radius: 8px 8px 0 0; font-weight: 600; font-size: 0.95rem; color: var(--sa-muted);
+        background: transparent; border: none; padding: 0.7rem 1.4rem; }
+    [data-baseweb="tab"]:hover { color: var(--sa-brand); background: #f0fdfa; }
+    [data-baseweb="tab"][aria-selected="true"] { color: var(--sa-brand); background: transparent; }
+    [data-baseweb="tab-highlight"] { background: var(--sa-brand) !important; height: 3px !important; border-radius: 3px; }
+    [data-baseweb="tab-border"] { display: none; }
+    /* panels */
+    [data-testid="stExpander"] { background: #fff; border: 1px solid var(--sa-line); border-radius: 14px;
+        box-shadow: 0 1px 2px rgba(15,23,42,.04); margin-bottom: 0.9rem; }
+    [data-testid="stExpander"] details { border: none; }
+    [data-testid="stExpander"] summary { padding: 0.85rem 1.1rem; }
+    [data-testid="stExpander"] summary p { font-weight: 700; color: var(--sa-ink); font-size: 1rem; }
+    [data-testid="stDataFrame"] { border: 1px solid var(--sa-line); border-radius: 10px; overflow: hidden; }
+    [data-testid="stCaptionContainer"] { color: var(--sa-muted); line-height: 1.45; font-size: 0.8rem; }
+    [data-testid="stAlert"] { border-radius: 12px; }
+    .js-plotly-plot { border-radius: 12px; background: #fff; border: 1px solid var(--sa-line); padding: 4px; }
     .symbol-link { color: #0f766e; text-decoration: none; font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; }
     .symbol-link:hover { color: #0d9488; text-decoration: underline; }
     .sa-chip { font-size: 0.75rem; font-weight: 600; color: #0f766e; background: #ccfbf1; border: 1px solid #99f6e4;
@@ -77,14 +100,12 @@ CSS = """
     .sa-section-divider { height: 1px; background: linear-gradient(to right, transparent, #e2e8f0 20%, #e2e8f0 80%, transparent);
         margin: 1rem 0 0.25rem; }
     .sa-group-title { font-size: 0.7rem; font-weight: 700; letter-spacing: .09em; color: #64748b; text-transform: uppercase; }
-    [data-testid="stMetric"] { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 0.6rem 0.85rem; }
-    [data-testid="stAlert"] { border-radius: 12px; }
     .sa-stat-label { font-size: 0.66rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
     .sa-stat-val { font-size: 0.95rem; font-weight: 700; color: #0f172a; font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
 </style>
 """
 
-CHART_FONT = "DM Sans, system-ui, sans-serif"
+CHART_FONT = "Inter, system-ui, sans-serif"
 PCT_COL = st.column_config.NumberColumn(format="%.2f%%")
 
 MA_COLS = ['ma_10', 'ma_30', 'ma_50', 'ma_100', 'ma_200']
@@ -149,9 +170,6 @@ def live_row(sty, col, name):
     return sty.apply(lambda r: ["background-color: #f0fdfa; font-weight: 700" if str(r[col]).startswith(name) else ""] * len(r),
                      axis=1)
 
-def sign_color(v):
-    return tone(v)
-
 def md_tone(text, color):
     """Markdown text in the tone color (st.caption / st.markdown color syntax)."""
     return {GOOD: f":green[{text}]", CAUTION: f":orange[{text}]", BAD: f":red[{text}]"}.get(color, text)
@@ -183,8 +201,18 @@ def usd(v, sign=True):
     return f"{'+' if sign and v > 0.005 else '-' if v < -0.005 else ''}${abs(v):,.2f}"
 
 MONEY = st.column_config.NumberColumn(format="dollar")
+SPCT, INT = st.column_config.NumberColumn(format="%+.2f%%"), st.column_config.NumberColumn(format="%d")
+SCORE, SHARES = st.column_config.NumberColumn(format="%.1f"), st.column_config.NumberColumn(format="%.4g")
+
+def table(df, tone=(), fit=False, max_h=None, cols=None, **kw):
+    """Every dashboard table: st.dataframe (sortable, searchable) with no index, full width, `tone` columns colored,
+    height fitted to every row (fit) and/or capped at max_h; returns the selection event."""
+    n = len(getattr(df, "data", df))
+    if fit or max_h:
+        kw["height"] = min(max_h or 10 ** 6, 35 * (n + 1) + 3)
+    return st.dataframe(toned(df, list(tone)) if tone else df, hide_index=True, width="stretch", column_config=cols, **kw)
 
 def setup_page():
     """The page config (the first Streamlit call) and the CSS, on every run."""
-    st.set_page_config(page_title="Stock Analysis Report", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(page_title="Stock Analysis", page_icon="📈", layout="wide", initial_sidebar_state="collapsed")
     st.markdown(CSS, unsafe_allow_html=True)

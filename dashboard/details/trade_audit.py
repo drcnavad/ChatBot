@@ -6,7 +6,7 @@ import streamlit as st
 
 from dashboard.details.live_holdings import holdings_this_run
 from dashboard.settings import CT
-from dashboard.style import MONEY, caption_text, info_text, toned
+from dashboard.style import MONEY, SHARES, SPCT, INT, caption_text, info_text, table
 
 # ---------------------------------------------------------------------------- trade audit (read-only)
 @st.cache_data(ttl=3600, max_entries=2, show_spinner=False)
@@ -37,10 +37,9 @@ def render_trade_audit():
         caption_text("No sales yet.")
         return
     shown = trips.assign(**{c: [f"{x:%b %-d, %Y}" if x == x else "" for x in trips[c]] for c in ("Bought_CT", "Sold_CT")})
-    cfg = {"Buy_Price": MONEY, "Sell_Price": MONEY, "P/L $": MONEY, "P/L %": st.column_config.NumberColumn(format="%+.2f%%"),
-           "Days_Held": st.column_config.NumberColumn(format="%d"), "Shares": st.column_config.NumberColumn(format="%.4g")}
-    st.dataframe(toned(shown.round(2), ["P/L $", "P/L %"]), hide_index=True, width="stretch", height=300, column_config=cfg)
+    cfg = {"Buy_Price": MONEY, "Sell_Price": MONEY, "P/L $": MONEY, "P/L %": SPCT, "Days_Held": INT, "Shares": SHARES}
+    table(shown.round(2), ["P/L $", "P/L %"], max_h=300, cols=cfg)
     total = pd.DataFrame([{c: None for c in shown.columns}]).astype(object)     # its own table: never sorted with the rows
     total.loc[0, shown.columns[0]] = "Total"
     total.loc[0, "P/L $"] = round(float(trips["P/L $"].sum()), 2)
-    st.dataframe(toned(total, ["P/L $"]), hide_index=True, width="stretch", column_config=cfg, key="trade_audit_total")
+    table(total, ["P/L $"], cols=cfg, key="trade_audit_total")

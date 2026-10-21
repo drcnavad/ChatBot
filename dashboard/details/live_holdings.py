@@ -8,7 +8,8 @@ import streamlit as st
 
 from dashboard.data import etf_prices
 from dashboard.settings import CT
-from dashboard.style import live_row, section, toned
+from dashboard.style import MONEY, SPCT, live_row, section, toned
+from dashboard.style import table as show
 
 @st.cache_resource(show_spinner=False)
 def _fill_history():
@@ -116,14 +117,11 @@ def render_positions(table, data):
     table.insert(2, "Rank", pd.array([rank_at_buy(s, g, d) for s, g, d in zip(table["Stock"], table["Strategy"], table["First bought"])],
                                      dtype="Int64"))
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
-    money, pct = st.column_config.NumberColumn(format="dollar"), st.column_config.NumberColumn(format="%+.2f%%")
-    table = table.drop(columns=["Weight %"], errors="ignore")   # equal weights: not shown (Oct 21, 2026)
-    st.dataframe(toned(table, ["P/L $", "P/L %", "Today %"]), hide_index=True, width="stretch",
-                 height=35 * (len(table) + 1) + 3,                  # every row visible, no inner scroll
-                 column_config={"Rank": st.column_config.NumberColumn(format="%d", help="Rank in its half on the day it was first bought"),
-                                "Shares": st.column_config.NumberColumn(format="%.2f"), "Avg price": money,
-                                "Cost basis": money, "Market value": money, "P/L $": money, "Price": money,
-                                "P/L %": pct, "Today %": pct})
+    t = table.drop(columns=["Weight %"], errors="ignore")   # equal weights: not shown (Oct 21, 2026)
+    show(t, ["P/L $", "P/L %", "Today %"], fit=True,
+         cols={"Rank": st.column_config.NumberColumn(format="%d", help="Rank in its half on the day it was first bought"),
+               "Shares": st.column_config.NumberColumn(format="%.2f"), "P/L %": SPCT, "Today %": SPCT,
+               **dict.fromkeys(("Avg price", "Cost basis", "Market value", "P/L $", "Price"), MONEY)})
 
 def render_benchmarks(data):
     """The account vs QQQ / SPY / IWM / DIA since the forward-test start close, the same deposits on the same days, all
@@ -136,8 +134,6 @@ def render_benchmarks(data):
         return
     table, start, put_in = out
     section(f"Your account vs index ETFs since {start:%a %b %-d, %Y}")
-    pct, money = st.column_config.NumberColumn(format="%+.2f%%"), st.column_config.NumberColumn(format="dollar")
-    sty = live_row(toned(table, ["Return %", "Gain $", "Account ahead by (pts)"]), "Compared with", "Your account")
-    st.dataframe(sty, hide_index=True, width="stretch", height=35 * (len(table) + 1) + 3,
-                 column_config={"Return %": pct, "Value now": money, "Gain $": money,
-                                "Account ahead by (pts)": st.column_config.NumberColumn(format="%+.2f")})
+    show(live_row(toned(table, ["Return %", "Gain $", "Account ahead by (pts)"]), "Compared with", "Your account"), fit=True,
+         cols={"Return %": SPCT, "Value now": MONEY, "Gain $": MONEY,
+               "Account ahead by (pts)": st.column_config.NumberColumn(format="%+.2f")})

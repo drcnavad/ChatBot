@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import load_benchmarks, read_report_csv
-from dashboard.style import drawdown_tone, esc, show_html, symbol_link, toned
+from dashboard.style import SPCT, drawdown_tone, esc, show_html, symbol_link, table, toned
 
 def _board(daily, values):
     """(leaderboard, values) with the provisional close rows (forward_test.provisional), as shown on the dashboard."""
@@ -22,17 +22,63 @@ def render_forward_test():
     if (daily is None or daily.empty) and (values is None or values.empty):
         st.info(f"No forward-test rows yet (started {start}).")
         return
-    board, values = _board(daily, values)
-    board = tidy_board(board, start[:-6])
+    raw, values = _board(daily, values)
+    render_curve(raw, values)
+    board = tidy_board(raw, start[:-6])
+    f1, f2 = st.columns([2, 3])
+    q = f1.text_input("Search", key="ft_search", placeholder="Search strategies…", label_visibility="collapsed")
+    fams = f2.multiselect("Family", sorted(board["Rule"].unique()), key="ft_family", placeholder="All families",
+                          label_visibility="collapsed")
+    if q:
+        board = board[board["Strategy"].str.contains(q, case=False, regex=False)]
+    if fams:
+        board = board[board["Rule"].isin(fams)]
     pct = [c for c in board.columns if c not in ("Rank", "Strategy", "Rule")]
     sty = toned(toned(board, [c for c in pct if c != "Max drawdown"]), ["Max drawdown"], fn=drawdown_tone)
-    st.dataframe(highlight_rows(sty), hide_index=True, width="stretch",
-                 height=35 * (len(board) + 1) + 3,                                                # every row, no scrolling
-                 column_config={"Rank": st.column_config.NumberColumn(format="%d", width="small"),
-                                "Strategy": st.column_config.TextColumn(width="large"), "Rule": st.column_config.TextColumn(),
-                                **{c: st.column_config.NumberColumn(format="%+.2f%%") for c in pct},
-                                "Last EOD": st.column_config.NumberColumn(format="%+.2f%%", help="EOD = end of day close")})
+    table(highlight_rows(sty), fit=True, cols={"Rank": RANK, "Strategy": st.column_config.TextColumn(width="large"),
+                                               **{c: SPCT for c in pct},
+                                               "Last EOD": st.column_config.NumberColumn(format="%+.2f%%", help="End-of-day close")})
 
+def render_curve(board, values):
+    """Interactive growth chart since FORWARD_START: the leaderboard's Rank 1-5, the live strategy, QQQ and SPY by default."""
+    import plotly.graph_objects as go
+    import forward_test as ft
+    from backtest_engine import FORWARD_START
+    from dashboard.style import CHART_FONT
+    start = pd.Timestamp(FORWARD_START)
+    v = values.assign(Date=pd.to_datetime(values["Date"]), Strategy=values["Strategy"].replace(ft.OLD_NAMES))
+    v = v[v["Date"] >= start]
+    series = {n: g.set_index("Date")["Value"].sort_index() for n, g in v.groupby("Strategy")}
+    bench = load_benchmarks()
+    if bench is not None:
+        b = bench.loc[bench.index >= start]
+        series.update({f"{x} (comparison)": b[x].dropna() for x in ("QQQ", "SPY") if x in b})
+    names = board["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)
+    ranked = names[board["Rank"].notna()].tolist()
+    options = [n for n in names if n in series]
+    default = [n for n in ranked[:5] + [ft.LIVE, "QQQ (comparison)", "SPY (comparison)"] if n in series]
+    default = list(dict.fromkeys(default))
+    pick = st.multiselect("Compare", options, default=default, key="ft_curve",
+                          format_func=lambda n: CURRENT if n == ft.LIVE else n, label_visibility="collapsed")
+    fig = go.Figure()
+    for n in pick:
+        y = series[n]
+        if y.empty:
+            continue
+        y = (y / y.iloc[0] - 1) * 100
+        live = n == ft.LIVE
+        fig.add_trace(go.Scatter(x=y.index, y=y.values, mode="lines", name=CURRENT if live else n,
+                                 line=dict(width=3.5 if live else 1.8, dash="dot" if "(comparison)" in n else None),
+                                 hovertemplate="%{x|%b %-d}: %{y:+.2f}%<extra>%{fullData.name}</extra>"))
+    fig.add_hline(y=0, line=dict(color="#cbd5e1", width=1))
+    fig.update_layout(height=360, margin=dict(l=10, r=10, t=10, b=10), font=dict(family=CHART_FONT, size=12),
+                      plot_bgcolor="#fff", paper_bgcolor="#fff", hovermode="x unified",
+                      legend=dict(orientation="h", y=-0.15, font=dict(size=11)),
+                      yaxis=dict(ticksuffix="%", gridcolor="#f1f5f9", zeroline=False), xaxis=dict(gridcolor="#f1f5f9"))
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+
+RANK = st.column_config.NumberColumn(format="%d", width="small",
+                                    help="Forward-test rank: total return since Oct 2, smaller max drawdown breaks ties")
 HIGHLIGHT_BG = "background-color: #e2e8f0; font-weight: 700"   # subtle slate on the white table
 
 CURRENT = "Current Strategy (Live from Oct End)"   # display name of the live strategy's row (forward_test.LIVE stays its id)
@@ -69,22 +115,6 @@ def highlight_rows(sty):
     return sty.apply(lambda r: [HIGHLIGHT_BG if on(r["Strategy"]) else ""] * len(r), axis=1)
 
 CONSENSUS_GOOD, CONSENSUS_WARN, EXIT_RANK = 3, 2, 30   # chip colors: held by 3+ / 2 of the 5; ranked worse than 30
-
-def render_group_legend():
-    """The family colors used on strategy names (forward_test.GROUPS)."""
-    import forward_test as ft
-    chips = " · ".join(f'<span style="color:{ft.GROUPS[k]};font-weight:700">{esc(ft.GROUP_LABEL[k])}</span>' for k in ft.GROUPS)
-    show_html(f'<div class="sa-note">{chips}</div>')
-
-def paint_strategy(sty, extra=()):
-    """Color the Strategy column (and `extra` columns) by the strategy's family."""
-    import forward_test as ft
-    cols = {"Strategy", *extra}
-
-    def css(row):
-        color = ft.strategy_color(row["Strategy"])
-        return [f"color: {color}; font-weight: 600" if color and col in cols else "" for col in row.index]
-    return sty.apply(css, axis=1)
 
 def render_top10(ranks=None):
     """Top 5 consensus card (display only): the 10 stocks most held by the 5 best forward-test strategies
@@ -129,15 +159,9 @@ def render_forward_rules(p=None):
     rules = pd.DataFrame([{"Rank": rank.get(n, pd.NA), "Strategy": CURRENT if n == ft.LIVE else n,
                            "Rule": by_name[n]["rule"], "Holdings now": held.get(n, "cash")} for n in order])
     rules["Rank"] = pd.array(pd.to_numeric(rules["Rank"], errors="coerce"), dtype="Int64")
-    st.dataframe(rules, hide_index=True, width="stretch",
-                 column_config={"Rank": st.column_config.NumberColumn(format="%d", width="small",
-                                    help="Forward-test leaderboard rank: total return since Oct 2, smaller max drawdown breaks ties"),
-                                "Strategy": st.column_config.TextColumn(width="medium"),
-                                "Rule": st.column_config.TextColumn(width="large"),
-                                "Holdings now": st.column_config.TextColumn(width="large")})
-
-def render_strategy_guide():
-    """Bottom of the Strategy tab: one or two lines for what each paper strategy holds."""
-    import forward_test as ft
-    guide = pd.DataFrame([{"Strategy": c["name"], "What it does": c["rule"]} for c in ft.STRATEGIES])
-    st.dataframe(paint_strategy(guide.style, extra=("What it does",)), hide_index=True, width="stretch")
+    q = st.text_input("Search rules", key="rules_search", placeholder="Search strategy, rule or holding…",
+                      label_visibility="collapsed")
+    if q:
+        rules = rules[rules.apply(lambda r: q.lower() in " ".join(map(str, r.values)).lower(), axis=1)]
+    table(rules, cols={"Rank": RANK, "Strategy": st.column_config.TextColumn(width="medium"),
+                       "Rule": st.column_config.TextColumn(width="large"), "Holdings now": st.column_config.TextColumn(width="large")})

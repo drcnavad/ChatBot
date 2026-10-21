@@ -8,7 +8,7 @@ import streamlit as st
 
 from dashboard.page import open_symbol
 from dashboard.settings import SIGNAL_CSV
-from dashboard.style import GOOD, INK, toned
+from dashboard.style import GOOD, INK, SCORE, table, toned
 
 SLEEVE = {"lowvol": "Low vol", "sector": "Sector rotation"}
 @st.cache_data(ttl=60, show_spinner=False)
@@ -115,9 +115,8 @@ def render_last_decision(p):
             t, others = ranking_table(half, day, positions, led, values=half_values(positions, led, equity))
             t = t.drop(columns=["Weight in half %"])           # equal weights: no weight columns shown (Oct 21, 2026)
             sty = toned(t, ["Held by"], fn=lambda v: GOOD if str(v).startswith("✓") else INK)
-            event = st.dataframe(sty, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
-                                 key=f"rank_tbl_{half}", height=35 * (len(t) + 1) + 3,
-                                 column_config={"Score": st.column_config.NumberColumn(format="%.1f")})
+            event = table(sty, fit=True, cols={"Score": SCORE}, on_select="rerun", selection_mode="single-row",
+                          key=f"rank_tbl_{half}")
             if others:
                 st.caption(f"Held, not in top 20: {', '.join(others)}")
             t = t.rename(columns={"Stock": "Symbol"})
@@ -263,17 +262,13 @@ def render_preview(positions, led, equity):
             t.insert(1, "Plan", [plan(s) for s in t["Stock"]])
             t = t.drop(columns=["Weight in half %"])           # equal weights: no weight columns shown
             sty = toned(t, ["Plan"], fn=lambda v: GOOD if v == "Buy" else INK)
-            st.dataframe(sty, hide_index=True, width="stretch", height=35 * (len(t) + 1) + 3, key=f"preview_{half}",
-                         column_config={
-                                        "Score": st.column_config.NumberColumn(format="%.1f")})
+            table(sty, fit=True, cols={"Score": SCORE}, key=f"preview_{half}")
             buys_out = sorted(set(tg) - set(t["Stock"]) - set(mine[half]) - blocked)
             sells = sell_table(half, day, sorted(set(mine[half]) - set(tg)), value, vals[half], ranks, targets)
             if len(sells):
                 sells = sells.drop(columns=["Weight in half %"])
             st.markdown("Would sell" + ("" if len(sells) else ": nothing"))
             if len(sells):
-                st.dataframe(sells, hide_index=True, width="stretch", key=f"preview_sell_{half}",
-                             column_config={
-                                            "Score": st.column_config.NumberColumn(format="%.1f")})
+                table(sells, cols={"Score": SCORE}, key=f"preview_sell_{half}")
             if buys_out:
                 st.caption(f"Would also buy (ranked below 20): {', '.join(buys_out)}")

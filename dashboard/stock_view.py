@@ -12,7 +12,7 @@ from dashboard.settings import CT, HOLDINGS_CSV, symbol_sector
 from dashboard.signals import PLAN_BADGE, SIGNAL_BADGE, plan_text
 from dashboard.stock_groups import dnb_symbols, stock_groups
 from dashboard.style import (BAD, GOOD, INK, MA_COLS, TONE_CLASS, esc, fmt, num, score_tone,
-    show_html, sign_color, stat_html, symbol_link, tone)
+    show_html, stat_html, symbol_link, tone)
 
 def ticker_label(p, s):
     if s in p.short.index:
@@ -82,7 +82,7 @@ def render_stock_section(p, ticker, tdata):
             live_html = (
                 f'<div class="sa-live" title="Live quote from yfinance (display only — the strategy uses the bar close above)">'
                 f'<span class="sa-live-dot"></span>LIVE {fmt(lp, ",.2f", "$")} '
-                f'<span style="color:{sign_color(chg)};">{fmt(chg, "+.2f", suffix="%")}</span>'
+                f'<span style="color:{tone(chg)};">{fmt(chg, "+.2f", suffix="%")}</span>'
                 f' <span class="sa-live-sub">vs {pd.Timestamp(latest["Date"]):%a} close · '
                 f'{lts.tz_convert(CT).strftime("%I:%M %p")} CT</span></div>'
             )
@@ -115,7 +115,7 @@ def render_stock_section(p, ticker, tdata):
         stats += [
             stat_html("Held since", f"{pd.Timestamp(hold['Entry_Date']):%b %-d}"
                       if pd.notna(hold['Entry_Date']) else "—"),
-            stat_html("P&L since entry", fmt(num(hold['PnL_%']), "+.1f", suffix="%"), sign_color(num(hold['PnL_%']))),
+            stat_html("P&L since entry", fmt(num(hold['PnL_%']), "+.1f", suffix="%"), tone(num(hold['PnL_%']))),
         ]
     close = num(latest['Close'])
     ma_stats = [(ma.upper().replace('_', ' '), fmt(num(latest[ma]), ",.2f", "$"),     # green = the close is above it

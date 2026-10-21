@@ -46,20 +46,57 @@ def open_symbol(table, event, key):
         st.session_state["_pending_ticker"] = pick
         st.rerun()
 
+def kpis():
+    """Header KPI numbers from the saved forward test (the same leaderboard the Strategy tab shows); {} when missing."""
+    try:
+        import forward_test as ft
+        from dashboard.data import read_report_csv
+        from dashboard.details.forward_test import _board
+        daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
+        if values is None or values.empty:
+            return {}
+        b = _board(daily, values)[0]
+        b = b.assign(name=b["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)).set_index("name")
+        row = lambda n: b.loc[n] if n in b.index else None
+        out = {"live": row(ft.LIVE), "account": row(ft.ACCOUNT), "qqq": row("QQQ (comparison)"),
+               "spy": row("SPY (comparison)"), "ranked": int(b["Rank"].notna().sum())}
+        if daily is not None and len(daily):
+            out["equity"] = float(daily["Equity"].iloc[-1])
+        return out
+    except Exception:          # the header never breaks the page
+        return {}
+
+def _pct(r, col="Total return %"):
+    return f"{r[col]:+.2f}%" if r is not None and pd.notna(r[col]) else "—"
+
 def render_top_bar(p):
     stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()
-    updated = datetime.fromtimestamp(p.mtime, tz=CT).strftime("%m/%d/%Y %I:%M %p CT")
-    note = f" · ⚠️ {len(stale)} stale file(s), see Strategy > Data freshness" if stale else ""
-    c1, c2, c3 = st.columns([4, 3, 1], vertical_alignment="center")
+    updated = datetime.fromtimestamp(p.mtime, tz=CT).strftime("%b %-d, %I:%M %p CT")
+    c1, c2, c3 = st.columns([5, 3, 1.2], vertical_alignment="center")
     with c1:
-        show_html("<h1 style='margin:0;font-size:1.45rem;font-weight:700;'>Stock Analysis</h1>")
+        show_html('<div class="sa-brand"><div class="sa-logo">SA</div><div><div class="sa-brand-name">Stock Analysis</div>'
+                  '<div class="sa-brand-sub">Signals · forward test · live account</div></div></div>')
     with c2:
-        show_html(f'<div class="sa-chip{" sa-chip-warn" if stale else ""}">Updated {esc(updated + note)}</div>')
+        note = f" · ⚠️ {len(stale)} stale" if stale else ""
+        show_html(f'<div style="text-align:right"><span class="sa-chip{" sa-chip-warn" if stale else ""}" '
+                  f'title="{esc(", ".join(stale) or "All data files are fresh")}">Updated {esc(updated + note)}</span></div>')
     with c3:
-        # One-click freshness: every data cache is already keyed on the Reports/*.csv modification times,
-        # so clearing the caches and rerunning always shows the newest pipeline output + live quotes.
-        if st.button("Refresh data",
-                       help="Clear all cached data and reload the latest Reports/*.csv files and live quotes."):
+        # every data cache is keyed on the Reports/*.csv modification times: clearing them reloads the newest output
+        if st.button("Refresh data", width="stretch",
+                     help="Clear all cached data and reload the latest Reports/*.csv files and live quotes."):
             st.cache_data.clear()
             st.cache_resource.clear()
             st.rerun()
+    k = kpis()
+    if not k:
+        return
+    live, acc, qqq, spy = k.get("live"), k.get("account"), k.get("qqq"), k.get("spy")
+    m = st.columns(5)
+    m[0].metric("Account equity", f"${k['equity']:,.0f}" if "equity" in k else "—",
+                _pct(acc, "Daily return %") if acc is not None else None, help="Alpaca account, last saved close")
+    m[1].metric("Account since Oct 2", _pct(acc), help="Time-weighted: deposits and withdrawals are not returns")
+    m[2].metric("Live strategy since Oct 2", _pct(live),
+                f"Rank #{int(live['Rank'])} of {k['ranked']}" if live is not None and pd.notna(live["Rank"]) else None,
+                delta_color="off", help="Forward-test leaderboard (Strategy tab)")
+    m[3].metric("QQQ since Oct 2", _pct(qqq), _pct(qqq, "Daily return %") if qqq is not None else None)
+    m[4].metric("SPY since Oct 2", _pct(spy), _pct(spy, "Daily return %") if spy is not None else None)
