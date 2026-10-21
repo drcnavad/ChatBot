@@ -126,8 +126,6 @@ CSS = """
     .sa-tier-syms .symbol-link.t-warn { color: #b45309; background: #fffbeb; border-color: #fde68a; }
     .sa-tier-syms .symbol-link.t-bad { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
     .sa-tier-syms .symbol-link.sel { outline: 2px solid #0f766e; outline-offset: 1px; }
-    .sa-note { font-size: 0.78rem; color: #475569; background: #f0fdfa; border: 1px solid #ccfbf1; border-radius: 10px;
-               padding: 0.55rem 0.8rem; margin-top: 0.6rem; line-height: 1.5; }
     .sa-ident { display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap; }
     .sa-sym { font-size: 1.75rem; font-weight: 700; color: #0f172a; font-family: 'JetBrains Mono', monospace; }
     .sa-price { font-size: 1.25rem; font-weight: 700; color: #334155; font-family: 'JetBrains Mono', monospace; }

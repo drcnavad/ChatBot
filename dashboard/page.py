@@ -102,7 +102,7 @@ def render_ticker(box):
         cls = "up" if chg == chg and chg > 0 else "down" if chg == chg and chg < 0 else ""
         items.append(f'<a class="sa-tick" href="?stock={esc(x["symbol"])}" target="_self"><b>{esc(x["symbol"])}</b>'
                      f'<span>${px:,.2f}</span><span class="{cls}">{"▲" if cls == "up" else "▼" if cls == "down" else ""}'
-                     f'{abs(chg):.2f}%</span></a>' if px == px else "")
+                     f'{f"{abs(chg):.2f}%" if chg == chg else ""}</span></a>' if px == px else "")
     row = "".join(items)
     secs = max(20, 3 * len(items))                       # the same speed for any number of stocks
     box.markdown(f'<div class="sa-ticker"><div class="sa-ticker-track" style="animation-duration:{secs}s">'

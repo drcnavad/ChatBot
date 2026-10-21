@@ -8,6 +8,7 @@ import re
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -19,6 +20,7 @@ FEEDS = [("CNBC", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partne
                          "?hl=en-US&gl=US&ceid=US:en")]
 STOCK_FEED = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={sym}&region=US&lang=en-US"   # free, keyless
 MAX_ITEMS, PER_STOCK, SECONDS = 30, 2, 6
+NY = ZoneInfo("America/New_York")
 
 def _one_line(p):
     return re.sub(r"\n\s*", "", p)
@@ -91,18 +93,22 @@ def headlines():
     items = []
     with ThreadPoolExecutor(max_workers=16) as pool:
         for job, got in zip(jobs, pool.map(_safe, jobs)):
-            items += got[:PER_STOCK] if len(job) == 3 else got
-    items = [i for i in items if is_news(i["title"], i["source"])]
+            items += [i for i in got if is_news(i["title"], i["source"])][:PER_STOCK] if len(job) == 3 else got
+    return _recent(items, 24)[0][:MAX_ITEMS]
+
+def _recent(items, fallback_hours):
+    """(news headlines newest first, each once; today's in New York, else the last fallback_hours, label)."""
     seen, uniq = set(), []
     for it in sorted(items, key=lambda x: x["time"], reverse=True):
         key = "".join(c for c in it["title"].lower() if c.isalnum())[:80]
-        if key not in seen:
+        if key not in seen and is_news(it["title"], it["source"]):
             seen.add(key)
             uniq.append(it)
     now = datetime.now(timezone.utc)
-    today = [i for i in uniq if i["time"].astimezone(timezone(timedelta(hours=-4))).date()
-             == now.astimezone(timezone(timedelta(hours=-4))).date()]
-    return (today or [i for i in uniq if now - i["time"] <= timedelta(hours=24)])[:MAX_ITEMS]
+    today = [i for i in uniq if i["time"].astimezone(NY).date() == now.astimezone(NY).date()]
+    if today:
+        return today, "today"
+    return [i for i in uniq if now - i["time"] <= timedelta(hours=fallback_hours)], f"last {fallback_hours} hours"
 
 def _ago(t):
     m = int((datetime.now(timezone.utc) - t).total_seconds() // 60)
@@ -132,18 +138,11 @@ def render_news_banner(box):
     with box:
         show_html(css + f'<div class="sa-news"><span class="sa-news-tag">LIVE NEWS</span><div class="sa-news-box">{rows}</div></div>')
 
-
 @st.cache_data(ttl=600, show_spinner=False)
 def stock_news(sym, limit=5):
     """(items, label) for one stock from its Yahoo Finance feed: today's (New York) headlines, else the last 48 h."""
-    items = _safe(("Yahoo Finance", STOCK_FEED.format(sym=sym), sym))
-    items = sorted({i["title"]: i for i in items if is_news(i["title"], i["source"])}.values(), key=lambda x: x["time"], reverse=True)
-    ny = timezone(timedelta(hours=-4))
-    now = datetime.now(timezone.utc)
-    today = [i for i in items if i["time"].astimezone(ny).date() == now.astimezone(ny).date()]
-    if today:
-        return today[:limit], "today"
-    return [i for i in items if now - i["time"] <= timedelta(hours=48)][:limit], "last 48 hours"
+    items, label = _recent(_safe(("Yahoo Finance", STOCK_FEED.format(sym=sym), sym)), 48)
+    return items[:limit], label
 
 def render_stock_news(sym):
     """A compact list of the stock's headlines (links open in a new tab); nothing when there are none."""

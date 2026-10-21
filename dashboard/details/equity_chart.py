@@ -34,8 +34,10 @@ def equity_series(key):
     if tf == "1D":                                      # daily bars are stamped at midnight New York time of their day
         raw.index = flow.index = ts.tz_convert("America/New_York").tz_localize(None).normalize()
         acct = ap.PaperAccount()._get("/account")                 # today's live equity as the last point
-        today = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
-        if float(acct.get("equity") or 0) > 0 and (not len(raw) or raw.index[-1] < today):
+        now = pd.Timestamp.now(tz="America/New_York")
+        today = now.tz_localize(None).normalize()
+        trading = now.weekday() < 5 and now.hour * 60 + now.minute >= 570     # not on weekends or before the open
+        if trading and float(acct.get("equity") or 0) > 0 and (not len(raw) or raw.index[-1] < today):
             raw.loc[today], flow.loc[today] = float(acct["equity"]), 0.0
     keep_from = raw.index.tz_localize(None) >= START if raw.index.tz is not None else raw.index >= START
     raw, flow = raw[keep_from], flow[keep_from]
@@ -44,7 +46,7 @@ def equity_series(key):
     keep = (raw > 0) & raw.notna()                                            # before funding / after closing: left out
     raw, ratio, flow = raw[keep], ratio[keep], flow[keep]
     if len(raw) < 2:
-        return pd.DataFrame(columns=["equity", "flow", "twr"]), pd.Series(dtype=float)
+        return pd.DataFrame(columns=["equity", "flow", "twr"]), {}
     ratio.iloc[0] = 1.0
     flow.iloc[0] = 0.0                                 # money already in at the start is the starting balance
     out = pd.DataFrame({"equity": raw, "flow": flow, "twr": ratio.cumprod()})
@@ -57,29 +59,21 @@ def gains(d):
             "twr_pct": (float(d["twr"].iloc[-1]) - 1) * 100}
 
 def _bench(sym, index, tf):
-    """sym's closes at the same times (Alpaca bars, SIP then IEX); empty when unavailable."""
+    """sym's closes at the same times (data.alpaca_bars); empty when unavailable."""
     if not len(index):
         return pd.Series(dtype=float)
     try:
-        import backtest_engine as be
-        from alpaca.data.enums import DataFeed
-        from alpaca.data.requests import StockBarsRequest
-        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-        frame = TimeFrame.Day if tf == "1D" else TimeFrame(int(tf[:-3]), TimeFrameUnit.Minute)
-        start = pd.Timestamp(index[0]).tz_localize("America/Chicago") if index.tz is None else index[0]
-        client = be.market_data_client()
-        for feed in ("sip", "iex"):
-            try:
-                bars = client.get_stock_bars(StockBarsRequest(symbol_or_symbols=sym, timeframe=frame,
-                                                              start=(start - pd.Timedelta(days=3)).to_pydatetime(),
-                                                              feed=DataFeed(feed))).data.get(sym, [])
-                break
-            except Exception:
-                bars = []
-        s = pd.Series({pd.Timestamp(b.timestamp).tz_convert("America/Chicago"): float(b.close) for b in bars}).sort_index()
-        if tf == "1D":
-            s.index = s.index.tz_localize(None).normalize()
+        from dashboard.data import NY, alpaca_bars
+        start = pd.Timestamp(index[0])
+        start = (start.tz_localize(NY) if start.tz is None else start) - pd.Timedelta(days=3)
+        bars = alpaca_bars((sym,), None if tf == "1D" else int(tf[:-3]), start)
+        if sym not in bars:
+            return pd.Series(dtype=float)
+        s = bars[sym]["Close"]
+        if tf == "1D":                                  # daily bars: their New York date, as the equity index
+            s.index = s.index.normalize()
             return s.reindex(index, method="ffill")
+        s.index = s.index.tz_localize(NY).tz_convert(index.tz)
         return s.reindex(index, method="ffill", tolerance=pd.Timedelta(minutes=30))
     except Exception:
         return pd.Series(dtype=float)

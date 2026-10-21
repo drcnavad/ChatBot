@@ -231,11 +231,45 @@ def ohlcv(symbol):
     b = _bars(tuple(os.path.getmtime(p) if os.path.exists(p) else 0 for p in BAR_CACHES))
     return b[b["Symbol"] == symbol].set_index("Date").sort_index()[["Open", "High", "Low", "Close", "Volume"]]
 
+NY = "America/New_York"
+OHLCV = ["Open", "High", "Low", "Close", "Volume"]
+
+def alpaca_bars(symbols, minutes, start):
+    """Display only: {symbol: OHLCV DataFrame indexed by New York time without zone} from Alpaca bars since `start`
+    (minutes per bar; None = daily), SIP first and IEX on any SIP error; {} when neither answers."""
+    import backtest_engine as be
+    from alpaca.data.enums import DataFeed
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+    frame = TimeFrame.Day if minutes is None else TimeFrame(minutes, TimeFrameUnit.Minute)
+    client = be.market_data_client()
+    for feed in ("sip", "iex"):
+        try:
+            data = client.get_stock_bars(StockBarsRequest(symbol_or_symbols=list(symbols), timeframe=frame,
+                                                          start=pd.Timestamp(start).to_pydatetime(), feed=DataFeed(feed))).data
+            break
+        except Exception:
+            data = None
+    out = {}
+    for sym, rows in (data or {}).items():
+        df = pd.DataFrame([(r.timestamp, r.open, r.high, r.low, r.close, r.volume) for r in rows], columns=["t"] + OHLCV)
+        if len(df):
+            df.index = pd.to_datetime(df.pop("t"), utc=True).dt.tz_convert(NY).dt.tz_localize(None).rename(None)
+            out[sym] = df.astype(float)
+    return out
+
+def last_sessions(df, n):
+    """Regular-hours (9:30-16:00 New York) bars of the last n sessions that have any."""
+    hm = df.index.hour * 60 + df.index.minute
+    df = df[(hm >= 570) & (hm < 960)]
+    days = sorted(set(df.index.normalize()))[-n:]
+    return df[df.index.normalize().isin(days)]
+
 @st.cache_data(ttl=60, show_spinner=False)
 def intraday(symbols: tuple):
-    """Display only (header card popups): {symbol: (times, closes, previous close)} of today's 5-minute bars from the
-    open, Alpaca SIP first, IEX on any SIP error; "PORTFOLIO" = the account's 1-day, 5-minute equity history (GET
-    /account/portfolio/history). Cached 60 s; a series that cannot be read is left out."""
+    """Display only (header card popups): {symbol: (epoch times, closes, previous close)} of the latest session's
+    5-minute bars (today's, or the last session's while the market is closed); "PORTFOLIO" = the account's 1-day,
+    5-minute equity history (GET /account/portfolio/history). Cached 60 s; a series that cannot be read is left out."""
     if _live_off():
         return {}
     out = {}
@@ -249,24 +283,14 @@ def intraday(symbols: tuple):
     except Exception:
         pass
     try:
-        import backtest_engine as be
-        from alpaca.data.enums import DataFeed
-        from alpaca.data.requests import StockBarsRequest
-        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-        client = be.market_data_client()
-        start = pd.Timestamp.now(tz="America/New_York").normalize() + pd.Timedelta(hours=9, minutes=30)
-        prev = {s: v[1] for s, v in index_quotes(symbols).items()}
-        for feed in ("sip", "iex"):
-            try:
-                bars = client.get_stock_bars(StockBarsRequest(symbol_or_symbols=list(symbols), start=start.to_pydatetime(),
-                                                              timeframe=TimeFrame(5, TimeFrameUnit.Minute), feed=DataFeed(feed))).data
-                break
-            except Exception:
-                bars = {}
-        for s, rows in bars.items():
-            if rows and s in prev and prev[s] == prev[s]:
-                last = index_quotes(symbols)[s][0]
-                out[s] = ([r.timestamp.timestamp() for r in rows], [float(r.close) for r in rows], last / (1 + prev[s] / 100))
+        quotes = index_quotes(symbols)
+        bars = alpaca_bars(symbols, 5, pd.Timestamp.now(tz=NY).normalize() - pd.Timedelta(days=5))
+        for s, df in bars.items():
+            df = last_sessions(df, 1)
+            last, chg = quotes.get(s, (None, float("nan")))
+            if len(df) and chg == chg:
+                times = [t.timestamp() for t in df.index.tz_localize(NY)]
+                out[s] = (times, df["Close"].tolist(), last / (1 + chg / 100))
     except Exception:
         pass
     return out
@@ -275,37 +299,13 @@ INTRADAY_VIEWS = {"1D": (5, 1), "1W": (15, 5)}      # range button -> (minutes p
 
 @st.cache_data(ttl=60, show_spinner=False)
 def intraday_ohlcv(symbol, view):
-    """Display only (stock chart 1D / 1W buttons): Open/High/Low/Close/Volume candles of the last session (5-minute)
-    or the last 5 sessions (15-minute), regular hours, index = New York time without zone. Alpaca SIP, IEX on any SIP
-    error; cached 60 s; empty when it cannot be read."""
-    cols = ["Open", "High", "Low", "Close", "Volume"]
+    """Display only (stock chart 1D / 1W buttons): OHLCV candles of the last session (5-minute) or the last 5 sessions
+    (15-minute), regular hours, index = New York time without zone. Cached 60 s; empty when it cannot be read."""
     if _live_off() or view not in INTRADAY_VIEWS:
-        return pd.DataFrame(columns=cols)
+        return pd.DataFrame(columns=OHLCV)
     minutes, sessions = INTRADAY_VIEWS[view]
     try:
-        import backtest_engine as be
-        from alpaca.data.enums import DataFeed
-        from alpaca.data.requests import StockBarsRequest
-        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-        client = be.market_data_client()
-        start = pd.Timestamp.now(tz="America/New_York").normalize() - pd.Timedelta(days=4 + sessions * 2)
-        rows = []
-        for feed in ("sip", "iex"):
-            try:
-                rows = client.get_stock_bars(StockBarsRequest(symbol_or_symbols=symbol, start=start.to_pydatetime(),
-                                                              timeframe=TimeFrame(minutes, TimeFrameUnit.Minute),
-                                                              feed=DataFeed(feed))).data.get(symbol, [])
-                break
-            except Exception:
-                rows = []
-        df = pd.DataFrame([(r.timestamp, r.open, r.high, r.low, r.close, r.volume) for r in rows], columns=["t"] + cols)
-        if df.empty:
-            return pd.DataFrame(columns=cols)
-        t = pd.to_datetime(df.pop("t"), utc=True).dt.tz_convert("America/New_York").dt.tz_localize(None)
-        df.index = t
-        hm = df.index.hour * 60 + df.index.minute
-        df = df[(hm >= 570) & (hm < 960)].astype(float)                       # 9:30 to 16:00 only
-        days = sorted(set(df.index.normalize()))[-sessions:]
-        return df[df.index.normalize().isin(days)]
+        df = alpaca_bars((symbol,), minutes, pd.Timestamp.now(tz=NY).normalize() - pd.Timedelta(days=4 + sessions * 2))
+        return last_sessions(df[symbol], sessions) if symbol in df else pd.DataFrame(columns=OHLCV)
     except Exception:
-        return pd.DataFrame(columns=cols)
+        return pd.DataFrame(columns=OHLCV)

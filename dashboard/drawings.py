@@ -16,7 +16,6 @@ if not os.path.exists(_JS):                      # plotly.js from the installed 
     shutil.copy(os.path.join(os.path.dirname(plotly.__file__), "package_data", "plotly.min.js"), _JS)
 _chart = components.declare_component("sa_stock_chart", path=_DIR)
 LEVEL = dict(color="#7c3aed", width=1.5, dash="dash")
-TOOLS = ["drawline", "drawopenpath", "drawrect", "eraseshape"]
 
 def _path(sym):
     return os.path.join(DRAWINGS_DIR, f"{''.join(c for c in sym if c.isalnum() or c in '.-')}.json")
@@ -48,10 +47,8 @@ def render_chart(fig, sym, ohlc, view="1Y", mode="Candles", intraday=False):
     shapes = load(sym)
     fig.update_layout(shapes=list(fig.layout.shapes) + shapes, dragmode=False,   # range only via the 1M..All buttons
                       newshape=dict(line=dict(color="#7c3aed", width=2), fillcolor="rgba(124,58,237,0.08)"))
-    spec = json.loads(fig.to_json())
-    spec["config"] = {"displaylogo": False, "scrollZoom": False, "modeBarButtonsToAdd": TOOLS,
-                      "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d", "zoom2d", "pan2d", "zoomIn2d", "zoomOut2d"]}
-    out = _chart(spec=json.dumps(spec), ohlc=ohlc, view=view, mode=mode, intraday=intraday, key=f"chart_{sym}",
+    # toolbar (line, rectangle, undo, redo, delete, erase), no scroll zoom: set by the component (index.html)
+    out = _chart(spec=fig.to_json(), ohlc=ohlc, view=view, mode=mode, intraday=intraday, key=f"chart_{sym}",
                  default=None)
     if out and out.get("t") != st.session_state.get(f"_drawn_{sym}"):
         st.session_state[f"_drawn_{sym}"] = out["t"]
