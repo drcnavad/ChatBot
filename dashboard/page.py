@@ -47,27 +47,41 @@ def open_symbol(table, event, key):
         st.rerun()
 
 def kpis():
-    """Header KPI numbers from the saved forward test (the same leaderboard the Strategy tab shows); {} when missing."""
+    """The live strategy's leaderboard row and the ranked count (the same board as the Strategy tab) + the last saved
+    account row (fallback when Alpaca cannot be read); {} when missing."""
     try:
         import forward_test as ft
         from dashboard.data import read_report_csv
         from dashboard.details.forward_test import _board
         daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
-        if values is None or values.empty:
-            return {}
-        b = _board(daily, values)[0]
-        b = b.assign(name=b["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)).set_index("name")
-        row = lambda n: b.loc[n] if n in b.index else None
-        out = {"live": row(ft.LIVE), "account": row(ft.ACCOUNT), "qqq": row("QQQ (comparison)"),
-               "spy": row("SPY (comparison)"), "ranked": int(b["Rank"].notna().sum())}
-        if daily is not None and len(daily):
-            out["equity"] = float(daily["Equity"].iloc[-1])
+        out = {"daily": daily.iloc[-1] if daily is not None and len(daily) else None}
+        if values is not None and not values.empty:
+            b = _board(daily, values)[0]
+            live = b[b["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False) == ft.LIVE]
+            out.update(live=live.iloc[0] if len(live) else None, ranked=int(b["Rank"].notna().sum()))
         return out
     except Exception:          # the header never breaks the page
         return {}
 
-def _pct(r, col="Total return %"):
-    return f"{r[col]:+.2f}%" if r is not None and pd.notna(r[col]) else "—"
+def account_now():
+    """Header cards: equity, cash, today's change and open positions from this run's live holdings read
+    (holdings_this_run: no extra Alpaca call). Today's change = equity vs the last finished day in the account
+    history, net of today's deposits. None when the account cannot be read."""
+    from dashboard.details.live_holdings import holdings_this_run
+    data, err = holdings_this_run()
+    if err or not data:
+        return None
+    eq, pos, h = float(data["equity"]), data["positions"], data.get("history")
+    invested = sum(float(x.get("market_value") or 0) for x in pos)
+    today = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
+    prev = h[h["Date"] < today] if h is not None and len(h) else None
+    flow = float(h.loc[h["Date"] == today, "Cashflow"].sum()) if h is not None and len(h) else 0.0
+    chg = eq - flow - float(prev["Equity"].iloc[-1]) if prev is not None and len(prev) else None
+    return {"equity": eq, "cash": eq - invested, "positions": len(pos), "chg": chg,
+            "chg_pct": chg / float(prev["Equity"].iloc[-1]) * 100 if chg is not None else None}
+
+def _sp(v, d=2, unit="%"):
+    return f"{v:+,.{d}f}{unit}" if v is not None and v == v else "—"
 
 def render_top_bar(p):
     stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()
@@ -87,16 +101,31 @@ def render_top_bar(p):
             st.cache_data.clear()
             st.cache_resource.clear()
             st.rerun()
+    return st.container()          # the KPI cards, filled by render_kpis at the end of the run
+
+def render_kpis(box):
+    """The header cards, drawn last (into render_top_bar's container) so they reuse this run's holdings read."""
     k = kpis()
-    if not k:
-        return
-    live, acc, qqq, spy = k.get("live"), k.get("account"), k.get("qqq"), k.get("spy")
-    m = st.columns(5)
-    m[0].metric("Account equity", f"${k['equity']:,.0f}" if "equity" in k else "—",
-                _pct(acc, "Daily return %") if acc is not None else None, help="Alpaca account, last saved close")
-    m[1].metric("Account since Oct 2", _pct(acc), help="Time-weighted: deposits and withdrawals are not returns")
-    m[2].metric("Live strategy since Oct 2", _pct(live),
-                f"Rank #{int(live['Rank'])} of {k['ranked']}" if live is not None and pd.notna(live["Rank"]) else None,
-                delta_color="off", help="Forward-test leaderboard (Strategy tab)")
-    m[3].metric("QQQ since Oct 2", _pct(qqq), _pct(qqq, "Daily return %") if qqq is not None else None)
-    m[4].metric("SPY since Oct 2", _pct(spy), _pct(spy, "Daily return %") if spy is not None else None)
+    from dashboard.data import index_quotes
+    acct, q, live = account_now(), index_quotes(("QQQ", "SPY", "DIA")), k.get("live")
+    if acct is None and k.get("daily") is not None:                   # Alpaca not readable: the last saved close
+        d = k["daily"]
+        acct = {"equity": float(d["Equity"]), "cash": float(d["Cash"]), "chg": None, "chg_pct": None,
+                "positions": int(d["Positions"]), "saved": True}
+    cards = []
+    if acct:
+        cards += [("Portfolio", f"${acct['equity']:,.0f}",
+                   "Last saved close" if acct.get("saved") or acct["chg"] is None else f"{'-' if acct['chg'] < 0 else '+'}${abs(acct['chg']):,.0f} ({_sp(acct['chg_pct'])}) today",
+                   "off" if acct.get("saved") else "normal", "Alpaca account equity and today's change"),
+                  ("Cash", f"{acct['cash'] / acct['equity']:.1%}" if acct["equity"] else "—",
+                   f"${acct['cash']:,.0f} · {acct['positions']} positions", "off", "Cash share of equity; open positions")]
+    for sym, name in (("QQQ", "Nasdaq 100 · QQQ"), ("SPY", "S&P 500 · SPY"), ("DIA", "Dow · DIA")):
+        px, chg = q.get(sym, (None, None))
+        cards.append((name, f"${px:,.2f}" if px else "—", f"{_sp(chg)} today" if px else "Quote unavailable",
+                      "normal" if px else "off", "Live price (Alpaca SIP, IEX fallback), change vs the previous close"))
+    if live is not None:
+        cards.append(("Live strategy", _sp(live["Total return %"]),
+                      f"Rank #{int(live['Rank'])} of {k['ranked']}" if pd.notna(live["Rank"]) else "Not ranked", "off",
+                      "Forward-test total return and rank (Strategy tab)"))
+    for col, (label, value, delta, dc, tip) in zip(box.columns(len(cards), gap="small"), cards):
+        col.metric(label, value, delta, delta_color=dc, help=tip)

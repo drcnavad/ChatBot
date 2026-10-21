@@ -30,12 +30,17 @@ CSS = """
     .sa-brand-name { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.03em; color: var(--sa-ink); line-height: 1.1; }
     .sa-brand-sub { font-size: 0.75rem; color: var(--sa-muted); font-weight: 500; }
     /* KPI cards */
-    [data-testid="stMetric"] { background: #fff; border: 1px solid var(--sa-line); border-radius: 14px; padding: 0.8rem 1rem;
-        box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: box-shadow .15s ease, transform .15s ease; }
+    [data-testid="stMetric"] { background: #fff; border: 1px solid var(--sa-line); border-radius: 14px; padding: 0.9rem 1.1rem;
+        box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: box-shadow .15s ease, transform .15s ease;
+        height: 112px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; }
+    [data-testid="stMetric"] > div { gap: 0.15rem; }
+    [data-testid="stMetricLabel"], [data-testid="stMetricLabel"] p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    [data-testid="stMetricDelta"] svg { width: 0.85rem; height: 0.85rem; }
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { min-width: 0; }
     [data-testid="stMetric"]:hover { box-shadow: 0 6px 18px rgba(15,23,42,.08); transform: translateY(-1px); }
-    [data-testid="stMetricValue"] { color: var(--sa-ink); font-weight: 700; font-size: 1.35rem; font-family: 'Inter', sans-serif;
+    [data-testid="stMetricValue"] { color: var(--sa-ink); font-weight: 700; font-size: 1.45rem; line-height: 1.2; font-family: 'Inter', sans-serif;
         font-variant-numeric: tabular-nums; }
-    [data-testid="stMetricLabel"] { color: var(--sa-muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .05em; }
+    [data-testid="stMetricLabel"] { color: var(--sa-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: .05em; line-height: 1.2; }
     [data-testid="stMetricDelta"] { font-weight: 600; font-size: 0.8rem; }
     /* buttons */
     .stButton > button { background: var(--sa-brand); color: #fff; border: none; border-radius: 10px; font-weight: 600;

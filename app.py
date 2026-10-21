@@ -30,7 +30,7 @@ sys.path.insert(0, ROOT)  # project modules (backtest_engine, sector_mapping, da
 from dashboard.details import render_strategy_tab, render_trading_tab  # noqa: E402
 from dashboard.details.live_holdings import new_run  # noqa: E402
 from dashboard.notes import render_notes  # noqa: E402
-from dashboard.page import build_page, render_top_bar  # noqa: E402
+from dashboard.page import build_page, render_kpis, render_top_bar  # noqa: E402
 from dashboard.sector_table import render_sector_table  # noqa: E402
 from dashboard.short_stock import render_short_stock  # noqa: E402
 from dashboard.stock_chart import render_stock_figure, stock_chart_inputs  # noqa: E402
@@ -51,7 +51,7 @@ def main():
         st.session_state["_pending_ticker"] = q_symbol
         del st.query_params["symbol"]
 
-    render_top_bar(p)
+    kpi_box = render_top_bar(p)
     tab_home, tab_strategy, tab_trading = st.tabs(["Home", "Strategy", "Trading Account"])
     with tab_home:
         with st.expander("My notes", expanded=True):
@@ -68,5 +68,6 @@ def main():
         render_strategy_tab(p)
     with tab_trading:
         render_trading_tab(p)
+    render_kpis(kpi_box)
 
 main()

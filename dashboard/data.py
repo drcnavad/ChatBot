@@ -187,3 +187,33 @@ def etf_prices(symbols: tuple, start: str):
         if s not in now and s in closes and len(closes[s].dropna()):
             now[s] = float(closes[s].dropna().iloc[-1])
     return closes, now
+
+def _live_off():
+    return os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off"          # tests: never call Alpaca
+
+@st.cache_data(ttl=30, show_spinner=False)
+def index_quotes(symbols: tuple):
+    """Display only (header cards): {symbol: (last price, day change %)} from Alpaca snapshots, SIP first and IEX on any
+    SIP error (the same feeds as paper_trade's order quotes). Change = last trade vs the previous session's close.
+    Cached 30 s; {} when neither feed answers."""
+    if _live_off():
+        return {}
+    import backtest_engine as be
+    from alpaca.data.enums import DataFeed
+    from alpaca.data.requests import StockSnapshotRequest
+    try:
+        client = be.market_data_client()
+    except Exception:
+        return {}
+    for feed in ("sip", "iex"):
+        try:
+            snaps = client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=list(symbols), feed=DataFeed(feed)))
+            out = {}
+            for s, x in snaps.items():
+                px = float(x.latest_trade.price) if x.latest_trade else float(x.daily_bar.close)
+                prev = float(x.previous_daily_bar.close) if x.previous_daily_bar else float("nan")
+                out[s] = (px, (px / prev - 1) * 100 if prev == prev and prev else float("nan"))
+            return out
+        except Exception:
+            continue
+    return {}
