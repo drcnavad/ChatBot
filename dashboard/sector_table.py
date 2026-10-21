@@ -44,7 +44,7 @@ try:
 except Exception:
     sector_etfs = {}
 MARKETS = {"SPY": "S&P 500", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWM": "Russell 2000",
-           "DBC": "Commodities", "GLD": "Gold", "SLV": "Silver", "USO": "Crude Oil"}
+           "DBC": "Commodities", "GLD": "Gold", "SLV": "Silver", "USO": "USO (crude ETF)"}
 LIVE_WINDOWS = {"3 days %": pd.DateOffset(days=3), "1 week %": pd.DateOffset(weeks=1), **WINDOWS,
                 "2 years %": pd.DateOffset(years=2)}
 
@@ -97,6 +97,32 @@ def portfolio_row(today):
         row[col] = (idx.iloc[-1] / past.iloc[-1] - 1) * 100 if len(past) else None
     return row
 
+FUTURES = {"CL=F": "Crude oil WTI (US)", "BZ=F": "Crude oil Brent (global)", "GC=F": "Gold futures",
+           "SI=F": "Silver futures"}
+
+@st.cache_data(ttl=60, show_spinner=False)
+def futures_rows(today):
+    """Front-month futures from yfinance ($ per barrel / ounce): live = latest price, % vs the daily close that far back.
+    A failed symbol is left out."""
+    import yfinance as yf
+    rows = []
+    for sym, name in FUTURES.items():
+        try:
+            t = yf.Ticker(sym)
+            c = t.history(period="3y", interval="1d", auto_adjust=False)["Close"].dropna()
+            c.index = c.index.tz_localize(None).normalize()
+            live = float(t.fast_info["last_price"])
+            prev = c[c.index < today]
+            row = {"Group": "Futures", "Name": name, "Symbol": sym, "Live price": live,
+                   "Today %": (live / prev.iloc[-1] - 1) * 100 if len(prev) else None}
+            for col, off in LIVE_WINDOWS.items():
+                past = c[c.index <= today - off]
+                row[col] = (live / past.iloc[-1] - 1) * 100 if len(past) else None
+            rows.append(row)
+        except Exception:
+            pass
+    return rows
+
 @st.cache_data(ttl=30, show_spinner=False)
 def live_table():
     """Group, Name, Symbol, Live price, Today %, then WINDOWS % (live price vs that past daily close). -> (table, feed)."""
@@ -121,6 +147,10 @@ def live_table():
         rows.insert(0, portfolio_row(today))
     except Exception:
         pass   # account unavailable: the ETF rows still show
+    try:
+        rows[len(rows) - len(sector_etfs):len(rows) - len(sector_etfs)] = futures_rows(today)   # before the sectors
+    except Exception:
+        pass
     return pd.DataFrame(rows), feed
 
 @st.fragment(run_every=60)
@@ -135,7 +165,7 @@ def render_live_table():
     st.dataframe(toned(t.round(2), pcts), hide_index=True, width="stretch",
                  column_config={"Live price": st.column_config.NumberColumn(format="$%.2f"), **{k: PCT_COL for k in pcts}})
     st.caption(f"Live price = latest Alpaca trade ({feed.upper()}), refreshed every minute, "
-               f"{pd.Timestamp.now(tz='America/Chicago'):%-I:%M:%S %p} CT. Indexes and commodities via ETFs. "
+               f"{pd.Timestamp.now(tz='America/Chicago'):%-I:%M:%S %p} CT. Indexes and commodities via ETFs; futures rows (crude $/barrel, gold/silver $/oz) from Yahoo Finance. "
                "Our portfolio = Alpaca account equity, returns time-weighted (deposits excluded), blank = before the account's "
                "history. Today % vs yesterday's close; other columns = live price vs the daily close that far back.")
 
