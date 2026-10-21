@@ -12,7 +12,7 @@ from dashboard.settings import rules_text
 
 def render_strategy_tab(p):
     """Strategy tab: last decision, forward test, strategy rules and holdings, data freshness and settings."""
-    with st.expander(f"Last decision · {p.off_date:%a %b %-d} · portfolio and both strategies' ranks", expanded=True):
+    with st.expander("Last decision · portfolio and both strategies' ranks", expanded=True):
         render_last_decision(p)
     import forward_test as ft
     with st.expander(f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
