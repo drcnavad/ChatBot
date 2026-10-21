@@ -1,6 +1,6 @@
 """Trading Account tab: the account's equity over a chosen period (Alpaca portfolio history, read-only GET), with the
-period's gain, QQQ on the same starting money and the drawdown. Deposits / withdrawals are taken out of the line
-(daily periods), so the line and the gain show what the market did, not money moved in."""
+period's gain, QQQ / SPY / DIA bought with the same cash flows and the drawdown. The line is the real equity in $ (from Oct 2); the
+$ gain and the % return leave deposits / withdrawals out, so money moved in is never a gain (nor out a loss)."""
 import os
 
 import pandas as pd
@@ -10,13 +10,15 @@ from plotly.subplots import make_subplots
 
 from dashboard.style import BAD, CHART_FONT, GOOD, show_html, usd
 
-PERIODS = {"1D": ("1D", "5Min"), "5D": ("5D", "15Min"), "14D": ("2W", "1D"), "1M": ("1M", "1D"), "3M": ("3M", "1D"),
-           "1Y": ("1A", "1D"), "2Y": ("2A", "1D"), "All": ("10A", "1D")}
+START = pd.Timestamp("2026-10-02")          # the live account's history starts here; nothing earlier is shown
+BENCH = {"QQQ": "#64748b", "SPY": "#d97706", "DIA": "#7c3aed"}   # comparisons: Nasdaq-100, S&P 500, Dow
+SINCE = f"Since {START:%b %-d}"
+PERIODS = {"1D": ("1D", "5Min"), "5D": ("5D", "15Min"), "14D": ("2W", "1D"), SINCE: ("3M", "1D")}
 
 @st.cache_data(ttl=60, show_spinner=False)
 def equity_series(key):
-    """(deposit-adjusted equity = the period's first equity grown by the time-weighted return, the actual equity,
-    QQQ closes on the same clock) for PERIODS[key]."""
+    """(DataFrame equity (actual $), flow (deposits - withdrawals on that bar), twr (time-weighted growth), invested,
+    {QQQ, SPY, DIA: closes on the same clock}) for PERIODS[key]."""
     import alpaca_paper as ap
     period, tf = PERIODS[key]
     q = {"period": period, "timeframe": tf, "pnl_reset": "no_reset", "cashflow_types": "CSD,CSW,JNLC"}
@@ -25,23 +27,38 @@ def equity_series(key):
     h = ap.PaperAccount()._get("/account/portfolio/history", q)
     ts = pd.to_datetime(h.get("timestamp") or [], unit="s", utc=True).tz_convert("America/Chicago")
     raw = pd.Series(pd.to_numeric(pd.Series(h.get("equity") or [], dtype=object), errors="coerce").to_numpy(), index=ts)
-    flow = pd.Series([sum(float(v[i] or 0) for v in (h.get("cashflow") or {}).values() if i < len(v or []))
-                      for i in range(len(ts))], index=ts)
+    # deposits (CSD), withdrawals (CSW) and cash journals (JNLC) as portfolio history books them: on the bar whose
+    # equity first includes them (a transfer shows in the equity a trading day after its activity date)
+    cf = h.get("cashflow") or {}
+    flow = pd.Series([sum(float(v[i] or 0) for v in cf.values() if i < len(v or [])) for i in range(len(ts))], index=ts)
+    if tf == "1D":                                      # daily bars are stamped at midnight New York time of their day
+        raw.index = flow.index = ts.tz_convert("America/New_York").tz_localize(None).normalize()
+        acct = ap.PaperAccount()._get("/account")                 # today's live equity as the last point
+        today = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
+        if float(acct.get("equity") or 0) > 0 and (not len(raw) or raw.index[-1] < today):
+            raw.loc[today], flow.loc[today] = float(acct["equity"]), 0.0
+    keep_from = raw.index.tz_localize(None) >= START if raw.index.tz is not None else raw.index >= START
+    raw, flow = raw[keep_from], flow[keep_from]
     prev = raw.shift(1)
     ratio = ((raw - flow) / prev).where((prev > 0) & (raw - flow > 0), 1.0)   # time-weighted: deposits aren't gains
     keep = (raw > 0) & raw.notna()                                            # before funding / after closing: left out
     raw, ratio, flow = raw[keep], ratio[keep], flow[keep]
     if len(raw) < 2:
-        return raw, raw, pd.Series(dtype=float)
+        return pd.DataFrame(columns=["equity", "flow", "twr", "invested"]), pd.Series(dtype=float)
     ratio.iloc[0] = 1.0
-    eq = raw.iloc[0] * ratio.cumprod()                 # the period's first equity grown by the time-weighted return
-    eq.attrs["pnl"] = float(raw.iloc[-1] - raw.iloc[0] - flow.iloc[1:].sum())   # market gain in $, net of cash flows
-    if tf == "1D":
-        eq.index = raw.index = eq.index.tz_localize(None).normalize()
-    return eq, raw, _qqq(eq.index, tf)
+    flow.iloc[0] = 0.0                                 # money already in at the start is the starting balance
+    out = pd.DataFrame({"equity": raw, "flow": flow, "twr": ratio.cumprod()})
+    out["invested"] = raw.iloc[0] + flow.cumsum()      # starting balance + deposits - withdrawals since
+    return out, {sym: _bench(sym, out.index, tf) for sym in BENCH}
 
-def _qqq(index, tf):
-    """QQQ closes at the same times (Alpaca bars, SIP then IEX); empty when unavailable."""
+def gains(d):
+    """The period's numbers, cash flows taken out: $ gain = end - start - net deposits; % = time-weighted return."""
+    start, end, net = float(d["equity"].iloc[0]), float(d["equity"].iloc[-1]), float(d["flow"].sum())
+    return {"start": start, "end": end, "net_flows": net, "gain": end - start - net,
+            "twr_pct": (float(d["twr"].iloc[-1]) - 1) * 100}
+
+def _bench(sym, index, tf):
+    """sym's closes at the same times (Alpaca bars, SIP then IEX); empty when unavailable."""
     if not len(index):
         return pd.Series(dtype=float)
     try:
@@ -54,9 +71,9 @@ def _qqq(index, tf):
         client = be.market_data_client()
         for feed in ("sip", "iex"):
             try:
-                bars = client.get_stock_bars(StockBarsRequest(symbol_or_symbols="QQQ", timeframe=frame,
+                bars = client.get_stock_bars(StockBarsRequest(symbol_or_symbols=sym, timeframe=frame,
                                                               start=(start - pd.Timedelta(days=3)).to_pydatetime(),
-                                                              feed=DataFeed(feed))).data.get("QQQ", [])
+                                                              feed=DataFeed(feed))).data.get(sym, [])
                 break
             except Exception:
                 bars = []
@@ -68,25 +85,30 @@ def _qqq(index, tf):
     except Exception:
         return pd.Series(dtype=float)
 
-def equity_figure(eq, qqq, show_qqq=True, show_dd=True, intraday=False):
-    """The equity line (green / red fill vs the period start), dashed start baseline, QQQ on the same money, drawdown."""
-    base, last = float(eq.iloc[0]), float(eq.iloc[-1])
-    color = GOOD if last >= base else BAD
-    fill = "rgba(21,128,61,0.10)" if last >= base else "rgba(185,28,28,0.10)"
+def equity_figure(d, bench, shown=("QQQ",), show_dd=True, intraday=False):
+    """The actual equity in $ (green / red fill vs the money put in), the dashed money-put-in line (start balance +
+    deposits - withdrawals), QQQ / SPY / DIA bought with the same cash flows, and the drawdown of the time-weighted return."""
+    eq, inv = d["equity"], d["invested"]
+    up = eq.iloc[-1] >= inv.iloc[-1]
+    color, fill = (GOOD, "rgba(21,128,61,0.10)") if up else (BAD, "rgba(185,28,28,0.10)")
     fig = make_subplots(rows=2 if show_dd else 1, cols=1, shared_xaxes=True, vertical_spacing=0.04,
                         row_heights=[0.75, 0.25] if show_dd else [1])
-    fig.add_trace(go.Scatter(x=eq.index, y=[base] * len(eq), mode="lines", line=dict(width=0), hoverinfo="skip",
-                             showlegend=False), row=1, col=1)
+    fig.add_trace(go.Scatter(x=inv.index, y=inv.values, mode="lines", name="Start + net deposits",
+                             line=dict(color="#94a3b8", width=1.2, dash="dash", shape="hv"),
+                             hovertemplate="Start + net deposits $%{y:,.2f}<extra></extra>"), row=1, col=1)
     fig.add_trace(go.Scatter(x=eq.index, y=eq.values, mode="lines", name="Portfolio", fill="tonexty", fillcolor=fill,
                              line=dict(color=color, width=2.2), hovertemplate="Portfolio $%{y:,.2f}<extra></extra>"), row=1, col=1)
-    if show_qqq and qqq is not None and qqq.notna().any():
-        qn = qqq / qqq.dropna().iloc[0] * base
-        fig.add_trace(go.Scatter(x=qn.index, y=qn.values, mode="lines", name="QQQ (same start)",
-                                 line=dict(color="#64748b", width=1.4, dash="dot"),
-                                 hovertemplate="QQQ $%{y:,.2f}<extra></extra>"), row=1, col=1)
-    fig.add_hline(y=base, line=dict(color="#94a3b8", width=1, dash="dash"), row=1, col=1)
+    for sym in shown:                                  # same starting money and the same deposits, in the index fund
+        px = (bench or {}).get(sym)
+        if px is None or not px.notna().any():
+            continue
+        px = px.ffill().bfill()
+        qv = ((eq.iloc[0] / px.iloc[0]) + (d["flow"] / px).cumsum()) * px
+        fig.add_trace(go.Scatter(x=qv.index, y=qv.values, mode="lines", name=f"{sym} (same start + deposits)",
+                                 line=dict(color=BENCH[sym], width=1.4, dash="dot"),
+                                 hovertemplate=f"{sym} $%{{y:,.2f}}<extra></extra>"), row=1, col=1)
     if show_dd:
-        dd = (eq / eq.cummax() - 1) * 100
+        dd = (d["twr"] / d["twr"].cummax() - 1) * 100
         fig.add_trace(go.Scatter(x=dd.index, y=dd.values, mode="lines", name="Drawdown", fill="tozeroy",
                                  line=dict(color=BAD, width=1), fillcolor="rgba(185,28,28,0.12)", showlegend=False,
                                  hovertemplate="Drawdown %{y:.2f}%<extra></extra>"), row=2, col=1)
@@ -107,28 +129,24 @@ def render_equity_chart():
     if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off":
         st.info("Portfolio chart is turned off here (STOCK_ANALYSIS_LIVE_HOLDINGS=off).")
         return
-    c1, c2, c3 = st.columns([5, 1.2, 1.2], vertical_alignment="center")
-    key = c1.radio("Period", list(PERIODS), index=list(PERIODS).index("1M"), key="eq_period", horizontal=True,
+    c1, *tg = st.columns([5, 0.9, 0.9, 0.9, 1.2], vertical_alignment="center")
+    key = c1.radio("Period", list(PERIODS), index=list(PERIODS).index(SINCE), key="eq_period", horizontal=True,
                    label_visibility="collapsed")   # radio, not segmented_control: AppTest cannot rerun button groups
-    show_qqq = c2.toggle("QQQ", value=True, key="eq_qqq")
-    show_dd = c3.toggle("Drawdown", value=True, key="eq_dd")
+    shown = [sym for c, sym in zip(tg, BENCH) if c.toggle(sym, value=sym == "QQQ", key=f"eq_{sym.lower()}")]
+    show_dd = tg[3].toggle("Drawdown", value=True, key="eq_dd")
     try:
-        eq, raw, qqq = equity_series(key)
+        d, bench = equity_series(key)
     except Exception as e:
         st.info(f"Portfolio history unavailable right now ({type(e).__name__}). It tries again in a minute.")
         return
-    if len(eq) < 2:
+    if len(d) < 2:
         st.info("Not enough portfolio history for this period yet.")
         return
-    base, last = float(eq.iloc[0]), float(eq.iloc[-1])
-    pct = (last / base - 1) * 100
-    chg = eq.attrs.get("pnl", last - base)
-    qtxt = ""
-    if qqq is not None and qqq.notna().sum() > 1:
-        qq = qqq.dropna()
-        qtxt = f' · QQQ {(qq.iloc[-1] / qq.iloc[0] - 1) * 100:+.2f}%'
-    show_html(f'<div class="sa-eq-head"><span class="sa-eq-val">${float(raw.iloc[-1]):,.2f}</span>'
-              f'<span class="sa-eq-chg" style="color:{GOOD if chg >= 0 else BAD}">{usd(chg)} ({pct:+.2f}%)</span>'
-              f'<span class="sa-eq-sub">{key} · deposit-adjusted{qtxt}</span></div>')
-    st.plotly_chart(equity_figure(eq, qqq, show_qqq, show_dd, intraday=PERIODS[key][1] != "1D"), width="stretch",
+    m = gains(d)
+    qtxt = "".join(f' · {sym} {(px.dropna().iloc[-1] / px.dropna().iloc[0] - 1) * 100:+.2f}%'
+                   for sym, px in bench.items() if px is not None and px.notna().sum() > 1)
+    show_html(f'<div class="sa-eq-head"><span class="sa-eq-val">${m["end"]:,.2f}</span>'
+              f'<span class="sa-eq-chg" style="color:{GOOD if m["gain"] >= 0 else BAD}">{usd(m["gain"])} ({m["twr_pct"]:+.2f}%)</span>'
+              f'<span class="sa-eq-sub">{key} · net of {usd(m["net_flows"])} deposits / withdrawals · time-weighted{qtxt}</span></div>')
+    st.plotly_chart(equity_figure(d, bench, shown, show_dd, intraday=PERIODS[key][1] != "1D"), width="stretch",
                     config={"displaylogo": False, "modeBarButtonsToRemove": ["select2d", "lasso2d"]}, key="eq_chart")

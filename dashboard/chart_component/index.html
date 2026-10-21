@@ -1,7 +1,12 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><script src="plotly.min.js"></script>
-<style>html,body{margin:0;background:#fff;font-family:Inter,system-ui,sans-serif}#c{width:100%}</style></head>
-<body><div id="c"></div><script>
+<style>html,body{margin:0;background:#fff;font-family:Inter,system-ui,sans-serif}#c{width:100%;position:relative}
+.lg{position:absolute;pointer-events:none;font-size:11px;color:#334155;background:rgba(255,255,255,.85);padding:1px 4px;border-radius:3px;white-space:nowrap;z-index:5}
+.lg b{font-weight:600}.lg .up{color:#16a34a}.lg .dn{color:#dc2626}
+.ch{position:absolute;pointer-events:none;z-index:4;display:none}
+#chh{border-top:1px dotted #64748b;height:0}#chv{border-left:1px dotted #64748b;width:0}
+#chy{background:#334155;color:#fff;font-size:10px;padding:1px 4px;border-radius:2px;transform:translateY(-50%)}</style></head>
+<body><div id="c"><div id="chh" class="ch"></div><div id="chv" class="ch"></div><div id="chy" class="ch"></div></div><script>
 // The stock chart as a Streamlit component: draws the figure, sends your own shapes back (to be saved per stock)
 // and rescales the price axis to the candles in view. Streamlit's component protocol, no extra JS library.
 const div = document.getElementById("c");
@@ -22,14 +27,86 @@ window.addEventListener("message", e => {
   const fig = JSON.parse(spec);
   Plotly.react(div, fig.data, fig.layout, fig.config || {}).then(() => {
     send("streamlit:setFrameHeight", {height: fig.layout.height + 8});
+    buildIndex(); show(idx.days[idx.days.length - 1]);
     if (div._sa) return; div._sa = true;
     div.on("plotly_relayout", ev => {
       if (busy) return;
       const k = Object.keys(ev);
       if (k.some(x => x.startsWith("xaxis"))) rescale();
+      buildIndex();
       if (k.some(x => x.startsWith("shapes"))) send("streamlit:setComponentValue", {value: {shapes: mine(), t: Date.now()}, dataType: "json"});
     });
   });
 });
+// TradingView-style read-out: a legend at the top-left of each panel, updated on mouse move, and a dotted crosshair
+// with the price at the cursor on the right axis (no floating tooltip over the candles).
+const fmt$ = v => "$" + v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const day = x => String(x).slice(0, 10);
+let idx = null;
+function buildIndex() {
+  const fd = div._fullData, fl = div._fullLayout; idx = {panels: {}, candle: null};
+  fd.forEach(t => {
+    if (t.hoverinfo !== "none") return;
+    const ax = t.yaxis || "y", m = {};
+    if (t.type === "candlestick") { idx.candle = t; t.x.forEach((x, i) => m[day(x)] = i); t._m = m; return; }
+    t.x.forEach((x, i) => m[day(x)] = i); t._m = m;
+    (idx.panels[ax] = idx.panels[ax] || []).push(t);
+  });
+  idx.days = idx.candle ? idx.candle.x.map(day) : [];
+  idx.lg = {};
+  ["y"].concat(Object.keys(idx.panels)).forEach(ax => {
+    let el = div.querySelector(`.lg[data-ax="${ax}"]`);
+    if (!el) { el = document.createElement("div"); el.className = "lg"; el.dataset.ax = ax; div.appendChild(el); }
+    const ya = fl[ax === "y" ? "yaxis" : "yaxis" + ax.slice(1)], sz = fl._size;
+    el.style.left = (sz.l + 4) + "px"; el.style.top = (ya._offset + (ax === "y" ? 4 : 2)) + "px";
+    idx.lg[ax] = el;
+  });
+}
+function nearest(ms) {
+  const d = idx.days; if (!d.length) return null; let lo = 0, hi = d.length - 1; const t = new Date(ms).toISOString().slice(0, 10);
+  while (lo < hi) { const m = (lo + hi) >> 1; if (d[m] < t) lo = m + 1; else hi = m; }
+  if (lo > 0 && Math.abs(new Date(d[lo - 1]) - ms) < Math.abs(new Date(d[lo]) - ms)) lo--;
+  return d[lo];
+}
+function show(key) {
+  const c = idx.candle; if (!c || !key) return;
+  const i = c._m[key];
+  if (i !== undefined) {
+    const o = +c.open[i], h = +c.high[i], l = +c.low[i], cl = +c.close[i], pc = i > 0 ? +c.close[i - 1] : o, ch = cl - pc;
+    const k = ch >= 0 ? "up" : "dn", dt = new Date(key + "T12:00:00");
+    let ma = (idx.panels["y"] || []).map(t => t._m[key] !== undefined && t.y[t._m[key]] != null ?
+      `<span style="color:${t.line.color}">${t.name} ${fmt$(+t.y[t._m[key]])}</span>` : "").filter(Boolean).join(" &nbsp;");
+    idx.lg.y.innerHTML = `<b>${dt.toLocaleDateString("en-US", {month: "short", day: "numeric", year: "numeric"})}</b> &nbsp;O <b class="${k}">${fmt$(o)}</b> H <b class="${k}">${fmt$(h)}</b> L <b class="${k}">${fmt$(l)}</b> C <b class="${k}">${fmt$(cl)}</b> <span class="${k}">${ch >= 0 ? "+" : ""}${ch.toFixed(2)} (${ch >= 0 ? "+" : ""}${(ch / pc * 100).toFixed(2)}%)</span>` + (ma ? "<br>" + ma : "");
+  }
+  Object.entries(idx.panels).forEach(([ax, ts]) => {
+    if (ax === "y") return;
+    idx.lg[ax].innerHTML = ts.map(t => { const j = t._m[key]; if (j === undefined || t.y[j] == null) return "";
+      const v = +t.y[j], col = (t.line && t.line.color) || (t.marker && typeof t.marker.color === "string" ? t.marker.color : "#334155");
+      const txt = t.name === "Volume" ? (v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : (v / 1e3).toFixed(0) + "K") :
+        t.name === "RSI" ? v.toFixed(1) : t.name.startsWith("MACD") ? v.toFixed(3) : (v >= 0 ? "+" : "") + v.toFixed(1) + "%";
+      return `<span style="color:${col}">${t.name} <b>${txt}</b></span>`; }).filter(Boolean).join(" &nbsp;");
+  });
+}
+function crosshair(ev) {
+  if (!idx) return;
+  const fl = div._fullLayout, sz = fl._size, r = div.getBoundingClientRect(), px = ev.clientX - r.left, py = ev.clientY - r.top;
+  const H = document.getElementById("chh"), V = document.getElementById("chv"), Y = document.getElementById("chy");
+  const inside = px >= sz.l && px <= sz.l + sz.w && py >= sz.t && py <= sz.t + sz.h;
+  [H, V, Y].forEach(e => e.style.display = inside ? "block" : "none");
+  if (!inside) { show(idx.days[idx.days.length - 1]); return; }
+  V.style.left = px + "px"; V.style.top = sz.t + "px"; V.style.height = sz.h + "px";
+  H.style.left = sz.l + "px"; H.style.width = sz.w + "px"; H.style.top = py + "px";
+  // the y label: which panel is the cursor in, and its value there
+  let label = null;
+  Object.keys(fl).filter(k => /^yaxis\d*$/.test(k)).forEach(k => {
+    const ya = fl[k], top = ya._offset, bot = ya._offset + ya._length;
+    if (py >= top && py <= bot) { const v = ya.p2l(py - top); label = k === "yaxis" ? fmt$(v) : Math.abs(v) >= 1e5 ? (v / 1e6).toFixed(1) + "M" : v.toFixed(2); }
+  });
+  Y.style.display = label ? "block" : "none"; Y.textContent = label || "";
+  Y.style.left = (sz.l + sz.w + 2) + "px"; Y.style.top = py + "px";
+  show(nearest(+new Date(fl.xaxis.p2c(px - fl.xaxis._offset))));
+}
+div.addEventListener("mousemove", crosshair);
+div.addEventListener("mouseleave", () => { ["chh", "chv", "chy"].forEach(i => document.getElementById(i).style.display = "none"); if (idx) show(idx.days[idx.days.length - 1]); });
 send("streamlit:componentReady", {apiVersion: 1});
 </script></body></html>

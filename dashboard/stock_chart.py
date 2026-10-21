@@ -11,22 +11,44 @@ from dashboard.history import (RS_COLORS, daily_status, event_hover,
 from dashboard.settings import CT
 from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, MA_COLORS, MA_COLS, TEAL)
 
-WINDOW = pd.Timedelta(days=730)          # chart data: 2 years (the range buttons zoom inside it)
+WINDOW = pd.Timedelta(days=366 * 7)     # chart data: all cached daily bars, up to ~7 years (range buttons zoom inside)
 RANGES = [dict(count=1, label="1M", step="month", stepmode="backward"), dict(count=3, label="3M", step="month", stepmode="backward"),
           dict(count=6, label="6M", step="month", stepmode="backward"), dict(count=1, label="1Y", step="year", stepmode="backward"),
-          dict(step="all", label="All")]
+          dict(count=2, label="2Y", step="year", stepmode="backward"), dict(count=5, label="5Y", step="year", stepmode="backward"),
+          dict(step="all", label="ALL")]
+
+def _with_bar_history(tdata, bars):
+    """The signal rows (from Aug 2024) plus every older cached daily bar, with MAs / RSI / MACD worked out from the
+    bars' closes where the signal file has none (same formulas: simple MAs, Wilder RSI 14, MACD 12/26/9)."""
+    chart = tdata.sort_values('Date').drop_duplicates('Date').set_index('Date')
+    if bars is None or bars.empty or "Close" not in bars:
+        return chart
+    chart = chart.reindex(bars.index.union(chart.index))
+    close = chart['Close'].fillna(bars['Close'].reindex(chart.index)).astype(float)
+    chart['Close'] = close
+    for n in (10, 30, 50, 100, 200):
+        chart[f'ma_{n}'] = chart[f'ma_{n}'].fillna(close.rolling(n).mean())
+    d = close.diff()
+    gain, loss = d.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean(), (-d.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+    chart['RSI'] = chart['RSI'].fillna(100 - 100 / (1 + gain / loss))
+    macd = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
+    chart['macd'] = chart['macd'].fillna(macd)
+    chart['MACD Signal'] = chart['MACD Signal'].fillna(macd.ewm(span=9, adjust=False).mean())
+    chart['Symbol'] = chart['Symbol'].fillna(tdata['Symbol'].iloc[0]) if len(tdata) else chart['Symbol']
+    return chart
 
 def build_price_chart(ticker, tdata, bars=None):
     """Candlesticks + moving averages + buy/sell markers, volume, RSI, MACD and performance panels on one shared,
     zoomable x-axis (range buttons 1M..All, unified hover). bars = daily OHLCV (data.ohlcv); missing days are drawn
     from the close alone."""
-    chart = tdata[tdata['Date'] >= tdata['Date'].max() - WINDOW].sort_values('Date').set_index('Date')
+    chart = _with_bar_history(tdata, bars)
+    chart = chart[chart.index >= chart.index.max() - WINDOW]
     bars = (bars if bars is not None else pd.DataFrame()).reindex(chart.index)
     for col in ("Open", "High", "Low", "Close"):
         bars[col] = bars[col].fillna(chart['Close']) if col in bars else chart['Close']
     x_start, x_end = chart.index[0], chart.index[-1]
     events, _ = strategy_events(tdata, load_decisions(), ticker)
-    rs_lines = relative_strength_lines(chart, ticker)
+    rs_lines = relative_strength_lines(chart[chart.index >= tdata["Date"].min()], ticker)   # where SPY / sector bars exist too
 
     panels = ["price", "vol", "rsi", "macd"] + (["rs"] if rs_lines else [])
     height_of = {"price": 0.46, "vol": 0.09, "rsi": 0.12, "macd": 0.12, "rs": 0.16}
@@ -143,22 +165,21 @@ def build_price_chart(ticker, tdata, bars=None):
         fig.add_hline(y=0, line_dash="dot", line_color="rgba(128, 128, 128, 0.4)", row=r, col=1)
 
     grid = dict(showgrid=True, gridcolor='#f1f5f9', showline=False, tickfont=dict(size=10, color='#64748b'), zeroline=False)
-    view = chart.index[chart.index >= x_end - pd.Timedelta(days=182)]          # opens on 6 months
+    view = chart.index[chart.index >= x_end - pd.Timedelta(days=365)]          # opens on 1 year
     lo, hi = bars.loc[view, "Low"].min(), bars.loc[view, "High"].max()
     fig.update_layout(
-        height=int(620 + 120 * (len(panels) - 2)), hovermode='x unified', margin=dict(l=10, r=70, t=44, b=24),
+        height=int(620 + 120 * (len(panels) - 2)), hovermode='closest', margin=dict(l=10, r=70, t=44, b=24),
         plot_bgcolor='#ffffff', paper_bgcolor='#ffffff', dragmode="zoom", bargap=0.15,
         legend=dict(orientation="h", yanchor="bottom", y=1.005, xanchor="center", x=0.5, font=dict(size=10, color='#334155'),
                     bgcolor="rgba(0,0,0,0)"),
         font=dict(family=CHART_FONT, size=11, color='#334155'),
         hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family=CHART_FONT))
-    fig.update_xaxes(type="date", range=[view[0], x_right], showspikes=True, spikemode="across", spikesnap="cursor",
-                     spikethickness=1, spikecolor="#94a3b8", spikedash="dot", rangeslider_visible=False,
+    fig.update_xaxes(type="date", range=[view[0], x_right], showspikes=False, rangeslider_visible=False,
                      rangebreaks=[dict(bounds=["sat", "mon"])], tickformat='%b %d', **(grid | dict(showgrid=False)))
-    fig.update_xaxes(rangeselector=dict(buttons=RANGES, x=0, y=1.0, yanchor="bottom", bgcolor="#f1f5f9", activecolor="#99f6e4",
-                                        font=dict(size=11)), row=1, col=1)
+    fig.update_xaxes(rangeselector=dict(buttons=RANGES, x=0, y=1.0, yanchor="bottom", bgcolor="#f1f5f9", activecolor="#5eead4",
+                                        bordercolor="#cbd5e1", borderwidth=1, font=dict(size=12, color="#0f172a")), row=1, col=1)
     fig.update_yaxes(side="right", showticklabels=True, ticks="outside", ticklen=3, tickcolor="#e2e8f0", automargin=True,
-                     showspikes=True, spikemode="across", spikethickness=1, spikecolor="#cbd5e1",
+                     showspikes=False,
                      title_font=dict(size=10, color="#64748b"), **grid)
     fig.update_yaxes(title_text="Price", tickformat='$,.2f', hoverformat='$,.2f', nticks=8,
                      range=[lo - (hi - lo) * 0.06, hi + (hi - lo) * 0.06], row=1, col=1)
@@ -168,6 +189,11 @@ def build_price_chart(ticker, tdata, bars=None):
     for name, kw in axis.items():
         if name in row_of:
             fig.update_yaxes(row=row_of[name], col=1, **kw)
+    # No floating tooltip for the series: the chart component shows their values in a top-left legend per panel and
+    # draws a dotted crosshair with the price at the cursor on the right axis (chart_component/index.html).
+    legend_traces = {"Close", "Volume", "RSI", "MACD", "MACD signal"} | {n for n, _s in rs_lines.values()}
+    fig.for_each_trace(lambda t: t.update(hoverinfo="none", hovertemplate=None)
+                       if t.name in legend_traces or (t.name or "").startswith("MA ") else None)
     return fig
 
 def account_trade_lines(ticker, ledger_csv=None):

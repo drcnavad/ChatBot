@@ -45,11 +45,11 @@ def render_chart(fig, sym, ohlc):
     for s in fig.layout.shapes:
         s.name = "sys"                            # the chart's own shapes (earnings lines, held periods) are never saved
     shapes = load(sym)
-    fig.update_layout(shapes=list(fig.layout.shapes) + shapes, dragmode="zoom",
+    fig.update_layout(shapes=list(fig.layout.shapes) + shapes, dragmode=False,   # range only via the 1M..All buttons
                       newshape=dict(line=dict(color="#7c3aed", width=2), fillcolor="rgba(124,58,237,0.08)"))
     spec = json.loads(fig.to_json())
-    spec["config"] = {"displaylogo": False, "scrollZoom": True, "modeBarButtonsToAdd": TOOLS,
-                      "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d"]}
+    spec["config"] = {"displaylogo": False, "scrollZoom": False, "modeBarButtonsToAdd": TOOLS,
+                      "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d", "zoom2d", "pan2d", "zoomIn2d", "zoomOut2d"]}
     out = _chart(spec=json.dumps(spec), ohlc=ohlc, key=f"chart_{sym}", default=None)
     if out and out.get("t") != st.session_state.get(f"_drawn_{sym}"):
         st.session_state[f"_drawn_{sym}"] = out["t"]
