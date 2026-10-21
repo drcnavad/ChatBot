@@ -4,6 +4,7 @@ nothing from the trading accounts), read with the standard library, cached 5 min
 import email.utils
 import html
 import os
+import re
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,35 @@ FEEDS = [("CNBC", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partne
                          "?hl=en-US&gl=US&ceid=US:en")]
 STOCK_FEED = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={sym}&region=US&lang=en-US"   # free, keyless
 MAX_ITEMS, PER_STOCK, SECONDS = 30, 2, 6
+
+def _one_line(p):
+    return re.sub(r"\n\s*", "", p)
+
+# Only headlines that report an event: a headline matching DROP (clickbait, questions, comparisons, lists, buy/sell
+# advice, predictions, promo) is left out; the rest needs an EVENT word, or a wire / newsroom source (TRUSTED).
+DROP = re.compile(_one_line(r"""\?\s*$|\bvs\.?\b|\bversus\b|\bcompare[sd]?\b|how (low|high|far) can|should you|\bis it (time|too late)\b
+    |\bis (it|this|now) a\b|\b(a|the) (buy|sell)\b|\bbuy (now|today|before|and hold)\b|\b(top|best|worst) \d+\b|^\d+ (stocks?|reasons?|things?|ways?)
+    |\bstocks? to (buy|watch|own|sell)\b|prediction|predict|could (soar|double|triple|make you|turn)|\bmillionaire\b|here'?s (why|what|how)
+    |\bwhy (i|you|we)\b|motley fool|zacks|\bmy (top|favorite)\b|\bopinion\b|\bwatchlist\b|\bsponsored\b|\bpromo\b|\bunder the radar\b
+    |\bno-brainer\b|\bsupercharge|\bforever\b|\bretire\b|\bpassive income\b|\bdividend (king|aristocrat)s?\b|\bdon'?t miss\b|\bbargain\b
+    |\bsnapshot\b|^(how|why|forget|here are|what)\b|\bto watch\b|\bcalendar\b|stock reports?\b|\bfavorite\b|warning signs?|\bproblem with\b
+    |\bcagr\b|market report|\bthese \d+\b|\b\d+ (\w+ )?stocks\b|deep dive|what it means|\bhow it\b|\bbullish plays\b|\bwhat to (expect|know)\b|\bthings to know\b|\bpreview\b|\bconference call\b|\bto participate in\b|\binvestor (day|conference)\b"""), re.I)
+EVENT = re.compile(_one_line(r"""earnings|results|revenue|profit|loss|quarter|\bq[1-4]\b|guidance|outlook|forecast|beats?\b|miss(es|ed)?\b|tops?\b
+    |acquir|acquisition|merger|merge|deal\b|buyout|takeover|stake|spin.?off|ipo\b|listing|upgrade|downgrade|price target|initiat|\brating\b
+    |fda|approv|recall|lawsuit|sues?\b|settle|fine[sd]?\b|penalt|probe|investigat|antitrust|regulat|ban(s|ned)?\b|tariff|sanction
+    |launch|unveil|introduc|announce|ceo|cfo|chief|resign|steps? down|appoint|names? .* (ceo|cfo|chair)|layoff|job cuts|cuts? \d|plant|strike
+    |\bfed\b|federal reserve|powell|rate (cut|hike)|interest rate|inflation|cpi|ppi|jobs report|payrolls|unemployment|gdp|retail sales|treasury|yields?
+    |dow|s&p|nasdaq|stocks? (rise|fall|jump|drop|slide|surge|rally|sink|climb|tumble)|record|plunge|soar|surge|tumble|slump|rall(y|ies)|selloff
+    |\bto buy\b|\$?\d[\d.,]*\s?(billion|bn|million)|debut|certif|partnership|expands?\b|contract|\bfaa\b|clears?\b|wins?\b|agrees?\b|files? for
+    |split|buyback|dividend|bankrupt|default|downgrad|outage|hack|breach|halt"""), re.I)
+TRUSTED = {"CNBC", "Reuters", "AP", "Associated Press", "BBC", "Bloomberg", "The Wall Street Journal", "Financial Times", "CNN", "WSJ", "Axios", "MarketWatch"}
+
+def is_news(title, source=""):
+    """True for a headline that reports an event (see DROP / EVENT / TRUSTED)."""
+    t = (title or "").strip()
+    if not t or DROP.search(t):
+        return False
+    return bool(EVENT.search(t)) or source in TRUSTED
 
 def _off():
     return os.getenv("STOCK_ANALYSIS_NEWS", "on") == "off" or os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off"
@@ -62,6 +92,7 @@ def headlines():
     with ThreadPoolExecutor(max_workers=16) as pool:
         for job, got in zip(jobs, pool.map(_safe, jobs)):
             items += got[:PER_STOCK] if len(job) == 3 else got
+    items = [i for i in items if is_news(i["title"], i["source"])]
     seen, uniq = set(), []
     for it in sorted(items, key=lambda x: x["time"], reverse=True):
         key = "".join(c for c in it["title"].lower() if c.isalnum())[:80]
@@ -106,7 +137,7 @@ def render_news_banner(box):
 def stock_news(sym, limit=5):
     """(items, label) for one stock from its Yahoo Finance feed: today's (New York) headlines, else the last 48 h."""
     items = _safe(("Yahoo Finance", STOCK_FEED.format(sym=sym), sym))
-    items = sorted({i["title"]: i for i in items}.values(), key=lambda x: x["time"], reverse=True)
+    items = sorted({i["title"]: i for i in items if is_news(i["title"], i["source"])}.values(), key=lambda x: x["time"], reverse=True)
     ny = timezone(timedelta(hours=-4))
     now = datetime.now(timezone.utc)
     today = [i for i in items if i["time"].astimezone(ny).date() == now.astimezone(ny).date()]
