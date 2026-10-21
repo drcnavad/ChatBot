@@ -1,7 +1,7 @@
 """Manual orders on the LIVE Alpaca account, outside the pipeline (Chirag, Oct 16, 2026).
 
   python manual_trade.py sell KO [--block-until-drop 10] [--no-replace] [--dry-run]   # sell the whole position now
-  python manual_trade.py buy XYZ [--amount 1000] [--dry-run]           # buy $1000 now (default: 5% of equity = one slot)
+  python manual_trade.py buy XYZ [--amount 1000] [--dry-run]           # buy $1000 now (default: 10% of equity = one slot)
   python manual_trade.py blocks                                        # list the active buy blocks
 
 Orders go out at once as DAY limit orders in regular hours, priced like the pipeline (paper_trade.smart_quote: buy at the
@@ -33,7 +33,7 @@ REPORTS = os.path.join(ROOT, "Reports")
 ORDERS_JSON = os.environ.get("STOCK_ANALYSIS_MANUAL_ORDERS") or os.path.join(REPORTS, "manual_orders.json")
 BLOCK_JSON = os.environ.get("STOCK_ANALYSIS_MANUAL_BLOCK") or os.path.join(REPORTS, "manual_block.json")
 FILL_WAIT_SECS = 30        # a manual sell is polled this long for its fill before the replacement buy
-DEFAULT_PCT = 0.05          # buy size without --amount: 5% of equity (was a pipeline slot with 10 per half; a slot is ~10% with 5 per half - proposed, not changed)
+DEFAULT_PCT = 0.10          # buy size without --amount: 10% of equity = one slot with 5 stocks per half (Chirag, Oct 21, 2026; was 5%)
 CT = ZoneInfo("America/Chicago")
 
 def _now():

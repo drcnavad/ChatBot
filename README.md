@@ -64,7 +64,7 @@ halves keep only `tradable_symbols`), so it is sold and never rebought. Until th
 ## Manual orders (`manual_trade.py`, separate from the pipeline)
 ```
 python manual_trade.py sell KO [--block-until-drop 10] [--no-replace] [--dry-run]
-python manual_trade.py buy XYZ [--amount 1000] [--dry-run]     # default amount: 5% of equity (one slot)
+python manual_trade.py buy XYZ [--amount 1000] [--dry-run]     # default amount: 10% of equity (one slot, 5 per half)
 python manual_trade.py blocks                                   # list active blocks
 ```
 - Places the order at once on the LIVE account (DAY limit, pipeline pricing); refuses outside market hours. Every

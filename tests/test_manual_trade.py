@@ -93,7 +93,7 @@ check("buy --amount 1000: floor(1000 / ask limit) to 0.01 shares, buy side", c.s
       and c.sent[0].side.value == "buy" and float(c.sent[0].limit_price) == 60.13, c.sent)
 c = FakeClient()
 mt.run("BUY", "XYZ", client=c, quote=quote)
-check("buy default: 5% of equity ($10,000 of $200,000)", c.sent and float(c.sent[0].qty) == 166.3, c.sent)
+check("buy default: 10% of equity ($20,000 of $200,000)", mt.DEFAULT_PCT == 0.10 and c.sent and float(c.sent[0].qty) == 332.61, c.sent)
 sleeves.save_ledger({"day": "2026-10-16", "halves": {"lowvol": {"shares": {"PFE": 10}, "prices": {"PFE": 25}, "cash": 0},
                                                      "sector": {"shares": {"KO": 98.5}, "prices": {"KO": 60}, "cash": 0}}})
 c = FakeClient()
