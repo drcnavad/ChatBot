@@ -1,4 +1,4 @@
-"""Home tab: your notes, an editable table saved to Reports/my_notes.csv on every change.
+"""Stock Analysis tab: your notes, an editable table saved to Reports/my_notes.csv on every change.
 Date (created) fills itself in; a note is deleted at midnight when its End Date has passed (blank End Date = kept)."""
 from datetime import datetime
 

@@ -1,4 +1,4 @@
-"""Home tab stock list: every stock once (Chirag, Oct 16, 2026). Oct 21: with the Next rebalance preview readable the
+"""Stock Analysis tab stock list: every stock once (Chirag, Oct 16, 2026). Oct 21: with the Next rebalance preview readable the
 first row splits into Keep / Buy next / Sell next (last_decision.next_plan); rows 2-3 are now "Next in line" / "Others".
 
   1. Holdings: the live Alpaca positions (read-only GET, the Trading Account tab's read); when Alpaca is not readable

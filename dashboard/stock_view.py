@@ -1,4 +1,4 @@
-"""Home tab: the single-stock view (stock list rows, stock picker, header, detail card)."""
+"""Stock Analysis tab: the single-stock view (stock list rows, stock picker, header, detail card)."""
 from datetime import datetime
 
 import pandas as pd
@@ -152,7 +152,7 @@ def render_stock_section(p, ticker, tdata):
     show_html(f"""
         <div class="sa-card">
           <div class="sa-ident">
-            <div class="sa-sym">{esc(ticker)}</div><a class="sa-open" href="?stock={esc(ticker)}" target="_self" title="Open this stock on its own page">Full page ↗</a>
+            <div class="sa-sym">{esc(ticker)}</div>
             <div class="sa-price" title="Latest completed daily bar — the strategy's official price">{fmt(num(latest['Close']), ",.2f", "$")}</div>
             {live_html}
             <span class="sa-badge {SIGNAL_BADGE.get(status, 'sa-badge-grey')}" title="The strategy's decision in force (last decision)">{esc(badge)}</span>

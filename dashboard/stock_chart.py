@@ -1,4 +1,4 @@
-"""Home tab: the single-stock price chart (price, RSI / MACD, relative strength)."""
+"""Stock Analysis tab: the single-stock price chart (price, RSI / MACD, relative strength)."""
 from datetime import datetime
 
 import pandas as pd

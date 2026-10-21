@@ -43,14 +43,21 @@ function rescale() {
   });
   if (Object.keys(upd).length) { busy = true; Plotly.relayout(div, upd).then(() => busy = false); }
 }
+// a chart in a hidden tab has no width (and unmeasured text): wait until it is shown, then draw
+let waiting = null;
+new ResizeObserver(() => { if (waiting && div.clientWidth > 0) { const a = waiting; waiting = null; draw(a); } }).observe(div);
 window.addEventListener("message", e => {
   if (e.data.type !== "streamlit:render") return;
-  const args = e.data.args;
+  if (!div.clientWidth) { waiting = e.data.args; send("streamlit:setFrameHeight", {height: 900}); return; }
+  draw(e.data.args);
+});
+function draw(args) {
   if (args.spec === spec) return;
   spec = args.spec; ohlc = args.ohlc;
   const newView = args.view || "1Y", changed = newView !== curView || !!args.intraday !== intraday;
   curView = newView; intraday = !!args.intraday; mode = args.mode || mode; K = intraday ? 16 : 10;
   const fig = JSON.parse(spec);
+  delete fig.layout.width; fig.layout.autosize = true;                 // always the full frame width
   if (!changed && div.layout && div.layout.xaxis && div.layout.xaxis.range) {          // a re-render after a save keeps your view
     Object.keys(fig.layout).filter(k => /^xaxis\d*$/.test(k))
       .forEach(k => fig.layout[k].range = div.layout.xaxis.range.slice());   // every shared x-axis, or they disagree
@@ -58,7 +65,7 @@ window.addEventListener("message", e => {
   }
   if (div._fullLayout && typeof div._fullLayout.dragmode === "string" && div._fullLayout.dragmode.startsWith("draw"))
     fig.layout.dragmode = div._fullLayout.dragmode;      // a drawing tool stays on through the save / redraw
-  const cfg = Object.assign({}, fig.config || {}, {displaylogo: false, scrollZoom: false, displayModeBar: true,
+  const cfg = Object.assign({}, fig.config || {}, {displaylogo: false, scrollZoom: false, displayModeBar: true, responsive: true,
     modeBarButtons: [["drawline", "drawrect", UNDO, REDO, DEL, "eraseshape"]]});
   Plotly.react(div, fig.data, fig.layout, cfg).then(() => {
     if (saving) { hist[hist.length - 1] = mine(); saving = false; }   // our own save coming back (same shapes, re-serialised)
@@ -76,7 +83,7 @@ window.addEventListener("message", e => {
       if (k.some(x => x.startsWith("shapes"))) record();
     });
   });
-});
+}
 // TradingView-style read-out: a legend at the top-left of each panel, updated on mouse move, and a dotted crosshair
 // with the price at the cursor on the right axis (no floating tooltip over the candles).
 const fmt$ = v => "$" + v.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});

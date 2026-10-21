@@ -1,4 +1,4 @@
-"""Breaking-news banner under the ticker strip: three headlines at a time (one per row), fading to the next three every 10 s (CSS only),
+"""Breaking-news banner under the ticker strip: three headlines at a time (one per row), fading to the next three every 15 s (CSS only),
 paused on hover, click opens the article. Display only and separate from the bot: free public RSS feeds (no API keys,
 nothing from the trading accounts), read with the standard library, cached 5 minutes, silent when a feed is down."""
 import email.utils
@@ -19,7 +19,7 @@ FEEDS = [("CNBC", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partne
          ("Google News", "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB"
                          "?hl=en-US&gl=US&ceid=US:en")]
 STOCK_FEED = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={sym}&region=US&lang=en-US"   # free, keyless
-MAX_ITEMS, PER_STOCK, PER_PAGE, SECONDS = 30, 2, 3, 10   # banner: 3 headline rows at a time, 10 s each
+MAX_ITEMS, PER_STOCK, PER_PAGE, SECONDS = 30, 2, 3, 15   # banner: 3 headline rows at a time, 15 s each
 NY = ZoneInfo("America/New_York")
 
 def _one_line(p):
@@ -51,6 +51,47 @@ def is_news(title, source=""):
         return False
     return bool(EVENT.search(t)) or source in TRUSTED
 
+SHORT = {"Yahoo Finance": "YFinance"}                          # banner tag of a market headline with no stock in it
+GENERIC = {"Advanced", "Applied", "Texas", "Live", "Royal", "Interactive", "Steel", "Martin", "Super", "Bloom", "Monster",
+           "Delta", "Arm", "Lam", "Palo", "Cadence", "Quanta", "Credo", "Nu", "Upstart", "Johnson", "Williams", "Parker",
+           "Devon", "Celestica", "Morgan", "Invesco", "GE", "APA"}
+ALIAS = {"GOOGL": ["Google"], "NVDA": ["Nvidia"], "GS": ["Goldman"], "C": ["Citi"], "JPM": ["JPMorgan"], "DIS": ["Disney"],
+         "KO": ["Coca-Cola"], "UNH": ["UnitedHealth"], "AMD": ["AMD"], "META": ["Facebook"], "MS": ["Morgan Stanley"]}
+SUFFIX = re.compile(r"^The |,? (Inc\.?|Corporation|Corp\.?|Company|Co\.?|Incorporated|Ltd\.?|plc|N\.V\.|Holdings?|Group)\b.*$")
+
+@st.cache_resource(show_spinner=False)
+def _matcher():
+    """(regex, word -> ticker) that finds a sector_mapping.py stock in a headline: its name (no Inc./Corp.), the
+    name's first word unless generic, a few common aliases, or the symbol itself ($X, (X), or a bare 4+ letter one)."""
+    import sector_mapping as sm
+    words = {}
+    for sym in dict.fromkeys(sm.stock_symbols):
+        if sym in sm.BENCHMARK_SYMBOLS:
+            continue
+        name = SUFFIX.sub("", sm.symbol_name.get(sym, "")).strip()
+        first = name.split()[0].rstrip(",") if name else ""
+        for w in [name, first if first not in GENERIC and len(first) > 2 else "", *ALIAS.get(sym, [])]:
+            if w:
+                words.setdefault(w.lower(), sym)
+        for w in [f"${sym}", f"({sym})"] + ([sym] if len(sym) > 3 else []):   # 2-3 letters are often words (NOW, ARM)
+            words.setdefault(w.lower(), sym)
+    alts = "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True))
+    return re.compile(rf"(?<![\w$])({alts})(?![\w-])", re.I), words
+
+def tag(item):
+    """The amber box before a headline: its stock (feed ticker, else one named in the title), else the feed's short name."""
+    if item.get("ticker"):
+        return item["ticker"]
+    try:
+        rx, words = _matcher()
+        m = rx.search(item["title"])
+        if m and (m.group(1)[0] in "$(" or m.group(1)[0].isupper()):   # a name, not a lowercase word
+            return words[m.group(1).lower()]
+    except Exception:
+        pass
+    feed = item.get("feed") or item.get("source", "")
+    return SHORT.get(feed, feed) or "News"
+
 def _off():
     return os.getenv("STOCK_ANALYSIS_NEWS", "on") == "off" or os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off"
 
@@ -69,7 +110,7 @@ def _read(source, url, ticker=""):
         if source == "Google News" and " - " in title:          # "Headline - Publisher"
             title, src = title.rsplit(" - ", 1)
         if title and link:
-            out.append({"title": html.unescape(title), "link": link, "source": src, "time": t, "ticker": ticker})
+            out.append({"title": html.unescape(title), "link": link, "source": src, "feed": source, "time": t, "ticker": ticker})
     return out
 
 def _safe(args):
@@ -130,7 +171,7 @@ def render_news_banner(box):
     item = lambda i: (
         f'<a class="sa-news-item" href="{html.escape(i["link"], quote=True)}" target="_blank" rel="noopener" '
         f'>'
-        + (f'<span class="sa-news-sym">{html.escape(i["ticker"])}</span>' if i["ticker"] else "")
+        + f'<span class="sa-news-sym">{html.escape(tag(i))}</span>'
         + f'<span class="sa-news-t">{html.escape(i["title"])}</span>'
         f'<span class="sa-news-ago">{html.escape(i["source"])} · {_ago(i["time"])}</span></a>')
     rows = "".join(f'<div class="sa-news-page" style="animation-delay:{k * SECONDS}s">{"".join(map(item, pg))}</div>'

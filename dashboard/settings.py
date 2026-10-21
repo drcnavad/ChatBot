@@ -142,7 +142,7 @@ DRAWINGS_DIR = os.path.join(ROOT, "data", "drawings")   # your chart lines, one 
 NEWS_CSV = os.path.join(REPORTS, "news_cleaned_df.csv")
 SHORT_HISTORY_CSV = os.path.join(REPORTS, "short_history_reference.csv")   # main_signal_analysis.ipynb: too new to trade
 COMPANY_XLSX = os.path.join(REPORTS, "complete_company_analysis.xlsx")
-NOTES_CSV = os.path.join(REPORTS, "my_notes.csv")   # the Home tab's notes table (written by the dashboard)
+NOTES_CSV = os.path.join(REPORTS, "my_notes.csv")   # the Stock Analysis tab's notes table (written by the dashboard)
 CT = ZoneInfo("America/Chicago")
 
 # file -> (what it is, max age in days before it is flagged stale)

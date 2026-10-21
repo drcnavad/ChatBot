@@ -6,7 +6,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from dashboard.news import is_news  # noqa: E402
+from dashboard.news import is_news, tag  # noqa: E402
 
 KEEP = [("Meta posts Q3 revenue beat and strong guidance: Live updates", "CNBC"),
         ("Tesla beats on earnings and sales even as auto revenue declines", "CNBC"),
@@ -49,5 +49,18 @@ bad = [(t, "should keep") for t, s in KEEP if not is_news(t, s)] + [(t, "should 
 for t, why in bad:
     print("FAIL", why, ":", t)
 print(f"{len(KEEP) + len(DROP) - len(bad)}/{len(KEEP) + len(DROP)} headlines classified right")
+assert not bad
+
+# Banner tag: the feed's ticker, else a stock named in the title, else the feed's short name
+TAGS = [({"title": "Fed holds rates", "feed": "CNBC", "ticker": "AAPL"}, "AAPL"),
+        ({"title": "Nvidia shares jump on chip deal", "feed": "CNBC", "ticker": ""}, "NVDA"),
+        ({"title": "Walt Disney names new CEO", "feed": "Google News", "ticker": ""}, "DIS"),
+        ({"title": "Coca-Cola earnings top estimates", "feed": "Yahoo Finance", "ticker": ""}, "KO"),
+        ({"title": "Fed holds rates steady", "feed": "Yahoo Finance", "ticker": ""}, "YFinance"),
+        ({"title": "Stocks slide as yields climb, now at a record", "feed": "CNBC", "ticker": ""}, "CNBC"),
+        ({"title": "Treasury yields rise", "feed": "Google News", "ticker": ""}, "Google News")]
+bad = [(i["title"], tag(i), want) for i, want in TAGS if tag(i) != want]
+for b in bad:
+    print("FAIL tag:", b)
 assert not bad
 print("NEWS FILTER OK")

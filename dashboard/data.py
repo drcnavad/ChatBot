@@ -268,20 +268,10 @@ def last_sessions(df, n):
 @st.cache_data(ttl=60, show_spinner=False)
 def intraday(symbols: tuple):
     """Display only (header card popups): {symbol: (epoch times, closes, previous close)} of the latest session's
-    5-minute bars (today's, or the last session's while the market is closed); "PORTFOLIO" = the account's 1-day,
-    5-minute equity history (GET /account/portfolio/history). Cached 60 s; a series that cannot be read is left out."""
+    5-minute bars (today's, or the last session's while the market is closed). Cached 60 s; a series that cannot be read is left out."""
     if _live_off():
         return {}
     out = {}
-    try:
-        import alpaca_paper as ap
-        h = ap.PaperAccount()._get("/account/portfolio/history", {"period": "1D", "timeframe": "5Min",
-                                                                   "intraday_reporting": "market_hours"})
-        pts = [(t, e) for t, e in zip(h.get("timestamp") or [], h.get("equity") or []) if e is not None]
-        if pts and h.get("base_value"):
-            out["PORTFOLIO"] = ([t for t, _ in pts], [float(e) for _, e in pts], float(h["base_value"]))
-    except Exception:
-        pass
     try:
         quotes = index_quotes(symbols)
         bars = alpaca_bars(symbols, 5, pd.Timestamp.now(tz=NY).normalize() - pd.Timedelta(days=5))
@@ -291,6 +281,32 @@ def intraday(symbols: tuple):
             if len(df) and chg == chg:
                 times = [t.timestamp() for t in df.index.tz_localize(NY)]
                 out[s] = (times, df["Close"].tolist(), last / (1 + chg / 100))
+    except Exception:
+        pass
+    return out
+
+@st.cache_data(ttl=60, show_spinner=False)
+def yf_intraday(symbols: tuple):
+    """Display only (header cards Alpaca does not carry, e.g. CL=F, BTC-USD): {symbol: ((price, day %), (epoch times,
+    closes, previous close))} from yfinance (free, keyless): 5-minute bars of the latest trading date, previous close =
+    the prior daily close. Cached 60 s; a symbol that cannot be read is left out."""
+    if _live_off():
+        return {}
+    out = {}
+    try:
+        import yfinance as yf
+        for s in symbols:
+            try:
+                bars = yf.Ticker(s).history(period="5d", interval="5m")["Close"].dropna()
+                daily = yf.Ticker(s).history(period="7d", interval="1d")["Close"].dropna()
+                if bars.empty or len(daily) < 2:
+                    continue
+                today = bars[bars.index.date == bars.index[-1].date()]
+                prev = float(daily[daily.index.date < bars.index[-1].date()].iloc[-1])
+                px = float(today.iloc[-1])
+                out[s] = ((px, (px / prev - 1) * 100), ([t.timestamp() for t in today.index], today.tolist(), prev))
+            except Exception:
+                continue
     except Exception:
         pass
     return out
