@@ -56,6 +56,8 @@ window.addEventListener("message", e => {
       .forEach(k => fig.layout[k].range = div.layout.xaxis.range.slice());   // every shared x-axis, or they disagree
     if (div.layout.yaxis && div.layout.yaxis.range) fig.layout.yaxis.range = div.layout.yaxis.range.slice();
   }
+  if (div._fullLayout && typeof div._fullLayout.dragmode === "string" && div._fullLayout.dragmode.startsWith("draw"))
+    fig.layout.dragmode = div._fullLayout.dragmode;      // a drawing tool stays on through the save / redraw
   const cfg = Object.assign({}, fig.config || {}, {displaylogo: false, scrollZoom: false, displayModeBar: true,
     modeBarButtons: [["drawline", "drawrect", UNDO, REDO, DEL, "eraseshape"]]});
   Plotly.react(div, fig.data, fig.layout, cfg).then(() => {
