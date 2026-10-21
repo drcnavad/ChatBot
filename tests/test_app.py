@@ -211,15 +211,15 @@ _wk = [c for c in _ft[0].columns if c.startswith("Wk ")] if _ft else []
 def _ranked_ok(b):
     """Ranked rows = the ranked strategies (cfg "ranked" not False) that have a total return; the rest show '–'."""
     rk = {c["name"] for c in ft.STRATEGIES if c.get("ranked", True)}
-    names = b["Strategy"].replace({"Current Strategy (live)": ft.MARKED}).str.replace(ft.LIVE_MARK, "", regex=False)
+    names = b["Strategy"].replace({"Current Strategy (Live from Oct End)": ft.MARKED}).str.replace(ft.LIVE_MARK, "", regex=False)
     want = names.isin(rk) & b["Total since Oct 2"].notna()
     return bool((b["Rank"].notna() == want).all()) or not b["Rank"].notna().any()
 expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Rule", "Total since Oct 2", "Last EOD", *_wk, "Max drawdown"] and [w.replace(" (so far)", "") for w in _wk] == [f"Wk {k}" for k in range(len(_wk), 0, -1)]
-                   and (_ft[0]["Strategy"] == "Current Strategy (live)").sum() == 1 and _ranked_ok(_ft[0])),
+                   and (_ft[0]["Strategy"] == "Current Strategy (Live from Oct End)").sum() == 1 and _ranked_ok(_ft[0])),
        f"leaderboard: columns, one marked live row, every ranked strategy with data ranked (the Oct 16 live halves not): {_ft[0].to_dict('list') if _ft else None}")
 expect(not _ft or sum(ft.RANK_RULE in c.value for c in at.caption) == 1, "the ranking rule is written once in the caption")
 _rules = [d.value for d in at.dataframe if "Rule" in d.value.columns and "Total since Oct 2" not in d.value.columns]
-_shown = [ft.MARKED if s == "Current Strategy (live)" else s.replace(ft.LIVE_MARK, "") for s in _ft[0]["Strategy"]] if _ft else []
+_shown = [ft.MARKED if s == "Current Strategy (Live from Oct End)" else s.replace(ft.LIVE_MARK, "") for s in _ft[0]["Strategy"]] if _ft else []
 _board_names = [s for s in _shown if s in {c["name"] for c in ft.STRATEGIES}] if _ft else [c["name"] for c in ft.STRATEGIES]
 expect(len(_rules) == 1 and set(_rules[0]["Strategy"]) == {c["name"] for c in ft.STRATEGIES}
        and list(_rules[0]["Strategy"]) == _board_names,

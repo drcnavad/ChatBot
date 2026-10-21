@@ -2,8 +2,8 @@
 
   lowvol  50%: the monthly low-volatility rules (the pipeline's Provisional_Weight in strategy_picks.csv), rebalanced on
                the last trading day of each month (+ the Oct 16 switch).
-  sector  50%: forward_test.py's "Sector rotation" (top 3 sector ETFs by 63-day return, then their top 10 by the C6 score,
-               inverse-volatility weights, max 4 per sector, 20% cap, QQQ halving, do_not_buy), full rebalance of this half
+  sector  50%: forward_test.py's "Sector rotation" (top 3 sector ETFs by 63-day return, then their top WINNER["n"] (5 from Oct 26, 2026; was 10) by the C6 score,
+               inverse-volatility weights, max 2 per sector (4 with 10), 20% cap, QQQ halving, do_not_buy), full rebalance of this half
                every Monday (the week's first session; Fridays until Oct 16, 2026). No overlap: it never buys a name the low-volatility half holds or
                targets; when the low-volatility half buys a name this half holds, the shares move to the low-volatility half
                at the current price (no trade) and this half rebalances the same day without it.
@@ -83,13 +83,14 @@ def sector_inputs(signal_csv=None, bench_csv=None):
     return _INPUTS[key]
 
 def sector_args(inp):
-    """rank_targets settings of forward_test's Sector rotation (as forward_test.strategy_targets passes them), 10 stocks."""
+    """rank_targets settings of forward_test's Sector rotation (as forward_test.strategy_targets passes them), WINNER["n"]
+    stocks (5 from Oct 21, 2026: first used at the Mon Oct 26 rebalance; was 10)."""
     import backtest_engine as be
     import forward_test as ft
     cfg = next(c for c in ft.STRATEGIES if c["name"] == SECTOR_STRATEGY)
     a = be.winner_rank_args(inp["regime"])
     a.update({"max_weight": ft.MAX_WEIGHT, **ft.PIN, **(cfg.get("select") or {}), "sleeve": ()})
-    a["n"] = 10
+    a["n"] = be.WINNER["n"]
     return a, cfg
 
 def sector_weights(day, exclude=(), held=None, inp=None):

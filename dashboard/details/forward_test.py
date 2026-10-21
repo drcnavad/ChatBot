@@ -54,7 +54,7 @@ def render_forward_test():
 
 HIGHLIGHT_BG = "background-color: #e2e8f0; font-weight: 700"   # subtle slate on the white table
 
-CURRENT = "Current Strategy (live)"   # display name of the live strategy's row (forward_test.LIVE stays its id)
+CURRENT = "Current Strategy (Live from Oct End)"   # display name of the live strategy's row (forward_test.LIVE stays its id)
 
 def tidy_board(board, start):
     """Leaderboard for display: short column names (Total since <start>, Last EOD, Max drawdown, Wk 1..), integer Rank

@@ -39,8 +39,8 @@ check(((x.leg("sr63")[0] - inp["scores"]["sector_rot"]).abs().fillna(0) < 1e-12)
       "sr63 score = forward_test's Sector rotation score")
 
 start = "2026-07-01"
-combos = [(ft.LIVE_LEGS, "full weekly SR"), ((ft.LIVE_LEGS[0], ("sr63", "swap10", "day", 0.5)), "daily swap"),
-          ((ft.LIVE_LEGS[0], ("calm", "full", "week", 0.5)), "calmer half")]
+combos = [(ft.PREV_LEGS, "full weekly SR"), ((ft.LV, ("sr63", "swap10", "day", 0.5)), "daily swap"),
+          ((ft.LV, ("calm", "full", "week", 0.5)), "calmer half"), (ft.LIVE_LEGS, "live top 5")]
 never = set(sm.do_not_buy)
 for legs, label in combos:
     a = fc.simulate(inp, legs, start)
@@ -57,7 +57,8 @@ for legs, label in combos:
     overlap = [d for d, l0, l1 in zip(a["days"], lv, sr) if set(l0[2]) & set(l1[2])]
     check(not overlap, f"{label}: no stock in both halves at any close", overlap[:3])
     worst = max(max((q * p / v for q, p in l[2].values()), default=0) for leg in a["legs"] for (v, c, l) in [(e[0], e[1], e) for e in leg])
-    check(worst <= ft.MAX_WEIGHT + 0.012, f"{label}: no stock above 20% of its half (+ drift until a rebalance)", worst)
+    # 5 stocks drift more between rebalances
+    check(worst <= ft.MAX_WEIGHT + (0.05 if label == "live top 5" else 0.012), f"{label}: no stock above 20% of its half (+ drift until a rebalance)", worst)
     check(all(len(e[2]) <= 10 for leg in a["legs"] for e in leg), f"{label}: at most 10 names per half")
     check(min(e[1] for leg in a["legs"] for e in leg) >= -1e-9, f"{label}: cash never below zero")
     check(not any(set(e[2]) & never for leg in a["legs"] for e in leg), f"{label}: do_not_buy never held")
@@ -87,13 +88,13 @@ fc._CACHE.clear()
 ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)
 v1, h1 = pd.read_csv(vp), pd.read_csv(hp)
 check(not set(v1["Strategy"]) & ft.REMOVED and not set(h1["Strategy"]) & ft.REMOVED, "removed lines purged from both files")
-check(ft.LIVE == ft.MON and ft.MON in set(v1["Strategy"]), "the live comparison line is the Monday 50/50")
+check(ft.LIVE == ft.TOP5 and {ft.TOP5, ft.MON} <= set(v1["Strategy"]), "the live comparison line is the top-5 50/50 (top-10 kept)")
 new = v1[v1["Strategy"].isin(names)]
 starts = new.groupby("Strategy")["Date"].min()
 halves = list(ft.LIVE_HALVES)
 check(set(starts.drop(halves, errors="ignore")) == {"2026-10-02"}, "the new lines (not the live halves) start on Oct 2", starts.to_dict())
 check(all(abs(v - 1.0) < 1e-12 for v in new[new["Date"] == "2026-10-02"]["Value"]), "each new line is 1.0 at the Oct 2 close")
-T5 = "Live 50/50, top 5 each half"
+T5 = ft.TOP5
 h5 = h1[(h1["Strategy"] == T5) & (h1["Shares"] > 0)]
 check(T5 in starts and starts[T5] == "2026-10-02" and len(h5) and h5.groupby("Date")["Symbol"].nunique().max() <= 10,
       "top 5 each half: from Oct 2, at most 5 + 5 stocks", h5.groupby("Date")["Symbol"].nunique().to_dict())

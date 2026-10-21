@@ -33,7 +33,7 @@ REPORTS = os.path.join(ROOT, "Reports")
 ORDERS_JSON = os.environ.get("STOCK_ANALYSIS_MANUAL_ORDERS") or os.path.join(REPORTS, "manual_orders.json")
 BLOCK_JSON = os.environ.get("STOCK_ANALYSIS_MANUAL_BLOCK") or os.path.join(REPORTS, "manual_block.json")
 FILL_WAIT_SECS = 30        # a manual sell is polled this long for its fill before the replacement buy
-DEFAULT_PCT = 0.05          # buy size without --amount: 5% of equity (a pipeline slot: 10 stocks per half x 50%, 99%)
+DEFAULT_PCT = 0.05          # buy size without --amount: 5% of equity (was a pipeline slot with 10 per half; a slot is ~10% with 5 per half - proposed, not changed)
 CT = ZoneInfo("America/Chicago")
 
 def _now():
@@ -167,6 +167,11 @@ def queue_leftover_cash(dry_run=False, rankings=None, prices=None, positions=Non
         if any(o.get("source") == "leftover-cash" and o.get("half") == h for o in pend):
             out.append({**row, "status": "already queued (not doubled)"})
             continue
+        import backtest_engine as be
+        n_held = sum(1 for s, o in sleeves.owners(led).items() if o == h)
+        if n_held >= be.WINNER["n"]:                    # (Oct 21, 2026) the half already holds its n stocks: cash left by
+            out.append({**row, "status": f"half holds its {be.WINNER['n']} stocks (cash stays, as in the forward test)"})
+            continue                                     # the 20% cap stays cash; only a missing slot is refilled
         lv_picks = set()
         if h == "sector":                                # no overlap: the low-volatility half's picks stay its own
             try:

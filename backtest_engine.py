@@ -71,14 +71,17 @@ WINNER = {
     # in uptrend" strategy (score low_vol, calendar monthly, select EQ, earnings None, 20% cap) + do_not_buy never bought:
     # a normal full rebalance on Oct 16 and the last trading day of each month, + the Friday check below on every other
     # Friday. No Mon-Thu trading, no sleeve, no earnings rule.
-    "n": 10,                # stocks held
+    # Top 5 per half (Chirag, Oct 21, 2026) = forward_test's "Current Strategy (Live from Oct End)" (ft.TOP5): from each half's next
+    # rebalance (sector half Mon Oct 26, low vol half Fri Oct 30); max 2 per sector (sector_cap 0.4 x 5), 20% cap.
+    # Non-rebalance days place no orders (unchanged). Was 10 (Oct 16-25).
+    "n": 5,                 # stocks held per half (the low vol half here; sleeves.sector_args uses the same n)
     "score": "low_vol",     # winner_score: 1 / 63-day volatility (calmest first) while above the 200-day average, else -1
     "use_regime": True,     # soft market regime (below)
     "regime_symbol": "QQQ", # regime is on while QQQ closes above its 200-day average
     "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
     "min_score": 0.0,       # only stocks with a score above 0 can be picked (low_vol: above the 200-day)
-    "sector_cap": 0.4,      # max 4 per sector (forward_test EQ = PLAIN + equal weight)
-    "vol_sizing": False,    # equal weights: 10 x 10% (x 99% invested)
+    "sector_cap": 0.4,      # max floor(0.4 x n) per sector = 2 with 5 stocks (forward_test EQ = PLAIN + equal weight)
+    "vol_sizing": False,    # equal weights: 5 x 20% (x 99% invested)
     "max_weight": 0.20,     # no stock above 20% (forward_test MAX_WEIGHT); the extra stays in cash
     "buffer_rank": None,    # no rank buffer
     "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF (tiebreak only)
@@ -99,8 +102,8 @@ WINNER = {
     # friday_falling_orders.) False = monthly rebalances only.
     "friday_falling_check": False,
     # Two halves (Chirag, Oct 15, 8:44 PM; live from Fri Oct 16): 50% of the account = the low-volatility rules above (monthly)
-    # and 50% = forward_test's "Sector rotation" (63-day sector ETF return, top 3 sectors, its top 10 by the C6 score,
-    # inverse-volatility weights, max 4 per sector, 20% cap within the half, QQQ halving, do_not_buy) with a full
+    # and 50% = forward_test's "Sector rotation" (63-day sector ETF return, top 3 sectors, its top n (5 from Oct 26, 2026) by the C6 score,
+    # inverse-volatility weights, max 2 per sector (4 with 10), 20% cap within the half, QQQ halving, do_not_buy) with a full
     # rebalance of that half every Friday (the week's last session); no overlap (the sector half never holds a name the
     # low-volatility half holds or targets). Two independent halves, each with its own cash (sleeves.py,
     # Reports/sleeve_ledger.json) = the backtested '50/50 + SR weekly, no overlap'. None = 100% low volatility.
@@ -151,7 +154,7 @@ def winner_label(n_stocks):
                    "same dollars into the best pick not held)" if S.get("friday_falling_check") else ""))
         if S.get("sleeves"):
             name = (f"{S['sleeves']['lowvol']:.0%} " + name + f" + {S['sleeves']['sector']:.0%} Sector rotation (top 3 sectors by "
-                    "63-day ETF return, top 10, rebalanced every " + ("Monday" if S.get("sector_day") == "monday" else "Friday")
+                    f"63-day ETF return, top {S['n']}, rebalanced every " + ("Monday" if S.get("sector_day") == "monday" else "Friday")
                     + ", no overlap)")
         return tag, name
     tag = f"C6-U{n_stocks}"

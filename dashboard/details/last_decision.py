@@ -124,7 +124,7 @@ def render_last_decision(p):
             open_symbol(t, event, f"rank_{half}")
     st.caption("Ranks saved by the trade run (Reports/decision_ranks.csv). Sector rotation: rank of the sector score among "
                "the stocks of the 3 sectors with the best 63-day ETF return; the bot then skips stocks the low-vol half owns "
-               "(no overlap), blocked stocks and a 5th stock of one sector, so a held stock can rank below a skipped one. "
+               "(no overlap), blocked stocks and a 3rd stock of one sector (max 2 per sector with 5 stocks), so a held stock can rank below a skipped one. "
                "Low vol: calmest first, above the 200-day only; Score = its strategy score. Top 20 ranks (Sector can have fewer: "
                "only stocks of its 3 sectors with a positive score are ranked); Weight in half = live value / the half's value (stocks + its cash).")
     st.markdown("##### Next rebalance preview · based on yesterday's close")
@@ -135,14 +135,28 @@ def render_last_decision(p):
 def _preview_targets(day, lv_held, sec_held):
     """{half: set of target symbols} at the close `day`, by the bot's own selection: the sector half =
     sleeves.sector_weights (the low-vol half's names excluded, as in sleeves.plan); the low-vol half = the pipeline's
-    Provisional_Weight in strategy_picks.csv (as paper_trade.plan_sleeve_orders), stock list only."""
+    Provisional_Weight in strategy_picks.csv when it holds n (5) names, else the same low_vol ranking (top n, max per
+    sector); a manually blocked stock is skipped for the next in line (the leftover-cash rule). Stock list only."""
     import paper_trade as pt
     import sector_mapping as sm
     import sleeves
-    w = sleeves.sector_weights(day, exclude=set(lv_held), held=dict(sec_held))
+    blocked = set(pt.manual_list("buy"))              # (Oct 21) a blocked stock's slot goes to the next in line, as the
+    w = sleeves.sector_weights(day, exclude=set(lv_held) | blocked, held=dict(sec_held))   # leftover-cash buy / forward test
     picks = pd.read_csv(pt.PICKS_CSV)
-    lv = picks[pd.to_numeric(picks["Provisional_Weight"], errors="coerce").fillna(0) > 0]["Symbol"].astype(str).str.upper()
-    return {"sector": set(w[w > 0].index), "lowvol": set(lv) & set(sm.tradable_symbols)}
+    import backtest_engine as be
+    p = picks[pd.to_numeric(picks["Provisional_Weight"], errors="coerce").fillna(0) > 0]
+    n, cap, per, lv = be.WINNER["n"], be.winner_max_per_sector(), {}, []
+    if len(p) == n:                                     # the pipeline already wrote the top-n targets
+        return {"sector": set(w[w > 0].index), "lowvol": set(p["Symbol"].astype(str).str.upper()) & set(sm.tradable_symbols)}
+    inp = sleeves.sector_inputs()                       # else (Oct 21, until its next run): the same low_vol ranking,
+    d = pd.Timestamp(day) if pd.Timestamp(day) in inp["close"].index else inp["close"].index[-1]   # top n, max per sector
+    sc = inp["scores"]["low_vol"].loc[d].where(inp["eligible"].loc[d])
+    for s in sc[sc > 0].sort_values(ascending=False, kind="stable").index:
+        sec = sm.symbol_sector.get(s, "Other")
+        if s in set(sm.tradable_symbols) and s not in set(sm.do_not_buy) | blocked and len(lv) < n and per.get(sec, 0) < cap:
+            lv.append(s)
+            per[sec] = per.get(sec, 0) + 1
+    return {"sector": set(w[w > 0].index), "lowvol": set(lv)}
 
 def _scores(half, day):
     """{symbol: score} at close `day`: Strategy_Score (low vol) / the sector-rotation score (sector)."""
@@ -177,6 +191,32 @@ def sell_table(half, day, sells, value, half_v, ranks, targets):
     t = pd.DataFrame(rows, columns=["Stock", "Sector", "Rank", "Score", "Weight in half %", "Reason"])
     t["Rank"] = pd.array(pd.to_numeric(t["Rank"], errors="coerce"), dtype="Int64")
     return t
+
+def preview_marks():
+    """(targets, sells) of the Next rebalance preview at the latest close (Home stock list colors, Oct 21, 2026): targets =
+    both halves' targets (5 + 5), sells = held stocks no half targets. Same cached _preview_targets; (set(), set()) when
+    Alpaca or the ledger cannot be read. Display only."""
+    import decision_ranks
+    import sleeves
+    from dashboard.details.live_holdings import holdings_this_run
+    try:
+        led = sleeves.load_ledger()
+        data, _ = holdings_this_run()
+        if led is None or data is None:
+            return set(), set()
+        positions, equity = data["positions"], data["equity"]
+        day, _ = decision_ranks.ranks_on()
+        owner = sleeves.owners(led)
+        value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
+        mine = {h: [x for x, o in owner.items() if o == h and x in value] for h in SLEEVE}
+        vs = half_values(positions, led, equity)["sector"]
+        sec_held = tuple(sorted((x, value[x] / vs) for x in mine["sector"])) if vs else ()
+        t = _preview_targets(day, tuple(sorted(mine["lowvol"])), sec_held)
+    except Exception:
+        return set(), set()
+    import paper_trade as pt
+    tg = set(t["lowvol"]) | set(t["sector"])
+    return tg - set(pt.manual_list("buy")), {s for s, v in value.items() if v > 0} - tg
 
 def render_preview(positions, led, equity):
     """Next rebalance preview: each half's top 20 at the latest close with Keep / Buy / Blocked, and what it would sell."""

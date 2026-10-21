@@ -60,8 +60,8 @@ prev = tgt.iloc[idx.get_loc(last_fri) - 1]
 sw = sleeves.sector_weights(last_fri, held={s: w for s, w in prev.items() if w > 0}, inp=inp)
 check(set(fw[fw > 0].index) == set(sw[sw > 0].index) and float((fw.reindex(sw.index).fillna(0) - sw).abs().max()) < 1e-12,
       "sector half weights = forward_test Sector rotation (weekly, 10 stocks) on the last Friday")
-check(cfg["score"] == "sector_rot" and args["n"] == 10 and args["sector_cap"] == 0.4 and args["vol_sizing"]
-      and args["regime_scale"] == 0.5, "sector half: score sector_rot, 10 stocks, max 4/sector, 1/vol weights, QQQ halving")
+check(cfg["score"] == "sector_rot" and args["n"] == be.WINNER["n"] == 5 and args["sector_cap"] == 0.4 and args["vol_sizing"]
+      and args["regime_scale"] == 0.5, "sector half: score sector_rot, 5 stocks (Oct 21), max 2/sector, 1/vol weights, QQQ halving")
 ex = set(sw[sw > 0].index[:3])
 sw2 = sleeves.sector_weights(last_fri, exclude=ex, inp=inp)
 check(not (set(sw2[sw2 > 0].index) & ex) and (sw2 > 0).sum() == (sw > 0).sum(), "excluded names are never picked; the next stock takes the slot")
@@ -101,7 +101,8 @@ check(not (lvn & secn) and len(lvn) == 10 and len(secn) == (sec_first > 0).sum()
 check(all("shares" not in L[h] and set(L[h]["tags"]) >= set(PL[h]) for h in sleeves.HALVES),
       "ledger: tags only (held + this run's buys), never shares (live positions are the record)", L)
 inv = {h: sum(q * p for q, p in PL[h].values()) / info["values"][h] for h in sleeves.HALVES}
-check(all(0.97 <= v <= 0.99 + 1e-9 for v in inv.values()), "each half ~99% invested of its OWN value", inv)
+check(0.97 <= inv["lowvol"] <= 0.99 + 1e-9 and 0.75 <= inv["sector"] <= 0.99 + 1e-9,
+      "each half invested of its OWN value: low vol ~99%, sector <= 99% (5 stocks: the 20% cap leaves cash)", inv)
 w_lv = {s: q * p / info["values"]["lowvol"] for s, (q, p) in PL["lowvol"].items()}
 check(all(abs(w - 0.099) < 0.0101 for w in w_lv.values()), "low-volatility weights = 9.9% of the half (1-point band)", w_lv)
 

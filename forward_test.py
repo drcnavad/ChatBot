@@ -48,15 +48,16 @@ SIG_COLS = ["Date", "Symbol", "Close", "ma_50", "ma_10", "ma_30", "ma_100", "ma_
 MAX_WEIGHT = 0.20            # paper strategies: no stock above 20% (pinned; LIVE uses the be.WINNER max_weight, 15% from Oct 15)
 # The paper strategies' base selection = the live WINNER of Oct 15, 2026 (pinned when live moved to the monthly low-volatility
 # rules on Oct 16): 1/volatility weights, no sector limit, no rank gate, the sleeve's 5% cap, earnings rule E5.
-PIN = {"vol_sizing": True, "sector_cap": 1.0, "max_pick_rank": None, "cap_soft": False, "sleeve": (),
+PIN = {"n": 10, "vol_sizing": True, "sector_cap": 1.0, "max_pick_rank": None, "cap_soft": False, "sleeve": (),
        "sleeve_cap": be.sector_mapping.defensive_cap}
 EARN_DAYS = 5
 BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
-FRI = "Live 50/50, sector rotation on Fridays"      # Oct 16 evening: the sector half moved from Friday to Monday
-MON = "Live 50/50, sector rotation on Mondays"      # = the current live rules (marked on the leaderboard)
-MARKED = MON
-LIVE = MON          # the line the verdict and the dashboard compare against
+FRI = "Live 50/50, top 5, sector on Fridays"   # Oct 21: top 5 per half + manual blocks (was "..., sector rotation on Fridays")
+MON = "Live 50/50, top 10 each half"    # the live rules Oct 19-25 (sector half on Mondays, 10 stocks per half)
+TOP5 = "Current Strategy (Live from Oct End)"   # = the current live rules (Chirag, Oct 21, 2026: 5 per half from Oct 26 / Oct 30)
+MARKED = TOP5
+LIVE = TOP5         # the line the verdict and the dashboard compare against
 # Removed Oct 20, 2026 (Chirag): "Live 50/50 combined (no overlap)" (was "Live rules (C6)"), a near-duplicate of MON;
 # its saved rows are dropped (REMOVED, purge_removed).
 # Removed Oct 21, 2026 (Chirag): near-duplicates (MACD cross + TP20 = MACD cross so far; breakouts cut to 2 and 4 days;
@@ -75,13 +76,17 @@ OLD_NAMES = {
     "Now: 30% technical": "Now: 30% technical + 70% RS",
     "Now: exit below 15": "Now: Mon-Thu sell below rank 15",
     "Restored RS + sleeve, Mon-Thu checks (Oct 15 rules)": "Oct 15 rules (RS + sleeve, Mon-Thu)",
+    "Live 50/50, sector rotation on Mondays": MON,   # Oct 21: the top-10 live line, kept as the previous rules
+    "Live 50/50, top 5 each half": TOP5,
+    "Live 50/50, sector rotation on Fridays": FRI,   # Oct 21: now top 5 per half (its rows recomputed from Oct 2)             # Oct 21: the new live rules (5 per half)
     "Live half: Sector rotation weekly (63d)": "Live half: Sector rotation Mondays (63d)",   # Oct 21: it rebalances Mondays
 }
 # the live 50/50 (be.WINNER "sleeves", from the Oct 16, 2026 switch): forward_combos legs, low-volatility half first
 # "+mb" = the live manual buy blocks too (Reports/manual_block.json, e.g. KO; Oct 21, 2026) on the live lines only
-LIVE_LEGS = (("lowvol+mb", "full", "month", 0.5), ("sr63+mb", "full", "weekstart", 0.5))   # sector half on Mondays (Oct 19 on)
+PREV_LEGS = (("lowvol+mb", "full", "month", 0.5), ("sr63+mb", "full", "weekstart", 0.5))   # top 10 per half (Oct 19-25)
+LIVE_LEGS = (("lowvol@5+mb", "full", "month", 0.5), ("sr63@5+mb", "full", "weekstart", 0.5))  # top 5 per half (Oct 21 rule)
 LV = ("lowvol", "full", "month", 0.5)   # the low vol half of the other 50/50 lines (no manual blocks)
-FRI_LEGS = (LV, ("sr63", "full", "week", 0.5))
+FRI_LEGS = (LIVE_LEGS[0], ("sr63@5+mb", "full", "week", 0.5))   # = the live top-5 rules, sector half on Fridays
 LIVE_SWITCH = "2026-10-16"
 C6 = "Oct 2 rules (pinned)" # the rules the forward test started with (pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, 50/50 score)
 # paper_trade's Mon-Thu spare-cash rule (forward_test never imports paper_trade; tests check these equal its constants)
@@ -244,24 +249,26 @@ STRATEGIES = [
               "the list that day. A holding that moves into the jumpier half is sold on Mon-Thu."),
     # ---- added Oct 15, 2026 (evening, Chirag): the live 50/50 halves (from the Oct 16 close) and every rule discussed
     # that day (from Oct 2), simulated by forward_combos (no_overlap: the low-volatility half has priority)
-    dict(name="Live half: Low vol monthly", combo=dict(legs=LIVE_LEGS, start=LIVE_SWITCH, which=0), ranked=False, group="lowvol",
+    dict(name="Live half: Low vol monthly", combo=dict(legs=PREV_LEGS, start=LIVE_SWITCH, which=0), ranked=False, group="lowvol",
          rule="The live account's low-volatility half on its own (from the Oct 16 close, 1.0 then): the 10 calmest stocks "
               "above their 200-day average, max 4 per sector, equal weight, rebalanced on Oct 16 and then the last trading "
               "day of each month; do_not_buy never bought. Not ranked (starts Oct 16)."),
-    dict(name="Live half: Sector rotation Mondays (63d)", combo=dict(legs=LIVE_LEGS, start=LIVE_SWITCH, which=1), ranked=False,
+    dict(name="Live half: Sector rotation Mondays (63d)", combo=dict(legs=PREV_LEGS, start=LIVE_SWITCH, which=1), ranked=False,
          group="sector",
          rule="The live account's sector-rotation half on its own (from the Oct 16 close, 1.0 then): the best C6-score "
               "stocks in the 3 sectors whose ETF has the best 63-day return, top 10, 1/volatility weights, max 20% of the "
               "half, rebalanced every Monday (the first session of the week); never buys a stock the low-volatility half holds. Not ranked (starts Oct 16)."),
     dict(name=FRI, combo=dict(legs=FRI_LEGS), group="combo",
+         rule="The live top-5 rules (Current Strategy (Live from Oct End)) computed from Oct 2 with the sector half rebalanced "
+              "every Friday instead of Monday: top 5 per half, max 2 per sector, 20% max per stock, no overlap, do_not_buy and "
+              "the live manual buy blocks such as KO never bought (was top 10 per half until Oct 21, 2026)."),
+    dict(name=MON, combo=dict(legs=PREV_LEGS), group="combo",
          rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
-              "(63-day ETF return, top 3 sectors) half rebalanced every Friday, no overlap (the live rules until Oct 16)."),
-    dict(name=MON, combo=dict(legs=LIVE_LEGS), group="combo",
-         rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
-              "half rebalanced every Monday (Tuesday after a Monday holiday), no overlap. Current live rules from Oct 19."),
-    dict(name="Live 50/50, top 5 each half", combo=dict(legs=(("lowvol@5+mb",) + LIVE_LEGS[0][1:],
-                                                             ("sr63@5+mb",) + LIVE_LEGS[1][1:])), group="combo",
-         rule="The current live 50/50 (low vol half on the last trading day of the month + sector rotation 63-day half every "
+              "half rebalanced every Monday (Tuesday after a Monday holiday), no overlap, 10 stocks per half. The live rules Oct 19 "
+              "until the 5-per-half switch (sector half Mon Oct 26, low vol half Fri Oct 30)."),
+    dict(name=TOP5, combo=dict(legs=LIVE_LEGS), group="combo",
+         rule="The live rules (Chirag, Oct 21, 2026; live from the sector half's Mon Oct 26 and the low vol half's Fri Oct 30 "
+              "rebalance): the 50/50 (low vol half on the last trading day of the month + sector rotation 63-day half every "
               "Monday, no overlap, do_not_buy and the live manual buy blocks such as KO never bought) computed from Oct 2, with each half holding its top 5 instead of "
               "10: max 2 per sector (the 40% sector cap on 5 stocks), the same 20% max per stock (the extra stays cash)."),
     dict(name="50/50: Low vol + SR every 2 weeks 63d", combo=dict(legs=(LV, ("sr63", "full", "2week", 0.5))),
@@ -810,7 +817,7 @@ def spare_cash(tgt, chk, inp):
             if left >= DEPLOY_MIN_PCT:
                 day = tgt.index[[t]]
                 fri = be.rank_targets(score.loc[day, cols], inp["eligible"], inp["vol"], rebalance_days=pd.Series(True, index=day),
-                                      tiebreak_w=inp["scores"]["rs"], **be.winner_rank_args(inp["regime"])).iloc[0].to_numpy(float)
+                                      tiebreak_w=inp["scores"]["rs"], **{**be.winner_rank_args(inp["regime"]), "n": 10}).iloc[0].to_numpy(float)
                 order = [j for j in np.argsort(np.nan_to_num(R[t], nan=1e9), kind="stable") if R[t, j] == R[t, j]]
                 for j in order:                                                   # 1. unheld top 10 at their weights
                     if R[t, j] > DEPLOY_MAX_RANK or left < DEPLOY_MIN_PCT:
@@ -855,7 +862,7 @@ def strategy_targets(cfg, inp):
     open-sale prices in inp["open_sells"][name]."""
     if cfg.get("combo"):                               # forward_combos line: the simulated end-of-day weights
         w = combo_weights(cfg, inp)
-        if cfg["name"].startswith("Live"):               # the live account's rules: as they are
+        if cfg["name"].startswith("Live") or cfg["name"] == LIVE:               # the live account's rules: as they are
             return w
         return w.mask(_dnb(inp).reindex(index=w.index, columns=w.columns, fill_value=False), 0.0)
     if cfg.get("live"):                                # the current live rules (be.WINNER), not pinned

@@ -31,7 +31,7 @@ EXIT_BELOW = WINNER.get("midweek_exit_below") if MIDWEEK else None   # mid-week 
 EXIT_TO_TOP = WINNER.get("midweek_exit_to_top") if EXIT_BELOW else None  # refill an exit from the best non-held top-N
 EARNINGS = WINNER.get("earnings_block_days")                         # no new buys with earnings within N days (None = off)
 
-N_PICKS = WINNER.get("n", 10)                                        # portfolio size (top 10)
+N_PICKS = WINNER.get("n", 10)                                        # stocks per half (5 from Oct 21, 2026)
 W_TECH = WINNER.get("w_tech", 0.5)                                   # score = W_TECH x technical + (1 - W_TECH) x RS
 LOW_VOL = WINNER.get("score") == "low_vol"                          # low volatility in uptrend (else relative strength)
 MONTHLY = WINNER.get("calendar") == "monthly"                       # rebalance on the last trading day of the month
@@ -82,7 +82,7 @@ def low_vol_rules_text():
             + (f"- **Two halves:** the account is split {SLEEVES['lowvol']:.0%} / {SLEEVES['sector']:.0%}. The rules above run the "
                "**low-volatility half** (weights are fractions of that half). The **sector-rotation half**: the 3 sector "
                "ETFs with the best 63-day return, then the best stocks of those sectors by the C6 score (50% technical + "
-               "50% relative strength), top 10, weights ∝ 1 / 63-day volatility, max 4 per sector, max 20% of the half, "
+               f"50% relative strength), top {N_PICKS}, weights ∝ 1 / 63-day volatility, max {max(1, int(0.4 * N_PICKS))} per sector, max 20% of the half (the extra stays cash), "
                f"{HALVED} with {REGIME_OFF}, do_not_buy never bought; a full rebalance of that half every Monday 2:30 PM CT "
                "(the week's first trading day: Tuesday after a Monday holiday; Fridays until Oct 16). When the month's last "
                "trading day is a Monday both halves rebalance that day, without overlap. **No overlap:** the sector half never buys a stock the low-volatility half "

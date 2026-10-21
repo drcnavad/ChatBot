@@ -131,6 +131,13 @@ check("leftover: sector cash buys next-in-line BBB (held AAA, blocked KO skipped
       and "BBB" in L["tags"] and "shares" not in L and L["cash"] == 9000, (q, pend, L))
 q2 = mt.queue_leftover_cash(rankings={"sector": ["CCC"], "lowvol": []}, prices={"CCC": 50.0}, positions=["AAA"], pending_path=pp)
 check("leftover: never doubled (a second run queues nothing)", [r["status"] for r in q2] == ["already queued (not doubled)"] and len(json.load(open(pp))["orders"]) == 1, q2)
+full = ["AAA", "DDD", "EEE", "FFF", "GGG"]                          # (Oct 21, 2026) a half holding its 5 stocks
+sleeves.save_ledger({"day": "2026-10-26", "halves": {"lowvol": {"tags": [], "cash": 0, "value": 1, "rebalanced": False},
+                     "sector": {"tags": full, "cash": 2000, "value": 10000, "rebalanced": True}}})
+pp3 = os.path.join(_tmp, "pending3.json")
+q3 = mt.queue_leftover_cash(rankings={"sector": full + ["BBB"], "lowvol": []}, prices={"BBB": 50.0}, positions=full, pending_path=pp3)
+check("leftover: a half already holding its WINNER n (5) stocks keeps the cap cash (as the forward test)",
+      [r["status"] for r in q3] == ["half holds its 5 stocks (cash stays, as in the forward test)"] and not os.path.exists(pp3), q3)
 pt.manual_list = _real_buy
 
 print(f"\n{len(FAIL)} failed" if FAIL else "\nall passed")

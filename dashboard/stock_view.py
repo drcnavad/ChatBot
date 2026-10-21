@@ -33,7 +33,9 @@ def render_rank_tiers(p):
     Each symbol is a ?symbol= link, handled in main() exactly like a table click
     (opens the stock in the stock view below). The dropdown underneath stays for manual typing."""
     current = st.session_state.get("ticker_dropdown")
-    held = lambda s: TONE_CLASS.get(tone(p.sig_off.get(s)), "") if p.sig_off.get(s) in ("Buy", "Hold", "Sold") else ""
+    from dashboard.details.last_decision import preview_marks     # (Oct 21) colors = the Next rebalance preview
+    tg, sells = preview_marks()
+    held = lambda s: TONE_CLASS[GOOD] if s in tg else TONE_CLASS[BAD] if s in sells else ""
     rows, dnb = [], dnb_symbols()
     tag = ('<sup title="on your do-not-buy list (sector_mapping.do_not_buy)" style="font-size:0.6em;opacity:0.7;'
            'margin-left:1px;">DNB</sup>')
@@ -43,7 +45,7 @@ def render_rank_tiers(p):
         rows.append(f'<div class="sa-tier"><b{tip}>{title} ({len(syms)}):</b><div class="sa-tier-syms">{links or "\u2014"}</div></div>')
     day = p.df["Date"].max()
     show_html(f'<div class="sa-card"><div class="sa-card-title">Stock list<span>ranks at the {day:%a %b %-d} close · '
-              'click a stock to open it</span></div>' + "".join(rows) + '</div>')
+              'click a stock to open it · green = next rebalance target (5 per half), red = held, would be sold (Next rebalance preview)</span></div>' + "".join(rows) + '</div>')
 
 def render_stock_picker(p, jumped):
     """Stock list (click a symbol to open it) + dropdown for manual typing + AI button.
