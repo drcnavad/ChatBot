@@ -147,18 +147,28 @@ CSS = """
     .sa-stat-label { font-size: 0.66rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
     .sa-stat-val { font-size: 0.95rem; font-weight: 700; color: #0f172a; font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
 /* breaking-news banner (dashboard/news.py): one headline at a time, CSS fade, paused on hover */
-.sa-news{display:flex;align-items:center;gap:10px;height:30px;margin:2px 0 8px;padding:0 10px;border:1px solid #e2e8f0;
-  border-radius:6px;background:#f8fafc;overflow:hidden}
-.sa-news-tag{font:700 10px Inter,system-ui,sans-serif;letter-spacing:.06em;color:#fff;background:#dc2626;border-radius:3px;padding:2px 6px}
-.sa-news-box{position:relative;flex:1;height:30px}
-.sa-news-item{position:absolute;inset:0;display:flex;align-items:center;gap:8px;opacity:0;visibility:hidden;
-  text-decoration:none!important;color:#0f172a!important;font-size:13px;white-space:nowrap;overflow:hidden}
+.sa-news{display:flex;align-items:center;gap:14px;height:46px;margin:10px 0 18px;padding:0 16px;border-radius:8px;
+  background:linear-gradient(90deg,#0b1f3a,#13315c);box-shadow:0 2px 6px rgba(15,23,42,.18);overflow:hidden}
+.sa-news-tag{display:inline-flex;align-items:center;gap:6px;font:700 11px Inter,system-ui,sans-serif;letter-spacing:.08em;
+  color:#fff;background:#dc2626;border-radius:999px;padding:4px 10px;white-space:nowrap}
+.sa-news-tag:before{content:"";width:7px;height:7px;border-radius:50%;background:#fff;animation:sa-blink 1.4s infinite}
+@keyframes sa-blink{50%{opacity:.25}}
+.sa-news-box{position:relative;flex:1;height:46px}
+.sa-news-item{position:absolute;inset:0;display:flex;align-items:center;gap:10px;opacity:0;visibility:hidden;
+  text-decoration:none!important;color:#f8fafc!important;font-size:15.5px;font-weight:600;white-space:nowrap;overflow:hidden}
 .sa-news:hover .sa-news-item{animation-play-state:paused!important}
 .sa-news-item:hover .sa-news-t{text-decoration:underline}
-.sa-news-src{font-weight:600;color:#0f766e;font-size:12px}
-.sa-news-sym{font:700 11px Inter,system-ui,sans-serif;color:#1d4ed8;background:#dbeafe;border-radius:3px;padding:1px 5px}
+.sa-news-src{font-weight:700;color:#5eead4;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.sa-news-sym{font:700 12px Inter,system-ui,sans-serif;color:#0b1f3a;background:#fcd34d;border-radius:4px;padding:2px 6px}
 .sa-news-t{overflow:hidden;text-overflow:ellipsis}
-.sa-news-ago{color:#64748b;font-size:11px;margin-left:auto;padding-left:8px}
+.sa-news-ago{color:#cbd5e1;font-size:12px;font-weight:500;margin-left:auto;padding-left:10px}
+/* one stock's news, above its chart */
+.sa-snews{border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;margin:6px 0 8px;background:#fff}
+.sa-snews-h{font-size:12px;font-weight:700;color:#334155;margin-bottom:4px}.sa-snews-h span{font-weight:500;color:#64748b}
+.sa-snews a{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:13.5px;color:#0f172a!important;text-decoration:none!important;border-top:1px solid #f1f5f9}
+.sa-snews a:first-of-type{border-top:0}.sa-snews a:hover .t{text-decoration:underline}
+.sa-snews .t{flex:1;font-weight:500}.sa-snews .s{color:#0f766e;font-size:11.5px;font-weight:600;white-space:nowrap}
+.sa-snews .a{color:#64748b;font-size:11.5px;white-space:nowrap}
 </style>
 """
 

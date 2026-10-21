@@ -30,7 +30,7 @@ sys.path.insert(0, ROOT)  # project modules (backtest_engine, sector_mapping, da
 from dashboard.details import render_strategy_tab, render_trading_tab  # noqa: E402
 from dashboard.details.live_holdings import new_run  # noqa: E402
 from dashboard.notes import render_notes  # noqa: E402
-from dashboard.news import render_news_banner  # noqa: E402
+from dashboard.news import render_news_banner, render_stock_news  # noqa: E402
 from dashboard.page import build_page, render_kpis, render_ticker, render_top_bar  # noqa: E402
 from dashboard.sector_table import render_sector_table  # noqa: E402
 from dashboard.short_stock import render_short_stock  # noqa: E402
@@ -48,6 +48,7 @@ def render_stock(p, ticker, tdata):
         render_short_stock(ticker, p.short.loc[ticker])
     else:
         render_stock_section(p, ticker, tdata)
+        render_stock_news(ticker)
         render_stock_chart(ticker, tdata)
 
 def stock_page(p, sym):

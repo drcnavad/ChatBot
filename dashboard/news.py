@@ -99,4 +99,32 @@ def render_news_banner(box):
            f'@keyframes sa-news{{0%{{opacity:0;visibility:visible}}{fade:.2f}%{{opacity:1}}{show - fade:.2f}%{{opacity:1}}'
            f'{show:.2f}%{{opacity:0;visibility:hidden}}100%{{opacity:0;visibility:hidden}}}}</style>')
     with box:
-        show_html(css + f'<div class="sa-news"><span class="sa-news-tag">NEWS</span><div class="sa-news-box">{rows}</div></div>')
+        show_html(css + f'<div class="sa-news"><span class="sa-news-tag">LIVE NEWS</span><div class="sa-news-box">{rows}</div></div>')
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def stock_news(sym, limit=5):
+    """(items, label) for one stock from its Yahoo Finance feed: today's (New York) headlines, else the last 48 h."""
+    items = _safe(("Yahoo Finance", STOCK_FEED.format(sym=sym), sym))
+    items = sorted({i["title"]: i for i in items}.values(), key=lambda x: x["time"], reverse=True)
+    ny = timezone(timedelta(hours=-4))
+    now = datetime.now(timezone.utc)
+    today = [i for i in items if i["time"].astimezone(ny).date() == now.astimezone(ny).date()]
+    if today:
+        return today[:limit], "today"
+    return [i for i in items if now - i["time"] <= timedelta(hours=48)][:limit], "last 48 hours"
+
+def render_stock_news(sym):
+    """A compact list of the stock's headlines (links open in a new tab); nothing when there are none."""
+    if _off():
+        return
+    try:
+        items, label = stock_news(sym)
+    except Exception:
+        return
+    if not items:
+        return
+    rows = "".join(f'<a href="{html.escape(i["link"], quote=True)}" target="_blank" rel="noopener">'
+                   f'<span class="t">{html.escape(i["title"])}</span><span class="s">{html.escape(i["source"])}</span>'
+                   f'<span class="a">{_ago(i["time"])}</span></a>' for i in items)
+    show_html(f'<div class="sa-snews"><div class="sa-snews-h">{html.escape(sym)} news <span>· {label}</span></div>{rows}</div>')
