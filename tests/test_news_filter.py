@@ -63,4 +63,17 @@ bad = [(i["title"], tag(i), want) for i, want in TAGS if tag(i) != want]
 for b in bad:
     print("FAIL tag:", b)
 assert not bad
+from dashboard.news_voice import key, script  # noqa: E402
+SAID = [("CNBC", "Fed holds rates - Reuters", "From CNBC: Fed holds rates."),
+        ("YFinance", "Stock Market Today, Oct. 21: SpaceX Surges on Q3 Earnings Beat",
+         "From Yahoo Finance: Stock Market Today, October 21: SpaceX Surges on third-quarter Earnings Beat."),
+        ("TSLA", "TESLA (TSLA) EPS beats by $0.05, revenue up 12% YoY - Reuters",
+         "Tesla earnings per share beats by $0.05, revenue up 12% year over year."),
+        ("TSLA", "Tesla Earnings Mixed, FSD Revenue Strong (Live Coverage)", "Tesla Earnings Mixed, full self-driving Revenue Strong."),
+        ("NVDA", "Shares jump after $NVDA chip deal", "Shares jump after Nvidia chip deal."),
+        ("AAPL", "Shares slip in late trade", "Apple: Shares slip in late trade.")]
+bad = [(t, script(g, t), want) for g, t, want in SAID if script(g, t) != want]
+for b_ in bad:
+    print("FAIL spoken:", b_)
+assert not bad and key("a") == key("a") != key("b")
 print("NEWS FILTER OK")

@@ -33,3 +33,6 @@ docs/
 # Stock chart: plotly.js is copied in from the installed plotly package at run time; your drawings stay local
 dashboard/chart_component/plotly.min.js
 data/drawings/
+
+# News read-aloud audio cache (dashboard/news_voice.py)
+dashboard/news_voice/audio/

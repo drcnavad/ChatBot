@@ -64,11 +64,12 @@ def main():
         if k in st.query_params:
             del st.query_params[k]
 
-    ticker_box, kpi_box = render_top_bar(p)
+    ticker_box = render_top_bar(p)
     opening = "_pending_ticker" in st.session_state          # a link or a row click: show the stock
     tab_home, tab_stock, tab_strategy, tab_trading = st.tabs(
         ["Home", "Stock Analysis", "Strategy", "Trading Account"], default="Stock Analysis" if opening else None)
     with tab_home:
+        kpi_box = st.container()          # the market cards (filled at the end of the run, Home only)
         render_sector_table(p)
     with tab_stock:
         with st.expander("My notes", expanded=True):

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from dashboard.data import data_freshness, latest_rows, load_signals
 from dashboard.settings import CT, SIGNAL_CSV
@@ -56,6 +57,8 @@ def render_ticker(box):
     from dashboard.details.live_holdings import holdings_this_run
     data, err = holdings_this_run()
     pos = sorted((data or {}).get("positions") or [], key=lambda x: x["symbol"]) if not err else []
+    if any(x["symbol"] == "GOOGL" for x in pos):                  # both share classes held: show GOOGL once
+        pos = [x for x in pos if x["symbol"] != "GOOG"]
     if not pos:
         return
     q = index_quotes(tuple(x["symbol"] for x in pos))
@@ -74,11 +77,31 @@ def render_ticker(box):
     box.markdown(f'<div class="sa-ticker"><div class="sa-ticker-track" style="animation-duration:{secs}s">'
                  f'{row}{row}</div></div>', unsafe_allow_html=True)
 
+# Lays the st.tabs tab bar over #sa-nav-slot in the title row: CSS only (absolute position from the slot's box, kept
+# in step every 250 ms), the tab bar itself is not moved in the DOM, so Streamlit keeps owning it.
+NAV_JS = """<script>
+const P = window.parent, D = P.document;
+function place() {
+  const slot = D.getElementById("sa-nav-slot"), main = D.querySelector('[data-testid="stMainBlockContainer"]'),
+        bar = D.querySelector('[data-testid="stTabs"] [data-baseweb="tab-list"]');
+  if (!slot || !main || !bar) return;
+  const holder = bar.parentElement, s = slot.getBoundingClientRect(), m = main.getBoundingClientRect();
+  main.classList.add("sa-has-nav"); holder.classList.add("sa-nav");
+  holder.style.top = (s.top - m.top + s.height / 2) + "px"; holder.style.left = (s.left - m.left) + "px"; holder.style.width = s.width + "px";
+}
+P.saNavPlace = place;                 // the strip, news and cards above fill in late: follow the slot as it moves
+if (!P.saNavTimer) P.saNavTimer = P.setInterval(() => P.saNavPlace(), 250);
+place();
+</script>"""
+
 def render_top_bar(p):
     ticker = st.container()          # the held-stock strip, filled at the end of the run (render_ticker)
     stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()
     updated = datetime.fromtimestamp(p.mtime, tz=CT).strftime("%b %-d, %I:%M %p CT")
-    c1, c2, c3 = st.columns([5, 3, 1.2], vertical_alignment="center")
+    c1, nav, c2, c3 = st.columns([2.2, 4.6, 1.9, 1.1], vertical_alignment="center")
+    with nav:                       # the tab names are shown here, nav-bar style (NAV_JS lays them over this slot)
+        show_html('<div id="sa-nav-slot" class="sa-nav-slot"></div>')
+        components.html(NAV_JS, height=0)
     with c1:
         show_html('<div class="sa-brand"><div class="sa-logo">SA</div><div><div class="sa-brand-name">Stock Analysis</div>'
                   '<div class="sa-brand-sub">Signals · forward test · live account</div></div></div>')
@@ -93,18 +116,19 @@ def render_top_bar(p):
             st.cache_data.clear()
             st.cache_resource.clear()
             st.rerun()
-    return ticker, st.container()          # the KPI cards, filled by render_kpis at the end of the run
+    return ticker
 
 INDEXES = {"QQQ": "Nasdaq 100", "SPY": "S&P 500", "DIA": "Dow", "IWM": "Russell 2000", "CL=F": "US Crude", "BTC-USD": "Bitcoin"}
 SECTORS = {"XLK": "Technology", "XLF": "Financials", "XLV": "Health Care", "XLY": "Cons. Discretionary", "XLP": "Cons. Staples",
            "XLE": "Energy", "XLI": "Industrials", "XLB": "Materials", "XLU": "Utilities", "XLRE": "Real Estate",
            "XLC": "Communication", "DBC": "Commodities"}
 # Top 5 holdings by weight, shown small at the card bottom: yfinance Ticker(etf).funds_data.top_holdings, checked
-# 2026-10-21 (DBC holds futures + T-bills: its largest commodity exposures instead). Static: refresh by hand.
+# 2026-10-21; GOOG (class C) is shown once, as GOOGL, and the next holding fills in. DBC holds futures + T-bills:
+# its largest commodity exposures instead. Static: refresh by hand.
 HOLDINGS = {"XLK": "NVDA AAPL MSFT AMD AVGO", "XLF": "BRK-B JPM V MA BAC", "XLV": "LLY JNJ ABBV MRK UNH",
             "XLY": "AMZN TSLA HD MCD TJX", "XLP": "WMT COST PG KO PM", "XLE": "XOM CVX COP VLO MPC",
             "XLI": "CAT GE GEV RTX DE", "XLB": "LIN NEM FCX ECL SHW", "XLU": "NEE SO DUK CEG AEP",
-            "XLRE": "WELL PLD EQIX AMT SPG", "XLC": "META GOOGL GOOG WBD DIS", "DBC": "Brent WTI Diesel Gasoline Gold"}
+            "XLRE": "WELL PLD EQIX AMT SPG", "XLC": "META GOOGL WBD DIS TTWO", "DBC": "Brent WTI Diesel Gasoline Gold"}
 YF = ("CL=F", "BTC-USD")                     # not on Alpaca stock data: yfinance (free, keyless)
 
 def render_kpis(box):

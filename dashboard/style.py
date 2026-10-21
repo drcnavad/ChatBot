@@ -46,6 +46,15 @@ CSS = """
     .sa-kv td { padding: 0.28rem 0.35rem; border-bottom: 1px solid #f1f5f9; color: var(--sa-muted); }
     .sa-kv td:nth-child(even) { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; padding-right: 0.9rem; }
     /* header cards (dashboard/page.py kpi_card): one grid, every card the same size; hover = today's intraday line */
+    /* tab names in the title row (dashboard/page.py NAV_JS) */
+    .sa-has-nav { position: relative; }
+    /* script-only frames (nav placement, news voice) take no space */
+    [data-testid="stElementContainer"]:has(> iframe[height="0"]), [data-testid="stElementContainer"]:has(iframe[data-testid="stCustomComponentV1"][height="0"]) { position: absolute; width: 0; height: 0; overflow: hidden; }
+    .sa-nav { position: absolute; z-index: 20; transform: translateY(-50%); display: flex; justify-content: flex-end; }
+    .sa-nav [data-baseweb="tab-list"] { gap: 0.4rem; }
+    .sa-nav [data-baseweb="tab"] { font-weight: 600; padding: 0.35rem 0.7rem; }
+    [data-testid="stTabs"]:has(.sa-nav) [data-baseweb="tab-border"] { display: none; }
+    .sa-nav-slot { height: 40px; }
     .sa-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.6rem; margin-bottom: 0.6rem; }
     @media (max-width: 1100px) { .sa-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     .sa-kpi { position: relative; border: 1px solid var(--sa-line); border-left: 4px solid #cbd5e1; border-radius: 14px;
@@ -170,6 +179,14 @@ CSS = """
 .sa-news-item:hover .sa-news-t{text-decoration:underline}
 .sa-news-sym{flex:none;font:700 11px Inter,system-ui,sans-serif;color:#0b1f3a;background:#fcd34d;border-radius:4px;padding:2px 6px}
 .sa-news-t{flex:1;min-width:0;white-space:normal}
+.sa-news-voice{flex:none;margin-left:6px;width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,.35);
+  background:rgba(255,255,255,.08);color:#fff;font-size:15px;line-height:1;cursor:pointer;padding:0}
+.sa-news-voice:hover{background:rgba(255,255,255,.18)}
+.sa-news-voice.on{background:#f59e0b;border-color:#fcd34d;animation:sa-voice 1.2s ease-in-out infinite}
+@keyframes sa-voice{0%,100%{box-shadow:0 0 0 0 rgba(252,211,77,.7)}50%{box-shadow:0 0 0 7px rgba(252,211,77,0)}}
+.sa-news-reading .sa-news-page{animation:none!important;opacity:0!important;visibility:hidden!important}
+.sa-news-reading .sa-news-page.sa-cur{opacity:1!important;visibility:visible!important}
+.sa-news-item.sa-said .sa-news-t{color:#fde68a}
 .sa-news-ago{flex:none;color:#94a3b8;font-size:11.5px;font-weight:500;white-space:nowrap}
 /* one stock's news, above its chart */
 .sa-snews{border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;margin:6px 0 8px;background:#fff}

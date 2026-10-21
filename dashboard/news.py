@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import streamlit as st
 
+from dashboard.news_voice import prepare, render_voice, script
 from dashboard.style import show_html
 
 FEEDS = [("CNBC", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114"),
@@ -19,6 +20,11 @@ FEEDS = [("CNBC", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partne
          ("Google News", "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB"
                          "?hl=en-US&gl=US&ceid=US:en")]
 STOCK_FEED = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={sym}&region=US&lang=en-US"   # free, keyless
+FEEDS += [("Nasdaq", "https://www.nasdaq.com/feed/rssoutbound?category=Markets"),                  # free, keyless
+          ("MarketWatch", "https://feeds.content.dowjones.io/public/rss/mw_topstories"),
+          ("MarketWatch", "https://feeds.content.dowjones.io/public/rss/mw_marketpulse")]
+NASDAQ_STOCK_FEED = "https://www.nasdaq.com/feed/rssoutbound?symbol={sym}"   # mixes in market stories: tagged by title
+BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129 Safari/537.36"
 MAX_ITEMS, PER_STOCK, PER_PAGE, SECONDS = 30, 2, 3, 15   # banner: 3 headline rows at a time, 15 s each
 NY = ZoneInfo("America/New_York")
 
@@ -55,7 +61,7 @@ SHORT = {"Yahoo Finance": "YFinance"}                          # banner tag of a
 GENERIC = {"Advanced", "Applied", "Texas", "Live", "Royal", "Interactive", "Steel", "Martin", "Super", "Bloom", "Monster",
            "Delta", "Arm", "Lam", "Palo", "Cadence", "Quanta", "Credo", "Nu", "Upstart", "Johnson", "Williams", "Parker",
            "Devon", "Celestica", "Morgan", "Invesco", "GE", "APA"}
-ALIAS = {"GOOGL": ["Google"], "NVDA": ["Nvidia"], "GS": ["Goldman"], "C": ["Citi"], "JPM": ["JPMorgan"], "DIS": ["Disney"],
+ALIAS = {"GOOGL": ["Google", "GOOG"], "NVDA": ["Nvidia"], "GS": ["Goldman"], "C": ["Citi"], "JPM": ["JPMorgan"], "DIS": ["Disney"],
          "KO": ["Coca-Cola"], "UNH": ["UnitedHealth"], "AMD": ["AMD"], "META": ["Facebook"], "MS": ["Morgan Stanley"]}
 SUFFIX = re.compile(r"^The |,? (Inc\.?|Corporation|Corp\.?|Company|Co\.?|Incorporated|Ltd\.?|plc|N\.V\.|Holdings?|Group)\b.*$")
 
@@ -78,17 +84,24 @@ def _matcher():
     alts = "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True))
     return re.compile(rf"(?<![\w$])({alts})(?![\w-])", re.I), words
 
-def tag(item):
-    """The amber box before a headline: its stock (feed ticker, else one named in the title), else the feed's short name."""
-    if item.get("ticker"):
-        return item["ticker"]
+def _named(title):
+    """The sector_mapping.py stock a headline names, else None."""
     try:
         rx, words = _matcher()
-        m = rx.search(item["title"])
+        m = rx.search(title)
         if m and (m.group(1)[0] in "$(" or m.group(1)[0].isupper()):   # a name, not a lowercase word
             return words[m.group(1).lower()]
     except Exception:
         pass
+    return None
+
+def tag(item):
+    """The amber box before a headline: its stock (feed ticker, else one named in the title), else the feed's short name."""
+    if item.get("ticker"):
+        return "GOOGL" if item["ticker"] == "GOOG" else item["ticker"]        # one Alphabet tag
+    named = _named(item["title"])
+    if named:
+        return named
     feed = item.get("feed") or item.get("source", "")
     return SHORT.get(feed, feed) or "News"
 
@@ -96,7 +109,7 @@ def _off():
     return os.getenv("STOCK_ANALYSIS_NEWS", "on") == "off" or os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off"
 
 def _read(source, url, ticker=""):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (StockAnalysis dashboard)"})
+    req = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA if "nasdaq.com" in url else "Mozilla/5.0 (StockAnalysis dashboard)"})
     with urllib.request.urlopen(req, timeout=6) as r:
         root = ET.fromstring(r.read())
     out = []
@@ -109,8 +122,12 @@ def _read(source, url, ticker=""):
         src = source
         if source == "Google News" and " - " in title:          # "Headline - Publisher"
             title, src = title.rsplit(" - ", 1)
+        if source == "Nasdaq" and ticker and _named(html.unescape(title)) != ticker:
+            ticker_ = ""                                       # a market story in the stock's feed
+        else:
+            ticker_ = ticker
         if title and link:
-            out.append({"title": html.unescape(title), "link": link, "source": src, "feed": source, "time": t, "ticker": ticker})
+            out.append({"title": html.unescape(title), "link": link, "source": src, "feed": source, "time": t, "ticker": ticker_})
     return out
 
 def _safe(args):
@@ -130,9 +147,10 @@ def headlines():
         syms = list(dict.fromkeys(sm.stock_symbols))
     except Exception:
         syms = []
-    jobs = [(src, url) for src, url in FEEDS] + [("Yahoo Finance", STOCK_FEED.format(sym=s), s) for s in syms]
+    jobs = ([(src, url) for src, url in FEEDS] + [("Yahoo Finance", STOCK_FEED.format(sym=s), s) for s in syms]
+            + [("Nasdaq", NASDAQ_STOCK_FEED.format(sym=s), s) for s in syms])
     items = []
-    with ThreadPoolExecutor(max_workers=16) as pool:
+    with ThreadPoolExecutor(max_workers=32) as pool:
         for job, got in zip(jobs, pool.map(_safe, jobs)):
             items += [i for i in got if is_news(i["title"], i["source"])][:PER_STOCK] if len(job) == 3 else got
     return _recent(items, 24)[0][:MAX_ITEMS]
@@ -168,9 +186,10 @@ def render_news_banner(box):
     n, total = len(pages), len(pages) * SECONDS
     show = 100 / n                                             # each page's share of the cycle, in %
     fade = min(1.5, show / 4)
+    said = prepare([script(tag(i), i["title"]) for i in items])          # the read-aloud audio, rendered in the background
     item = lambda i: (
         f'<a class="sa-news-item" href="{html.escape(i["link"], quote=True)}" target="_blank" rel="noopener" '
-        f'>'
+        f'data-say="{said.get(script(tag(i), i["title"]), "")}" data-text="{html.escape(script(tag(i), i["title"]), quote=True)}">'
         + f'<span class="sa-news-sym">{html.escape(tag(i))}</span>'
         + f'<span class="sa-news-t">{html.escape(i["title"])}</span>'
         f'<span class="sa-news-ago">{html.escape(i["source"])} · {_ago(i["time"])}</span></a>')
@@ -181,6 +200,8 @@ def render_news_banner(box):
            f'{show:.2f}%{{opacity:0;visibility:hidden}}100%{{opacity:0;visibility:hidden}}}}</style>')
     with box:
         show_html(css + f'<div class="sa-news"><span class="sa-news-tag">LIVE NEWS</span><div class="sa-news-box">{rows}</div></div>')
+        render_voice()
+
 
 @st.cache_data(ttl=600, show_spinner=False)
 def stock_news(sym, limit=5):
