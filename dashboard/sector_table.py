@@ -45,6 +45,8 @@ except Exception:
     sector_etfs = {}
 MARKETS = {"SPY": "S&P 500", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWM": "Russell 2000",
            "DBC": "Commodities", "GLD": "Gold", "SLV": "Silver", "USO": "Crude Oil"}
+LIVE_WINDOWS = {"3 days %": pd.DateOffset(days=3), "1 week %": pd.DateOffset(weeks=1), **WINDOWS,
+                "2 years %": pd.DateOffset(years=2)}
 
 def _feeds(fetch):
     """fetch(feed) on SIP, then IEX if SIP fails (like paper_trade's quotes) -> (result, feed)."""
@@ -59,12 +61,12 @@ def _feeds(fetch):
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
 def _daily_closes(syms):
-    """Daily closes (columns = symbols), ~13 months, from Alpaca."""
+    """Daily closes (columns = symbols), ~25 months, from Alpaca."""
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.enums import Adjustment
     from alpaca.data.timeframe import TimeFrame
     import backtest_engine as be
-    start = pd.Timestamp.now(tz="America/New_York") - pd.DateOffset(days=400)
+    start = pd.Timestamp.now(tz="America/New_York") - pd.DateOffset(days=760)
     bars, _ = _feeds(lambda f: be.market_data_client().get_stock_bars(
         StockBarsRequest(symbol_or_symbols=list(syms), timeframe=TimeFrame.Day, start=start, adjustment=Adjustment.SPLIT, feed=f)).df)
     c = bars.reset_index().pivot(index="timestamp", columns="symbol", values="close")
@@ -87,7 +89,7 @@ def live_table():
         row = {"Group": "Market" if s in MARKETS else "Sector", "Name": name, "Symbol": s, "Live price": live,
                "Today %": (live / prev - 1) * 100 if live and prev else None}
         c = closes[s].dropna() if s in closes else pd.Series(dtype=float)
-        for col, off in WINDOWS.items():
+        for col, off in LIVE_WINDOWS.items():
             past = c[c.index <= today - off]
             row[col] = (live / past.iloc[-1] - 1) * 100 if live and len(past) else None
         rows.append(row)
@@ -101,7 +103,7 @@ def render_live_table():
     except Exception as e:
         st.warning(f"Live prices unavailable: {str(e)[:150]}")
         return
-    pcts = ["Today %"] + list(WINDOWS)
+    pcts = ["Today %"] + list(LIVE_WINDOWS)
     st.dataframe(toned(t.round(2), pcts), hide_index=True, width="stretch",
                  column_config={"Live price": st.column_config.NumberColumn(format="$%.2f"), **{k: PCT_COL for k in pcts}})
     st.caption(f"Live price = latest Alpaca trade ({feed.upper()}), refreshed every minute, "
