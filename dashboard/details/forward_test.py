@@ -52,15 +52,19 @@ def render_forward_test():
 
 HIGHLIGHT_BG = "background-color: #e2e8f0; font-weight: 700"   # subtle slate on the white table
 
+CURRENT = "Current Strategy (live)"   # display name of the live strategy's row (forward_test.LIVE stays its id)
+
 def tidy_board(board, start):
     """Leaderboard for display: short column names (Total since <start>, Today, Max drawdown, Wk 1..), integer Rank
     (blank = not ranked), weeks that have not started dropped."""
+    import forward_test as ft
     weeks = [c for c in board.columns if c.startswith("Week ") and board[c].notna().any()]
     b = board[["Rank", "Strategy", "Total return %", "Daily return %", *weeks[::-1], "Max drawdown %"]].copy()   # newest week first
     b["Rank"] = pd.array(pd.to_numeric(b["Rank"], errors="coerce"), dtype="Int64")
     names = {"Total return %": f"Total since {start}", "Daily return %": "Today", "Max drawdown %": "Max drawdown",
              **{w: w.replace("Week ", "Wk ").replace(" %", "") for w in weeks}}
     b.insert(2, "Rule", [rule_of(x) for x in b["Strategy"]])
+    b["Strategy"] = [CURRENT if str(x).startswith(ft.LIVE) else x for x in b["Strategy"]]   # display name only
     return b.rename(columns=names)
 
 def rule_of(name):
@@ -78,7 +82,7 @@ def highlight_rows(sty):
     """Darker rows: your Alpaca account, the current (live) strategy, Low volatility in uptrend, Sector rotation."""
     import forward_test as ft
     keys = ("My Alpaca account", "Low volatility in uptrend", "Sector rotation")
-    on = lambda name: str(name).startswith(ft.LIVE) or str(name) in keys
+    on = lambda name: str(name).startswith(ft.LIVE) or str(name) in (*keys, CURRENT)
     return sty.apply(lambda r: [HIGHLIGHT_BG if on(r["Strategy"]) else ""] * len(r), axis=1)
 
 CONSENSUS_GOOD, CONSENSUS_WARN, EXIT_RANK = 3, 2, 30   # chip colors: held by 3+ / 2 of the 5; ranked worse than 30
