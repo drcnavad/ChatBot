@@ -274,20 +274,29 @@ def render_preview(positions, led, equity):
             plan = lambda s: "Blocked" if s in blocked else ("Keep" if s in mine[half] else
                               f"Take over from {SLEEVE[other]}" if s in mine[other] else "Buy") if s in tg else ""
             t.insert(1, "Plan", [plan(s) for s in t["Stock"]])
-            t.insert(2, "Target %", [100 * tg[s] if s in tg else None for s in t["Stock"]])   # weight in the half
+            f = vals[half] / (sum(vals.values()) or 1.0)       # (Oct 21) % of the account, not of the half
+            t.insert(2, "Target %", [round(100 * tg[s] * f, 1) if s in tg else None for s in t["Stock"]])
+            t = t.rename(columns={"Weight in half %": "Now %"})
+            t["Now %"] = (t["Now %"] * f).round(1)
+            tot = sum(tg.values()) * 100 * f
+            st.caption(f"Targets: {tot:.1f}% of account (half = {100 * f:.1f}%)"
+                       + (f"; {100 * f - tot:.1f}% stays cash (20% cap)" if 100 * f - tot > 1 else ""))
             sty = toned(t, ["Plan"], fn=lambda v: GOOD if v == "Buy" else INK)
             st.dataframe(sty, hide_index=True, width="stretch", height=35 * (len(t) + 1) + 3, key=f"preview_{half}",
-                         column_config={"Weight in half %": PCT_COL, "Target %": PCT_COL,
+                         column_config={"Now %": PCT_COL, "Target %": PCT_COL,
                                         "Score": st.column_config.NumberColumn(format="%.1f")})
             buys_out = sorted(set(tg) - set(t["Stock"]) - set(mine[half]) - blocked)
             sells = sell_table(half, day, sorted(set(mine[half]) - set(tg)), value, vals[half], ranks, targets)
+            if len(sells):
+                sells = sells.rename(columns={"Weight in half %": "Now %"})
+                sells["Now %"] = (sells["Now %"] * f).round(1)
             st.markdown("Would sell" + ("" if len(sells) else ": nothing"))
             if len(sells):
                 st.dataframe(sells, hide_index=True, width="stretch", key=f"preview_sell_{half}",
-                             column_config={"Weight in half %": PCT_COL,
+                             column_config={"Now %": PCT_COL,
                                             "Score": st.column_config.NumberColumn(format="%.1f")})
             if buys_out:
                 st.caption(f"Would also buy (ranked below 20): {', '.join(buys_out)}")
     st.caption(f"Ranks and targets at the {day:%a %b %-d} close, by the bot's own selection code (read-only; nothing is "
                "sent). Keep = target and held; Buy = target, not held; Take over = the low-vol half takes a stock the other "
-               "half holds (no trade); Target % = target weight in the half; Blocked = a stock on a buy block / do-not-buy list (not bought). The real rebalance uses the data of its own day, so the list can still change.")
+               "half holds (no trade); Now % / Target % = % of the whole account; Blocked = a stock on a buy block / do-not-buy list (not bought). The real rebalance uses the data of its own day, so the list can still change.")
