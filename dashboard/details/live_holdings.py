@@ -71,8 +71,36 @@ def render_live_holdings():
         render_positions(table, data)
     render_benchmarks(data)
 
+HALF_NAMES = {"lowvol": "Low volatility in uptrend", "sector": "Sector rotation"}
+
+def strategy_of(symbols, reports=None):
+    """{symbol: strategy}: the half that owns it in Reports/sleeve_ledger.json (the bot's own tags); not tagged = Manual.
+    '(manual buy)' is added when the latest filled BUY in live_trade_ledger.csv was not a bot order (Client_Order_ID not
+    starting with 'live-') or was placed through manual_orders.json."""
+    import json
+    import pandas as pd
+    from dashboard.settings import ROOT
+    reports = reports or os.path.join(ROOT, "Reports")
+    try:
+        halves = json.load(open(os.path.join(reports, "sleeve_ledger.json")))["halves"]
+        tag = {s: HALF_NAMES.get(h, h) for h, v in halves.items() for s in v.get("tags", [])}
+    except Exception:
+        return {s: "Unknown" for s in symbols}
+    manual = set()
+    try:
+        l = pd.read_csv(os.path.join(reports, "live_trade_ledger.csv"))
+        last = l[(l["Side"] == "BUY") & (l["Filled_Qty"] > 0)].sort_values("Filled_CT").groupby("Symbol").tail(1)
+        manual = set(last.loc[~last["Client_Order_ID"].astype(str).str.startswith("live-"), "Symbol"])
+        mo = json.load(open(os.path.join(reports, "manual_orders.json")))
+        manual |= {o["symbol"] for o in mo if str(o.get("action", "")).startswith("buy")} & set(last["Symbol"])
+    except Exception:
+        pass
+    return {s: (tag[s] + (" (manual buy)" if s in manual else "")) if s in tag else "Manual" for s in symbols}
+
 def render_positions(table, data):
     """The holdings table (alpaca_paper.holdings_table) and its caption."""
+    strat = strategy_of(list(table["Stock"]))
+    table.insert(1, "Strategy", [strat.get(s, "") if not str(s).startswith("Total") else "" for s in table["Stock"]])
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
     money, pct = st.column_config.NumberColumn(format="dollar"), st.column_config.NumberColumn(format="%+.2f%%")
     st.dataframe(toned(table, ["P/L $", "P/L %", "Today %"]), hide_index=True, width="stretch",
@@ -84,7 +112,9 @@ def render_positions(table, data):
                "minute in market hours (8:30 AM-3:00 PM CT on trading days), every hour otherwise. "
                "Cost basis = what you paid; Market value = shares x the latest price; P/L \\$ and P/L % = market value vs "
                "cost basis; Today % = price change since the last close; Weight % = share of the account's equity (the rest "
-               "is cash). First bought = the earliest buy still in the position (sells use up the oldest shares first).")
+               "is cash). First bought = the earliest buy still in the position (sells use up the oldest shares first). "
+               "Strategy = the half that owns the stock in the bot's sleeve ledger; '(manual buy)' = its latest buy was a "
+               "manual order; Manual = not in either half.")
 
 def render_benchmarks(data):
     """The account vs QQQ / SPY / IWM / DIA since the forward-test start close, the same deposits on the same days, all
