@@ -1,6 +1,6 @@
 """Paper-only forward-test lines the weight-based simulator in forward_test.update_strategies cannot express (added Oct 15,
 2026, Chirag): two independent halves (50/50, each with its own cash, the second half never buys what the first holds),
-swap-only halves, and the low-volatility cost-basis rules (keep winners; the Friday falling check). Ported from the Oct 15
+and swap-only halves. Ported from the Oct 15
 backtests (/tmp/combo bt.py + swap.py, /tmp/lvbt bt4.py) so the forward lines match what was backtested.
 
 Same conventions as forward_test: decide and trade at the day's close, be.COST (0.1%) per side, a holding within 1 point
@@ -16,9 +16,7 @@ A line = legs [(key, mode, calendar, share)]:
            / "calm" (the Oct 15 rules' calmer half, "Now: RS, calmer half of the list": relative strength, 63-day volatility at or below the median, no buys
            5 days before earnings)
   mode     "full" = the leg's top 10 on each calendar day (a full rebalance) / "swap<k>" = buy the top 10 once, then on
-           each calendar day sell a holding ranked worse than k (or held by the first leg) for the best stock not held /
-           "keep" = monthly, a held non-pick that is not falling stays (rule A) / "bfinal" = monthly + on other Fridays a
-           falling holding (below its cost or below its 200-day average) or a non-pick is swapped for the best new pick
+           each calendar day sell a holding ranked worse than k (or held by the first leg) for the best stock not held
   calendar "month" (last session of the month) / "week" (last session of the week) / "weekstart" (first session of the week) / "2week" (every other week end from
            the start) / "day"; the start close always buys.
 With no_overlap the first leg has priority: the second never buys a name the first holds, and when the first buys a name
@@ -43,7 +41,6 @@ class Ctx:
         self.c = inp["close"]
         self.idx, self.cols = self.c.index, list(self.c.columns)
         self.elig, self.vol, self.rs = inp["eligible"], inp["vol"], inp["scores"]["rs"]
-        self.up = inp.get("up", inp["scores"]["low_vol"].notna())
         self.cal = {"month": inp["monthly"].reindex(self.idx).fillna(False).astype(bool),
                     "week": pd.Series([be.next_sessions(d, 1)[0].isocalendar()[:2] != d.isocalendar()[:2]
                                        for d in self.idx], index=self.idx),
@@ -142,7 +139,6 @@ class Leg:
     def __init__(self, x, key, mode, cal, cash):
         self.x, self.key, self.mode, self.cal, self.cash = x, key, mode, cal, cash
         self.sh = pd.Series(0.0, index=x.cols)
-        self.basis = pd.Series(np.nan, index=x.cols)
 
     def value(self, px):
         return self.cash + float((self.sh * px.fillna(0)).sum())
@@ -154,31 +150,19 @@ class Leg:
         if abs(dq) * p < 1e-12:
             return
         v = dq * p
-        if dq > 0:
-            self.basis[sym] = (np.nan_to_num(self.basis[sym]) * self.sh[sym] + v) / (self.sh[sym] + dq)
         self.sh[sym] += dq
         self.cash -= v + abs(v) * be.COST
         if self.sh[sym] < 1e-12:
-            self.sh[sym], self.basis[sym] = 0.0, np.nan
+            self.sh[sym] = 0.0
 
-    def falling(self, t, px, s):
-        return bool(px[s] < self.basis[s]) or not bool(self.x.up.iloc[t][s])
-
-    # ---- full rebalance (bt.py Sleeve.rebalance; keep rule A from bt4)
+    # ---- full rebalance (bt.py Sleeve.rebalance)
     def rebalance(self, t, px, exclude=()):
         val = self.value(px)
         held_w = (self.sh * px.fillna(0) / val).to_numpy(float) if val > 0 else None
         w = self.x.pick(self.key, t, held_w, exclude)
-        kept = {}
         for s in sorted(self.held()):
-            if w[s] > 0:
-                continue
-            if self.mode == "keep" and s not in exclude and not self.falling(t, px, s):
-                kept[s] = self.sh[s] * px[s]
-            else:
+            if not w[s] > 0:
                 self.trade(s, -self.sh[s], px[s])
-        if kept and w.sum() > 0:
-            w = w * max(0.0, 1 - sum(kept.values()) / (val * w.sum()))
         hw = self.sh * px.fillna(0) / val
         move = [s for s in w[w > 0].index if not (self.sh[s] > 0 and abs(hw[s] - w[s]) <= self.x.ft.BAND)]
         for s in move:
@@ -190,24 +174,6 @@ class Leg:
         f = min(1.0, max(self.cash, 0) / need) if need > 0 else 1.0
         for s, q in buys:
             self.trade(s, q * f, px[s])
-
-    # ---- B-final Friday check (bt4 mode BF)
-    def friday_check(self, t, px):
-        w = self.x.pick(self.key, t)
-        out = [s for s in sorted(self.held()) if self.falling(t, px, s) or not w[s] > 0]
-        if not out:
-            return
-        score, tb, _, _ = self.x.leg(self.key)
-        cands = sorted(w[w > 0].index, key=lambda s: (-round(float(score.iloc[t][s]), 6),
-                                                      -np.nan_to_num(tb.iloc[t][s], nan=-1e9), s))
-        cands = [s for s in cands if self.sh[s] == 0]
-        for s in out:
-            dollars = self.sh[s] * px[s]
-            self.trade(s, -self.sh[s], px[s])
-            if cands:
-                b = cands.pop(0)
-                dollars = dollars * (1 - be.COST)                 # the sale's dollars (equal slots)
-                self.trade(b, dollars / (1 + be.COST) / px[b], px[b])
 
     # ---- swap-only (swap.py Swap)
     def _best(self, t, exclude):
@@ -258,8 +224,6 @@ class Leg:
             return
         if i == 0 or bool(self.cal.iloc[t]):
             self.rebalance(t, px, exclude)
-        elif self.mode == "bfinal" and bool(self.x.cal["week"].iloc[t]):
-            self.friday_check(t, px)
 
 def simulate(inp, legs, start, no_overlap=True, through=None):
     """Replay a line from the `start` close: {"days", "legs": [[(value, cash, {sym: (shares, price)}) per day] per leg]};

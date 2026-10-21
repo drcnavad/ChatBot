@@ -66,13 +66,6 @@ for legs, label in combos:
     check(abs(rows[0]["Value"] - 1.0) < 1e-12 and abs(sum(h["Shares"] * h["Price"] for h in hold if h["Date"] == rows[0]["Date"])
                                                      + rows[0]["Cash"] - 1.0) < 1e-9, f"{label}: 1.0 at the start close after its buys")
 
-# keep (A) / B-final differ from plain monthly only by their rules
-m = fc.simulate(inp, (("lowvol", "full", "month", 1.0),), start)
-bf = fc.simulate(inp, (("lowvol", "bfinal", "month", 1.0),), start)
-kp = fc.simulate(inp, (("lowvol", "keep", "month", 1.0),), start)
-check(m["legs"][0][0] == bf["legs"][0][0] == kp["legs"][0][0], "low vol variants: same start-day buys")
-check(m["legs"][0][-1] != bf["legs"][0][-1], "B-final trades on Fridays between month ends (differs from plain monthly)")
-
 # update_strategies on temp copies: new lines appended, the old live name migrated, saved days kept
 tmp = tempfile.mkdtemp()
 vp, hp = os.path.join(tmp, "v.csv"), os.path.join(tmp, "h.csv")

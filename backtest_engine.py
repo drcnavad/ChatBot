@@ -69,8 +69,7 @@ RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 WINNER = {
     # LIVE from Fri Oct 16, 2026 (Chirag, final): "Low volatility in uptrend (monthly)" = forward_test.py's "Low volatility
     # in uptrend" strategy (score low_vol, calendar monthly, select EQ, earnings None, equal weight) + do_not_buy never bought:
-    # a normal full rebalance on Oct 16 and the last trading day of each month, + the Friday check below on every other
-    # Friday. No Mon-Thu trading, no sleeve, no earnings rule.
+    # a normal full rebalance on Oct 16 and the last trading day of each month. No Mon-Thu trading, no sleeve, no earnings rule.
     # Top 5 per half (Chirag, Oct 21, 2026) = forward_test's "Current Strategy (Live from Oct End)" (ft.TOP5): from each half's next
     # rebalance (sector half Fri Oct 23, low vol half Fri Oct 30); max 2 per sector (sector_cap 0.4 x 5), equal weight 1/5 each.
     # Non-rebalance days place no orders (unchanged). Was 10 (Oct 16-25).
@@ -93,13 +92,7 @@ WINNER = {
     "cap_soft": False,          # strict sector cap
     "earnings_block_days": None,  # no earnings rule (the forward strategy has none)
     "sleeve": False,            # no defensive sleeve (sector_mapping.defensive is kept only for the pinned forward strategies)
-    "keep_profit_at_rebalance": False,  # (tested, not live) keep a non-pick in profit + above its 200-day at a rebalance
     "earnings_day_stop": False, # earnings_stop.py places no orders (not in the backtest; no Mon-Thu trading)
-    # Friday check (tested; Chirag turned it OFF Oct 15, 8:28 PM -> live = plain monthly): every Friday that is not a rebalance day, sell each holding that is below its
-    # Alpaca avg entry price, at/below its 200-day average, or no longer in the day's top picks, and buy the best-ranked
-    # pick not held with the same dollars (do_not_buy skipped). No trims / top-ups. (paper_trade
-    # friday_falling_orders.) False = monthly rebalances only.
-    "friday_falling_check": False,
     # Two halves (Chirag, Oct 15, 8:44 PM; live from Fri Oct 16): 50% of the account = the low-volatility rules above (monthly)
     # and 50% = forward_test's "Sector rotation" (63-day sector ETF return, top 3 sectors, its top n (5 from Fri Oct 23, 2026) by the C6 score,
     # equal weights, max 2 per sector (4 with 10), QQQ halving, do_not_buy) with a full
@@ -128,8 +121,8 @@ C6_RULES_OCT15 = {
     "calendar": "weekly", "switch_days": [],
     "midweek_swap": {"enter_top": None, "exit_below": None, "days": ["Mon", "Tue", "Wed", "Thu"]},
     "midweek_exit_below": 20, "midweek_exit_to_top": 10, "max_pick_rank": None, "cap_soft": False,
-    "earnings_block_days": 5, "sleeve": True, "keep_profit_at_rebalance": False, "earnings_day_stop": True,
-    "friday_falling_check": False, "rebalance_band": 0.01,
+    "earnings_block_days": 5, "sleeve": True, "earnings_day_stop": True,
+    "rebalance_band": 0.01,
 }
 
 def scored_stock_count():
@@ -144,14 +137,10 @@ def winner_label(n_stocks):
     """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'LV-M-U84' / 'C6-U91-NS-MW30R10-E5'."""
     S, mw = WINNER, WINNER.get("midweek_swap")
     if S.get("score") == "low_vol" and S.get("calendar") == "monthly":
-        tag = (f"LV-M-U{n_stocks}" + ("-KP" if S.get("keep_profit_at_rebalance") else "")
-               + ("-FC" if S.get("friday_falling_check") else "") + ("+SR-W" if S.get("sleeves") else ""))
+        tag = f"LV-M-U{n_stocks}" + ("+SR-W" if S.get("sleeves") else "")
         name = (f"Low volatility in uptrend (monthly): the {S['n']} calmest stocks above their 200-day average, equal weight, "
                 f"max {winner_max_per_sector()} per sector, rebalanced on the last trading day of the month + soft QQQ regime "
-                f"({n_stocks} stocks)" + (" [at a rebalance a non-pick is sold only below its purchase price or at/below its 200-day average]"
-                                          if S.get("keep_profit_at_rebalance") else "")
-                + (" + Friday check (sell a holding below its purchase price, at/below its 200-day or out of the top picks; "
-                   "same dollars into the best pick not held)" if S.get("friday_falling_check") else ""))
+                f"({n_stocks} stocks)")
         if S.get("sleeves"):
             name = (f"{S['sleeves']['lowvol']:.0%} " + name + f" + {S['sleeves']['sector']:.0%} Sector rotation (top 3 sectors by "
                     f"63-day ETF return, top {S['n']}, rebalanced every " + ("Monday" if S.get("sector_day") == "monday" else "Friday")
@@ -227,8 +216,7 @@ def rules_version():
     """Rules version stored in signal_analysis.csv (older rows of the same version keep their BUY/SELL/HOLD)."""
     S, mw = WINNER, WINNER.get("midweek_swap")
     if S.get("score") == "low_vol":
-        return ("v6-lv-" + str(S.get("calendar", "weekly")) + ("-kp" if S.get("keep_profit_at_rebalance") else "")
-                + ("-fc" if S.get("friday_falling_check") else ""))
+        return "v6-lv-" + str(S.get("calendar", "weekly"))
     v = f"v5-x{S.get('midweek_exit_below') or 0}" if mw else "v3"      # v5-x20r10-ns-e5: Mon-Thu exit rule, no swap
     if S.get("midweek_exit_below") and S.get("midweek_exit_to_top"):
         v += f"r{S['midweek_exit_to_top']}"
@@ -1722,9 +1710,6 @@ def next_decision(latest, days=None):
                 return d, "full rebalance", sess[i + 1]
             if WINNER.get("sleeves") and is_sector_day(d):
                 return d, SECTOR_KIND, sess[i + 1]             # the sector-rotation half's weekly rebalance
-            if d.isocalendar()[:2] != sess[i + 1].isocalendar()[:2]:     # the week's last session
-                if WINNER.get("friday_falling_check"):
-                    return d, "Friday check", sess[i + 1]      # variant B (flag)
         return sess[0], "full rebalance", sess[1]
     if days is None:
         days = mw.get("days", ("Mon", "Wed")) if mw else ()

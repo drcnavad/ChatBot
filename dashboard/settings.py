@@ -57,7 +57,7 @@ def low_vol_rules_text():
             "- **When:** a full rebalance on Fri Oct 16, 2026 (the switch), then on the last trading day of each month"
             + (" (the low-volatility half; the sector half every Friday, from Fri Oct 23; Mondays Oct 19-22)" if SLEEVES else "") + ", with "
             "the prices at about 2:30 PM CT (sells first, then buys from the cash free after the sells; any rest at 9 AM CT "
-            "the next trading day)" + (", and the Friday check on the other Fridays" if WINNER.get("friday_falling_check") else "")
+            "the next trading day)"
             + ". **Other days:** the 2:30 PM runs only refresh the data and place no orders (a month-end on Mon-Thu is still a "
             "rebalance day).\n"
             "- **Score:** 1 / 63-day volatility (calmest first), only stocks whose close is above their 200-day average; "
@@ -68,14 +68,6 @@ def low_vol_rules_text():
             + ".\n"
             + (f"- **Market filter:** with {REGIME_OFF} at a rebalance, every weight is {HALVED}.\n" if SCALE else "")
             + (f"- **Rebalance:** every pick is brought back to its weight unless within {band * 100:g} point of it.\n" if band else "")
-            + ("- **Keep rule:** at a rebalance a holding that is no longer a pick is sold only if its price is below its "
-               "Alpaca average entry price or its close is at/below its 200-day average; one in profit and in an uptrend is "
-               "kept as it is (not sold, not trimmed) and the picks share the rest of the 99%.\n"
-               if WINNER.get("keep_profit_at_rebalance") else "")
-            + ("- **Friday check:** every Friday that is not a rebalance day (2:30 PM CT), a holding is sold in full when it "
-               "is below its Alpaca average entry price, its close is at/below its 200-day average, or it is no longer one of "
-               f"the day's top-{WINNER.get('n', 5)} picks; each sale buys the best-ranked pick not held with the same dollars"
-               + ", do_not_buy skipped; none left = cash. No trims or top-ups.\n" if WINNER.get("friday_falling_check") else "")
             + ("- **Earnings-day stop:** off (no orders from earnings_stop.py).\n" if not WINNER.get("earnings_day_stop", True) else "")
             + (f"- **Two halves:** the account is split {SLEEVES['lowvol']:.0%} / {SLEEVES['sector']:.0%}. The rules above run the "
                "**low-volatility half** (weights are fractions of that half). The **sector-rotation half**: the 3 sector "

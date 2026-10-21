@@ -234,14 +234,6 @@ def next_plan():
         plan.setdefault(s, ("Blocked", 0.0, min(d for d in days.values() if d is not None)))
     return {"asof": asof, "days": days, "targets": t, "plan": plan}
 
-def preview_marks():
-    """(targets, sells) for the Home stock list colors: both halves' targets (5 + 5) and the held stocks no half targets."""
-    np_ = next_plan()
-    if np_ is None:
-        return set(), set()
-    pl = np_["plan"]
-    return {s for s, a in pl.items() if a[0] != "Sell"}, {s for s, a in pl.items() if a[0] == "Sell"}
-
 def render_preview(positions, led, equity):
     """Next rebalance preview: each half's top 20 at the latest close with Keep / Buy / Blocked, and what it would sell."""
     import decision_ranks
