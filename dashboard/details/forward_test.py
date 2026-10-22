@@ -36,7 +36,6 @@ def render_forward_test(p=None):
         st.info(f"No forward-test rows yet (started {start}).")
         return
     raw, values = built
-    render_top10(p.by_symbol["Strategy_Rank"].to_dict() if p is not None and "Strategy_Rank" in p.by_symbol else None)
     render_curve(raw, values)
     board = tidy_board(raw, start[:-6])
     f1, f2 = st.columns([2, 3])
@@ -53,8 +52,6 @@ def render_forward_test(p=None):
     pct = [c for c in board.columns if c not in ("Rank", "Strategy", "Rule")]
     sty = toned(toned(board, [c for c in pct if c != "Max drawdown"]), ["Max drawdown"], fn=drawdown_tone)
     board_html(highlight_rows(sty), board, pct)
-    with st.container(key="ft_live_js"):
-        _live_push(values)
 
 def live_returns(values):
     """Display only: {leaderboard display name: live % vs its last EOD value}. A strategy = the cash + shares of its last
@@ -97,13 +94,25 @@ def live_returns(values):
         out["My Alpaca account"] = (float(data["equity"]) / float(daily["Equity"].iloc[-1]) - 1) * 100
     return out
 
+def render_live_push():
+    """The leaderboard's in-place Live updater, outside the 5-minute leaderboard fragment (nested timed fragments
+    re-register their keys when both rerun together: StreamlitDuplicateElementKey, Oct 22)."""
+    with st.container(key="ft_live_js"):
+        _live_push()
+
 @st.fragment(run_every=30)
-def _live_push(values):
+def _live_push():
     """Every 30 s: write the Live column's new values into the leaderboard table in place (same-origin component
     iframe), so its sort order and hover stay; a hidden component (.st-key-ft_live_js)."""
     import json
     import streamlit.components.v1 as components
-    live = {k: round(v, 2) for k, v in live_returns(values).items() if v == v}
+    built = _forward_files()[2]
+    try:
+        live = {k: round(v, 2) for k, v in live_returns(built[1]).items() if v == v} if built else {}
+    except Exception:
+        live = {}
+    if not live:
+        return
     components.html("""<script>
 const L=%s;for(const f of window.parent.document.querySelectorAll('iframe')){let d;try{d=f.contentDocument}catch(e){continue}
  if(!d)continue;const T=d.querySelector('table');if(!T)continue;const hs=[...T.querySelectorAll('thead th')].map(h=>h.innerText.trim());
@@ -268,14 +277,16 @@ def _cs_open(sym):
     st.session_state["_cs_open"] = sym
 
 @st.fragment(run_every=30)
-def render_top10(ranks=None):
+def render_top10(p=None):
     """Top 5 consensus (display only) as Stock Analysis-style tiles: every stock held by the leaderboard's Rank 1-5
-    strategies (forward_test.consensus), colored by its live 5-day return (5th completed session's close -> the Alpaca
-    price now), labeled with how many of the 5 hold it; hover = names + today's sparkline; click = open in Stock Analysis.
-    Sorted by holders, then 5-day return. Its own fragment: refreshes silently every 30 s."""
+    strategies by last completed week (by_last_week), colored by its live week-so-far return (the previous week's
+    last close -> the Alpaca price now), labeled with how many of the 5 hold it; hover = names + today's sparkline; click = open in Stock Analysis.
+    Sorted by holders, then this week's return. Not nested in the leaderboard fragment (duplicate keys). Its own fragment: refreshes silently every 30 s."""
     import forward_test as ft
     import sector_mapping as sm
-    from dashboard.data import close_days_ago, index_quotes, intraday
+    from dashboard.data import index_quotes, intraday, prior_week_close
+    from dashboard.heatmap import _symbols
+    ranks = p.by_symbol["Strategy_Rank"].to_dict() if p is not None and "Strategy_Rank" in p.by_symbol else None
     from dashboard.heatmap import tile_color
     from dashboard.page import sparkline
     if st.session_state.get("_cs_open"):
@@ -293,10 +304,19 @@ def render_top10(ranks=None):
     top = [nm for nm, _ in c["strategies"]]
     by = {s: [CURRENT if nm == ft.LIVE else nm for nm in top if nm in set(g["Strategy"])] for s, g in h.groupby("Symbol")}
     syms = tuple(c["stocks"]["Symbol"])
-    try:
-        q, base, spark = index_quotes(syms), close_days_ago(syms), intraday(syms)
-    except Exception:
-        q, base, spark = {}, {}, {}
+    # the Stock Analysis grid's own batched request (same symbol tuple -> the same 20 s / 60 s cache entries)
+    grid = tuple(s for s in _symbols() if p is None or s in p.options)
+    req = grid if set(syms) <= set(grid) else tuple(sorted(set(grid) | set(syms)))
+    from dashboard.data import NY
+    monday = (pd.Timestamp.now(tz=NY).normalize() - pd.Timedelta(days=pd.Timestamp.now(tz=NY).weekday())).tz_localize(None)
+    good = st.session_state.setdefault("_cs_last", {"q": {}, "base": {}, "spark": {}})   # last good values per symbol
+    for name, fn in (("q", lambda: index_quotes(req)), ("base", lambda: prior_week_close(syms, f"{monday:%Y-%m-%d}")),
+                     ("spark", lambda: intraday(req))):
+        try:
+            good[name].update({k: v for k, v in (fn() or {}).items() if k in syms})
+        except Exception:
+            pass                                          # a hiccup: keep the last good values, show no error
+    q, base, spark = good["q"], good["base"], good["spark"]
     def r5(s):
         px, b = q.get(s, (float("nan"),))[0], base.get(s, float("nan"))
         return (px / b - 1) * 100 if px == px and b == b and b else float("nan")
@@ -307,7 +327,7 @@ def render_top10(ranks=None):
     now = datetime.now(CT)
     when = f"{now:%-I:%M %p} CT " + ("today" if now.weekday() < 5 else f"{now:%a, %b %-d}")
     st.markdown(f'<div class="sa-card-title">Top 5 consensus<span>{len(rows)} stocks held by the top {n} strategies '
-                f'(by last week\'s return) as of {c["day"]:%a, %b %-d} close. Colored by 5-day return through {when}.</span></div>'
+                f'(by last week\'s return) as of {c["day"]:%a, %b %-d} close. Colored by this week\'s return so far through {when}.</span></div>'
                 + TILE_CSS + "".join(f'<style>.st-key-cs_b_{s.replace(".", "_")} button{{background:{tile_color(r / 1.5 if r == r else r)}!important}}</style>'
                                      for s, _, r in rows), unsafe_allow_html=True)
     with st.container(horizontal=True, gap=None, key="cs_grid"):
@@ -317,6 +337,6 @@ def render_top10(ranks=None):
                 st.button(f"{s}  {k}/{n}\n" + (f"{r:+.2f}%" if r == r else "–"), key=f"cs_b_{key}", on_click=_cs_open, args=(s,))
                 px = q.get(s, (float("nan"),))[0]
                 head = (f"{esc(s)} · {esc(sm.symbol_name.get(s, s))}" + (f" · ${px:,.2f}" if px == px else "")
-                        + (f" · {r:+.2f}% 5D" if r == r else "") + f" · held by {k}/{n}: {esc(', '.join(by.get(s, [])))}")
+                        + (f" · {r:+.2f}% this week" if r == r else "") + f" · held by {k}/{n}: {esc(', '.join(by.get(s, [])))}")
                 body = sparkline(*spark[s], ",.2f") if s in spark else '<div class="sa-pop-empty">No intraday data right now</div>'
                 st.markdown(f'<div class="sa-pop"><div class="sa-pop-title">{head}</div>{body}</div>', unsafe_allow_html=True)

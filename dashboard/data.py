@@ -275,15 +275,14 @@ def _days_back(n):
     return pd.Timestamp.now(tz=NY).normalize() - pd.Timedelta(days=n)
 
 @st.cache_data(ttl=600, show_spinner=False)
-def close_days_ago(symbols: tuple, n=5):
-    """Display only: {symbol: close of the n-th completed session before today (New York)} from one Alpaca daily-bar
-    request (cached 10 min); the base of a live n-day return."""
-    out = {}
-    today = pd.Timestamp.now(tz=NY).tz_localize(None).normalize()
-    for s, df in alpaca_bars(symbols, None, _days_back(n * 2 + 10)).items():
-        c = df.loc[df.index.normalize() < today, "Close"]
-        if len(c) >= n:
-            out[s] = float(c.iloc[-n])
+def prior_week_close(symbols: tuple, week: str):
+    """Display only: {symbol: last daily close before the week starting `week` (Monday, New York)} from one Alpaca
+    daily-bar request, cached 10 min per week; the base of a live week-so-far return."""
+    out, monday = {}, pd.Timestamp(week)
+    for s, df in alpaca_bars(symbols, None, monday - pd.Timedelta(days=14)).items():
+        c = df.loc[df.index.normalize() < monday, "Close"]
+        if len(c):
+            out[s] = float(c.iloc[-1])
     return out
 
 @st.cache_data(ttl=60, show_spinner=False)

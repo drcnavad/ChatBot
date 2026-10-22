@@ -5,7 +5,7 @@ import streamlit as st
 
 from dashboard.details.data_settings import render_data_and_settings
 from dashboard.details.equity_chart import render_equity_chart
-from dashboard.details.forward_test import render_forward_test
+from dashboard.details.forward_test import render_forward_test, render_live_push, render_top10
 from dashboard.details.last_decision import render_last_decision
 from dashboard.details.live_holdings import render_live_holdings
 from dashboard.details.manual_orders import render_manual_orders
@@ -20,7 +20,9 @@ def render_strategy_tab(p):
     import forward_test as ft
     with st.expander(f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
                      expanded=True):
+        render_top10(p)
         render_forward_test(p)
+        render_live_push()
     with st.expander("Manual orders and buy blocks (manual_trade.py)", expanded=False):
         render_manual_orders()
     with st.expander("Data freshness and settings", expanded=False):
