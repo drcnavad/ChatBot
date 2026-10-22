@@ -129,15 +129,7 @@ try:
 except ImportError:  # graceful degradation: dashboard works without live quotes
     _yf, _YF_OK = None, False
 
-def refresh_every():
-    """Seconds between live-data refreshes: 30 in the regular session (Alpaca clock), 300 outside it."""
-    from dashboard.page import market_open
-    return 30 if market_open() else 300
-
-def refresh_slot():
-    """A number that changes every refresh_every() seconds: the cache key of every live (Alpaca) read."""
-    import time
-    return int(time.time() // refresh_every())
+from dashboard.alpaca_data import refresh_every, refresh_slot  # noqa: E402,F401  (re-exported)
 
 @st.cache_data(ttl=600, max_entries=200, show_spinner=False)
 def _alpaca_last_trade(ticker: str, slot: int):

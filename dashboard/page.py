@@ -50,6 +50,11 @@ def _sp(v, d=2, unit="%"):
     return f"{v:+,.{d}f}{unit}" if v is not None and v == v else "—"
 
 def render_ticker(box):
+    with box:
+        _ticker()
+
+@st.fragment(run_every=300)
+def _ticker():
     """The scrolling strip of held stocks (this run's Alpaca positions): live price and day change from
     data.index_quotes (Alpaca SIP / IEX, 30 s cache), else the position's own current price and change_today."""
     from dashboard.data import index_quotes
@@ -73,7 +78,7 @@ def render_ticker(box):
                      f'{f"{abs(chg):.2f}%" if chg == chg else ""}</span></a>' if px == px else "")
     row = "".join(items)
     secs = max(20, 3 * len(items))                       # the same speed for any number of stocks
-    box.markdown(f'<div class="sa-ticker"><div class="sa-ticker-track" style="animation-duration:{secs}s">'
+    st.markdown(f'<div class="sa-ticker"><div class="sa-ticker-track" style="animation-duration:{secs}s">'
                  f'{row}{row}</div></div>', unsafe_allow_html=True)
 
 PAGES = ["Home", "Stock Analysis", "Strategy", "Trading Account"]
@@ -116,16 +121,7 @@ HOLDINGS = {"XLK": "NVDA AAPL MSFT AMD AVGO", "XLF": "BRK-B JPM V MA BAC", "XLV"
             "XLRE": "WELL PLD EQIX AMT SPG", "XLC": "META GOOGL WBD DIS TTWO", "DBC": "Brent WTI Diesel Gasoline Gold"}
 YF = ("CL=F", "BTC-USD")                     # not on Alpaca stock data: yfinance (free, keyless)
 
-@st.cache_data(ttl=60, show_spinner=False)
-def market_open():
-    """True during the regular session: Alpaca's clock (read-only GET /clock; knows holidays), else Mon-Fri
-    9:30-16:00 New York."""
-    try:
-        import alpaca_paper as ap
-        return bool(ap.PaperAccount()._get("/clock").get("is_open"))
-    except Exception:
-        now = pd.Timestamp.now(tz="America/New_York")
-        return now.weekday() < 5 and 570 <= now.hour * 60 + now.minute < 960
+from dashboard.alpaca_data import market_open  # noqa: E402  (the live-data layer)
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _card_data(syms, slot):
