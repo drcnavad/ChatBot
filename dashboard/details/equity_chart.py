@@ -43,6 +43,12 @@ def equity_series(key, slot=0):
         trading = now.weekday() < 5 and now.hour * 60 + now.minute >= 570     # not on weekends or before the open
         if trading and float(acct.get("equity") or 0) > 0 and (not len(raw) or raw.index[-1] < today):
             raw.loc[today], flow.loc[today] = float(acct["equity"]), 0.0
+    elif len(raw):                                      # intraday: today's live equity (GET /account) as the latest point
+        now = pd.Timestamp.now(tz="America/Chicago")
+        if raw.index[-1].date() == now.date() and now > raw.index[-1]:
+            eq_now = float(ap.PaperAccount()._get("/account").get("equity") or 0)
+            if eq_now > 0:
+                raw.loc[now], flow.loc[now] = eq_now, 0.0
     keep_from = raw.index.tz_localize(None) >= START if raw.index.tz is not None else raw.index >= START
     raw, flow = raw[keep_from], flow[keep_from]
     prev = raw.shift(1)
@@ -130,7 +136,7 @@ def render_equity_chart():
     if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off":
         st.info("Portfolio chart is turned off here (STOCK_ANALYSIS_LIVE_HOLDINGS=off).")
         return
-    view = st.session_state.get("eq_view", "1Y")
+    view = st.session_state.get("eq_view", "1D")      # a fresh load shows today; a picked range is kept for the session
     key = DATA.get(view, SINCE)
     tg = st.columns(4)
     shown = [sym for c, sym in zip(tg, BENCH) if c.toggle(sym, value=sym == "QQQ", key=f"eq_{sym.lower()}")]
