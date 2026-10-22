@@ -223,12 +223,9 @@ _tips = _fd.hover_tips(_ft[0]) if _ft else None
 expect(_tips is None or all(("Holds now:" in t) == (s.replace(ft.LIVE_MARK, "") in {c["name"] for c in ft.STRATEGIES} or s == _fd.CURRENT)
                             for s, t in zip(_ft[0]["Strategy"], _tips["Strategy"])),
        "leaderboard hover: every strategy row has its rule and holdings, benchmarks/account none")
-_top = [m.value for m in at.markdown if 'sa-card-title">Top 5 consensus<' in m.value]
-_top_syms = re.findall(r'\?symbol=([A-Z0-9.]+)"[^>]*>[^<]*</a> (\d+)/(\d+) strategies', _top[0]) if _top else []
-expect(len(_top) == 1 and len(_top_syms) == 10 and len({s for s, _, _ in _top_syms}) == 10
-       and [int(c) for _, c, _ in _top_syms] == sorted((int(c) for _, c, _ in _top_syms), reverse=True)
-       and all(int(c) <= int(n) == 5 for _, c, n in _top_syms),
-       f"Top 5 consensus: 10 linked stocks from 5 strategies, most held first: {_top_syms}")
+_cs = [x for x in at.button if str(x.key).startswith("cs_b_")]
+_cnt = [int(re.search(r" (\d)/\d", x.label).group(1)) for x in _cs]
+expect(len(_cs) >= 10 and _cnt == sorted(_cnt, reverse=True), f"Top 5 consensus tiles: held-by count first: {[x.label for x in _cs[:5]]}")
 expect(any("flex-wrap: wrap" in m.value and "sa-tier-syms" in m.value for m in at.markdown),
        "stock-list rows (sa-tier-syms) must wrap onto more lines, not scroll")
 _rule = "Don't change the strategy until 12+ weeks of forward results (from Oct 2, 2026) compare against QQQ."

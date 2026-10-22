@@ -48,7 +48,7 @@ CSS = """
         font-size: 0.9rem; font-variant-numeric: tabular-nums; border-right: 1px solid #1e293b; }
     .sa-tick b { color: #f8fafc; font-weight: 700; } .sa-tick span { color: #cbd5e1; }
     .sa-tick .up { color: #4ade80; } .sa-tick .down { color: #f87171; }
-    .st-key-sa_ticker_js { display: none; }  /* the hidden price updater of the ticker strip */
+    .st-key-ft_live_js, .st-key-sa_ticker_js { display: none; }  /* the hidden price updater of the ticker strip */
     /* stock card: compact label / value tables side by side */
     .sa-kv-grid { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 1.25rem; margin-top: 0.75rem; }
     @media (max-width: 1000px) { .sa-kv-grid { grid-template-columns: 1fr; } }

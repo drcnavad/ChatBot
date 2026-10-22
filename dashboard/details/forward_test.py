@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import load_benchmarks, read_report_csv
-from dashboard.style import drawdown_tone, esc, show_html, symbol_link, toned
+from dashboard.style import BAD, GOOD, INK, drawdown_tone, esc, show_html, toned
 
 @st.cache_data(ttl=900, max_entries=4, show_spinner=False)
 def _board_cached(_daily, _values, key):
@@ -48,9 +48,69 @@ def render_forward_test(p=None):
     if fams:
         board = board[board["Rule"].isin(fams)]
     board = board.drop(columns="Rule")                   # family: filter only; rule + holdings show on hover
+    live = live_returns(values)
+    board.insert(list(board.columns).index("Last EOD"), "Live", [live.get(x, float("nan")) for x in board["Strategy"]])
     pct = [c for c in board.columns if c not in ("Rank", "Strategy", "Rule")]
     sty = toned(toned(board, [c for c in pct if c != "Max drawdown"]), ["Max drawdown"], fn=drawdown_tone)
     board_html(highlight_rows(sty), board, pct)
+    with st.container(key="ft_live_js"):
+        _live_push(values)
+
+def live_returns(values):
+    """Display only: {leaderboard display name: live % vs its last EOD value}. A strategy = the cash + shares of its last
+    saved day (forward_strategies*.csv, no trades) at live Alpaca prices vs its latest value (provisional close
+    included); QQQ / SPY = live price vs their close that day; the account = Alpaca equity now vs its last saved equity."""
+    import forward_test as ft
+    from dashboard.data import index_quotes, load_benchmarks, read_report_csv
+    hold, saved = read_report_csv(ft.HOLDINGS_CSV), read_report_csv(ft.STRATEGIES_CSV)
+    if hold is None or saved is None or values is None or values.empty:
+        return {}
+    v = values.assign(Date=pd.to_datetime(values["Date"]), Strategy=values["Strategy"].replace(ft.OLD_NAMES))
+    day = v["Date"].max()
+    base = v.sort_values("Date").groupby("Strategy")["Value"].last()
+    saved = saved.assign(Date=pd.to_datetime(saved["Date"]), Strategy=saved["Strategy"].replace(ft.OLD_NAMES))
+    cash = saved.sort_values("Date").groupby("Strategy")["Cash"].last()
+    h = hold.assign(Date=pd.to_datetime(hold["Date"]), Strategy=hold["Strategy"].replace(ft.OLD_NAMES))
+    h = h[h["Date"] == h.groupby("Strategy")["Date"].transform("max")]
+    try:
+        q = index_quotes(tuple(sorted(set(h["Symbol"]) | {"QQQ", "SPY"})))
+    except Exception:
+        q = {}
+    out = {}
+    for name, g in h.groupby("Strategy"):
+        px = g["Symbol"].map(lambda s: q.get(s, (float("nan"),))[0])
+        if name in base and name in cash and px.notna().all() and base[name]:
+            out[CURRENT if name == ft.LIVE else name] = ((cash[name] + float((g["Shares"] * px).sum())) / base[name] - 1) * 100
+    for name in base.index:                              # all cash: flat
+        if name in cash and (CURRENT if name == ft.LIVE else name) not in out and name not in set(h["Strategy"]):
+            out[CURRENT if name == ft.LIVE else name] = 0.0
+    bench = load_benchmarks()
+    for x in ("QQQ", "SPY"):
+        px, chg = q.get(x, (float("nan"), float("nan")))
+        b = bench[x].dropna() if bench is not None and x in bench else pd.Series(dtype=float)
+        ref = float(b[b.index <= day].iloc[-1]) if len(b[b.index <= day]) and b.index.max() >= day else px / (1 + chg / 100)
+        out[f"{x} (comparison)"] = out[x] = (px / ref - 1) * 100
+    from dashboard.details.live_holdings import live_holdings
+    data, _ = live_holdings()
+    daily = read_report_csv(ft.DAILY_CSV)
+    if data and daily is not None and len(daily):
+        out["My Alpaca account"] = (float(data["equity"]) / float(daily["Equity"].iloc[-1]) - 1) * 100
+    return out
+
+@st.fragment(run_every=30)
+def _live_push(values):
+    """Every 30 s: write the Live column's new values into the leaderboard table in place (same-origin component
+    iframe), so its sort order and hover stay; a hidden component (.st-key-ft_live_js)."""
+    import json
+    import streamlit.components.v1 as components
+    live = {k: round(v, 2) for k, v in live_returns(values).items() if v == v}
+    components.html("""<script>
+const L=%s;for(const f of window.parent.document.querySelectorAll('iframe')){let d;try{d=f.contentDocument}catch(e){continue}
+ if(!d)continue;const T=d.querySelector('table');if(!T)continue;const hs=[...T.querySelectorAll('thead th')].map(h=>h.innerText.trim());
+ const i=hs.indexOf('Live'),n=hs.indexOf('Strategy');if(i<0||n<0)continue;
+ for(const r of T.tBodies[0].rows){const c=r.cells[n].firstChild;const k=c&&c.nodeType==3?c.data:'';if(!(k in L))continue;
+  const v=L[k];r.cells[i].textContent=(v>0?'+':'')+v.toFixed(2)+'%%';r.cells[i].style.color=v>0?'%s':v<0?'%s':'%s'}}
+</script>""" % (json.dumps(live), GOOD, BAD, INK), height=0)
 
 TIP_CSS = ("visibility:hidden; position:absolute; z-index:9; left:6px; top:100%; width:520px; "
            "background:#0f172a; color:#f8fafc; font-weight:400; font-size:12.5px; line-height:1.45; padding:9px 11px; "
@@ -180,27 +240,68 @@ def highlight_rows(sty):
     on = lambda name: str(name).startswith(ft.LIVE) or str(name) in (*keys, CURRENT)
     return sty.apply(lambda r: [HIGHLIGHT_BG if on(r["Strategy"]) else ""] * len(r), axis=1)
 
-CONSENSUS_GOOD, CONSENSUS_WARN, EXIT_RANK = 3, 2, 30   # chip colors: held by 3+ / 2 of the 5; ranked worse than 30
 
+TILE_CSS = (
+    '<style>.st-key-cs_grid{gap:4px!important;flex-wrap:wrap!important;justify-content:flex-start!important}'
+    '.st-key-cs_grid > *{flex:0 0 84px!important;width:84px!important;min-width:0!important;max-width:84px!important}'
+    '[class*="st-key-cs_b_"] button{width:84px;height:46px;min-height:46px;padding:0 2px;border:0;border-radius:3px}'
+    '[class*="st-key-cs_b_"] button p{color:#fff!important;font:600 11px/1.2 Inter,system-ui,sans-serif;white-space:pre-line;text-align:center;margin:0}'
+    '[class*="st-key-cs_b_"] button:hover{filter:brightness(1.25)}'
+    '[class*="st-key-cs_t_"]{position:relative;gap:0!important;width:84px!important;flex:none!important}'
+    '[class*="st-key-cs_t_"] [data-testid="stElementContainer"]:has(.sa-pop){position:absolute;top:0;left:0;height:0;margin:0;overflow:visible;pointer-events:none}'
+    '[class*="st-key-cs_t_"] .sa-pop{top:52px}[class*="st-key-cs_t_"]:hover .sa-pop{display:block}'
+    '[class*="st-key-cs_t_"]:hover{z-index:1000}</style>')
+
+def _cs_open(sym):
+    st.session_state["_cs_open"] = sym
+
+@st.fragment(run_every=30)
 def render_top10(ranks=None):
-    """Top 5 consensus card (display only): the 10 stocks most held by the 5 best forward-test strategies
-    (forward_test.consensus): the leaderboard's Rank 1-5 above (total return since Oct 2, provisional close included)."""
+    """Top 5 consensus (display only) as Stock Analysis-style tiles: every stock held by the leaderboard's Rank 1-5
+    strategies (forward_test.consensus), colored by its live 5-day return (5th completed session's close -> the Alpaca
+    price now), labeled with how many of the 5 hold it; hover = names + today's sparkline; click = open in Stock Analysis.
+    Sorted by holders, then 5-day return. Its own fragment: refreshes silently every 30 s."""
     import forward_test as ft
+    import sector_mapping as sm
+    from dashboard.data import close_days_ago, index_quotes, intraday
+    from dashboard.heatmap import tile_color
+    from dashboard.page import sparkline
+    if st.session_state.get("_cs_open"):
+        st.session_state["_pending_ticker"] = st.session_state.pop("_cs_open")
+        st.rerun(scope="app")
     built = _forward_files()[2]
-    c = ft.consensus(built[0], read_report_csv(ft.HOLDINGS_CSV), ranks) if built else None
+    hold = read_report_csv(ft.HOLDINGS_CSV)
+    c = ft.consensus(built[0], hold, ranks, n_stocks=10 ** 4) if built else None
     if c is None or c["stocks"].empty:
         show_html('<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>no saved strategy holdings yet</span></div></div>')
         return
-    n = len(c["strategies"])
-
-    def chip(r):
-        cls = ("t-bad" if pd.isna(r.Rank) or r.Rank > EXIT_RANK else
-               "t-good" if r.Count >= CONSENSUS_GOOD else "t-warn" if r.Count >= CONSENSUS_WARN else "")
-        rk = f"rank #{r.Rank:.0f}" if pd.notna(r.Rank) else "not ranked"
-        return (f'<span title="{esc(f"summed target weight {r.Weight:.0%} · {rk} at the latest close")}">'
-                f'{symbol_link(r.Symbol, cls)} {r.Count}/{n} strategies</span>')
-    strats = " ".join(f'<span>{i}. {esc(nm)}' + (f' <i title="{esc(", ".join(tw))}">(+{len(tw)} same holdings)</i>' if tw else "")
-                      + "</span>" for i, (nm, tw) in enumerate(c["strategies"], 1))
-    show_html(f'<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>forward-test Rank 1–5 (total return since Oct 2) · holdings at {c["day"]:%a %b %-d} close</span></div>'
-              f'<div class="sa-tier"><b>Stocks</b><div class="sa-tier-syms">{" ".join(chip(r) for r in c["stocks"].itertuples())}</div></div>'
-              f'<div class="sa-tier"><b>Strategies</b><div class="sa-tier-syms">{strats}</div></div></div>')
+    h = hold.assign(Date=pd.to_datetime(hold["Date"]), Strategy=hold["Strategy"].replace(ft.OLD_NAMES))
+    h = h[(h["Date"] == h.groupby("Strategy")["Date"].transform("max")) & (h["Weight"] > 0)]
+    top = [nm for nm, _ in c["strategies"]]
+    by = {s: [CURRENT if nm == ft.LIVE else nm for nm in top if nm in set(g["Strategy"])] for s, g in h.groupby("Symbol")}
+    syms = tuple(c["stocks"]["Symbol"])
+    try:
+        q, base, spark = index_quotes(syms), close_days_ago(syms), intraday(syms)
+    except Exception:
+        q, base, spark = {}, {}, {}
+    def r5(s):
+        px, b = q.get(s, (float("nan"),))[0], base.get(s, float("nan"))
+        return (px / b - 1) * 100 if px == px and b == b and b else float("nan")
+    rows = sorted(((s, len(by.get(s, [])), r5(s)) for s in syms), key=lambda x: (-x[1], -(x[2] if x[2] == x[2] else -1e9)))
+    n = len(top)
+    from datetime import datetime
+    from dashboard.settings import CT
+    st.markdown(f'<div class="sa-card-title">Top 5 consensus<span>{len(rows)} stocks held by the leaderboard\'s Rank 1–{n} · '
+                f'colored by 5-day return · holdings at {c["day"]:%a %b %-d} close · updated {datetime.now(CT):%-I:%M:%S %p} CT</span></div>'
+                + TILE_CSS + "".join(f'<style>.st-key-cs_b_{s.replace(".", "_")} button{{background:{tile_color(r / 1.5 if r == r else r)}!important}}</style>'
+                                     for s, _, r in rows), unsafe_allow_html=True)
+    with st.container(horizontal=True, gap=None, key="cs_grid"):
+        for s, k, r in rows:
+            key = s.replace(".", "_")
+            with st.container(key=f"cs_t_{key}"):
+                st.button(f"{s}  {k}/{n}\n" + (f"{r:+.2f}%" if r == r else "–"), key=f"cs_b_{key}", on_click=_cs_open, args=(s,))
+                px = q.get(s, (float("nan"),))[0]
+                head = (f"{esc(s)} · {esc(sm.symbol_name.get(s, s))}" + (f" · ${px:,.2f}" if px == px else "")
+                        + (f" · {r:+.2f}% 5D" if r == r else "") + f" · held by {k}/{n}: {esc(', '.join(by.get(s, [])))}")
+                body = sparkline(*spark[s], ",.2f") if s in spark else '<div class="sa-pop-empty">No intraday data right now</div>'
+                st.markdown(f'<div class="sa-pop"><div class="sa-pop-title">{head}</div>{body}</div>', unsafe_allow_html=True)
