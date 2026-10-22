@@ -55,7 +55,8 @@ def render_stock_picker(p, jumped):
     if jumped or pending:  # opened from a link or a table: scroll the stock view into sight
         components.html("<script>const el = window.parent.document.getElementById('ticker-focus');"
                         "if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});</script>", height=0)
-    render_rank_tiers(p)
+    from dashboard.heatmap import render_heatmap
+    render_heatmap(p)                          # replaced the stock list (Oct 22)
     pick_col, ai_col = st.columns([3, 1])
     ticker = pick_col.selectbox("Ticker", options=p.options, format_func=lambda s: ticker_label(p, s),
                                 key="ticker_dropdown", label_visibility="collapsed",
