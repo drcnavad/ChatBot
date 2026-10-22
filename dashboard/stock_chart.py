@@ -232,7 +232,7 @@ def close_line(x, close):
                       line=dict(color="#0f172a", width=1.6), hoverinfo="none")
 
 def build_intraday_chart(ticker, bars, view):
-    """1D / 1W buttons: today's 5-minute or the week's 15-minute candles (data.intraday_ohlcv) with volume; nights and
+    """1D / 5D buttons: today's 5-minute or the week's 15-minute candles (data.intraday_ohlcv) with volume; nights and
     weekends left out of the axis. Same look, legend and crosshair as the daily chart."""
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.78, 0.22],
                         subplot_titles=["", "Volume"])
@@ -263,31 +263,44 @@ def build_intraday_chart(ticker, bars, view):
     fig.update_yaxes(title_text="Volume", tickformat="~s", nticks=3, showgrid=False, row=2, col=1)
     return fig
 
+@st.cache_data(ttl=3600, max_entries=8, show_spinner=False)
+def _daily_chart(ticker, mtime, _tdata):
+    """(figure, ohlc lists) of the daily chart, built once per stock and data file (the 5 s reruns reuse it)."""
+    from dashboard.data import ohlcv
+    bars = ohlcv(ticker)
+    b = bars[bars.index >= _tdata['Date'].max() - WINDOW]
+    return build_price_chart(ticker, _tdata, bars), {"x": [f"{d:%Y-%m-%d}" for d in b.index], **_ohlc_lists(b)}
+
+@st.fragment(run_every=5)
 def render_stock_chart(ticker, tdata):
-    """The stock chart (with your saved drawings, dashboard/drawings.py). Range buttons 1D / 1W show intraday candles,
-    the rest the daily chart; Candles / Line and the range are remembered for the session."""
-    from dashboard.data import INTRADAY_VIEWS, intraday_ohlcv, ohlcv
+    """The stock chart with its range buttons (1D / 5D intraday, 1M..2Y daily) and Candles / Line, all in this one
+    fragment: a click reruns only the chart, and 1D / 5D refresh live every 5 s (1D: Alpaca REST bars + the SIP
+    stream). Range and type are kept in the session; your drawings (dashboard/drawings.py) on the daily views."""
+    import copy
+    from dashboard.data import intraday_ohlcv
     from dashboard.drawings import render_chart
+    from dashboard.settings import SIGNAL_CSV
+    import os
     view = st.session_state.get(f"chart_view_{ticker}", "1Y")
+    if view == "1W":
+        view = "5D"
     mode = st.session_state.get("chart_mode", "Candles")
-    if view == "1D":
-        if render_live_1d(ticker, mode):
-            return
-        st.caption("Intraday bars are not available right now; showing the daily chart.")
-        view = "1Y"
-    if view in INTRADAY_VIEWS:
-        b = intraday_ohlcv(ticker, view)
-        if len(b) >= 1:
+    if view in ("1D", "5D"):
+        b = live_1d_bars(ticker) if view == "1D" else intraday_ohlcv(ticker, "5D")
+        if len(b):
             fig = build_intraday_chart(ticker, b, view)
             render_chart(fig, ticker, {"x": [f"{d:%Y-%m-%dT%H:%M}" for d in b.index], **_ohlc_lists(b)},
                          view=view, mode=mode, intraday=True)
+            if view == "1D":
+                from dashboard.live_stream import live_stream
+                ls = live_stream()
+                st.caption(f"1D live · {ls.status() if ls else 'REST polling'} · last candle {b.index[-1]:%H:%M} ET · "
+                           f"close ${b['Close'].iloc[-1]:,.2f}")
             return
         st.caption("Intraday bars are not available right now; showing the daily chart.")
         view = "1Y"
-    bars = ohlcv(ticker)
-    fig = build_price_chart(ticker, tdata, bars)
-    b = bars[bars.index >= tdata['Date'].max() - WINDOW]
-    render_chart(fig, ticker, {"x": [f"{d:%Y-%m-%d}" for d in b.index], **_ohlc_lists(b)}, view=view, mode=mode)
+    fig, ohlc = _daily_chart(ticker, os.path.getmtime(SIGNAL_CSV), tdata)
+    render_chart(copy.deepcopy(fig), ticker, ohlc, view=view, mode=mode)
 
 def live_1d_bars(ticker):
     """Today's 5-minute candles: Alpaca REST bars from the open (SIP -> IEX, cached 60 s; the previous session before
@@ -303,20 +316,6 @@ def live_1d_bars(ticker):
         ls.watch([ticker])
         b = merge_into(b, ls.minutes(ticker))
     return _with_last_trade(ticker, b, ls)
-
-@st.fragment(run_every=5)          # only the 1D chart reruns (every 5 s); same component key, so drawings / zoom stay
-def render_live_1d(ticker, mode):
-    from dashboard.drawings import render_chart
-    from dashboard.live_stream import live_stream
-    b = live_1d_bars(ticker)
-    if not len(b):
-        return False
-    fig = build_intraday_chart(ticker, b, "1D")
-    fig.update_layout(uirevision=f"1d_{ticker}")
-    render_chart(fig, ticker, {"x": [f"{d:%Y-%m-%dT%H:%M}" for d in b.index], **_ohlc_lists(b)}, view="1D", mode=mode, intraday=True)
-    ls = live_stream()
-    st.caption(f"1D live · {ls.status() if ls else 'REST polling'} · last candle {b.index[-1]:%H:%M} ET · close ${b['Close'].iloc[-1]:,.2f}")
-    return True
 
 def _with_last_trade(ticker, b, ls=None):
     """Today's 1D candles end at the Alpaca latest trade (SIP -> IEX): the last 5-minute candle is updated, or a new one

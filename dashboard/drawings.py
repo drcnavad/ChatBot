@@ -39,13 +39,22 @@ def level(price):
     return dict(type="line", xref="x domain", x0=0, x1=1, yref="y", y0=price, y1=price, line=LEVEL, editable=True,
                 label=dict(text=f"${price:,.2f}", textposition="end", font=dict(size=10, color=LEVEL["color"])))
 
+INTRADAY = ("1D", "5D")
+
+def rerun_chart():
+    """Rerun only the chart's fragment (stock_chart.render_stock_chart); the whole page when called in a full run."""
+    try:
+        st.rerun(scope="fragment")
+    except st.errors.StreamlitAPIException:
+        st.rerun()
+
 def render_chart(fig, sym, ohlc, view="1Y", mode="Candles", intraday=False):
     """The chart with your saved shapes; a drawn / moved / erased shape is saved at once. The component also reports
-    a range button that needs other data (1D / 1W intraday <-> daily) and the Candles / Line choice (kept per session)."""
+    a range button that needs other data (1D / 5D intraday <-> daily) and the Candles / Line choice (kept per session)."""
     for s in fig.layout.shapes:
         s.name = "sys"                            # the chart's own shapes (earnings lines, held periods) are never saved
     shapes = load(sym)
-    # 1D / 1W: only the horizontal price levels carry over; a daily drawing (dates months apart) stretched the intraday
+    # 1D / 5D: only the horizontal price levels carry over; a daily drawing (dates months apart) stretched the intraday
     # x-axis to its dates and squeezed today's candles into a sliver at the right edge (Oct 22, 2026)
     shown = [s for s in shapes if s.get("xref") == "x domain"] if intraday else shapes
     fig.update_layout(shapes=list(fig.layout.shapes) + shown, dragmode=False,   # range only via the 1M..All buttons
@@ -59,16 +68,17 @@ def render_chart(fig, sym, ohlc, view="1Y", mode="Candles", intraday=False):
             st.session_state["chart_mode"] = out["mode"]
         if out.get("view") and out["view"] != view:
             st.session_state[f"chart_view_{sym}"] = out["view"]
-            st.rerun()
+            if intraday or out["view"] in INTRADAY:          # other data: redraw the chart (its fragment only)
+                rerun_chart()
         if "shapes" in out and out["shapes"] != shown and not intraday:     # drawings are saved on the daily views
             save(sym, out["shapes"])
-            st.rerun()
+            rerun_chart()
     c1, c2, c3 = st.columns([2, 1, 1], vertical_alignment="bottom")
     px = c1.number_input("Price level", min_value=0.0, value=None, step=1.0, format="%.2f", key=f"lvl_{sym}",
                          placeholder="Add a horizontal price level…", label_visibility="collapsed")
     if c2.button("Add level", key=f"lvl_add_{sym}", width="stretch", disabled=not px):
         save(sym, shapes + [level(px)])
-        st.rerun()
+        rerun_chart()
     if c3.button(f"Clear drawings ({len(shapes)})", key=f"clr_{sym}", width="stretch", disabled=not shapes):
         save(sym, [])
-        st.rerun()
+        rerun_chart()

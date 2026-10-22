@@ -24,11 +24,13 @@ def tile_color(c):
 def _open(sym):
     st.session_state["_hm_open"] = sym
 
-SIGNAL_ORDER = {"Strong Buy": 0, "Buy": 1, "Hold": 2, "Watch": 3, "Not ranked": 4, "Score below 0": 5, "Sell": 6, "Sold": 7,
-                "Strong Sell": 8}
+# Buy, Hold, then every other ranked stock by today's live rank: "Sold" only means it left the portfolio at the last
+# rebalance (UNH: sold Oct 16 at rank 9) and can rank well today, so it sorts with Watch, not at the end (Oct 22, 2026)
+SIGNAL_ORDER = {"Strong Buy": 0, "Buy": 1, "Hold": 2, "Watch": 3, "Sold": 3, "Sell": 3, "Strong Sell": 3,
+                "Not ranked": 4, "Score below 0": 5}
 
 def order(p, syms):
-    """Buy first, then Hold, Watch, Not ranked, Score below 0, Sold; within a signal by rank, then score."""
+    """Buy, Hold, then Watch / Sold by the latest Strategy_Rank (then score), Not ranked, Score below 0."""
     def key(s):
         sig = str(p.sig_off.get(s, "Not ranked"))
         r = p.by_symbol.loc[s] if s in p.by_symbol.index else {}

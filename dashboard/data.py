@@ -340,11 +340,11 @@ def yf_intraday(symbols: tuple):
         pass
     return out
 
-INTRADAY_VIEWS = {"1D": (5, 1), "1W": (15, 5)}      # range button -> (minutes per candle, sessions shown)
+INTRADAY_VIEWS = {"1D": (5, 1), "5D": (15, 5)}      # range button -> (minutes per candle, sessions shown)
 
 @st.cache_data(ttl=60, show_spinner=False)
 def intraday_ohlcv(symbol, view):
-    """Display only (stock chart 1D / 1W buttons): OHLCV candles of the last session (5-minute) or the last 5 sessions
+    """Display only (stock chart 1D / 5D buttons): OHLCV candles of the last session (5-minute) or the last 5 sessions
     (15-minute), regular hours, index = New York time without zone. Cached 60 s; empty when it cannot be read."""
     if _live_off() or view not in INTRADAY_VIEWS:
         return pd.DataFrame(columns=OHLCV)

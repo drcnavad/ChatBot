@@ -14,10 +14,10 @@ START = pd.Timestamp("2026-10-09")          # the live account's history starts 
 BENCH = {"QQQ": "#64748b", "SPY": "#d97706", "DIA": "#7c3aed"}   # comparisons: Nasdaq-100, S&P 500, Dow
 SINCE = f"Since {START:%b %-d}"
 PERIODS = {"1D": ("1D", "5Min"), "5D": ("5D", "15Min"), SINCE: ("1A", "1D")}
-# the chart's range buttons (the stock chart's component, read-only): 1D / 1W load intraday data, the rest zoom the
+# the chart's range buttons (the stock chart's component, read-only): 1D / 5D load intraday data, the rest zoom the
 # daily line (which starts Oct 9, so a longer button never shows empty space before it)
-VIEWS = ["1D", "1W", "1M", "3M", "1Y", "2Y"]
-DATA = {"1D": "1D", "1W": "5D"}             # view -> PERIODS key; any other view: SINCE
+VIEWS = ["1D", "5D", "1M", "3M", "1Y", "2Y"]
+DATA = {"1D": "1D", "5D": "5D"}             # view -> PERIODS key; any other view: SINCE
 
 @st.cache_data(ttl=600, max_entries=12, show_spinner=False)
 def equity_series(key, slot=0):

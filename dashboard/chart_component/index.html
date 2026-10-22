@@ -20,6 +20,7 @@
 // and rescales the price axis to the candles in view. Streamlit's component protocol, no extra JS library.
 const div = document.getElementById("c");
 const send = (type, data) => window.parent.postMessage(Object.assign({isStreamlitMessage: true, type}, data), "*");
+let userMode = null;
 let spec = null, ohlc = null, busy = false, K = 10, curView = "1Y", mode = "Candles", intraday = false;
 let plain = false, ranges = null;   // plain: a read-only line chart (the portfolio): no drawing, no toolbar, its own range list
 function mine() { return (div.layout.shapes || []).filter(s => s.name !== "sys").map(s => JSON.parse(JSON.stringify(s))); }
@@ -60,7 +61,8 @@ function draw(args) {
   const prevLast = ohlc && ohlc.x.length ? ohlc.x[ohlc.x.length - 1] : null;
   spec = args.spec; ohlc = args.ohlc;
   const newView = args.view || "1Y", changed = newView !== curView || !!args.intraday !== intraday;
-  curView = newView; intraday = !!args.intraday; mode = args.mode || mode; K = intraday ? 16 : 10;
+  curView = newView; intraday = !!args.intraday; if (userMode && args.mode === userMode) userMode = null;   // Python has the click now
+  mode = userMode || args.mode || mode; K = intraday ? 16 : 10;
   plain = !!args.plain; ranges = args.ranges || null;
   const fig = JSON.parse(spec);
   delete fig.layout.width; fig.layout.autosize = true;                 // always the full frame width
@@ -195,7 +197,7 @@ function crosshair(ev) {
 div.addEventListener("mousemove", crosshair);
 div.addEventListener("mouseleave", () => { ["chh", "chv", "chy"].forEach(i => document.getElementById(i).style.display = "none"); if (idx) show(idx.days[idx.days.length - 1]); });
 // Range buttons: the last N months, filling the width (data to the right edge but for a small margin)
-const INTRA = ["1D", "1W"];
+const INTRA = ["1D", "5D"];
 const RANGES = [["1M", 1], ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24]], AHEAD = 0.015;   // a small margin after the last bar (share of the span); drawings can still reach the edge
 const rng = document.getElementById("rng");
 function setRange(label, m) {
@@ -221,7 +223,8 @@ INTRA.concat(RANGES.map(r => r[0])).forEach(l => {
 });
 const sep = document.createElement("span"); sep.style.cssText = "width:10px"; rng.appendChild(sep);
 ["Candles", "Line"].forEach(l => { const b = document.createElement("button"); b.textContent = l; b.dataset.mode = l;
-  b.onclick = () => { if (mode === l) return; mode = l; applyMode(); paintButtons();
+  b.onclick = () => { if (mode === l) return; mode = l; userMode = l;   // a live redraw already on its way keeps this choice
+    applyMode(); paintButtons();
     send("streamlit:setComponentValue", {value: {mode, t: Date.now()}, dataType: "json"}); };
   rng.appendChild(b); });
 function paintButtons() {
