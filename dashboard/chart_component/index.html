@@ -54,8 +54,14 @@ new ResizeObserver(() => { if (waiting && div.clientWidth > 0) { const a = waiti
 window.addEventListener("message", e => {
   if (e.data.type !== "streamlit:render") return;
   if (!div.clientWidth) { waiting = e.data.args; send("streamlit:setFrameHeight", {height: 900}); return; }
+  if (pressing) { deferred = e.data.args; return; }      // a 5 s refresh during a drag waits until the mouse is up
   draw(e.data.args);
 });
+// a live refresh (Plotly.react) in the middle of a drag dropped the shape being drawn (Oct 22, 2026): hold it until release
+let pressing = false, deferred = null, specUser = null;
+div.addEventListener("pointerdown", () => { pressing = true; }, true);
+window.addEventListener("pointerup", () => { if (!pressing) return; pressing = false;
+  setTimeout(() => { if (!pressing && deferred) { const a = deferred; deferred = null; draw(a); } }, 400); }, true);
 function draw(args) {
   if (args.spec === spec) return;
   const prevLast = ohlc && ohlc.x.length ? ohlc.x[ohlc.x.length - 1] : null;
@@ -65,6 +71,12 @@ function draw(args) {
   mode = userMode || args.mode || mode; K = intraday ? 16 : 10;
   plain = !!args.plain; ranges = args.ranges || null;
   const fig = JSON.parse(spec);
+  // your shapes: the spec carries the saved ones; while they are unchanged on the Python side (no Add level / Clear),
+  // keep the chart's own (a just-drawn shape whose save has not come back yet is not wiped by a live refresh)
+  const user = (fig.layout.shapes || []).filter(s => s.name !== "sys"), userKey = JSON.stringify(user);
+  if (div.layout && specUser !== null && userKey === specUser && !plain)
+    fig.layout.shapes = (fig.layout.shapes || []).filter(s => s.name === "sys").concat(mine());
+  specUser = userKey;
   delete fig.layout.width; fig.layout.autosize = true;                 // always the full frame width
   if (div.clientWidth < 600) {                     // phones: thinner margins, smaller fonts, a shorter chart
     const L = fig.layout;
