@@ -150,7 +150,7 @@ def _safe(args):
     except Exception:
         return []                                              # a feed that is down is skipped silently
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def headlines():
     """The market feeds plus Yahoo Finance headlines for every stock in sector_mapping.py (tagged with the ticker,
     newest PER_STOCK each), read in parallel. Newest first, a headline once; today's (New York) when there are any,
@@ -215,6 +215,50 @@ def render_news_banner(box):
     with box:
         show_html(css + f'<div class="sa-news"><span class="sa-news-tag">LIVE NEWS</span><div class="sa-news-box">{rows}</div></div>')
         render_voice()
+        render_latest_news()
+
+# ---- "Latest News": a static list of the 10 most trading-relevant headlines (same feed / filters / format as the banner)
+LATEST_N = 10
+MAJOR = re.compile(_one_line(r"""earnings|results|guidance|outlook|forecast|beats?\b|miss(es|ed)?\b|acquir|acquisition|merger|buyout
+    |takeover|upgrade|downgrade|price target|fda|approv|recall|lawsuit|probe|investigat|antitrust|tariff|sanction|resign|steps? down
+    |layoff|job cuts|\bfed\b|federal reserve|powell|rate (cut|hike)|interest rate|inflation|cpi|ppi|jobs report|payrolls|gdp
+    |bankrupt|default|halt|buyback|split|plunge|soar|surge|tumble|selloff"""), re.I)
+
+def importance(item):
+    """0-3: +2 when it names one of your stocks (feed ticker or a sector_mapping.py name in the title), +1 for a
+    market-moving event (earnings / guidance, M&A, analyst rating, FDA / legal, Fed / macro data, big moves)."""
+    return (2 if item.get("ticker") or _named(item["title"]) else 0) + (1 if MAJOR.search(item["title"]) else 0)
+
+def _key(i):
+    return i["link"] or "".join(c for c in i["title"].lower() if c.isalnum())[:80]
+
+@st.fragment(run_every=300)      # checks the feeds every 5 min; only this list reruns (the banner keeps scrolling)
+def render_latest_news():
+    """The 10 most important headlines of the banner's feed (importance, then newest). Kept stable in the session: a new
+    headline that makes the top 10 goes on top and the oldest drops; known ones keep their place."""
+    if _off():
+        return
+    try:
+        items = headlines()
+    except Exception:
+        items = []
+    top = sorted(items, key=lambda i: (importance(i), i["time"]), reverse=True)[:LATEST_N]
+    keys = {_key(i) for i in top}
+    prev = st.session_state.get("_latest_news", [])
+    kept = [i for i in prev if _key(i) in keys]
+    old = {_key(i) for i in kept}
+    new = sorted((i for i in top if _key(i) not in old), key=lambda i: i["time"], reverse=True)
+    shown = (new + kept)[:LATEST_N] if prev else sorted(top, key=lambda i: i["time"], reverse=True)
+    st.session_state["_latest_news"] = shown
+    if not shown:
+        return
+    row = lambda i: (f'<a class="sa-news-item" href="{html.escape(i["link"], quote=True)}" target="_blank" rel="noopener">'
+                     f'<span class="sa-news-sym">{html.escape(tag(i))}</span><span class="sa-news-t">{html.escape(i["title"])}</span>'
+                     f'<span class="sa-news-ago">{html.escape(i["source"])} · {_ago(i["time"])}</span></a>')
+    show_html('<div class="sa-news sa-latest"><span class="sa-news-tag">LATEST NEWS</span>'
+              f'<div class="sa-latest-box">{"".join(map(row, shown))}</div></div>'
+              '<style>.sa-latest .sa-latest-box{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}.sa-latest .sa-news-tag:before{animation:none}'
+              '.sa-latest{align-items:flex-start;margin-top:6px}.sa-latest .sa-news-item{position:static;opacity:1;visibility:visible}</style>')
 
 
 @st.cache_data(ttl=600, show_spinner=False)
