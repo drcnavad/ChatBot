@@ -144,17 +144,14 @@ def _alpaca_last_trade(ticker: str, slot: int):
     """(price, trade time UTC) of the latest trade from Alpaca, SIP first and IEX on any SIP error; None if neither."""
     if _live_off():
         return None
-    import backtest_engine as be
-    from alpaca.data.enums import DataFeed
     from alpaca.data.requests import StockLatestTradeRequest
-    client = be.market_data_client()
-    for feed in ("sip", "iex"):
-        try:
-            t = client.get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=ticker, feed=DataFeed(feed)))[ticker]
-            return float(t.price), pd.Timestamp(t.timestamp).tz_convert("UTC") if pd.Timestamp(t.timestamp).tzinfo else pd.Timestamp(t.timestamp, tz="UTC")
-        except Exception:
-            continue
-    return None
+    from dashboard.alpaca_data import client, sip_then_iex
+    try:
+        t, _ = sip_then_iex(lambda f: client().get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=ticker, feed=f))[ticker])
+    except Exception:
+        return None
+    ts = pd.Timestamp(t.timestamp)
+    return float(t.price), ts.tz_convert("UTC") if ts.tzinfo else ts.tz_localize("UTC")
 
 def live_quote(ticker: str):
     """Display-only latest price -> (price, time) or None: Alpaca latest trade (SIP -> IEX), new every refresh slot
@@ -231,32 +228,28 @@ def etf_prices(symbols: tuple, start: str):
 def _live_off():
     return os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off"          # tests: never call Alpaca
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=20, show_spinner=False)     # < the 30 s fragment timers, so every tick gets new prices
 def index_quotes(symbols: tuple):
     """Display only (header cards): {symbol: (last price, day change %)} from Alpaca snapshots, SIP first and IEX on any
     SIP error (the same feeds as paper_trade's order quotes). Change = last trade vs the previous session's close.
     Cached 30 s; {} when neither feed answers."""
     if _live_off():
         return {}
-    import backtest_engine as be
-    from alpaca.data.enums import DataFeed
     from alpaca.data.requests import StockSnapshotRequest
+    from dashboard.alpaca_data import client, sip_then_iex
     try:
-        client = be.market_data_client()
+        snaps, _ = sip_then_iex(lambda f: client().get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=list(symbols), feed=f)))
     except Exception:
         return {}
-    for feed in ("sip", "iex"):
+    out = {}
+    for s, x in snaps.items():
         try:
-            snaps = client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=list(symbols), feed=DataFeed(feed)))
-            out = {}
-            for s, x in snaps.items():
-                px = float(x.latest_trade.price) if x.latest_trade else float(x.daily_bar.close)
-                prev = float(x.previous_daily_bar.close) if x.previous_daily_bar else float("nan")
-                out[s] = (px, (px / prev - 1) * 100 if prev == prev and prev else float("nan"))
-            return out
+            px = float(x.latest_trade.price) if x.latest_trade else float(x.daily_bar.close)
+            prev = float(x.previous_daily_bar.close) if x.previous_daily_bar else float("nan")
+            out[s] = (px, (px / prev - 1) * 100 if prev == prev and prev else float("nan"))
         except Exception:
             continue
-    return {}
+    return out
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _bars(mtimes: tuple):
@@ -277,19 +270,15 @@ OHLCV = ["Open", "High", "Low", "Close", "Volume"]
 def alpaca_bars(symbols, minutes, start):
     """Display only: {symbol: OHLCV DataFrame indexed by New York time without zone} from Alpaca bars since `start`
     (minutes per bar; None = daily), SIP first and IEX on any SIP error; {} when neither answers."""
-    import backtest_engine as be
-    from alpaca.data.enums import DataFeed
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+    from dashboard.alpaca_data import client, sip_then_iex
     frame = TimeFrame.Day if minutes is None else TimeFrame(minutes, TimeFrameUnit.Minute)
-    client = be.market_data_client()
-    for feed in ("sip", "iex"):
-        try:
-            data = client.get_stock_bars(StockBarsRequest(symbol_or_symbols=list(symbols), timeframe=frame,
-                                                          start=pd.Timestamp(start).to_pydatetime(), feed=DataFeed(feed))).data
-            break
-        except Exception:
-            data = None
+    try:
+        data, _ = sip_then_iex(lambda f: client().get_stock_bars(StockBarsRequest(
+            symbol_or_symbols=list(symbols), timeframe=frame, start=pd.Timestamp(start).to_pydatetime(), feed=f)).data)
+    except Exception:
+        data = None
     out = {}
     for sym, rows in (data or {}).items():
         df = pd.DataFrame([(r.timestamp, r.open, r.high, r.low, r.close, r.volume) for r in rows], columns=["t"] + OHLCV)

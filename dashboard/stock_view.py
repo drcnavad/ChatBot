@@ -1,4 +1,4 @@
-"""Stock Analysis tab: the single-stock view (stock list rows, stock picker, header, detail card)."""
+"""Stock Analysis tab: the single-stock view (tile grid, stock picker, header, detail card)."""
 from datetime import datetime
 
 import pandas as pd
@@ -10,9 +10,8 @@ from dashboard.data import (company_metrics, last_next_earnings, live_quote, loa
     row_for)
 from dashboard.settings import CT, HOLDINGS_CSV, symbol_sector
 from dashboard.signals import PLAN_BADGE, SIGNAL_BADGE, plan_text
-from dashboard.stock_groups import dnb_symbols, stock_groups
-from dashboard.style import (BAD, GOOD, INK, MA_COLS, TONE_CLASS, esc, fmt, num, score_tone,
-    show_html, symbol_link, tone)
+from dashboard.style import (BAD, GOOD, INK, MA_COLS, esc, fmt, num, score_tone,
+    show_html, tone)
 
 def ticker_label(p, s):
     """Picker label: "JPM (JP Morgan)" (company name from sector_mapping.symbol_name). Typing in the picker filters
@@ -20,25 +19,6 @@ def ticker_label(p, s):
     import sector_mapping as sm
     name = sm.symbol_name.get(s, "")
     return f"{s} ({name})" if name else s
-
-@st.fragment(run_every=300)   # re-renders every 5 min, so an open tab never shows a stale list (Oct 19)
-def render_rank_tiers(p):
-    """Horizontal clickable stock list, every stock once (dashboard/stock_groups.py): Keep / Buy next / Sell
-    next (or Holdings), Next in line, Others; do-not-buy stocks carry a small DNB tag.
-
-    Each symbol is a ?symbol= link, handled in main() exactly like a table click
-    (opens the stock in the stock view below). The dropdown underneath stays for manual typing."""
-    current = st.session_state.get("ticker_dropdown")
-    tone = {"Keep": TONE_CLASS[GOOD], "Buy next": TONE_CLASS[GOOD], "Sell next": TONE_CLASS[BAD]}   # color = the row (Oct 21)
-    rows, dnb = [], dnb_symbols()
-    tag = ('<sup title="on your do-not-buy list (sector_mapping.do_not_buy)" style="font-size:0.6em;opacity:0.7;'
-           'margin-left:1px;">DNB</sup>')
-    for title, syms, note in stock_groups(p):
-        links = " ".join(symbol_link(s, tone.get(title, "") + (" sel" if s == current else "")) + (tag if s in dnb else "") for s in syms)
-        tip = f' title="{esc(note)}"' if note else ""
-        rows.append(f'<div class="sa-tier"><b{tip}>{title} ({len(syms)}):</b><div class="sa-tier-syms">{links or "\u2014"}</div></div>')
-    day = p.df["Date"].max()
-    show_html(f'<div class="sa-card"><div class="sa-card-title">Stock list<span>{day:%a %b %-d} close</span></div>' + "".join(rows) + '</div>')
 
 def render_stock_picker(p, jumped):
     """Stock list (click a symbol to open it) + dropdown for manual typing + AI button.

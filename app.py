@@ -57,7 +57,7 @@ def auto_refresh():
     """The Live / last-updated line only (a fragment). No whole-page rerun: each live panel (cards, sector table, stock
     price, portfolio chart, holdings) is its own 30 s fragment; news, ticker strip, notes and searches never rerun on a timer."""
     from datetime import datetime
-    from dashboard.data import refresh_every, refresh_slot
+    from dashboard.data import refresh_every
     from dashboard.settings import CT
     every = refresh_every()
     st.caption(f"🟢 Live · last updated {datetime.now(CT):%I:%M:%S %p} CT · "

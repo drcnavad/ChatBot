@@ -4,7 +4,6 @@ dashboard server process, in a background thread (st.cache_resource singleton). 
 bot. Alpaca allows one market-data websocket per account: if another process holds it (connection limit), this waits
 60 s and retries, and the dashboard polls REST meanwhile (status() says which). Turn off: STOCK_ANALYSIS_STREAM=off."""
 import asyncio
-import logging
 import os
 import threading
 import time
@@ -13,7 +12,6 @@ import pandas as pd
 import streamlit as st
 
 NY = "America/New_York"
-log = logging.getLogger("sa.live_stream")
 
 class LiveStream:
     def __init__(self):

@@ -48,16 +48,7 @@ MARKETS = {"SPY": "S&P 500", "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWM": "Ru
 LIVE_WINDOWS = {"3 days %": pd.DateOffset(days=3), "1 week %": pd.DateOffset(weeks=1), **WINDOWS,
                 "2 years %": pd.DateOffset(years=2)}
 
-def _feeds(fetch):
-    """fetch(feed) on SIP, then IEX if SIP fails (like paper_trade's quotes) -> (result, feed)."""
-    from alpaca.data.enums import DataFeed
-    err = None
-    for feed in ("sip", "iex"):
-        try:
-            return fetch(DataFeed(feed)), feed
-        except Exception as e:
-            err = e
-    raise err
+from dashboard.alpaca_data import client as _client, sip_then_iex as _feeds  # noqa: E402  (shared SIP -> IEX)
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
 def _daily_closes(syms):
@@ -65,9 +56,8 @@ def _daily_closes(syms):
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.enums import Adjustment
     from alpaca.data.timeframe import TimeFrame
-    import backtest_engine as be
     start = pd.Timestamp.now(tz="America/New_York") - pd.DateOffset(days=760)
-    bars, _ = _feeds(lambda f: be.market_data_client().get_stock_bars(
+    bars, _ = _feeds(lambda f: _client().get_stock_bars(
         StockBarsRequest(symbol_or_symbols=list(syms), timeframe=TimeFrame.Day, start=start, adjustment=Adjustment.SPLIT, feed=f)).df)
     c = bars.reset_index().pivot(index="timestamp", columns="symbol", values="close")
     c.index = c.index.tz_convert("America/New_York").normalize().tz_localize(None)
@@ -103,9 +93,8 @@ def futures_rows(today):
 def live_table():
     """Group, Name, Symbol, Live price, Today %, then WINDOWS % (live price vs that past daily close). -> (table, feed)."""
     from alpaca.data.requests import StockSnapshotRequest
-    import backtest_engine as be
     names = {**MARKETS, **sector_etfs}
-    snaps, feed = _feeds(lambda f: be.market_data_client().get_stock_snapshot(
+    snaps, feed = _feeds(lambda f: _client().get_stock_snapshot(
         StockSnapshotRequest(symbol_or_symbols=list(names), feed=f)))
     closes, today, rows = _daily_closes(tuple(names)), pd.Timestamp.now().normalize(), []
     for s, name in names.items():

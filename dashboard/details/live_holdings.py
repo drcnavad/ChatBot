@@ -35,7 +35,6 @@ def live_holdings():
     if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off":                # tests: never call Alpaca
         return None, "Live holdings are turned off here (STOCK_ANALYSIS_LIVE_HOLDINGS=off)."
     try:
-        import alpaca_paper as ap
         from dashboard.data import refresh_slot
         return _read_holdings(refresh_slot()), None
     except Exception as e:
