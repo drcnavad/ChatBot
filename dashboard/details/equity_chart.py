@@ -169,4 +169,4 @@ def render_equity_chart():
         if out["view"] != view:
             st.session_state["eq_view"] = out["view"]
             if DATA.get(out["view"], SINCE) != key:            # other data (intraday <-> daily): redraw
-                st.rerun(scope="fragment")
+                st.rerun()                      # app scope: scope="fragment" fails when this runs in a full-page run

@@ -250,6 +250,8 @@ def build_intraday_chart(ticker, bars, view):
     grid = dict(showgrid=True, gridcolor='#f1f5f9', showline=False, tickfont=dict(size=10, color='#64748b'), zeroline=False)
     fig.update_layout(height=620, hovermode='closest', margin=dict(l=10, r=70, t=44, b=24), plot_bgcolor='#fff',
                       paper_bgcolor='#fff', bargap=0.15, font=dict(family=CHART_FONT, size=11, color='#334155'))
+    span = bars.index[-1] - bars.index[0] if len(bars) > 1 else pd.Timedelta(minutes=30)
+    fig.update_xaxes(range=[bars.index[0] - span * 0.02, bars.index[-1] + span * 0.03])     # the bars' own span, always
     fig.update_xaxes(type="date", rangeslider_visible=False, showspikes=False, tickformat="%b %d %H:%M" if view != "1D" else "%H:%M",
                      rangebreaks=[dict(bounds=["sat", "mon"]), dict(bounds=[16, 9.5], pattern="hour")],
                      **(grid | dict(showgrid=False)))

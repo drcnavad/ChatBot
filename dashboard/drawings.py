@@ -45,7 +45,10 @@ def render_chart(fig, sym, ohlc, view="1Y", mode="Candles", intraday=False):
     for s in fig.layout.shapes:
         s.name = "sys"                            # the chart's own shapes (earnings lines, held periods) are never saved
     shapes = load(sym)
-    fig.update_layout(shapes=list(fig.layout.shapes) + shapes, dragmode=False,   # range only via the 1M..All buttons
+    # 1D / 1W: only the horizontal price levels carry over; a daily drawing (dates months apart) stretched the intraday
+    # x-axis to its dates and squeezed today's candles into a sliver at the right edge (Oct 22, 2026)
+    shown = [s for s in shapes if s.get("xref") == "x domain"] if intraday else shapes
+    fig.update_layout(shapes=list(fig.layout.shapes) + shown, dragmode=False,   # range only via the 1M..All buttons
                       newshape=dict(line=dict(color="#7c3aed", width=2), fillcolor="rgba(124,58,237,0.08)"))
     # toolbar (line, rectangle, undo, redo, delete, erase), no scroll zoom: set by the component (index.html)
     out = _chart(spec=fig.to_json(), ohlc=ohlc, view=view, mode=mode, intraday=intraday, key=f"chart_{sym}",
@@ -57,7 +60,7 @@ def render_chart(fig, sym, ohlc, view="1Y", mode="Candles", intraday=False):
         if out.get("view") and out["view"] != view:
             st.session_state[f"chart_view_{sym}"] = out["view"]
             st.rerun()
-        if "shapes" in out and out["shapes"] != shapes:
+        if "shapes" in out and out["shapes"] != shown and not intraday:     # drawings are saved on the daily views
             save(sym, out["shapes"])
             st.rerun()
     c1, c2, c3 = st.columns([2, 1, 1], vertical_alignment="bottom")
