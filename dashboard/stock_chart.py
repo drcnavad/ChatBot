@@ -16,6 +16,46 @@ WINDOW = pd.Timedelta(days=740)          # chart data: 2 years (buttons up to 2Y
 FUTURE = 0.015                           # a small blank margin after the last bar (share of the shown span)
 # range buttons 1D..2Y: drawn by the chart component (chart_component/index.html), each with the FUTURE margin
 
+GRID = dict(showgrid=True, gridcolor='#f1f5f9', showline=False, tickfont=dict(size=10, color='#64748b'), zeroline=False)
+VOL_UP, VOL_DOWN = "rgba(21,128,61,.45)", "rgba(185,28,28,.45)"
+
+def _new_fig(heights, titles, spacing):
+    """Panels stacked on one shared x-axis, small grey panel titles at their top left."""
+    fig = make_subplots(rows=len(heights), cols=1, shared_xaxes=True, vertical_spacing=spacing,
+                        row_heights=[h / sum(heights) for h in heights], subplot_titles=titles)
+    fig.update_annotations(font=dict(size=11, color='#64748b', family=CHART_FONT), xanchor="left", x=0, yshift=-2)
+    return fig
+
+def _add_price(fig, x, bars, vol_row, text=None):
+    """Candles + the hidden close line (Candles / Line switch) in row 1, volume bars (green up / red down) in vol_row."""
+    fig.add_trace(go.Candlestick(x=x, open=bars["Open"], high=bars["High"], low=bars["Low"], close=bars["Close"],
+                                 name="Close", text=text, increasing=dict(line=dict(color=GOOD, width=1), fillcolor=GOOD),
+                                 decreasing=dict(line=dict(color=BAD, width=1), fillcolor=BAD), showlegend=False,
+                                 hoverinfo="none"), row=1, col=1)
+    fig.add_trace(close_line(x, bars["Close"]), row=1, col=1)
+    if "Volume" in bars and bars["Volume"].notna().any():
+        fig.add_trace(go.Bar(x=x, y=bars["Volume"], name="Volume", showlegend=False, hoverinfo="none",
+                             marker=dict(color=[VOL_UP if u else VOL_DOWN for u in bars["Close"] >= bars["Open"]], line_width=0)),
+                      row=vol_row, col=1)
+
+def _style(fig, height, x_range, lo, hi, tickformat, rangebreaks):
+    """The shared look: white panels, dates under the price panel, prices on the right with a 6% margin."""
+    fig.update_layout(
+        height=height, hovermode='closest', margin=dict(l=10, r=70, t=44, b=24),
+        plot_bgcolor='#ffffff', paper_bgcolor='#ffffff', dragmode="zoom", bargap=0.15,
+        legend=dict(orientation="h", yanchor="bottom", y=1.005, xanchor="right", x=0.9, font=dict(size=10, color='#334155'),
+                    bgcolor="rgba(0,0,0,0)"),
+        font=dict(family=CHART_FONT, size=11, color='#334155'),
+        hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family=CHART_FONT))
+    fig.update_xaxes(type="date", range=x_range, showspikes=False, rangeslider_visible=False, rangebreaks=rangebreaks,
+                     tickformat=tickformat, **(GRID | dict(showgrid=False)))
+    fig.update_xaxes(showticklabels=True, ticks="outside", ticklen=3, tickcolor="#e2e8f0", row=1, col=1)
+    fig.update_yaxes(side="right", showticklabels=True, ticks="outside", ticklen=3, tickcolor="#e2e8f0", automargin=True,
+                     showspikes=False, title_font=dict(size=10, color="#64748b"), **GRID)
+    fig.update_yaxes(title_text="Price", tickformat='$,.2f', hoverformat='$,.2f', nticks=8,
+                     range=[lo - (hi - lo) * 0.06, hi + (hi - lo) * 0.06], row=1, col=1)
+    fig.update_yaxes(title_text="Volume", tickformat="~s", nticks=3, showgrid=False, row=2, col=1)
+
 def _with_bar_history(tdata, bars):
     """The signal rows (from Aug 2024) plus every older cached daily bar, with MAs / RSI / MACD worked out from the
     bars' closes where the signal file has none (same formulas: simple MAs, Wilder RSI 14, MACD 12/26/9)."""
@@ -54,11 +94,8 @@ def build_price_chart(ticker, tdata, bars=None):
     titles = {"price": "", "vol": "Volume", "rsi": "RSI (14)", "macd": "MACD vs signal",
               "rs": "Performance (% change) · " + " · ".join(
                   f'<span style="color:{RS_COLORS[k]};">━ {name}</span>' for k, (name, _s) in rs_lines.items())}
-    heights = [height_of[x] for x in panels]
     row_of = {x: i + 1 for i, x in enumerate(panels)}
-    fig = make_subplots(rows=len(panels), cols=1, shared_xaxes=True, vertical_spacing=0.04,
-                        row_heights=[h / sum(heights) for h in heights], subplot_titles=[titles[x] for x in panels])
-    fig.update_annotations(font=dict(size=11, color='#64748b', family=CHART_FONT), xanchor="left", x=0, yshift=-2)
+    fig = _new_fig([height_of[x] for x in panels], [titles[x] for x in panels], 0.04)
 
     # Price line (hover shows the day's status), earnings dates, moving averages
     status_txt = []
@@ -67,15 +104,7 @@ def build_price_chart(ticker, tdata, bars=None):
         bits = [sig] + ([f"weight {w * 100:.1f}%"] if sig == "Hold" else []) \
             + ([f"rank #{r:.0f}"] if pd.notna(r) else []) + ([f"score {s:.1f}"] if pd.notna(s) else [])
         status_txt.append(" · ".join(bits))
-    fig.add_trace(go.Candlestick(x=chart.index, open=bars["Open"], high=bars["High"], low=bars["Low"], close=bars["Close"],
-                                 name="Close", text=status_txt, increasing=dict(line=dict(color=GOOD, width=1), fillcolor=GOOD),
-                                 decreasing=dict(line=dict(color=BAD, width=1), fillcolor=BAD), showlegend=False), row=1, col=1)
-    fig.add_trace(close_line(chart.index, bars["Close"]), row=1, col=1)
-    if "Volume" in bars and bars["Volume"].notna().any():
-        up = bars["Close"] >= bars["Open"]
-        fig.add_trace(go.Bar(x=chart.index, y=bars["Volume"], name="Volume", showlegend=False,
-                             marker=dict(color=[("rgba(21,128,61,.45)" if u else "rgba(185,28,28,.45)") for u in up], line_width=0),
-                             hovertemplate="Vol %{y:.3s}<extra></extra>"), row=row_of["vol"], col=1)
+    _add_price(fig, chart.index, bars, row_of["vol"], text=status_txt)
     earnings = chart[chart['is_earnings_date'] == 1]
     fig.add_trace(go.Scatter(x=earnings.index, y=earnings['Close'], name='Earnings date', mode='markers',
                              marker=dict(symbol='circle', size=9, color='#f97316'),
@@ -163,28 +192,11 @@ def build_price_chart(ticker, tdata, bars=None):
                                  mode='lines', showlegend=False, hovertemplate='<b>Signal</b> %{y:.3f}<extra></extra>'), row=r, col=1)
         fig.add_hline(y=0, line_dash="dot", line_color="rgba(128, 128, 128, 0.4)", row=r, col=1)
 
-    grid = dict(showgrid=True, gridcolor='#f1f5f9', showline=False, tickfont=dict(size=10, color='#64748b'), zeroline=False)
     view = chart.index[chart.index >= x_end - pd.Timedelta(days=365)]          # opens on 1 year
-    lo, hi = bars.loc[view, "Low"].min(), bars.loc[view, "High"].max()
-    fig.update_layout(
-        height=int(620 + 120 * (len(panels) - 2)), hovermode='closest', margin=dict(l=10, r=70, t=44, b=24),
-        plot_bgcolor='#ffffff', paper_bgcolor='#ffffff', dragmode="zoom", bargap=0.15,
-        legend=dict(orientation="h", yanchor="bottom", y=1.005, xanchor="right", x=0.9, font=dict(size=10, color='#334155'),
-                    bgcolor="rgba(0,0,0,0)"),
-        font=dict(family=CHART_FONT, size=11, color='#334155'),
-        hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e2e8f0", font_size=11, font_family=CHART_FONT))
     x_right = max(x_right, x_end) + (x_end - view[0]) * FUTURE
-    fig.update_xaxes(type="date", range=[view[0], x_right], showspikes=False, rangeslider_visible=False,
-                     rangebreaks=[dict(bounds=["sat", "mon"])], tickformat='%b %d', **(grid | dict(showgrid=False)))
-    # dates under the price panel too; the range buttons (RANGES) are drawn by the chart component (future space)
-    fig.update_xaxes(showticklabels=True, ticks="outside", ticklen=3, tickcolor="#e2e8f0", row=1, col=1)
-    fig.update_yaxes(side="right", showticklabels=True, ticks="outside", ticklen=3, tickcolor="#e2e8f0", automargin=True,
-                     showspikes=False,
-                     title_font=dict(size=10, color="#64748b"), **grid)
-    fig.update_yaxes(title_text="Price", tickformat='$,.2f', hoverformat='$,.2f', nticks=8,
-                     range=[lo - (hi - lo) * 0.06, hi + (hi - lo) * 0.06], row=1, col=1)
-    axis = {"vol": dict(title_text="Volume", tickformat="~s", nticks=3, showgrid=False),
-            "rsi": dict(title_text="RSI", tickvals=[30, 50, 70]), "macd": dict(title_text="MACD", tickformat=".2f", nticks=4),
+    _style(fig, int(620 + 120 * (len(panels) - 2)), [view[0], x_right], bars.loc[view, "Low"].min(),
+           bars.loc[view, "High"].max(), '%b %d', [dict(bounds=["sat", "mon"])])
+    axis = {"rsi": dict(title_text="RSI", tickvals=[30, 50, 70]), "macd": dict(title_text="MACD", tickformat=".2f", nticks=4),
             "rs": dict(title_text="Perf. %", ticksuffix="%", tickformat="+.0f", nticks=5)}
     for name, kw in axis.items():
         if name in row_of:
@@ -201,11 +213,10 @@ def account_trade_lines(ticker, ledger_csv=None):
     {'Exit': (date, price)} of the sell that closed the position; {} when never traded. FIFO over the filled quantities
     of Reports/live_trade_ledger.csv (partial fills of expired / canceled orders count too)."""
     import os
+    from dashboard.data import read_report_csv
     from dashboard.settings import REPORTS
-    path = ledger_csv or os.path.join(REPORTS, "live_trade_ledger.csv")
-    try:
-        t = pd.read_csv(path, usecols=["Filled_CT", "Symbol", "Side", "Filled_Qty", "Fill_Price"])
-    except (OSError, ValueError):
+    t = read_report_csv(ledger_csv or os.path.join(REPORTS, "live_trade_ledger.csv"))
+    if t is None or not {"Filled_CT", "Symbol", "Side", "Filled_Qty", "Fill_Price"} <= set(t.columns):
         return {}
     t = t[(t["Symbol"] == ticker) & (pd.to_numeric(t["Filled_Qty"], errors="coerce") > 0)].dropna(subset=["Filled_CT"])
     lots, last_sell = [], None
@@ -234,33 +245,11 @@ def close_line(x, close):
 def build_intraday_chart(ticker, bars, view):
     """1D / 5D buttons: today's 5-minute or the week's 15-minute candles (data.intraday_ohlcv) with volume; nights and
     weekends left out of the axis. Same look, legend and crosshair as the daily chart."""
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.78, 0.22],
-                        subplot_titles=["", "Volume"])
-    fig.update_annotations(font=dict(size=11, color='#64748b', family=CHART_FONT), xanchor="left", x=0, yshift=-2)
-    fig.add_trace(go.Candlestick(x=bars.index, open=bars["Open"], high=bars["High"], low=bars["Low"], close=bars["Close"],
-                                 name="Close", increasing=dict(line=dict(color=GOOD, width=1), fillcolor=GOOD),
-                                 decreasing=dict(line=dict(color=BAD, width=1), fillcolor=BAD), showlegend=False,
-                                 hoverinfo="none"), row=1, col=1)
-    fig.add_trace(close_line(bars.index, bars["Close"]), row=1, col=1)
-    up = bars["Close"] >= bars["Open"]
-    fig.add_trace(go.Bar(x=bars.index, y=bars["Volume"], name="Volume", showlegend=False, hoverinfo="none",
-                         marker=dict(color=[("rgba(21,128,61,.45)" if u else "rgba(185,28,28,.45)") for u in up], line_width=0)),
-                  row=2, col=1)
-    pad = (bars["High"].max() - bars["Low"].min()) * 0.06
-    grid = dict(showgrid=True, gridcolor='#f1f5f9', showline=False, tickfont=dict(size=10, color='#64748b'), zeroline=False)
-    fig.update_layout(height=620, hovermode='closest', margin=dict(l=10, r=70, t=44, b=24), plot_bgcolor='#fff',
-                      paper_bgcolor='#fff', bargap=0.15, font=dict(family=CHART_FONT, size=11, color='#334155'))
+    fig = _new_fig([0.78, 0.22], ["", "Volume"], 0.05)
+    _add_price(fig, bars.index, bars, 2)
     span = bars.index[-1] - bars.index[0] if len(bars) > 1 else pd.Timedelta(minutes=30)
-    fig.update_xaxes(range=[bars.index[0] - span * 0.02, bars.index[-1] + span * 0.03])     # the bars' own span, always
-    fig.update_xaxes(type="date", rangeslider_visible=False, showspikes=False, tickformat="%b %d %H:%M" if view != "1D" else "%H:%M",
-                     rangebreaks=[dict(bounds=["sat", "mon"]), dict(bounds=[16, 9.5], pattern="hour")],
-                     **(grid | dict(showgrid=False)))
-    fig.update_xaxes(showticklabels=True, ticks="outside", ticklen=3, tickcolor="#e2e8f0", row=1, col=1)
-    fig.update_yaxes(side="right", ticks="outside", ticklen=3, tickcolor="#e2e8f0", automargin=True, showspikes=False,
-                     title_font=dict(size=10, color="#64748b"), **grid)
-    fig.update_yaxes(title_text="Price", tickformat='$,.2f', hoverformat='$,.2f', nticks=8,
-                     range=[bars["Low"].min() - pad, bars["High"].max() + pad], row=1, col=1)
-    fig.update_yaxes(title_text="Volume", tickformat="~s", nticks=3, showgrid=False, row=2, col=1)
+    _style(fig, 620, [bars.index[0] - span * 0.02, bars.index[-1] + span * 0.03], bars["Low"].min(), bars["High"].max(),
+           "%b %d %H:%M" if view != "1D" else "%H:%M", [dict(bounds=["sat", "mon"]), dict(bounds=[16, 9.5], pattern="hour")])
     return fig
 
 @st.cache_data(ttl=3600, max_entries=8, show_spinner=False)
@@ -279,8 +268,8 @@ def render_stock_chart(ticker, tdata):
     import copy
     from dashboard.data import intraday_ohlcv
     from dashboard.drawings import render_chart
+    from dashboard.data import mtime
     from dashboard.settings import SIGNAL_CSV
-    import os
     view = st.session_state.get(f"chart_view_{ticker}", "1Y")
     if view == "1W":
         view = "5D"
@@ -299,7 +288,7 @@ def render_stock_chart(ticker, tdata):
             return
         st.caption("Intraday bars are not available right now; showing the daily chart.")
         view = "1Y"
-    fig, ohlc = _daily_chart(ticker, os.path.getmtime(SIGNAL_CSV), tdata)
+    fig, ohlc = _daily_chart(ticker, mtime(SIGNAL_CSV), tdata)
     fig, ohlc = with_today(ticker, copy.deepcopy(fig), {k: list(v) for k, v in ohlc.items()})
     render_chart(fig, ticker, ohlc, view=view, mode=mode)
 

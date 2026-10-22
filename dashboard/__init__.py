@@ -8,7 +8,7 @@
   history.py       one stock's live-strategy history
   page.py          page state (build_page), title bar
   stock_view.py    Stock Analysis tab: stock list, picker, header, detail card
-  stock_groups.py  stock rankings helper (manual_trade.py uses _rankings)
+  stock_groups.py  each half's ranking (manual_trade.py uses _rankings)
   heatmap.py       Stock Analysis tab: the clickable tile grid (signal order, day % colors, hover intraday lines)
   live_stream.py   one Alpaca SIP websocket per server process for the live 1D chart
   stock_chart.py   Stock Analysis tab: price chart

@@ -7,7 +7,6 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.page import open_symbol
-from dashboard.settings import SIGNAL_CSV
 from dashboard.style import GOOD, INK, SCORE, table, toned
 
 SLEEVE = {"lowvol": "Low vol", "sector": "Sector rotation"}
@@ -55,7 +54,8 @@ def half_decision_day(half, path=None):
     path = path or decision_ranks.RANKS_CSV
     if not os.path.exists(path):
         return None
-    days = sorted(pd.read_csv(path, usecols=["Date"], dtype=str)["Date"].unique(), reverse=True)
+    from dashboard.data import read_report_csv
+    days = sorted({str(d)[:10] for d in read_report_csv(path)["Date"]}, reverse=True)
     test = sleeves.lowvol_day if half == "lowvol" else sleeves.sector_day
     return next((pd.Timestamp(d) for d in days if test(d)), None)
 
@@ -72,11 +72,7 @@ def ranking_table(half, day, positions, ledger, top=20, path=None, values=None):
     value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
     mine = [x for x, h in owner.items() if h == half and x in value]
     half_v = (values or {}).get(half) or sum(value[x] for x in mine) + float(ledger["halves"][half].get("cash", 0.0))
-    if half == "lowvol":
-        sig = pd.read_csv(SIGNAL_CSV, usecols=["Date", "Symbol", "Strategy_Score"], parse_dates=["Date"])
-        score = sig[sig["Date"] == day].drop_duplicates("Symbol").set_index("Symbol")["Strategy_Score"]
-    else:
-        score = sleeves.sector_inputs()["scores"]["sector_rot"].loc[day]
+    score = _scores(half, day)
     r = r[r[col] <= top]
     others = sorted(set(mine) - set(r["Symbol"]))                 # held by the half, not in its top `top` that day
     held = lambda x: ("✓ " + SLEEVE[owner[x]]) if x in value and owner.get(x) in SLEEVE else ("✓ (untagged)" if x in value else "")
@@ -92,6 +88,8 @@ def ranking_table(half, day, positions, ledger, top=20, path=None, values=None):
 def render_last_decision(p):
     """Strategy tab: per-half summary, then each half's ranking at its own latest rebalance, side by side (held stocks
     marked). Click a row to open the stock."""
+    from dashboard.page import fresh
+    p = fresh(p)
     import sleeves
     from dashboard.details.live_holdings import holdings_this_run
     led = sleeves.load_ledger()
@@ -137,7 +135,8 @@ def _preview_targets(day, lv_held, sec_held):
     import sleeves
     blocked = set(pt.manual_list("buy"))              # (Oct 21) a blocked stock's slot goes to the next in line, as the
     w = sleeves.sector_weights(day, exclude=set(lv_held) | blocked, held=dict(sec_held))   # leftover-cash buy / forward test
-    picks = pd.read_csv(pt.PICKS_CSV)
+    from dashboard.data import read_report_csv
+    picks = read_report_csv(pt.PICKS_CSV)
     import backtest_engine as be
     p = picks[pd.to_numeric(picks["Provisional_Weight"], errors="coerce").fillna(0) > 0]
     n, cap, per, lv = be.WINNER["n"], be.winner_max_per_sector(), {}, []
@@ -159,7 +158,8 @@ def _scores(half, day):
     """{symbol: score} at close `day`: Strategy_Score (low vol) / the sector-rotation score (sector)."""
     import sleeves
     if half == "lowvol":
-        sig = pd.read_csv(SIGNAL_CSV, usecols=["Date", "Symbol", "Strategy_Score"], parse_dates=["Date"])
+        from dashboard.data import signals
+        sig = signals()
         return sig[sig["Date"] == day].drop_duplicates("Symbol").set_index("Symbol")["Strategy_Score"].to_dict()
     return sleeves.sector_inputs()["scores"]["sector_rot"].loc[day].dropna().to_dict()
 
@@ -203,14 +203,9 @@ def next_plan():
             return None
         positions, equity = data["positions"], data["equity"]
         asof, _ = decision_ranks.ranks_on()
-        owner = sleeves.owners(led)
-        value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
-        mine = {h: [x for x, o in owner.items() if o == h and x in value] for h in SLEEVE}
-        vals = half_values(positions, led, equity)
-        vs = vals["sector"]
-        sec_held = tuple(sorted((x, value[x] / vs) for x in mine["sector"])) if vs else ()
+        value, mine, vals, sec_held = _half_state(positions, led, equity)
         t = _preview_targets(asof, tuple(sorted(mine["lowvol"])), sec_held)
-        cal = sleeves.calendar(pd.Timestamp.now().normalize() + pd.Timedelta(days=1), 45)
+        cal = _calendar()
     except Exception:
         return None
     days = {h: next((d for d, hs in cal if h in hs), None) for h in SLEEVE}
@@ -229,18 +224,28 @@ def next_plan():
         plan.setdefault(s, ("Blocked", 0.0, min(d for d in days.values() if d is not None)))
     return {"asof": asof, "days": days, "targets": t, "plan": plan}
 
+def _half_state(positions, led, equity):
+    """(value by symbol, {half: its held symbols}, half values, sector half's (symbol, weight) holdings)."""
+    import sleeves
+    owner = sleeves.owners(led)
+    value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
+    mine = {h: [x for x, o in owner.items() if o == h and x in value] for h in SLEEVE}
+    vals = half_values(positions, led, equity)
+    vs = vals["sector"]
+    return value, mine, vals, tuple(sorted((x, value[x] / vs) for x in mine["sector"])) if vs else ()
+
+def _calendar():
+    """The next 45 days' rebalance calendar [(day, halves)] from tomorrow."""
+    import sleeves
+    return sleeves.calendar(pd.Timestamp.now().normalize() + pd.Timedelta(days=1), 45)
+
 def render_preview(positions, led, equity):
     """Next rebalance preview: each half's top 20 at the latest close with Keep / Buy / Blocked, and what it would sell."""
     import decision_ranks
     import paper_trade as pt
     import sleeves
     day, _ = decision_ranks.ranks_on()
-    owner = sleeves.owners(led)
-    value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
-    mine = {h: [x for x, o in owner.items() if o == h and x in value] for h in SLEEVE}
-    vals = half_values(positions, led, equity)
-    vs = vals["sector"]
-    sec_held = tuple(sorted((x, value[x] / vs) for x in mine["sector"])) if vs else ()
+    value, mine, vals, sec_held = _half_state(positions, led, equity)
     try:
         targets = _preview_targets(day, tuple(sorted(mine["lowvol"])), sec_held)
     except Exception as e:
@@ -248,7 +253,7 @@ def render_preview(positions, led, equity):
         return
     blocked = set(pt.manual_list("buy"))
     ranks = decision_ranks.ranks_on(day)[1].set_index("Symbol")
-    cal = sleeves.calendar(pd.Timestamp.now().normalize() + pd.Timedelta(days=1), 45)
+    cal = _calendar()
     cols = st.columns(2)
     for c, half in zip(cols, ("sector", "lowvol")):
         with c:

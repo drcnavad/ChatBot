@@ -133,7 +133,7 @@ def render_benchmarks(data):
     out = ap.account_vs_etfs(data["history"], data["snapshot"], closes, now, be.FORWARD_START)
     if out is None:
         return
-    table, start, put_in = out
+    table, start, _put_in = out
     section(f"Your account vs index ETFs since {start:%a %b %-d, %Y}")
     show(live_row(toned(table, ["Return %", "Gain $", "Account ahead by (pts)"]), "Compared with", "Your account"), fit=True,
          cols={"Return %": SPCT, "Value now": MONEY, "Gain $": MONEY,

@@ -187,6 +187,15 @@ def _ago(t):
     m = int((datetime.now(timezone.utc) - t).total_seconds() // 60)
     return "just now" if m < 1 else f"{m}m ago" if m < 60 else f"{m // 60}h ago"
 
+def _news_link(i, said):
+    """One headline link (banner and Latest News): ticker tag, title, source · age; data-say / data-text = what
+    Voice Genie reads (the summarized script and its pre-rendered audio)."""
+    text = script(tag(i), i["title"])
+    return (f'<a class="sa-news-item" href="{html.escape(i["link"], quote=True)}" target="_blank" rel="noopener" '
+            f'data-say="{said.get(text, "")}" data-text="{html.escape(text, quote=True)}">'
+            f'<span class="sa-news-sym">{html.escape(tag(i))}</span><span class="sa-news-t">{html.escape(i["title"])}</span>'
+            f'<span class="sa-news-ago">{html.escape(i["source"])} · {_ago(i["time"])}</span></a>')
+
 def render_news_banner(box):
     if _off():
         return
@@ -201,12 +210,7 @@ def render_news_banner(box):
     show = 100 / n                                             # each page's share of the cycle, in %
     fade = min(1.5, show / 4)
     said = prepare([script(tag(i), i["title"]) for i in items])          # the read-aloud audio, rendered in the background
-    item = lambda i: (
-        f'<a class="sa-news-item" href="{html.escape(i["link"], quote=True)}" target="_blank" rel="noopener" '
-        f'data-say="{said.get(script(tag(i), i["title"]), "")}" data-text="{html.escape(script(tag(i), i["title"]), quote=True)}">'
-        + f'<span class="sa-news-sym">{html.escape(tag(i))}</span>'
-        + f'<span class="sa-news-t">{html.escape(i["title"])}</span>'
-        f'<span class="sa-news-ago">{html.escape(i["source"])} · {_ago(i["time"])}</span></a>')
+    item = lambda i: _news_link(i, said)
     rows = "".join(f'<div class="sa-news-page" style="animation-delay:{k * SECONDS}s">{"".join(map(item, pg))}</div>'
                    for k, pg in enumerate(pages))
     css = (f'<style>.sa-news .sa-news-page{{animation:sa-news {total}s linear infinite}}'
@@ -253,10 +257,7 @@ def render_latest_news():
     if not shown:
         return
     said = prepare([script(tag(i), i["title"]) for i in shown])       # the same spoken text and Voice Genie audio as the band
-    row = lambda i: (f'<a class="sa-news-item" href="{html.escape(i["link"], quote=True)}" target="_blank" rel="noopener" '
-                     f'data-say="{said.get(script(tag(i), i["title"]), "")}" data-text="{html.escape(script(tag(i), i["title"]), quote=True)}">'
-                     f'<span class="sa-news-sym">{html.escape(tag(i))}</span><span class="sa-news-t">{html.escape(i["title"])}</span>'
-                     f'<span class="sa-news-ago">{html.escape(i["source"])} · {_ago(i["time"])}</span></a>')
+    row = lambda i: _news_link(i, said)
     show_html('<div class="sa-news sa-latest"><span class="sa-news-tag">LATEST NEWS</span>'
               f'<div class="sa-latest-box">{"".join(map(row, shown))}</div></div>'
               '<style>.sa-latest .sa-latest-box{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}.sa-latest .sa-news-tag:before{animation:none}'
