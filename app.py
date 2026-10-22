@@ -75,22 +75,22 @@ def main():
         if k in st.query_params:
             del st.query_params[k]
 
+    if "_pending_ticker" in st.session_state:                # a link or a row click: show the stock
+        st.session_state["nav"] = "Stock Analysis"
     ticker_box = render_top_bar(p)
     auto_refresh()
-    opening = "_pending_ticker" in st.session_state          # a link or a row click: show the stock
-    tab_home, tab_stock, tab_strategy, tab_trading = st.tabs(
-        ["Home", "Stock Analysis", "Strategy", "Trading Account"], default="Stock Analysis" if opening else None)
-    with tab_home:
+    page = st.session_state.get("nav") or "Home"             # only the selected page is drawn (no tab reset on reruns)
+    if page == "Home":
         render_kpis()                     # the market cards (Home only; refresh themselves every 30 s)
         render_sector_table(p)
-    with tab_stock:
+    elif page == "Stock Analysis":
         with st.expander("My notes", expanded=True):
             render_notes()
         ticker, tdata = render_stock_picker(p, jumped)
         render_stock(p, ticker, tdata)
-    with tab_strategy:
+    elif page == "Strategy":
         render_strategy_tab(p)
-    with tab_trading:
+    else:
         render_trading_tab(p)
     render_ticker(ticker_box)
     render_news_banner(ticker_box)

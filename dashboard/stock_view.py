@@ -49,6 +49,8 @@ def render_stock_picker(p, jumped):
 
     ?symbol=X, a table click, a tier click or the dropdown choose the stock."""
     pending = st.session_state.pop("_pending_ticker", None)
+    if "ticker_dropdown" not in st.session_state and st.session_state.get("_ticker") in p.options:
+        st.session_state.ticker_dropdown = st.session_state["_ticker"]       # back from another page: same stock
     if pending in p.options:
         st.session_state.ticker_dropdown = pending
     elif st.session_state.get("ticker_dropdown") not in p.options:
@@ -61,6 +63,7 @@ def render_stock_picker(p, jumped):
     pick_col, ai_col = st.columns([3, 1])
     ticker = pick_col.selectbox("Ticker", options=p.options, format_func=lambda s: ticker_label(p, s),
                                 key="ticker_dropdown", label_visibility="collapsed")
+    st.session_state["_ticker"] = ticker
     tdata = p.df[p.df['Symbol'] == ticker]
     if ticker not in p.short.index and ai_col.button("Generate AI Analysis", type="primary", width="stretch", key="generate_ai_btn"):
         ai_analysis_dialog(ticker, tdata, p.sig_off.get(ticker, 'Not ranked'), p.why_off.get(ticker, ''))

@@ -14,6 +14,13 @@ import streamlit as st
 
 CSS = """
 <style>
+/* page selector (st.radio key="nav" in the title row) drawn as tabs */
+[data-testid="stLayoutWrapper"]:has(.sa-brand) [role="radiogroup"] { gap: 0.25rem; flex-wrap: nowrap; justify-content: center; }
+[data-testid="stLayoutWrapper"]:has(.sa-brand) [role="radiogroup"] label { padding: 0.35rem 0.7rem; border-radius: 8px; margin: 0; cursor: pointer; }
+[data-testid="stLayoutWrapper"]:has(.sa-brand) [role="radiogroup"] label > div:first-child { display: none; }
+[data-testid="stLayoutWrapper"]:has(.sa-brand) [role="radiogroup"] label p { font-weight: 600; color: #64748b; white-space: nowrap; }
+[data-testid="stLayoutWrapper"]:has(.sa-brand) [role="radiogroup"] label:has(input:checked) { box-shadow: inset 0 -3px 0 #0f766e; }
+[data-testid="stLayoutWrapper"]:has(.sa-brand) [role="radiogroup"] label:has(input:checked) p { color: #0f766e; }
 [data-testid="stStatusWidget"] { visibility: hidden; height: 0; }  /* no 'Running…' flash on 30 s fragment updates */
 .stApp [data-stale="true"] { opacity: 1 !important; transition: none !important; }  /* no fade while a fragment reruns */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap');

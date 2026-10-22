@@ -76,12 +76,17 @@ def render_ticker(box):
     box.markdown(f'<div class="sa-ticker"><div class="sa-ticker-track" style="animation-duration:{secs}s">'
                  f'{row}{row}</div></div>', unsafe_allow_html=True)
 
+PAGES = ["Home", "Stock Analysis", "Strategy", "Trading Account"]
+
 def render_top_bar(p):
     ticker = st.container()          # the held-stock strip, filled at the end of the run (render_ticker)
     stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()
     updated = datetime.fromtimestamp(p.mtime, tz=CT).strftime("%b %-d, %I:%M %p CT")
     # the tab names sit in the middle of this row: st.tabs comes right after it and CSS lifts its tab bar up here
-    c1, _, c2, c3 = st.columns([2.2, 4.6, 1.9, 1.1], vertical_alignment="center")
+    c1, cnav, c2, c3 = st.columns([2.2, 4.6, 1.9, 1.1], vertical_alignment="center")
+    with cnav:                       # keyed page selector: kept in session_state across every rerun (st.tabs is not)
+        st.session_state.setdefault("nav", PAGES[0])
+        st.radio("Page", PAGES, key="nav", horizontal=True, label_visibility="collapsed")
     with c1:
         show_html('<div class="sa-brand"><div class="sa-logo">SA</div><div><div class="sa-brand-name">Stock Analysis</div>'
                   '<div class="sa-brand-sub">Signals · forward test · live account</div></div></div>')

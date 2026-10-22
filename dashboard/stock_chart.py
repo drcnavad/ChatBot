@@ -270,7 +270,9 @@ def render_stock_chart(ticker, tdata):
     mode = st.session_state.get("chart_mode", "Candles")
     if view in INTRADAY_VIEWS:
         b = intraday_ohlcv(ticker, view)
-        if len(b) > 1:
+        if view == "1D" and len(b):
+            b = _with_last_trade(ticker, b)
+        if len(b) >= 1:
             fig = build_intraday_chart(ticker, b, view)
             render_chart(fig, ticker, {"x": [f"{d:%Y-%m-%dT%H:%M}" for d in b.index], **_ohlc_lists(b)},
                          view=view, mode=mode, intraday=True)
@@ -281,6 +283,28 @@ def render_stock_chart(ticker, tdata):
     fig = build_price_chart(ticker, tdata, bars)
     b = bars[bars.index >= tdata['Date'].max() - WINDOW]
     render_chart(fig, ticker, {"x": [f"{d:%Y-%m-%d}" for d in b.index], **_ohlc_lists(b)}, view=view, mode=mode)
+
+def _with_last_trade(ticker, b):
+    """Today's 1D candles end at the Alpaca latest trade (SIP -> IEX): the last 5-minute candle is updated, or a new one
+    started, so the chart is current between bar closes. Display only."""
+    from dashboard.data import live_quote
+    q = live_quote(ticker)
+    if not q:
+        return b
+    px, ts = q
+    t = pd.Timestamp(ts).tz_convert("America/New_York").tz_localize(None)
+    if t.normalize() != b.index[-1].normalize() or t < b.index[-1] or not (570 <= t.hour * 60 + t.minute < 960):
+        return b
+    b = b.copy()
+    slot = t.floor("5min")
+    if slot > b.index[-1]:
+        b.loc[slot] = [px, px, px, px, 0.0]
+    else:
+        last = b.index[-1]
+        b.loc[last, "Close"] = px
+        b.loc[last, "High"] = max(b.loc[last, "High"], px)
+        b.loc[last, "Low"] = min(b.loc[last, "Low"], px)
+    return b
 
 def _ohlc_lists(b):
     return {k.lower(): [float(v) for v in b[k]] for k in ("Open", "High", "Low", "Close")}
