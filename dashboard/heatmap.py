@@ -43,6 +43,8 @@ def order(p, syms):
 def render_heatmap(p):
     """One compact grid of small equal tiles, Buy -> Sell (the strategy signal, then rank / score), colored by today's %;
     a tile click opens the stock in the picker and chart below (a whole-page rerun; the page stays on Stock Analysis)."""
+    from dashboard.page import fresh
+    p = fresh(p)
     import sector_mapping as sm
     from dashboard.data import index_quotes
     if st.session_state.get("_hm_open"):

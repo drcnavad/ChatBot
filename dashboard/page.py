@@ -35,6 +35,14 @@ def build_page():
         freshness=data_freshness(df["Date"].max()),
     )
 
+def fresh(p):
+    """`p`, or the page data rebuilt when a scheduled job rewrote the signals file since `p` was built. The 30 s
+    fragments call this, so new end-of-day data shows up in place, without a page reload."""
+    try:
+        return p if os.path.getmtime(SIGNAL_CSV) == p.mtime else build_page()
+    except OSError:
+        return p
+
 def open_symbol(table, event, key):
     """Row click in a table -> open that stock in the stock view (applied on the rerun, before the picker is drawn)."""
     rows = event.selection.rows if event is not None and hasattr(event, "selection") else []
@@ -49,37 +57,57 @@ def open_symbol(table, event, key):
 def _sp(v, d=2, unit="%"):
     return f"{v:+,.{d}f}{unit}" if v is not None and v == v else "—"
 
-def render_ticker(box):
-    with box:
-        _ticker()
-
-@st.fragment(run_every=300)
-def _ticker():
-    """The scrolling strip of held stocks (this run's Alpaca positions): live price and day change from
-    data.index_quotes (Alpaca SIP / IEX, 30 s cache), else the position's own current price and change_today."""
+def _ticker_quotes():
+    """{symbol: (price, day change %)} of the held stocks (this run's Alpaca positions; GOOG hidden when GOOGL is held):
+    data.index_quotes (Alpaca snapshots, 20 s cache), else the position's own current price and change_today."""
     from dashboard.data import index_quotes
     from dashboard.details.live_holdings import holdings_this_run
     data, err = holdings_this_run()
     pos = sorted((data or {}).get("positions") or [], key=lambda x: x["symbol"]) if not err else []
-    if any(x["symbol"] == "GOOGL" for x in pos):                  # both share classes held: show GOOGL once
+    if any(x["symbol"] == "GOOGL" for x in pos):
         pos = [x for x in pos if x["symbol"] != "GOOG"]
-    if not pos:
-        return
-    q = index_quotes(tuple(x["symbol"] for x in pos))
-    items = []
+    q = index_quotes(tuple(x["symbol"] for x in pos)) if pos else {}
+    out = {}
     for x in pos:
         px, chg = q.get(x["symbol"], (None, None))
         if px is None:
-            px = float(x.get("current_price") or "nan")
-            chg = float(x.get("change_today") or "nan") * 100
-        cls = "up" if chg == chg and chg > 0 else "down" if chg == chg and chg < 0 else ""
-        items.append(f'<a class="sa-tick" href="?symbol={esc(x["symbol"])}" target="_self"><b>{esc(x["symbol"])}</b>'
-                     f'<span>${px:,.2f}</span><span class="{cls}">{"▲" if cls == "up" else "▼" if cls == "down" else ""}'
-                     f'{f"{abs(chg):.2f}%" if chg == chg else ""}</span></a>' if px == px else "")
-    row = "".join(items)
-    secs = max(20, 3 * len(items))                       # the same speed for any number of stocks
-    st.markdown(f'<div class="sa-ticker"><div class="sa-ticker-track" style="animation-duration:{secs}s">'
-                 f'{row}{row}</div></div>', unsafe_allow_html=True)
+            px, chg = float(x.get("current_price") or "nan"), float(x.get("change_today") or "nan") * 100
+        if px == px:
+            out[x["symbol"]] = (px, chg)
+    return out
+
+def _tick_change(chg):
+    cls = "up" if chg == chg and chg > 0 else "down" if chg == chg and chg < 0 else ""
+    return cls, f'{"▲" if cls == "up" else "▼" if cls == "down" else ""}{f"{abs(chg):.2f}%" if chg == chg else ""}'
+
+def render_ticker(box):
+    """The scrolling strip of held stocks. Its HTML is kept for the session (the same markup on every rerun, so the
+    scroll never restarts); a hidden 30 s fragment writes the new prices into it in place (JS text replacement)."""
+    quotes = _ticker_quotes()
+    syms = tuple(sorted(quotes))
+    if st.session_state.get("_ticker_syms") != syms:          # first run, or the held stocks changed
+        items = "".join(f'<a class="sa-tick" href="?symbol={esc(s)}" target="_self"><b>{esc(s)}</b>'
+                        f'<span data-tp="{esc(s)}">${px:,.2f}</span><span data-tc="{esc(s)}" class="{_tick_change(c)[0]}">'
+                        f'{_tick_change(c)[1]}</span></a>' for s, (px, c) in sorted(quotes.items()))
+        st.session_state["_ticker_syms"] = syms
+        st.session_state["_ticker_html"] = (f'<div class="sa-ticker"><div class="sa-ticker-track" style="animation-duration:'
+                                            f'{max(20, 3 * len(syms))}s">{items}{items}</div></div>') if syms else ""
+    with box:
+        if st.session_state["_ticker_html"]:
+            st.markdown(st.session_state["_ticker_html"], unsafe_allow_html=True)
+            with st.container(key="sa_ticker_js"):
+                _ticker_prices()
+
+@st.fragment(run_every=30)
+def _ticker_prices():
+    import json
+    import streamlit.components.v1 as components
+    upd = {s: [f"${px:,.2f}", *_tick_change(c)] for s, (px, c) in _ticker_quotes().items()}
+    components.html("<script>const d = window.parent.document, u = " + json.dumps(upd) + ";"
+                    "for (const [s, [p, cls, t]] of Object.entries(u)) {"
+                    "d.querySelectorAll(`[data-tp=\"${s}\"]`).forEach(e => { if (e.textContent !== p) e.textContent = p; });"
+                    "d.querySelectorAll(`[data-tc=\"${s}\"]`).forEach(e => { if (e.textContent !== t) e.textContent = t;"
+                    " e.className = cls; }); }</script>", height=0)
 
 PAGES = ["Home", "Stock Analysis", "Strategy", "Trading Account"]
 
@@ -87,7 +115,6 @@ def render_top_bar(p):
     ticker = st.container()          # the held-stock strip, filled at the end of the run (render_ticker)
     stale = p.freshness.loc[p.freshness["Status"].str.startswith("⚠️"), "File"].tolist()
     updated = datetime.fromtimestamp(p.mtime, tz=CT).strftime("%b %-d, %I:%M %p CT")
-    # the tab names sit in the middle of this row: st.tabs comes right after it and CSS lifts its tab bar up here
     c1, cnav, c2, c3 = st.columns([2.2, 4.6, 1.9, 1.1], vertical_alignment="center")
     with cnav:                       # keyed page selector: kept in session_state across every rerun (st.tabs is not)
         st.session_state.setdefault("nav", PAGES[0])

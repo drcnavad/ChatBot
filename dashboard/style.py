@@ -48,6 +48,7 @@ CSS = """
         font-size: 0.82rem; font-variant-numeric: tabular-nums; border-right: 1px solid #1e293b; }
     .sa-tick b { color: #f8fafc; font-weight: 700; } .sa-tick span { color: #cbd5e1; }
     .sa-tick .up { color: #4ade80; } .sa-tick .down { color: #f87171; }
+    .st-key-sa_ticker_js { display: none; }  /* the hidden price updater of the ticker strip */
     /* stock card: compact label / value tables side by side */
     .sa-kv-grid { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 1.25rem; margin-top: 0.75rem; }
     @media (max-width: 1000px) { .sa-kv-grid { grid-template-columns: 1fr; } }
@@ -55,15 +56,6 @@ CSS = """
     .sa-kv td { padding: 0.28rem 0.35rem; border-bottom: 1px solid #f1f5f9; color: var(--sa-muted); }
     .sa-kv td:nth-child(even) { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; padding-right: 0.9rem; }
     /* header cards (dashboard/page.py kpi_card): one grid, every card the same size; hover = today's intraday line */
-    /* tab names in the title row: the st.tabs right after the title row lifts its tab bar into the row's middle gap
-       (relative to the tabs themselves, so the ticker strip and news band above never matter) */
-    [data-testid="stLayoutWrapper"]:has(.sa-brand) { min-height: 52px; }
-    [data-testid="stLayoutWrapper"]:has(.sa-brand) + [data-testid="stTabs"] { position: relative; }
-    [data-testid="stLayoutWrapper"]:has(.sa-brand) + [data-testid="stTabs"] > div > div:has(> [data-baseweb="tab-list"]) {
-        position: absolute; top: calc(-52px - 1rem); height: 52px; left: 22%; right: 30%; z-index: 5;
-        display: flex; align-items: center; justify-content: center; }
-    [data-testid="stLayoutWrapper"]:has(.sa-brand) + [data-testid="stTabs"] [data-baseweb="tab-border"] { display: none; }
-    [data-testid="stLayoutWrapper"]:has(.sa-brand) + [data-testid="stTabs"] [data-baseweb="tab"] { font-weight: 600; padding: 0.35rem 0.7rem; }
     /* script-only frames (news voice) take no space */
     [data-testid="stElementContainer"]:has(> iframe[height="0"]), [data-testid="stElementContainer"]:has(iframe[data-testid="stCustomComponentV1"][height="0"]) { position: absolute; width: 0; height: 0; overflow: hidden; }
     .sa-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.6rem; margin-bottom: 0.6rem; }
@@ -214,8 +206,6 @@ CSS = """
   [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: 0.5rem; }
   [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stColumn"] { min-width: 0 !important; flex: 1 1 auto !important; width: auto !important; }
   [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stColumn"]:nth-child(2) { display: none; }
-  [data-testid="stLayoutWrapper"]:has(.sa-brand) + [data-testid="stTabs"] > div > div:has(> [data-baseweb="tab-list"]) {
-      position: static; height: auto; justify-content: flex-start; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   [data-baseweb="tab-list"] { flex-wrap: nowrap; }
   [data-baseweb="tab"] { white-space: nowrap; }
   .sa-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 0.5rem; }
@@ -225,7 +215,7 @@ CSS = """
   .sa-news-item { font-size: 13.5px; flex-wrap: wrap; row-gap: 2px; }
   .sa-news-ago { flex-basis: 100%; }
   [data-testid="stDataFrame"], [data-testid="stTable"], .sa-card { max-width: 100%; overflow-x: auto; }
-  .sa-snews-item, .sa-kv-grid { min-width: 0; }
+  .sa-kv-grid { min-width: 0; }
   iframe { max-width: 100%; }
   [data-testid="stPlotlyChart"] .modebar-container { display: none; }   /* Plotly charts: no toolbar on phones */
 }
@@ -277,13 +267,12 @@ def fmt(v, spec, prefix="", suffix=""):
 
 # One color rule for both tabs: green = good / Bullish / buy / positive, yellow = hold / neutral / caution / warning,
 # red = bad / Bearish / sell / negative / error. Plain labels and headings stay slate (INK).
-GOOD, CAUTION, BAD, INK, MUTED = "#15803d", "#b45309", "#b91c1c", "#0f172a", "#94a3b8"   # MUTED = no data / cash
+GOOD, CAUTION, BAD, INK = "#15803d", "#b45309", "#b91c1c", "#0f172a"
 DD_RED = -10.0           # max drawdown: down to -10% yellow, worse than -10% red (0 = none yet, plain)
 SCORE_GOOD = 40          # scores (strategy, technical, strength): above 40 green (about top-20 level), 0-40 yellow, below 0 red
 TONE_WORDS = ((GOOD, ("buy", "bull", "fresh", "ok", "success", "add")),
               (BAD, ("sell", "sold", "bear", "score below", "missing", "error", "fail", "drop", "exit")),
               (CAUTION, ("hold", "keep", "watch", "neutral", "stale", "warn", "wait", "pending", "swap", "skip", "earn", "within")))
-TONE_CLASS = {GOOD: "t-good", CAUTION: "t-warn", BAD: "t-bad"}
 
 def tone(v, good=0.0, bad=0.0):
     """Color of a value. Text: by its first word (Buy / Hold / Sold, fresh / stale / missing...; other text stays plain).

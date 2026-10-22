@@ -35,6 +35,8 @@ def _harvest_view(t):
 def render_tax_view(p):
     """Trading Account tab: realized / unrealized gains (short vs long term), wash sales, harvest list, estimated tax, Form 8949
     export, from the live account's activity since tax_lots.TAX_START (read-only, hourly). An estimate, not tax advice."""
+    from dashboard.page import fresh
+    p = fresh(p)
     import tax_lots as tl
     data, err = holdings_this_run()
     if err:
