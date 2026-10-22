@@ -88,6 +88,7 @@ def ranking_table(half, day, positions, ledger, top=20, path=None, values=None):
                                               and half_v else None for x in r["Symbol"]]})
     return t, others
 
+@st.fragment(run_every=30)      # half values / held marks follow the live account
 def render_last_decision(p):
     """Strategy tab: per-half summary, then each half's ranking at its own latest rebalance, side by side (held stocks
     marked). Click a row to open the stock."""

@@ -52,6 +52,13 @@ def render_stock(p, ticker, tdata):
         render_stock_news(ticker)
         render_stock_chart(ticker, tdata)
 
+def data_stamp():
+    """Modification times of the files the scheduled jobs write (signals, decisions, ledger, forward test, ranks)."""
+    from dashboard.settings import REPORTS
+    names = ("signal_analysis.csv", "strategy_changes.csv", "strategy_decisions.csv", "sleeve_ledger.json",
+             "forward_test_daily.csv", "forward_strategies.csv", "decision_ranks.csv", "strategy_picks.csv")
+    return tuple(os.path.getmtime(os.path.join(REPORTS, n)) if os.path.exists(os.path.join(REPORTS, n)) else 0 for n in names)
+
 @st.fragment(run_every=30)
 def auto_refresh():
     """The Live / last-updated line only (a fragment). No whole-page rerun: each live panel (cards, sector table, stock
@@ -59,6 +66,10 @@ def auto_refresh():
     from datetime import datetime
     from dashboard.data import refresh_every
     from dashboard.settings import CT
+    stamp = data_stamp()
+    if st.session_state.setdefault("_data_stamp", stamp) != stamp:     # a scheduled job wrote new data: reload once
+        st.session_state["_data_stamp"] = stamp
+        st.rerun(scope="app")
     every = refresh_every()
     st.caption(f"🟢 Live · last updated {datetime.now(CT):%I:%M:%S %p} CT · "
                f"auto-refresh every {'30 s (market open)' if every == 30 else '5 min (market closed)'} · prices and account from Alpaca")

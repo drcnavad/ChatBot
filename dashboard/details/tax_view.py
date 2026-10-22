@@ -31,6 +31,7 @@ def _harvest_view(t):
     return (t.round({"Loss": 2, "Short-term loss": 2, "Long-term loss": 2})
             .assign(**{"Next long-term date": [f"{d:%b %-d, %Y}" if d is not None and d == d else "—" for d in t["Next long-term date"]]}))
 
+@st.fragment(run_every=60)      # unrealized gains follow the live prices
 def render_tax_view(p):
     """Trading Account tab: realized / unrealized gains (short vs long term), wash sales, harvest list, estimated tax, Form 8949
     export, from the live account's activity since tax_lots.TAX_START (read-only, hourly). An estimate, not tax advice."""
