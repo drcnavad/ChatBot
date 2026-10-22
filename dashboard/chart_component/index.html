@@ -57,6 +57,7 @@ window.addEventListener("message", e => {
 });
 function draw(args) {
   if (args.spec === spec) return;
+  const prevLast = ohlc && ohlc.x.length ? ohlc.x[ohlc.x.length - 1] : null;
   spec = args.spec; ohlc = args.ohlc;
   const newView = args.view || "1Y", changed = newView !== curView || !!args.intraday !== intraday;
   curView = newView; intraday = !!args.intraday; mode = args.mode || mode; K = intraday ? 16 : 10;
@@ -73,7 +74,10 @@ function draw(args) {
     (L.annotations || []).forEach(a => a.font = Object.assign({}, a.font, {size: 9}));
     L.showlegend = false;                         // the read-outs at each panel's top-left carry the names
   }
-  if (!changed && div.layout && div.layout.xaxis && div.layout.xaxis.range) {          // a re-render after a save keeps your view
+  // live 1D: while the view still reaches the last candle, follow new candles (autorange); a zoom into the past stays
+  const follow = !changed && intraday && prevLast && div.layout && div.layout.xaxis && div.layout.xaxis.range
+    && new Date(String(div.layout.xaxis.range[1]).replace(" ", "T")) >= new Date(String(prevLast).replace(" ", "T"));
+  if (!changed && !follow && div.layout && div.layout.xaxis && div.layout.xaxis.range) {          // a re-render after a save keeps your view
     Object.keys(fig.layout).filter(k => /^xaxis\d*$/.test(k))
       .forEach(k => fig.layout[k].range = div.layout.xaxis.range.slice());   // every shared x-axis, or they disagree
     if (div.layout.yaxis && div.layout.yaxis.range) fig.layout.yaxis.range = div.layout.yaxis.range.slice();

@@ -15,15 +15,11 @@ from dashboard.style import (BAD, GOOD, INK, MA_COLS, TONE_CLASS, esc, fmt, num,
     show_html, symbol_link, tone)
 
 def ticker_label(p, s):
-    if s in p.short.index:
-        return f"{s}  ·  not traded yet (short history)  ·  rough {p.short.loc[s, 'Rough_Signal']} (less reliable)  ·  not ranked"
-    r = p.by_symbol.loc[s]
-    rank, score = r.get('Strategy_Rank'), r['combined_signal']
-    parts = [s, f"{p.sig_off.get(s, 'Not ranked')} ({p.off_date:%b %-d})"]
-    if pd.notna(rank):
-        parts.append(f"rank #{rank:.0f}")
-    parts.append(f"score {score:.0f}" if pd.notna(score) else "score —")
-    return "  ·  ".join(parts)
+    """Picker label: "JPM (JP Morgan)" (company name from sector_mapping.symbol_name). Typing in the picker filters
+    on this label, so a ticker or a company name both find the stock."""
+    import sector_mapping as sm
+    name = sm.symbol_name.get(s, "")
+    return f"{s} ({name})" if name else s
 
 @st.fragment(run_every=300)   # re-renders every 5 min, so an open tab never shows a stale list (Oct 19)
 def render_rank_tiers(p):
@@ -62,7 +58,8 @@ def render_stock_picker(p, jumped):
     render_rank_tiers(p)
     pick_col, ai_col = st.columns([3, 1])
     ticker = pick_col.selectbox("Ticker", options=p.options, format_func=lambda s: ticker_label(p, s),
-                                key="ticker_dropdown", label_visibility="collapsed")
+                                key="ticker_dropdown", label_visibility="collapsed",
+                                placeholder="Search a ticker or company name…")
     st.session_state["_ticker"] = ticker
     tdata = p.df[p.df['Symbol'] == ticker]
     if ticker not in p.short.index and ai_col.button("Generate AI Analysis", type="primary", width="stretch", key="generate_ai_btn"):
