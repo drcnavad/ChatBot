@@ -1,7 +1,7 @@
-"""Stock Analysis: a Finviz-style heatmap of every stock in sector_mapping.py (display only). Tiles grouped by sector,
-size = market cap (yfinance, read once a day), color = today's % change (Alpaca snapshots, SIP -> IEX, vs the previous
-close; red -> green, centered at 0, clipped at +-3 %). Its own fragment: refreshes silently every 30 s (new prices
-every 30 s in market hours, 5 min outside). Open a stock with the picker below."""
+"""Stock Analysis: a Finviz-style heatmap of every stock in sector_mapping.py (display only): one grid of equal
+small tiles in one compact grid, ordered Buy -> Sell by the strategy signal (then rank / score), colored by today's % change (Alpaca snapshots,
+SIP -> IEX, vs the previous close; red -> green, centered at 0, clipped at +-3 %). Its own fragment: refreshes silently
+every 30 s. A tile click opens the stock in the picker and chart below."""
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
@@ -29,47 +29,62 @@ def market_caps(symbols: tuple, day: str):
     with ThreadPoolExecutor(max_workers=16) as pool:
         return {s: v for s, v in pool.map(one, symbols) if v}
 
-def heatmap_figure(df):
-    sectors = sorted(df["Sector"].unique())
-    ids = sectors + list(df["Symbol"])
-    parents = [""] * len(sectors) + list(df["Sector"])
-    values = [0] * len(sectors) + list(df["Cap"])
-    chg = [0.0] * len(sectors) + [max(-CLIP, min(CLIP, c)) if c == c else 0.0 for c in df["Chg"]]
-    labels = sectors + [f"<b>{s}</b><br>{c:+.2f}%" if c == c else f"<b>{s}</b>" for s, c in zip(df["Symbol"], df["Chg"])]
-    hover = [""] * len(sectors) + [f"<b>{s}</b> · {n}<br>${p:,.2f} · {c:+.2f}% today<br>Market cap ${m / 1e9:,.0f}B"
-                                   if p == p else f"<b>{s}</b> · {n}" for s, n, p, c, m in
-                                   zip(df["Symbol"], df["Name"], df["Price"], df["Chg"], df["Cap"])]
-    fig = go.Figure(go.Treemap(
-        ids=ids, labels=labels, parents=parents, values=values, branchvalues="remainder", customdata=hover,
-        hovertemplate="%{customdata}<extra></extra>", textinfo="label", textposition="middle center",
-        marker=dict(colors=chg, colorscale=[[0, "#b91c1c"], [0.35, "#7f1d1d"], [0.5, "#414554"], [0.65, "#14532d"], [1, "#16a34a"]],
-                    cmin=-CLIP, cmax=CLIP, cmid=0, line=dict(color="#0f172a", width=1)),
-        pathbar=dict(visible=False), tiling=dict(pad=1), maxdepth=2,
-        textfont=dict(color="#fff", family="Inter, system-ui, sans-serif")))
-    fig.update_traces(root_color="#0f172a", selector=dict(type="treemap"))
-    fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=460, paper_bgcolor="#0f172a", uirevision="heatmap")
-    return fig
+def tile_color(c):
+    """Red (-3 %) -> grey (0) -> green (+3 %), as Finviz."""
+    if c != c:
+        return "#414554"
+    t = max(-CLIP, min(CLIP, c)) / CLIP
+    lo, mid, hi = (185, 28, 28), (65, 69, 84), (22, 163, 74)
+    end = hi if t > 0 else lo
+    a = abs(t)
+    return "#%02x%02x%02x" % tuple(round(m + (e - m) * a) for m, e in zip(mid, end))
+
+def _open(sym):
+    st.session_state["_hm_open"] = sym
+
+SIGNAL_ORDER = {"Strong Buy": 0, "Buy": 1, "Hold": 2, "Watch": 3, "Not ranked": 4, "Score below 0": 5, "Sell": 6, "Sold": 7,
+                "Strong Sell": 8}
+
+def order(p, syms):
+    """Buy first, then Hold, Watch, Not ranked, Score below 0, Sold; within a signal by rank, then score."""
+    def key(s):
+        sig = str(p.sig_off.get(s, "Not ranked"))
+        r = p.by_symbol.loc[s] if s in p.by_symbol.index else {}
+        rank, score = r.get("Strategy_Rank", None), r.get("combined_signal", None)
+        return (SIGNAL_ORDER.get(sig, 4), rank if rank == rank and rank is not None else 1e9,
+                -(score if score == score and score is not None else -1e9))
+    return sorted(syms, key=key)
 
 @st.fragment(run_every=30)
 def render_heatmap(p):
+    """One compact grid of small equal tiles, Buy -> Sell (the strategy signal, then rank / score), colored by today's %;
+    a tile click opens the stock in the picker and chart below (a whole-page rerun; the page stays on Stock Analysis)."""
     import sector_mapping as sm
     from dashboard.data import index_quotes
-    syms = tuple(s for s in _symbols() if s in p.options)
+    if st.session_state.get("_hm_open"):
+        st.session_state["_pending_ticker"] = st.session_state.pop("_hm_open")
+        st.rerun(scope="app")
+    syms = [s for s in _symbols() if s in p.options]
     all_sectors = sorted({sm.symbol_sector.get(s, "Other") for s in syms})
     pick = st.multiselect("Sectors", all_sectors, key="hm_sectors", placeholder="All sectors", label_visibility="collapsed")
-    caps = market_caps(syms, str(date.today()))
+    if pick:
+        syms = [s for s in syms if sm.symbol_sector.get(s, "Other") in pick]
     try:
-        q = index_quotes(syms)        # Alpaca snapshots, cached 30 s
+        q = index_quotes(tuple(syms))        # Alpaca snapshots (SIP -> IEX), cached 30 s
     except Exception:
         q = {}
-    rows = [{"Symbol": s, "Name": sm.symbol_name.get(s, ""), "Sector": sm.symbol_sector.get(s, "Other"),
-             "Cap": caps.get(s, 1e9), "Price": q.get(s, (float("nan"), float("nan")))[0],
-             "Chg": q.get(s, (float("nan"), float("nan")))[1]} for s in syms]
-    df = pd.DataFrame(rows)
-    if pick:
-        df = df[df["Sector"].isin(pick)]
-    if df.empty:
-        st.info("No stocks in the chosen sectors.")
-        return
-    # tile clicks: Streamlit's selection events do not cover treemaps (checked Oct 22, 2026), so the picker below opens a stock
-    st.plotly_chart(heatmap_figure(df), key="heatmap", config={"displayModeBar": False}, width="stretch")
+    current = st.session_state.get("ticker_dropdown")
+    css = ['<style>[class*="st-key-hm_"] button{width:62px;height:38px;min-height:38px;padding:0 2px;border:0;border-radius:3px}'
+           '[class*="st-key-hm_"] button p{color:#fff!important;font:600 10.5px/1.15 Inter,system-ui,sans-serif;white-space:pre-line;text-align:center;margin:0}'
+           '[class*="st-key-hm_"] button:hover{filter:brightness(1.25)}'
+           '.st-key-hm_grid{gap:3px!important;flex-wrap:wrap!important}</style>']
+    for s in syms:
+        c = q.get(s, (float("nan"), float("nan")))[1]
+        ring = ";box-shadow:inset 0 0 0 2px #fcd34d" if s == current else ""
+        css.append(f'<style>.st-key-hm_{s.replace(".", "_")} button{{background:{tile_color(c)}!important{ring}}}</style>')
+    st.markdown("".join(css), unsafe_allow_html=True)
+    with st.container(horizontal=True, gap=None, key="hm_grid"):
+        for s in order(p, syms):
+            px, c = q.get(s, (float("nan"), float("nan")))
+            tip = f"{sm.symbol_name.get(s, s)} · {p.sig_off.get(s, 'Not ranked')}" + (f" · ${px:,.2f} · {c:+.2f}% today" if px == px else "")
+            st.button(f"{s}\n{c:+.2f}%" if c == c else s, key=f"hm_{s.replace('.', '_')}", help=tip, on_click=_open, args=(s,))
