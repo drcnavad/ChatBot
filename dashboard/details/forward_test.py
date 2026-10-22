@@ -252,6 +252,18 @@ TILE_CSS = (
     '[class*="st-key-cs_t_"] .sa-pop{top:52px}[class*="st-key-cs_t_"]:hover .sa-pop{display:block}'
     '[class*="st-key-cs_t_"]:hover{z-index:1000}</style>')
 
+def by_last_week(board):
+    """Display only (Chirag, Oct 22): the leaderboard re-ranked by the last completed week's return (the newest
+    "Week N %" with data that is not "(so far)"), ranked strategies only, so consensus() takes that week's top 5.
+    forward_test's own Rank is untouched. Returns (board, week column)."""
+    done = [c for c in board.columns if c.startswith("Week ") and "so far" not in c and board[c].notna().any()]
+    if not done:
+        return board, "Total return %"
+    wk = max(done, key=lambda c: int(c.split()[1]))
+    ranked = pd.to_numeric(board["Rank"], errors="coerce").notna()
+    r = board[wk].where(ranked).rank(ascending=False, method="first")
+    return board.assign(Rank=r), wk
+
 def _cs_open(sym):
     st.session_state["_cs_open"] = sym
 
@@ -271,7 +283,8 @@ def render_top10(ranks=None):
         st.rerun(scope="app")
     built = _forward_files()[2]
     hold = read_report_csv(ft.HOLDINGS_CSV)
-    c = ft.consensus(built[0], hold, ranks, n_stocks=10 ** 4) if built else None
+    board = by_last_week(built[0])[0] if built else None
+    c = ft.consensus(board, hold, ranks, n_stocks=10 ** 4) if built else None
     if c is None or c["stocks"].empty:
         show_html('<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>no saved strategy holdings yet</span></div></div>')
         return
@@ -291,8 +304,10 @@ def render_top10(ranks=None):
     n = len(top)
     from datetime import datetime
     from dashboard.settings import CT
-    st.markdown(f'<div class="sa-card-title">Top 5 consensus<span>{len(rows)} stocks held by the leaderboard\'s Rank 1–{n} · '
-                f'colored by 5-day return · holdings at {c["day"]:%a %b %-d} close · updated {datetime.now(CT):%-I:%M:%S %p} CT</span></div>'
+    now = datetime.now(CT)
+    when = f"{now:%-I:%M %p} CT " + ("today" if now.weekday() < 5 else f"{now:%a, %b %-d}")
+    st.markdown(f'<div class="sa-card-title">Top 5 consensus<span>{len(rows)} stocks held by the top {n} strategies '
+                f'(by last week\'s return) as of {c["day"]:%a, %b %-d} close. Colored by 5-day return through {when}.</span></div>'
                 + TILE_CSS + "".join(f'<style>.st-key-cs_b_{s.replace(".", "_")} button{{background:{tile_color(r / 1.5 if r == r else r)}!important}}</style>'
                                      for s, _, r in rows), unsafe_allow_html=True)
     with st.container(horizontal=True, gap=None, key="cs_grid"):
