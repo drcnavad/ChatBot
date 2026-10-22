@@ -335,9 +335,9 @@ def render_top10(p=None):
     from datetime import datetime
     from dashboard.settings import CT
     now = datetime.now(CT)
-    when = f"{now:%-I:%M %p} CT " + ("today" if now.weekday() < 5 else f"{now:%a, %b %-d}")
+    when = f"{now:%-I:%M %p} CT" + ("" if now.weekday() < 5 else f" {now:%a, %b %-d}")
     st.markdown(f'<div class="sa-card-title">Top 5 consensus<span>{len(rows)} stocks held by this week\'s top {n} strategies '
-                f'({wk} so far) as of {c["day"]:%a, %b %-d} close. Colored by this week\'s return so far through {when}.</span></div>'
+                f'({wk} so far). Colored by this week\'s return through {when}.</span></div>'
                 + TILE_CSS + "".join(f'<style>.st-key-cs_b_{s.replace(".", "_")} button{{background:{tile_color(r / 1.5 if r == r else r)}!important}}</style>'
                                      for s, _, r in rows), unsafe_allow_html=True)
     with st.container(horizontal=True, gap=None, key="cs_grid"):
