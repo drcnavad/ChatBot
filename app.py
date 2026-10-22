@@ -43,6 +43,33 @@ load_dotenv()
 setup_page()      # the first Streamlit call, on every run
 new_run()
 
+@st.cache_resource(show_spinner=False)
+def prewarm():
+    """Once per server process: fill the slow caches (news feeds, live account, portfolio history) in a background
+    thread, so the first visit of each page does not wait for them in turn."""
+    import threading
+    from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+    ctx = get_script_run_ctx()
+
+    from dashboard.data import refresh_slot
+    from dashboard.details import equity_chart as ec
+    from dashboard.details.live_holdings import live_holdings
+    from dashboard.news import headlines
+
+    def quiet(fn):
+        try:
+            fn()
+        except Exception:               # the page shows its own errors when it reads again
+            pass
+    for fn in (headlines, live_holdings, lambda: ec.equity_series("1D", refresh_slot())):    # each in its own thread
+        t = threading.Thread(target=quiet, args=(fn,), name="sa-prewarm", daemon=True)
+        add_script_run_ctx(t, ctx)
+        t.start()
+    return True
+
+if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") != "off":
+    prewarm()
+
 def render_stock(p, ticker, tdata):
     """One stock: its card and chart (short-history stocks: their own short view)."""
     if ticker in p.short.index:

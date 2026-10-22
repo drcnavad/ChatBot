@@ -148,11 +148,9 @@ HOLDINGS = {"XLK": "NVDA AAPL MSFT AMD AVGO", "XLF": "BRK-B JPM V MA BAC", "XLV"
             "XLRE": "WELL PLD EQIX AMT SPG", "XLC": "META GOOGL WBD DIS TTWO", "DBC": "Brent WTI Diesel Gasoline Gold"}
 YF = ("CL=F", "BTC-USD")                     # not on Alpaca stock data: yfinance (free, keyless)
 
-from dashboard.alpaca_data import market_open  # noqa: E402  (the live-data layer)
-
 @st.cache_data(ttl=1800, show_spinner=False)
 def _card_data(syms, slot):
-    """Quotes and intraday lines of the cards, fetched once per `slot` (a 30 s step in market hours, 30 min outside)."""
+    """Quotes and intraday lines of the cards, fetched once per `slot` (30 s in market hours, 5 min outside)."""
     from dashboard.data import index_quotes, intraday, yf_intraday
     alp = tuple(s for s in syms if s not in YF)
     q, spark = dict(index_quotes(alp)), dict(intraday(alp))
@@ -164,9 +162,9 @@ def _card_data(syms, slot):
 def render_kpis():
     """The header cards: indexes, crude and bitcoin, then the 11 SPDR sector ETFs and commodities (DBC); live price,
     day %, an inline line and a hover intraday popup. (Portfolio figures live on the Trading Account tab.)
-    A fragment: only the cards rerun, every 30 s; new quotes every 30 s in market hours, every 30 min outside."""
-    step = 30 if market_open() else 300                 # reruns every 30 s; new data every 30 s open, 5 min closed
-    q, spark = _card_data((*INDEXES, *SECTORS), int(datetime.now().timestamp() // step))
+    A fragment: only the cards rerun, every 30 s; new quotes every 30 s in market hours, every 5 min outside."""
+    from dashboard.alpaca_data import refresh_slot          # new data every 30 s open, 5 min closed
+    q, spark = _card_data((*INDEXES, *SECTORS), refresh_slot())
     def card(sym, name):
         px, chg = q.get(sym, (None, None))
         return kpi_card(f"{name}", f"${px:,.2f}" if px else "—", f"{_sp(chg)} today" if px else "Quote unavailable",
