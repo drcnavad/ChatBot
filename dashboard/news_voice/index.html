@@ -5,35 +5,42 @@
 const send = (type, data) => window.parent.postMessage(Object.assign({isStreamlitMessage: true, type}, data), "*");
 const P = window.parent, D = P.document;
 P.saVoiceBase = new URL("audio/", location.href).href;
-if (!P.saVoice) P.saVoice = (() => {
-  const S = P.speechSynthesis, KEY = "saNewsVoice", SRC = {CNBC: "CNBC", YFinance: "Yahoo Finance", "Google News": "Google News", Nasdaq: "Nasdaq", MarketWatch: "MarketWatch", News: "the wires"};
-  let on = false, k = 0, timer = null, audio = null, run = 0;
-  const items = () => [...D.querySelectorAll(".sa-news .sa-news-item")];
-  const band = () => D.querySelector(".sa-news");
+// Two readers share this code: the LIVE NEWS band (loops over its headlines) and LATEST NEWS (reads its 10 in order once,
+// then each new one that appears). Only one reads at a time: starting one stops the other.
+P.saReaders = P.saReaders || {};
+function makeReader(name, bandSel, KEY, queue) {
+  const S = P.speechSynthesis, SRC = {CNBC: "CNBC", YFinance: "Yahoo Finance", "Google News": "Google News", Nasdaq: "Nasdaq", MarketWatch: "MarketWatch", News: "the wires"};
+  let on = false, k = 0, timer = null, audio = null, run = 0, said = new Set(), cur = null;
+  const band = () => D.querySelector(bandSel);
+  const items = () => { const b = band(); return b ? [...b.querySelectorAll(".sa-news-item")] : []; };
   const pick = () => { const v = S.getVoices();
     for (const n of ["Samantha", "Google US English", "Daniel", "Karen"]) { const x = v.find(o => o.name.startsWith(n)); if (x) return x; }
     return v.find(o => /^en[-_]US/.test(o.lang)) || null; };
+  const textOf = it => { const tagEl = it.querySelector(".sa-news-sym"), t = it.querySelector(".sa-news-t");
+    const tag = tagEl ? tagEl.textContent.trim() : "", title = t ? t.textContent : "";
+    return it.dataset.text || (tag in SRC ? "From " + SRC[tag] + ": " : tag ? tag + ": " : "") + title; };
   function show(it) {
     const b = band(); if (!b) return;
     b.classList.add("sa-news-reading");
     b.querySelectorAll(".sa-news-page").forEach(p => p.classList.toggle("sa-cur", p.contains(it)));
-    b.querySelectorAll(".sa-news-item").forEach(i => i.classList.toggle("sa-said", i === it));
+    b.querySelectorAll(".sa-news-item").forEach(i => i.classList.toggle("sa-said", it && textOf(i) === textOf(it)));
   }
-  function browserVoice(text, done) {                  // fallback: the browser's own voice
+  function browserVoice(text, done) {
     const u = new P.SpeechSynthesisUtterance(text), v = pick();
     if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-US";
     u.rate = 1.0; u.onend = u.onerror = done; S.speak(u);
   }
+  function pickNext() {
+    const all = items(); if (!all.length) return null;
+    if (!queue) { if (k >= all.length) k = 0; return all[k++]; }     // live band: loop, newest first
+    return all.find(i => !said.has(textOf(i))) || null;              // latest: top to bottom, then each new one
+  }
   function next() {
     if (!on) return;
-    const all = items(), my = run;
-    if (!all.length) { timer = setTimeout(next, 2000); return; }
-    if (k >= all.length) k = 0;                         // the end: start over with the newest headlines
-    const it = all[k++], tagEl = it.querySelector(".sa-news-sym"), t = it.querySelector(".sa-news-t");
-    const tag = tagEl ? tagEl.textContent.trim() : "", title = t ? t.textContent : "";
-    const text = it.dataset.text || (tag in SRC ? "From " + SRC[tag] + ": " : tag ? tag + ": " : "") + title;
-    show(it);
-    const done = () => { if (on && my === run) timer = setTimeout(next, 700); };   // a short pause between stories
+    const my = run, it = pickNext();
+    if (!it) { cur = null; timer = setTimeout(next, 2000); return; }  // latest: wait for a new headline
+    const text = textOf(it); said.add(text); cur = text; show(it);
+    const done = () => { if (on && my === run) timer = setTimeout(next, 700); };
     const h = it.dataset.say;
     if (!h) return browserVoice(text, done);
     let failed = false;
@@ -44,28 +51,32 @@ if (!P.saVoice) P.saVoice = (() => {
   }
   function stopAll() { run++; clearTimeout(timer); if (audio) { audio.onended = audio.onerror = null; audio.pause(); audio = null; } S.cancel(); }
   function set(v) {
+    if (v) Object.entries(P.saReaders).forEach(([n, r]) => { if (n !== name && r.state()) r.set(false); });  // one at a time
     stopAll(); on = v; P.localStorage.setItem(KEY, v ? "on" : "off"); paint();
-    if (v) next(); else { const b = band(); if (b) { b.classList.remove("sa-news-reading");
+    if (v) { said = new Set(); k = 0; next(); }
+    else { cur = null; const b = band(); if (b) { b.classList.remove("sa-news-reading");
       b.querySelectorAll(".sa-cur,.sa-said").forEach(e => e.classList.remove("sa-cur", "sa-said")); } }
   }
-  function paint() { const b = D.querySelector(".sa-news-voice"); if (!b) return;
-    b.classList.toggle("on", on); b.title = on ? "Stop reading the news" : "Read the headlines aloud";
-    b.setAttribute("aria-pressed", on); b.textContent = on ? "🔊" : "🔈"; }
-  function attach() {                                   // after every rerun: the button again, and the current story shown
+  function paint() { const b = band(); const btn = b && b.querySelector(".sa-news-voice"); if (!btn) return;
+    btn.classList.toggle("on", on); btn.title = on ? "Stop reading" : (queue ? "Read the latest news aloud" : "Read the headlines aloud");
+    btn.setAttribute("aria-pressed", on); btn.textContent = on ? "🔊" : "🔈"; }
+  function attach() {
     const b = band(); if (!b) return;
     if (!b.querySelector(".sa-news-voice")) {
       const btn = D.createElement("button"); btn.className = "sa-news-voice"; btn.type = "button";
       btn.onclick = () => set(!on); b.appendChild(btn);
     }
     paint();
-    if (on) { const all = items(); if (all.length) show(all[Math.max(0, Math.min(k, all.length) - 1)]); }
+    if (on && cur) { const it = items().find(i => textOf(i) === cur); if (it) show(it); }
   }
   P.addEventListener("beforeunload", stopAll);
-  P.setInterval(attach, 1000);                          // a rerun can redraw the band at any time
-  if (P.localStorage.getItem(KEY) === "on") setTimeout(() => set(true), 800);   // the browser may wait for a first click
-  return {attach, set, state: () => on};
-})();
-window.addEventListener("message", e => { if (e.data.type === "streamlit:render") { P.saVoice.attach(); setTimeout(P.saVoice.attach, 500); } });
+  P.setInterval(attach, 1000);
+  if (P.localStorage.getItem(KEY) === "on") setTimeout(() => set(true), 800);
+  return {attach, set, state: () => on, queue: () => [...said], current: () => cur};
+}
+if (!P.saVoice) P.saVoice = P.saReaders.live = makeReader("live", ".sa-news:not(.sa-latest)", "saNewsVoice", false);
+if (!P.saLatestVoice) P.saLatestVoice = P.saReaders.latest = makeReader("latest", ".sa-news.sa-latest", "saLatestVoice", true);
+window.addEventListener("message", e => { if (e.data.type === "streamlit:render") { [P.saVoice, P.saLatestVoice].forEach(r => { r.attach(); setTimeout(r.attach, 500); }); } });
 send("streamlit:componentReady", {apiVersion: 1});
 send("streamlit:setFrameHeight", {height: 0});
 </script></body></html>

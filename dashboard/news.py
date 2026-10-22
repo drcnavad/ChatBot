@@ -252,7 +252,9 @@ def render_latest_news():
     st.session_state["_latest_news"] = shown
     if not shown:
         return
-    row = lambda i: (f'<a class="sa-news-item" href="{html.escape(i["link"], quote=True)}" target="_blank" rel="noopener">'
+    said = prepare([script(tag(i), i["title"]) for i in shown])       # the same spoken text and Voice Genie audio as the band
+    row = lambda i: (f'<a class="sa-news-item" href="{html.escape(i["link"], quote=True)}" target="_blank" rel="noopener" '
+                     f'data-say="{said.get(script(tag(i), i["title"]), "")}" data-text="{html.escape(script(tag(i), i["title"]), quote=True)}">'
                      f'<span class="sa-news-sym">{html.escape(tag(i))}</span><span class="sa-news-t">{html.escape(i["title"])}</span>'
                      f'<span class="sa-news-ago">{html.escape(i["source"])} · {_ago(i["time"])}</span></a>')
     show_html('<div class="sa-news sa-latest"><span class="sa-news-tag">LATEST NEWS</span>'
