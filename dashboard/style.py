@@ -14,6 +14,8 @@ import streamlit as st
 
 CSS = """
 <style>
+[data-testid="stStatusWidget"] { visibility: hidden; height: 0; }  /* no 'Running…' flash on 30 s fragment updates */
+.stApp [data-stale="true"] { opacity: 1 !important; transition: none !important; }  /* no fade while a fragment reruns */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap');
     :root { --sa-ink: #0f172a; --sa-muted: #64748b; --sa-line: #e2e8f0; --sa-brand: #0f766e; --sa-bg: #f6f8fb; }
     .stApp, .main { background: var(--sa-bg); }

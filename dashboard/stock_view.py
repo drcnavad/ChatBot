@@ -66,6 +66,7 @@ def render_stock_picker(p, jumped):
         ai_analysis_dialog(ticker, tdata, p.sig_off.get(ticker, 'Not ranked'), p.why_off.get(ticker, ''))
     return ticker, tdata
 
+@st.fragment(run_every=30)   # only the card reruns: Alpaca price new every 30 s open / 5 min closed
 def render_stock_section(p, ticker, tdata):
     """One unified stock card: header (name, price, signal, stats) flowing into moving averages and fundamentals/news."""
     latest = tdata.nlargest(1, 'Date').iloc[0]

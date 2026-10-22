@@ -169,7 +169,7 @@ def live_quote(ticker: str):
         pass
     return _yf_live_quote(ticker)
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=120, show_spinner=False)
 def _yf_live_quote(ticker: str):
     """Latest yfinance quote for one ticker -> (price, bar_time) or None.
 
