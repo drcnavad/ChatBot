@@ -300,7 +300,65 @@ def render_stock_chart(ticker, tdata):
         st.caption("Intraday bars are not available right now; showing the daily chart.")
         view = "1Y"
     fig, ohlc = _daily_chart(ticker, os.path.getmtime(SIGNAL_CSV), tdata)
-    render_chart(copy.deepcopy(fig), ticker, ohlc, view=view, mode=mode)
+    fig, ohlc = with_today(ticker, copy.deepcopy(fig), {k: list(v) for k, v in ohlc.items()})
+    render_chart(fig, ticker, ohlc, view=view, mode=mode)
+
+def _values(v):
+    """A trace array as a list: plotly keeps cached figures' numbers as {'dtype', 'bdata'} (base64), decoded here."""
+    if isinstance(v, dict) and "bdata" in v:
+        import base64
+        import numpy as np
+        return np.frombuffer(base64.b64decode(v["bdata"]), dtype=np.dtype(v["dtype"])).tolist()
+    return list(v) if v is not None else []
+
+def with_today(ticker, fig, ohlc):
+    """Daily views: today's bar at the live price. Only the last bar is patched (the cached history is not rebuilt):
+    Alpaca snapshot open / high / low / volume, close = the streamed last trade when fresh, else the snapshot's."""
+    import time
+    from dashboard.data import today_bar
+    from dashboard.live_stream import live_stream
+    bar = today_bar(ticker, int(time.time() // 5))
+    if not bar or not ohlc["x"]:
+        return fig, ohlc
+    day, o, h, lo, c, v = bar
+    ls = live_stream()
+    q = ls.latest(ticker) if ls is not None else None
+    if q:
+        c = q[0]
+        h, lo = max(h, c), min(lo, c)
+    key = f"{day:%Y-%m-%d}"
+    if key < ohlc["x"][-1]:
+        return fig, ohlc
+    new = key > ohlc["x"][-1]
+    for name, val in (("x", key), ("open", o), ("high", h), ("low", lo), ("close", c)):
+        if new:
+            ohlc[name].append(val)
+        else:
+            ohlc[name][-1] = val
+    for t in fig.data:
+        is_candle = t.type == "candlestick"
+        if not (is_candle or t.name in ("Close line", "Volume")) or t.x is None or not len(t.x):
+            continue
+        xs = _values(t.x)
+        last = pd.Timestamp(xs[-1]).normalize()
+        if last > day:
+            continue
+        cols = {"open": o, "high": h, "low": lo, "close": c} if is_candle else {"y": v if t.name == "Volume" else c}
+        if last < day:
+            xs.append(day)
+            t.x = xs
+            for k, val in cols.items():
+                t[k] = _values(t[k]) + [val]
+        else:
+            for k, val in cols.items():
+                arr = _values(t[k])
+                arr[-1] = val
+                t[k] = arr
+        if t.name == "Volume" and t.marker is not None and t.marker.color is not None and not isinstance(t.marker.color, str):
+            colors = _values(t.marker.color)
+            col = colors[-1] if colors else "#94a3b8"
+            t.marker.color = colors + [col] if len(colors) < len(t.x) else colors
+    return fig, ohlc
 
 def live_1d_bars(ticker):
     """Today's 5-minute candles: Alpaca REST bars from the open (SIP -> IEX, cached 60 s; the previous session before

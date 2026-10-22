@@ -153,6 +153,23 @@ def _alpaca_last_trade(ticker: str, slot: int):
     ts = pd.Timestamp(t.timestamp)
     return float(t.price), ts.tz_convert("UTC") if ts.tzinfo else ts.tz_localize("UTC")
 
+@st.cache_data(ttl=60, max_entries=64, show_spinner=False)
+def today_bar(ticker: str, slot: int):
+    """Today's daily bar so far from the Alpaca snapshot (SIP -> IEX): (NY date, open, high, low, close, volume), close =
+    the latest trade; None before today's first trade or when Alpaca does not answer. New every `slot` (5 s)."""
+    if _live_off():
+        return None
+    from alpaca.data.requests import StockSnapshotRequest
+    from dashboard.alpaca_data import client, sip_then_iex
+    try:
+        snap, _ = sip_then_iex(lambda f: client().get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=ticker, feed=f))[ticker])
+        d = snap.daily_bar
+        day = pd.Timestamp(d.timestamp).tz_convert("America/New_York").tz_localize(None).normalize()
+        px = float(snap.latest_trade.price) if snap.latest_trade else float(d.close)
+        return day, float(d.open), max(float(d.high), px), min(float(d.low), px), px, float(d.volume)
+    except Exception:
+        return None
+
 def live_quote(ticker: str):
     """Display-only latest price -> (price, time) or None: Alpaca latest trade (SIP -> IEX), new every refresh slot
     (30 s in market hours, 5 min outside); yfinance only when Alpaca does not answer (e.g. non-US symbols)."""
