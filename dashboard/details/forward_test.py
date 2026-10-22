@@ -67,8 +67,9 @@ def live_returns(values):
     base = v.sort_values("Date").groupby("Strategy")["Value"].last()
     saved = saved.assign(Date=pd.to_datetime(saved["Date"]), Strategy=saved["Strategy"].replace(ft.OLD_NAMES))
     cash = saved.sort_values("Date").groupby("Strategy")["Cash"].last()
+    last = saved.groupby("Strategy")["Date"].max()
     h = hold.assign(Date=pd.to_datetime(hold["Date"]), Strategy=hold["Strategy"].replace(ft.OLD_NAMES))
-    h = h[h["Date"] == h.groupby("Strategy")["Date"].transform("max")]
+    h = h[h["Date"] == h["Strategy"].map(last)]          # holdings of the last saved day only (none = all cash that day)
     try:
         q = index_quotes(tuple(sorted(set(h["Symbol"]) | {"QQQ", "SPY"})))
     except Exception:
@@ -78,9 +79,9 @@ def live_returns(values):
         px = g["Symbol"].map(lambda s: q.get(s, (float("nan"),))[0])
         if name in base and name in cash and px.notna().all() and base[name]:
             out[CURRENT if name == ft.LIVE else name] = ((cash[name] + float((g["Shares"] * px).sum())) / base[name] - 1) * 100
-    for name in base.index:                              # all cash: flat
-        if name in cash and (CURRENT if name == ft.LIVE else name) not in out and name not in set(h["Strategy"]):
-            out[CURRENT if name == ft.LIVE else name] = 0.0
+    for name in base.index:                              # all cash on its last saved day: cash vs its latest value
+        if name in cash and name not in set(h["Strategy"]) and base[name]:
+            out[CURRENT if name == ft.LIVE else name] = (cash[name] / base[name] - 1) * 100
     bench = load_benchmarks()
     for x in ("QQQ", "SPY"):
         px, chg = q.get(x, (float("nan"), float("nan")))
@@ -261,17 +262,22 @@ TILE_CSS = (
     '[class*="st-key-cs_t_"] .sa-pop{top:52px}[class*="st-key-cs_t_"]:hover .sa-pop{display:block}'
     '[class*="st-key-cs_t_"]:hover{z-index:1000}</style>')
 
-def by_last_week(board):
-    """Display only (Chirag, Oct 22): the leaderboard re-ranked by the last completed week's return (the newest
-    "Week N %" with data that is not "(so far)"), ranked strategies only, so consensus() takes that week's top 5.
-    forward_test's own Rank is untouched. Returns (board, week column)."""
-    done = [c for c in board.columns if c.startswith("Week ") and "so far" not in c and board[c].notna().any()]
-    if not done:
-        return board, "Total return %"
-    wk = max(done, key=lambda c: int(c.split()[1]))
+def by_this_week(board, live=None):
+    """Display only (Chirag, Oct 22): the leaderboard re-ranked by the current week's return so far ("Week N (so far) %"),
+    compounded with today's live return (live_returns) where there is one, ranked strategies only, so consensus()
+    takes this week's top 5. forward_test's own Rank is untouched. Returns (board, week label like "Wk 3")."""
+    import forward_test as ft
+    cur = [c for c in board.columns if c.startswith("Week ") and "so far" in c and board[c].notna().any()]
+    if not cur:
+        return board, None
+    wk, live = cur[0], live or {}
+    def shown(n):
+        return CURRENT if str(n).startswith(ft.LIVE) else str(n).replace(ft.LIVE_MARK, "")
+    lv = board["Strategy"].map(lambda n: live.get(shown(n), float("nan")))
+    ret = ((1 + board[wk] / 100) * (1 + lv.fillna(0) / 100) - 1) * 100
     ranked = pd.to_numeric(board["Rank"], errors="coerce").notna()
-    r = board[wk].where(ranked).rank(ascending=False, method="first")
-    return board.assign(Rank=r), wk
+    r = ret.where(ranked).rank(ascending=False, method="first")
+    return board.assign(Rank=r, _wk=ret), "Wk " + wk.split()[1]
 
 def _cs_open(sym):
     st.session_state["_cs_open"] = sym
@@ -279,7 +285,7 @@ def _cs_open(sym):
 @st.fragment(run_every=30)
 def render_top10(p=None):
     """Top 5 consensus (display only) as Stock Analysis-style tiles: every stock held by the leaderboard's Rank 1-5
-    strategies by last completed week (by_last_week), colored by its live week-so-far return (the previous week's
+    strategies by this week's return so far (by_this_week), colored by its live week-so-far return (the previous week's
     last close -> the Alpaca price now), labeled with how many of the 5 hold it; hover = names + today's sparkline; click = open in Stock Analysis.
     Sorted by holders, then this week's return. Not nested in the leaderboard fragment (duplicate keys). Its own fragment: refreshes silently every 30 s."""
     import forward_test as ft
@@ -294,7 +300,11 @@ def render_top10(p=None):
         st.rerun(scope="app")
     built = _forward_files()[2]
     hold = read_report_csv(ft.HOLDINGS_CSV)
-    board = by_last_week(built[0])[0] if built else None
+    try:
+        live = live_returns(built[1]) if built else {}
+    except Exception:
+        live = {}
+    board, wk = by_this_week(built[0], live) if built else (None, None)
     c = ft.consensus(board, hold, ranks, n_stocks=10 ** 4) if built else None
     if c is None or c["stocks"].empty:
         show_html('<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>no saved strategy holdings yet</span></div></div>')
@@ -326,8 +336,8 @@ def render_top10(p=None):
     from dashboard.settings import CT
     now = datetime.now(CT)
     when = f"{now:%-I:%M %p} CT " + ("today" if now.weekday() < 5 else f"{now:%a, %b %-d}")
-    st.markdown(f'<div class="sa-card-title">Top 5 consensus<span>{len(rows)} stocks held by the top {n} strategies '
-                f'(by last week\'s return) as of {c["day"]:%a, %b %-d} close. Colored by this week\'s return so far through {when}.</span></div>'
+    st.markdown(f'<div class="sa-card-title">Top 5 consensus<span>{len(rows)} stocks held by this week\'s top {n} strategies '
+                f'({wk} so far) as of {c["day"]:%a, %b %-d} close. Colored by this week\'s return so far through {when}.</span></div>'
                 + TILE_CSS + "".join(f'<style>.st-key-cs_b_{s.replace(".", "_")} button{{background:{tile_color(r / 1.5 if r == r else r)}!important}}</style>'
                                      for s, _, r in rows), unsafe_allow_html=True)
     with st.container(horizontal=True, gap=None, key="cs_grid"):
