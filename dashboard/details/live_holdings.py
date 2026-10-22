@@ -104,7 +104,8 @@ def rank_at_buy(sym, strategy, bought):
         return None
     try:
         import decision_ranks
-        r = pd.read_csv(decision_ranks.RANKS_CSV, parse_dates=["Date"])
+        from dashboard.data import read_report_csv
+        r = read_report_csv(decision_ranks.RANKS_CSV).assign(Date=lambda d: pd.to_datetime(d["Date"]))
     except Exception:
         return None
     r = r[(r["Symbol"] == sym) & (r["Date"].dt.date <= pd.Timestamp(bought).date())].sort_values("Date")
