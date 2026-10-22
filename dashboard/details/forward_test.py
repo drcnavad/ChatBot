@@ -5,24 +5,37 @@ import streamlit as st
 from dashboard.data import load_benchmarks, read_report_csv
 from dashboard.style import SPCT, drawdown_tone, esc, show_html, symbol_link, table, toned
 
-def _board(daily, values):
-    """(leaderboard, values) with the provisional close rows (forward_test.provisional), as shown on the dashboard."""
+@st.cache_data(ttl=900, max_entries=4, show_spinner=False)
+def _board_cached(_daily, _values, key):
     import forward_test as ft
     bench = load_benchmarks()
-    values, bench = ft.provisional(values, bench.reset_index() if bench is not None else None)
-    return ft.leaderboard(daily, bench, values), values
+    values, bench = ft.provisional(_values, bench.reset_index() if bench is not None else None)
+    return ft.leaderboard(_daily, bench, values), values
 
+def _forward_files():
+    """(daily, values, (leaderboard, values with the provisional close rows) or None). The leaderboard is built once per
+    file version and 5 minutes (the provisional closes count from 3:05 PM CT), shared by every panel of the tab."""
+    import time
+    import forward_test as ft
+    from dashboard.data import mtime
+    from dashboard.settings import BENCH_CSV
+    daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
+    if values is None or values.empty:
+        return daily, values, None
+    key = (*(mtime(f) for f in (ft.DAILY_CSV, ft.STRATEGIES_CSV, BENCH_CSV, ft.HOLDINGS_CSV, ft.FWD_BARS)), int(time.time() // 300))
+    return daily, values, _board_cached(daily, values, key)
+
+@st.fragment(run_every=300)      # re-reads its (mtime-cached) files: new forward-test days show up in place
 def render_forward_test():
     """Strategy tab: the forward-test leaderboard from FORWARD_START (forward_test.py): every paper strategy
     (forward_test.STRATEGIES, Reports/forward_strategies.csv), the real account (Reports/forward_test_daily.csv), QQQ, SPY."""
-    import forward_test as ft
     from backtest_engine import FORWARD_START
     start = f"{pd.Timestamp(FORWARD_START):%b %-d, %Y}"
-    daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
-    if (daily is None or daily.empty) and (values is None or values.empty):
+    daily, values, built = _forward_files()
+    if built is None:
         st.info(f"No forward-test rows yet (started {start}).")
         return
-    raw, values = _board(daily, values)
+    raw, values = built
     render_curve(raw, values)
     board = tidy_board(raw, start[:-6])
     f1, f2 = st.columns([2, 3])
@@ -120,10 +133,8 @@ def render_top10(ranks=None):
     """Top 5 consensus card (display only): the 10 stocks most held by the 5 best forward-test strategies
     (forward_test.consensus): the leaderboard's Rank 1-5 above (total return since Oct 2, provisional close included)."""
     import forward_test as ft
-    daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
-    c = None
-    if values is not None and not values.empty:
-        c = ft.consensus(_board(daily, values)[0], read_report_csv(ft.HOLDINGS_CSV), ranks)
+    built = _forward_files()[2]
+    c = ft.consensus(built[0], read_report_csv(ft.HOLDINGS_CSV), ranks) if built else None
     if c is None or c["stocks"].empty:
         show_html('<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>no saved strategy holdings yet</span></div></div>')
         return
@@ -149,10 +160,10 @@ def render_forward_rules(p=None):
     render_top10(ranks)
     held = ft.holdings()
     by_name = {c["name"]: c for c in ft.STRATEGIES}
-    daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
+    built = _forward_files()[2]
     order, rank = [c["name"] for c in ft.STRATEGIES], {}
-    if values is not None and not values.empty:
-        board = _board(daily, values)[0]                     # the same leaderboard (and Rank) as the table above
+    if built:
+        board = built[0]                                     # the same leaderboard (and Rank) as the table above
         names = board["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)
         rank = dict(zip(names, board["Rank"]))
         order = [n for n in names if n in by_name] + [n for n in order if n not in set(names)]

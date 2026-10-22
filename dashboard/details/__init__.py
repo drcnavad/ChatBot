@@ -1,4 +1,6 @@
 """Details tabs: Strategy and Trading Account, every panel in its own expander."""
+import os
+
 import streamlit as st
 
 from dashboard.details.data_settings import render_data_and_settings
@@ -26,9 +28,38 @@ def render_strategy_tab(p):
     with st.expander("Data freshness and settings", expanded=False):
         render_data_and_settings(p)
 
+def _prefetch():
+    """Read the tab's slow live-account data in parallel (portfolio history, then trade audit and tax inputs once the
+    fills are known) so each panel below finds it cached: the cold load costs the slowest read, not their sum."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import datetime
+    from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+    from dashboard.data import refresh_slot
+    from dashboard.details import equity_chart as ec, tax_view as tv, trade_audit as ta
+    from dashboard.details.live_holdings import holdings_this_run
+    from dashboard.settings import CT
+    ctx = get_script_run_ctx()
+
+    def quiet(fn, *a):
+        add_script_run_ctx(threading.current_thread(), ctx)
+        try:
+            fn(*a)
+        except Exception:                   # the panel itself shows the error
+            pass
+    with ThreadPoolExecutor(3) as ex:
+        if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") != "off":
+            ex.submit(quiet, ec.equity_series, ec.DATA.get(st.session_state.get("eq_view", "1D"), ec.SINCE), refresh_slot())
+        data, err = holdings_this_run()
+        if not err:
+            key = f"{datetime.now(CT):%Y-%m-%d %H}-{len(data['fills'])}"
+            ex.submit(quiet, ta._read_audit, key, tuple(data["positions"]), tuple(data["fills"]))
+            ex.submit(quiet, tv._read_tax_inputs, key)
+
 def render_trading_tab(p):
     """Trading Account tab: live holdings, trade audit, tax view, strategy rules (the portfolio by half and both strategies'
     ranks are in the Strategy tab's Last decision)."""
+    _prefetch()
     with st.expander("Portfolio value", expanded=True):
         render_equity_chart()
     with st.expander("Live holdings (Alpaca account)", expanded=True):

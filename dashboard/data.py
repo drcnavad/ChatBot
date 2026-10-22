@@ -1,26 +1,50 @@
-"""Data loading (cached; every cache key includes the file's modification time so new data shows up at once) and the
-display-only live quote (yfinance; never touches strategy, signals, picks, backtests, or orders)."""
+"""Data loading and display-only live prices.
+
+Files: every cache key includes the file's modification time, so data a scheduled job writes shows up on the next
+read (no page reload). Live: Alpaca snapshots / bars (SIP, IEX on any SIP error) through dashboard.alpaca_data;
+yfinance only for what Alpaca does not carry. Nothing here feeds signals, picks, backtests, or orders."""
 import os
 from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 
+from dashboard.alpaca_data import refresh_every, refresh_slot  # noqa: F401  (re-exported)
 from dashboard.settings import (APP_FILES, BAR_CACHES, BENCH_CSV, COMPANY_XLSX, CT, DECISIONS_CSV, EARNINGS_CSV, FRESHNESS,
     NEWS_CSV, REPORTS, SIGNAL_CSV)
 
-@st.cache_data(ttl=3600)
-def _read_csv_cached(path, mtime):
-    return pd.read_csv(path)
+try:
+    import yfinance as _yf
+    _YF_OK = True
+except ImportError:  # graceful degradation: dashboard works without yfinance quotes
+    _yf, _YF_OK = None, False
 
-def read_report_csv(path):
-    """Cached CSV read; None when the file is missing."""
-    return _read_csv_cached(path, os.path.getmtime(path)) if os.path.exists(path) else None
+NY = "America/New_York"
+OHLCV = ["Open", "High", "Low", "Close", "Volume"]
+
+# ---- files (mtime-keyed caches) ----
+
+def mtime(path):
+    return os.path.getmtime(path) if os.path.exists(path) else 0.0
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _read(path, mtime, dates=None, excel_sheet=None):
+    if excel_sheet:
+        return pd.read_excel(path, sheet_name=excel_sheet, engine="openpyxl")
+    return pd.read_csv(path, parse_dates=list(dates) if dates else None)
+
+def read_report_csv(path, dates=None):
+    """Cached CSV read (re-read when the file changes); None when the file is missing. Treat the result as read-only."""
+    return _read(path, mtime(path), dates) if os.path.exists(path) else None
 
 @st.cache_data(ttl=3600)
 def load_signals(mtime: float):
     """Reports/signal_analysis.csv: one row per symbol and day (prices, indicators, strategy columns)."""
     return pd.read_csv(SIGNAL_CSV, parse_dates=['Date'])
+
+def signals():
+    """The current signals frame (cached per file version)."""
+    return load_signals(mtime(SIGNAL_CSV))
 
 @st.cache_data(ttl=3600)
 def latest_rows(_df, mtime: float):
@@ -29,28 +53,17 @@ def latest_rows(_df, mtime: float):
 
 def load_decisions():
     """Reports/strategy_decisions.csv: the engine's log of every weekly / mid-week decision (with reasons)."""
-    d = read_report_csv(DECISIONS_CSV)
-    if d is None:
-        return None
-    d = d.copy()
-    d["Date"] = pd.to_datetime(d["Date"])
-    return d
+    return read_report_csv(DECISIONS_CSV, dates=("Date",))
 
 def load_benchmarks():
-    b = read_report_csv(BENCH_CSV)
-    if b is None:
-        return None
-    b = b.copy()
-    b["Date"] = pd.to_datetime(b["Date"])
-    return b.set_index("Date")
+    b = read_report_csv(BENCH_CSV, dates=("Date",))
+    return None if b is None else b.set_index("Date")
 
 def row_for(path, symbol):
     """First row of a Reports CSV for one symbol, or None."""
     t = read_report_csv(path)
-    if t is None:
-        return None
-    row = t[t["Symbol"] == symbol]
-    return None if row.empty else row.iloc[0]
+    row = None if t is None else t[t["Symbol"] == symbol]
+    return None if row is None or row.empty else row.iloc[0]
 
 def data_freshness(latest_bar):
     """One row per Reports file: last update (CT), age and a stale flag."""
@@ -74,39 +87,30 @@ def data_freshness(latest_bar):
                      "Status": "✅ fresh" if age_d <= max_days else f"⚠️ stale (> {max_days} d)"})
     return pd.DataFrame(rows)
 
-@st.cache_data(ttl=3600)
-def _load_earnings(mtime: float):
-    ed = pd.read_csv(EARNINGS_CSV)
-    ed['Symbol'] = ed['Symbol'].astype(str).str.strip().str.upper()
-    ed['Earnings Date'] = pd.to_datetime(ed['Earnings Date'], errors='coerce')
-    return ed.dropna(subset=['Earnings Date'])
-
 def load_earnings():
-    if not os.path.exists(EARNINGS_CSV):
+    ed = read_report_csv(EARNINGS_CSV)
+    if ed is None:
         return pd.DataFrame(columns=["Symbol", "Earnings Date", "Time"])
-    return _load_earnings(os.path.getmtime(EARNINGS_CSV))
+    ed = ed.assign(Symbol=ed['Symbol'].astype(str).str.strip().str.upper(),
+                   **{'Earnings Date': pd.to_datetime(ed['Earnings Date'], errors='coerce')})
+    return ed.dropna(subset=['Earnings Date'])
 
 def last_next_earnings(symbols):
     """Per symbol: most recent past and nearest upcoming earnings date (YYYY-MM-DD or '')."""
     ed = load_earnings()
     today = pd.Timestamp.now().normalize()
+    day = lambda d: d.strftime('%Y-%m-%d') if pd.notna(d) else ''
     rows = []
     for sym in symbols:
         dates = ed.loc[ed['Symbol'] == sym, 'Earnings Date']
-        last, nxt = dates[dates <= today].max(), dates[dates >= today].min()
-        rows.append({'Symbol': sym, 'Last ED': last.strftime('%Y-%m-%d') if pd.notna(last) else '',
-                     'Next ED': nxt.strftime('%Y-%m-%d') if pd.notna(nxt) else ''})
+        rows.append({'Symbol': sym, 'Last ED': day(dates[dates <= today].max()), 'Next ED': day(dates[dates >= today].min())})
     return pd.DataFrame(rows, columns=['Symbol', 'Last ED', 'Next ED'])
-
-@st.cache_data(ttl=3600)
-def _load_company(mtime: float):
-    return pd.read_excel(COMPANY_XLSX, sheet_name="2_Latest_Quarter_Complete", engine="openpyxl")
 
 def load_company():
     """Latest-quarter fundamentals workbook; empty frame when missing."""
     if not os.path.exists(COMPANY_XLSX):
         return pd.DataFrame(columns=["Symbol"])
-    return _load_company(os.path.getmtime(COMPANY_XLSX))
+    return _read(COMPANY_XLSX, mtime(COMPANY_XLSX), excel_sheet="2_Latest_Quarter_Complete")
 
 def company_metrics(ticker, company_df):
     """Fair value and key ratios for one ticker ({} if none on file)."""
@@ -123,88 +127,95 @@ def load_news():
     news = read_report_csv(NEWS_CSV)
     return news if news is not None else pd.DataFrame(columns=["symbol", "date", "headline", "summary", "source", "sentiment_label"])
 
-try:
-    import yfinance as _yf
-    _YF_OK = True
-except ImportError:  # graceful degradation: dashboard works without live quotes
-    _yf, _YF_OK = None, False
+@st.cache_data(ttl=3600, show_spinner=False)
+def _bars(mtimes: tuple):
+    """Daily OHLCV of every stock: the long bar cache with the forward-test bars (fresher, from May 2026) on top."""
+    parts = [pd.read_pickle(p) for p in BAR_CACHES if os.path.exists(p)]
+    b = pd.concat(parts) if parts else pd.DataFrame(columns=["Symbol", "Date"] + OHLCV)
+    b["Date"] = pd.to_datetime(b["Date"])
+    return b.drop_duplicates(["Symbol", "Date"], keep="last")
 
-from dashboard.alpaca_data import refresh_every, refresh_slot  # noqa: E402,F401  (re-exported)
+def ohlcv(symbol):
+    """Display only (the stock chart): one stock's daily Open/High/Low/Close/Volume by Date."""
+    b = _bars(tuple(mtime(p) for p in BAR_CACHES))
+    return b[b["Symbol"] == symbol].set_index("Date").sort_index()[OHLCV]
+
+# ---- live (Alpaca) ----
+
+def _live_off():
+    return os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off"          # tests: never call Alpaca
+
+def _snapshots(symbols):
+    """{symbol: Alpaca snapshot} in one request (SIP -> IEX); {} when live data is off or neither feed answers."""
+    if _live_off():
+        return {}
+    from alpaca.data.requests import StockSnapshotRequest
+    from dashboard.alpaca_data import client, sip_then_iex
+    try:
+        snaps, _ = sip_then_iex(lambda f: client().get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=list(symbols), feed=f)))
+        return snaps or {}
+    except Exception:
+        return {}
 
 @st.cache_data(ttl=600, max_entries=200, show_spinner=False)
 def _alpaca_last_trade(ticker: str, slot: int):
-    """(price, trade time UTC) of the latest trade from Alpaca, SIP first and IEX on any SIP error; None if neither."""
-    if _live_off():
-        return None
-    from alpaca.data.requests import StockLatestTradeRequest
-    from dashboard.alpaca_data import client, sip_then_iex
-    try:
-        t, _ = sip_then_iex(lambda f: client().get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=ticker, feed=f))[ticker])
-    except Exception:
+    """(price, trade time UTC) of the latest trade; None if Alpaca does not answer."""
+    t = getattr(_snapshots((ticker,)).get(ticker), "latest_trade", None)
+    if t is None:
         return None
     ts = pd.Timestamp(t.timestamp)
     return float(t.price), ts.tz_convert("UTC") if ts.tzinfo else ts.tz_localize("UTC")
 
 @st.cache_data(ttl=60, max_entries=64, show_spinner=False)
 def today_bar(ticker: str, slot: int):
-    """Today's daily bar so far from the Alpaca snapshot (SIP -> IEX): (NY date, open, high, low, close, volume), close =
-    the latest trade; None before today's first trade or when Alpaca does not answer. New every `slot` (5 s)."""
-    if _live_off():
-        return None
-    from alpaca.data.requests import StockSnapshotRequest
-    from dashboard.alpaca_data import client, sip_then_iex
+    """Today's daily bar so far from the Alpaca snapshot: (NY date, open, high, low, close, volume), close = the latest
+    trade; None before today's first trade or when Alpaca does not answer. New every `slot` (5 s)."""
     try:
-        snap, _ = sip_then_iex(lambda f: client().get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=ticker, feed=f))[ticker])
+        snap = _snapshots((ticker,))[ticker]
         d = snap.daily_bar
-        day = pd.Timestamp(d.timestamp).tz_convert("America/New_York").tz_localize(None).normalize()
+        day = pd.Timestamp(d.timestamp).tz_convert(NY).tz_localize(None).normalize()
         px = float(snap.latest_trade.price) if snap.latest_trade else float(d.close)
         return day, float(d.open), max(float(d.high), px), min(float(d.low), px), px, float(d.volume)
     except Exception:
         return None
 
+@st.cache_data(ttl=20, show_spinner=False)     # < the 30 s fragment timers, so every tick gets new prices
+def index_quotes(symbols: tuple):
+    """Display only: {symbol: (last price, day change %)} from one Alpaca snapshot request; change = last trade vs the
+    previous session's close. {} when neither feed answers."""
+    out = {}
+    for s, x in _snapshots(symbols).items():
+        try:
+            px = float(x.latest_trade.price) if x.latest_trade else float(x.daily_bar.close)
+            prev = float(x.previous_daily_bar.close) if x.previous_daily_bar else float("nan")
+            out[s] = (px, (px / prev - 1) * 100 if prev == prev and prev else float("nan"))
+        except Exception:
+            continue
+    return out
+
 def live_quote(ticker: str):
-    """Display-only latest price -> (price, time) or None: Alpaca latest trade (SIP -> IEX), new every refresh slot
-    (30 s in market hours, 5 min outside); yfinance only when Alpaca does not answer (e.g. non-US symbols)."""
+    """Display-only latest price -> (price, time) or None: Alpaca latest trade, new every refresh slot (30 s in market
+    hours, 5 min outside); yfinance only when Alpaca does not answer (e.g. non-US symbols)."""
     if not ticker:
         return None
-    try:
-        q = _alpaca_last_trade(ticker, refresh_slot())
-        if q is not None:
-            return q
-    except Exception:
-        pass
-    return _yf_live_quote(ticker)
+    return _alpaca_last_trade(ticker, refresh_slot()) or _yf_live_quote(ticker)
+
+def _yf_last(df):
+    """Close column(s) of a yfinance download, one column per ticker."""
+    c = df["Close"]
+    return c if isinstance(c, pd.DataFrame) else c.to_frame()
 
 @st.cache_data(ttl=120, show_spinner=False)
 def _yf_live_quote(ticker: str):
-    """Latest yfinance quote for one ticker -> (price, bar_time) or None.
-
-    Display-only helper for the stock header. The strategy always uses the completed
-    daily-bar Close from Reports/*.csv; this result never feeds back into signals,
-    picks, backtests, or orders. Returns None when yfinance is missing, the fetch
-    fails/rate-limits, or there is no usable bar.
-    """
-    if not _YF_OK or not ticker:
+    """Latest yfinance 1-minute close -> (price, bar time) or None (missing yfinance, a failed fetch or no bar)."""
+    if not _YF_OK:
         return None
     try:
-        df = _yf.download(ticker, period="1d", interval="1m", prepost=True,
-                          progress=False, auto_adjust=False)
-        if df is None or df.empty:
-            return None
-        closes = df["Close"]
-        if isinstance(closes, pd.DataFrame):  # yfinance>=0.12 returns MultiIndex columns
-            closes = closes.iloc[:, 0]
-        closes = closes.dropna()
-        if closes.empty:
-            return None
-        return float(closes.iloc[-1]), pd.Timestamp(closes.index[-1])
+        c = _yf_last(_yf.download(ticker, period="1d", interval="1m", prepost=True, progress=False, auto_adjust=False))
+        c = c.iloc[:, 0].dropna()
+        return (float(c.iloc[-1]), pd.Timestamp(c.index[-1])) if len(c) else None
     except Exception:
         return None
-
-def _closes(df):
-    """The Close column(s) of a yfinance download as a DataFrame with one column per ticker."""
-    c = df["Close"]
-    return c if isinstance(c, pd.DataFrame) else c.to_frame()
 
 @st.cache_data(ttl=120, show_spinner=False)
 def etf_prices(symbols: tuple, start: str):
@@ -216,13 +227,12 @@ def etf_prices(symbols: tuple, start: str):
         try:
             df = _yf.download(list(symbols), start=str(pd.Timestamp(start) - pd.Timedelta(days=7))[:10], interval="1d",
                               progress=False, auto_adjust=True)
-            closes = _closes(df).dropna(how="all")
+            closes = _yf_last(df).dropna(how="all")
             closes.index = pd.to_datetime(closes.index).tz_localize(None).normalize()
         except Exception:
             closes = pd.DataFrame()
         try:
-            q = _closes(_yf.download(list(symbols), period="1d", interval="1m", prepost=True, progress=False,
-                                     auto_adjust=False))
+            q = _yf_last(_yf.download(list(symbols), period="1d", interval="1m", prepost=True, progress=False, auto_adjust=False))
             now = {s: float(q[s].dropna().iloc[-1]) for s in q.columns if s in symbols and len(q[s].dropna())}
         except Exception:
             now = {}
@@ -234,51 +244,9 @@ def etf_prices(symbols: tuple, start: str):
             now[s] = float(closes[s].dropna().iloc[-1])
     return closes, now
 
-def _live_off():
-    return os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off"          # tests: never call Alpaca
-
-@st.cache_data(ttl=20, show_spinner=False)     # < the 30 s fragment timers, so every tick gets new prices
-def index_quotes(symbols: tuple):
-    """Display only (header cards): {symbol: (last price, day change %)} from Alpaca snapshots, SIP first and IEX on any
-    SIP error (the same feeds as paper_trade's order quotes). Change = last trade vs the previous session's close.
-    Cached 30 s; {} when neither feed answers."""
-    if _live_off():
-        return {}
-    from alpaca.data.requests import StockSnapshotRequest
-    from dashboard.alpaca_data import client, sip_then_iex
-    try:
-        snaps, _ = sip_then_iex(lambda f: client().get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=list(symbols), feed=f)))
-    except Exception:
-        return {}
-    out = {}
-    for s, x in snaps.items():
-        try:
-            px = float(x.latest_trade.price) if x.latest_trade else float(x.daily_bar.close)
-            prev = float(x.previous_daily_bar.close) if x.previous_daily_bar else float("nan")
-            out[s] = (px, (px / prev - 1) * 100 if prev == prev and prev else float("nan"))
-        except Exception:
-            continue
-    return out
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def _bars(mtimes: tuple):
-    """Daily OHLCV of every stock: the long bar cache with the forward-test bars (fresher, from May 2026) on top."""
-    parts = [pd.read_pickle(p) for p in BAR_CACHES if os.path.exists(p)]
-    b = pd.concat(parts) if parts else pd.DataFrame(columns=["Symbol", "Date", "Open", "High", "Low", "Close", "Volume"])
-    b["Date"] = pd.to_datetime(b["Date"])
-    return b.drop_duplicates(["Symbol", "Date"], keep="last")
-
-def ohlcv(symbol):
-    """Display only (the stock chart): one stock's daily Open/High/Low/Close/Volume by Date."""
-    b = _bars(tuple(os.path.getmtime(p) if os.path.exists(p) else 0 for p in BAR_CACHES))
-    return b[b["Symbol"] == symbol].set_index("Date").sort_index()[["Open", "High", "Low", "Close", "Volume"]]
-
-NY = "America/New_York"
-OHLCV = ["Open", "High", "Low", "Close", "Volume"]
-
 def alpaca_bars(symbols, minutes, start):
     """Display only: {symbol: OHLCV DataFrame indexed by New York time without zone} from Alpaca bars since `start`
-    (minutes per bar; None = daily), SIP first and IEX on any SIP error; {} when neither answers."""
+    (minutes per bar; None = daily), one request for all symbols; {} when neither feed answers."""
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
     from dashboard.alpaca_data import client, sip_then_iex
@@ -303,22 +271,29 @@ def last_sessions(df, n):
     days = sorted(set(df.index.normalize()))[-n:]
     return df[df.index.normalize().isin(days)]
 
+def _days_back(n):
+    return pd.Timestamp.now(tz=NY).normalize() - pd.Timedelta(days=n)
+
 @st.cache_data(ttl=60, show_spinner=False)
 def intraday(symbols: tuple):
-    """Display only (header card popups): {symbol: (epoch times, closes, previous close)} of the latest session's
-    5-minute bars (today's, or the last session's while the market is closed). Cached 60 s; a series that cannot be read is left out."""
+    """Display only (card / tile popups): {symbol: (epoch times, closes, previous close)} of the latest session's
+    5-minute bars (today's, or the last session's while the market is closed). Cached 60 s; unreadable series left out."""
     if _live_off():
         return {}
     out = {}
     try:
+        from concurrent.futures import ThreadPoolExecutor
+        from dashboard.alpaca_data import market_open
         quotes = index_quotes(symbols)
-        bars = alpaca_bars(symbols, 5, pd.Timestamp.now(tz=NY).normalize() - pd.Timedelta(days=5))
+        start = _days_back(0) if market_open() else _days_back(5)   # in the session: today's bars only (one page per chunk)
+        chunks = [symbols[k:k + 25] for k in range(0, len(symbols), 25)]
+        with ThreadPoolExecutor(4) as ex:                            # 25 symbols per request, 4 at a time
+            bars = {s: df for part in ex.map(lambda c: alpaca_bars(c, 5, start), chunks) for s, df in part.items()}
         for s, df in bars.items():
             df = last_sessions(df, 1)
             last, chg = quotes.get(s, (None, float("nan")))
             if len(df) and chg == chg:
-                times = [t.timestamp() for t in df.index.tz_localize(NY)]
-                out[s] = (times, df["Close"].tolist(), last / (1 + chg / 100))
+                out[s] = ([t.timestamp() for t in df.index.tz_localize(NY)], df["Close"].tolist(), last / (1 + chg / 100))
     except Exception:
         pass
     return out
@@ -326,40 +301,35 @@ def intraday(symbols: tuple):
 @st.cache_data(ttl=60, show_spinner=False)
 def yf_intraday(symbols: tuple):
     """Display only (header cards Alpaca does not carry, e.g. CL=F, BTC-USD): {symbol: ((price, day %), (epoch times,
-    closes, previous close))} from yfinance (free, keyless): 5-minute bars of the latest trading date, previous close =
-    the prior daily close. Cached 60 s; a symbol that cannot be read is left out."""
-    if _live_off():
+    closes, previous close))} from yfinance 5-minute bars of the latest trading date. Cached 60 s; unreadable left out."""
+    if _live_off() or not _YF_OK:
         return {}
     out = {}
-    try:
-        import yfinance as yf
-        for s in symbols:
-            try:
-                bars = yf.Ticker(s).history(period="5d", interval="5m")["Close"].dropna()
-                daily = yf.Ticker(s).history(period="7d", interval="1d")["Close"].dropna()
-                if bars.empty or len(daily) < 2:
-                    continue
-                today = bars[bars.index.date == bars.index[-1].date()]
-                prev = float(daily[daily.index.date < bars.index[-1].date()].iloc[-1])
-                px = float(today.iloc[-1])
-                out[s] = ((px, (px / prev - 1) * 100), ([t.timestamp() for t in today.index], today.tolist(), prev))
-            except Exception:
+    for s in symbols:
+        try:
+            bars = _yf.Ticker(s).history(period="5d", interval="5m")["Close"].dropna()
+            daily = _yf.Ticker(s).history(period="7d", interval="1d")["Close"].dropna()
+            if bars.empty or len(daily) < 2:
                 continue
-    except Exception:
-        pass
+            today = bars[bars.index.date == bars.index[-1].date()]
+            prev = float(daily[daily.index.date < bars.index[-1].date()].iloc[-1])
+            px = float(today.iloc[-1])
+            out[s] = ((px, (px / prev - 1) * 100), ([t.timestamp() for t in today.index], today.tolist(), prev))
+        except Exception:
+            continue
     return out
 
 INTRADAY_VIEWS = {"1D": (5, 1), "5D": (15, 5)}      # range button -> (minutes per candle, sessions shown)
 
 @st.cache_data(ttl=60, show_spinner=False)
 def intraday_ohlcv(symbol, view):
-    """Display only (stock chart 1D / 5D buttons): OHLCV candles of the last session (5-minute) or the last 5 sessions
+    """Display only (stock chart 1D / 5D): OHLCV candles of the last session (5-minute) or the last 5 sessions
     (15-minute), regular hours, index = New York time without zone. Cached 60 s; empty when it cannot be read."""
     if _live_off() or view not in INTRADAY_VIEWS:
         return pd.DataFrame(columns=OHLCV)
     minutes, sessions = INTRADAY_VIEWS[view]
     try:
-        df = alpaca_bars((symbol,), minutes, pd.Timestamp.now(tz=NY).normalize() - pd.Timedelta(days=4 + sessions * 2))
+        df = alpaca_bars((symbol,), minutes, _days_back(4 + sessions * 2))
         return last_sessions(df[symbol], sessions) if symbol in df else pd.DataFrame(columns=OHLCV)
     except Exception:
         return pd.DataFrame(columns=OHLCV)
