@@ -39,13 +39,13 @@ CSS = """
     .sa-brand-name { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.03em; color: var(--sa-ink); line-height: 1.1; }
     .sa-brand-sub { font-size: 0.75rem; color: var(--sa-muted); font-weight: 500; }
     /* held-stock ticker strip: the row is doubled and slides half its width, so the loop is seamless */
-    .sa-ticker { overflow: hidden; background: #0f172a; border-radius: 10px; margin: 0 0 0.6rem; padding: 0.45rem 0;
+    .sa-ticker { overflow: hidden; background: #0f172a; border-radius: 10px; margin: 0 0 0.6rem; padding: 0.5rem 0;
         -webkit-mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
     .sa-ticker-track { display: inline-flex; white-space: nowrap; animation: sa-scroll linear infinite; will-change: transform; }
     .sa-ticker:hover .sa-ticker-track { animation-play-state: paused; }
     @keyframes sa-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
     .sa-tick { display: inline-flex; gap: 0.45rem; align-items: baseline; padding: 0 1.3rem; text-decoration: none;
-        font-size: 0.82rem; font-variant-numeric: tabular-nums; border-right: 1px solid #1e293b; }
+        font-size: 0.9rem; font-variant-numeric: tabular-nums; border-right: 1px solid #1e293b; }
     .sa-tick b { color: #f8fafc; font-weight: 700; } .sa-tick span { color: #cbd5e1; }
     .sa-tick .up { color: #4ade80; } .sa-tick .down { color: #f87171; }
     .st-key-sa_ticker_js { display: none; }  /* the hidden price updater of the ticker strip */

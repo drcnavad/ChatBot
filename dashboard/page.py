@@ -57,52 +57,55 @@ def open_symbol(table, event, key):
 def _sp(v, d=2, unit="%"):
     return f"{v:+,.{d}f}{unit}" if v is not None and v == v else "—"
 
-def _ticker_quotes():
-    """{symbol: (price, day change %)} of the held stocks (this run's Alpaca positions; GOOG hidden when GOOGL is held):
-    data.index_quotes (Alpaca snapshots, 20 s cache), else the position's own current price and change_today."""
-    from dashboard.data import index_quotes
-    from dashboard.details.live_holdings import holdings_this_run
-    data, err = holdings_this_run()
-    pos = sorted((data or {}).get("positions") or [], key=lambda x: x["symbol"]) if not err else []
-    if any(x["symbol"] == "GOOGL" for x in pos):
-        pos = [x for x in pos if x["symbol"] != "GOOG"]
-    q = index_quotes(tuple(x["symbol"] for x in pos)) if pos else {}
-    out = {}
-    for x in pos:
-        px, chg = q.get(x["symbol"], (None, None))
-        if px is None:
-            px, chg = float(x.get("current_price") or "nan"), float(x.get("change_today") or "nan") * 100
-        if px == px:
-            out[x["symbol"]] = (px, chg)
-    return out
+def _ticker_symbols(p):
+    """The strip's order: the market indexes, then crude / Brent / gold / silver / bitcoin, then the sector ETFs (the Home
+    cards), then every stock of the Stock Analysis tile grid A-Z."""
+    from dashboard.heatmap import _symbols
+    from dashboard.sector_table import FUTURES
+    other = ("CL=F", *[f for f in FUTURES if f != "CL=F"], "BTC-USD")
+    return (*[s for s in INDEXES if s not in YF], *other, *SECTORS, *sorted(s for s in _symbols() if s in p.options))
+
+def _ticker_quotes(syms):
+    """{symbol: (price, day change %)}: one batched Alpaca snapshot request for the stocks and ETFs (20 s cache),
+    yfinance for the futures and bitcoin (data.yf_intraday, 60 s cache)."""
+    from dashboard.data import index_quotes, yf_intraday
+    yf = tuple(s for s in syms if s.endswith(("=F", "-USD")))
+    q = dict(index_quotes(tuple(s for s in syms if s not in yf)))
+    q.update({s: quote for s, (quote, _series) in yf_intraday(yf).items()})
+    return {s: q[s] for s in syms if s in q and q[s][0] == q[s][0]}
+
+def _label(s):
+    return s.replace("=F", "").replace("-USD", "")
 
 def _tick_change(chg):
     cls = "up" if chg == chg and chg > 0 else "down" if chg == chg and chg < 0 else ""
     return cls, f'{"▲" if cls == "up" else "▼" if cls == "down" else ""}{f"{abs(chg):.2f}%" if chg == chg else ""}'
 
-def render_ticker(box):
-    """The scrolling strip of held stocks. Its HTML is kept for the session (the same markup on every rerun, so the
-    scroll never restarts); a hidden 30 s fragment writes the new prices into it in place (JS text replacement)."""
-    quotes = _ticker_quotes()
-    syms = tuple(sorted(quotes))
-    if st.session_state.get("_ticker_syms") != syms:          # first run, or the held stocks changed
-        items = "".join(f'<a class="sa-tick" href="?symbol={esc(s)}" target="_self"><b>{esc(s)}</b>'
-                        f'<span data-tp="{esc(s)}">${px:,.2f}</span><span data-tc="{esc(s)}" class="{_tick_change(c)[0]}">'
-                        f'{_tick_change(c)[1]}</span></a>' for s, (px, c) in sorted(quotes.items()))
+def render_ticker(box, p):
+    """The scrolling strip: markets, commodities, sectors, then every tile-grid stock A-Z. Its HTML is kept for the
+    session (the same markup on every rerun, so the scroll never restarts); a hidden 30 s fragment writes the new prices
+    into it in place (JS text replacement)."""
+    syms = _ticker_symbols(p)
+    if st.session_state.get("_ticker_syms") != syms:          # first run, or the symbol list changed
+        quotes = _ticker_quotes(syms)
+        items = "".join(f'<a class="sa-tick" href="?symbol={esc(s)}" target="_self"><b>{esc(_label(s))}</b>'
+                        f'<span data-tp="{esc(s)}">{f"${quotes[s][0]:,.2f}" if s in quotes else "—"}</span>'
+                        f'<span data-tc="{esc(s)}" class="{_tick_change(quotes.get(s, (0, float("nan")))[1])[0]}">'
+                        f'{_tick_change(quotes.get(s, (0, float("nan")))[1])[1]}</span></a>' for s in syms)
         st.session_state["_ticker_syms"] = syms
         st.session_state["_ticker_html"] = (f'<div class="sa-ticker"><div class="sa-ticker-track" style="animation-duration:'
-                                            f'{max(20, 3 * len(syms))}s">{items}{items}</div></div>') if syms else ""
+                                            f'{round(2.6 * len(syms))}s">{items}{items}</div></div>') if syms else ""
     with box:
         if st.session_state["_ticker_html"]:
             st.markdown(st.session_state["_ticker_html"], unsafe_allow_html=True)
             with st.container(key="sa_ticker_js"):
-                _ticker_prices()
+                _ticker_prices(syms)
 
 @st.fragment(run_every=30)
-def _ticker_prices():
+def _ticker_prices(syms):
     import json
     import streamlit.components.v1 as components
-    upd = {s: [f"${px:,.2f}", *_tick_change(c)] for s, (px, c) in _ticker_quotes().items()}
+    upd = {s: [f"${px:,.2f}", *_tick_change(c)] for s, (px, c) in _ticker_quotes(syms).items()}
     components.html("<script>const d = window.parent.document, u = " + json.dumps(upd) + ";"
                     "for (const [s, [p, cls, t]] of Object.entries(u)) {"
                     "d.querySelectorAll(`[data-tp=\"${s}\"]`).forEach(e => { if (e.textContent !== p) e.textContent = p; });"

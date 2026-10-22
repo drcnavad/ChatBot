@@ -123,7 +123,7 @@ def main():
         render_strategy_tab(p)
     else:
         render_trading_tab(p)
-    render_ticker(ticker_box)
+    render_ticker(ticker_box, p)
     render_news_banner(ticker_box)
 
 main()
