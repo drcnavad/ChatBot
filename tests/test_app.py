@@ -196,16 +196,17 @@ for sym in dict.fromkeys(cases):
     rk = (fmt(SIG.Date.max()), rk and rk.group(1))
     print(f"   {sym}: {badges} · rank {rk} OK")
 import forward_test as ft  # noqa: E402
-# 4ad4ef4 order: Last decision, Forward test, Strategy rules and holdings first; live holdings and latest signals further down
+# order: Last decision, Forward test first (rules/holdings now hover on the leaderboard); live holdings and latest signals further down
 exp_titles = ["Last decision · portfolio and both strategies' ranks",   # Oct 21: no date (each half shows its own)
               f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
-              "Strategy rules and holdings (paper strategies)",
               "Live holdings (Alpaca account)"]
 labels = [e.label for e in at.expander if e.label != "My notes"]   # the notes table sits on top (daf6f89)
-expect(len(labels) >= 3 and labels[0] == exp_titles[0] and labels[1:3] == exp_titles[1:3]
-       and set(exp_titles[3:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
+expect(len(labels) >= 3 and labels[0] == exp_titles[0] and labels[1:2] == exp_titles[1:2]
+       and set(exp_titles[2:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
 expect(sum("forward test" in l.lower() for l in labels) == 1, f"the forward test is in one place only: {labels}")
-_ft = [d.value for d in at.dataframe if "Total since Oct 2" in d.value.columns]
+from dashboard.details import forward_test as _fd  # noqa: E402
+_built = _fd._forward_files()[2]   # the leaderboard is an HTML table now (hover tips), so test its data directly
+_ft = [_fd.tidy_board(_built[0], "Oct 2")] if _built else []
 expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Strategy"]} if _ft else
        any("Forward test started Oct 2, 2026" in i.value for i in at.info), "forward test leaderboard (QQQ + SPY rows) or empty state")
 _wk = [c for c in _ft[0].columns if c.startswith("Wk ")] if _ft else []
@@ -218,12 +219,10 @@ def _ranked_ok(b):
 expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Rule", "Total since Oct 2", "Last EOD", *_wk, "Max drawdown"] and [w.replace(" (so far)", "") for w in _wk] == [f"Wk {k}" for k in range(len(_wk), 0, -1)]
                    and (_ft[0]["Strategy"] == "Current Strategy (Live from Oct End)").sum() == 1 and _ranked_ok(_ft[0])),
        f"leaderboard: columns, one marked live row, every ranked strategy with data ranked (the Oct 16 live halves not): {_ft[0].to_dict('list') if _ft else None}")
-_rules = [d.value for d in at.dataframe if "Rule" in d.value.columns and "Total since Oct 2" not in d.value.columns]
-_shown = [ft.MARKED if s == "Current Strategy (Live from Oct End)" else s.replace(ft.LIVE_MARK, "") for s in _ft[0]["Strategy"]] if _ft else []
-_board_names = [s for s in _shown if s in {c["name"] for c in ft.STRATEGIES}] if _ft else [c["name"] for c in ft.STRATEGIES]
-expect(len(_rules) == 1 and set(_rules[0]["Strategy"]) == {c["name"] for c in ft.STRATEGIES}
-       and list(_rules[0]["Strategy"]) == _board_names,
-       f"rules table: every strategy once, same order as the leaderboard: {_rules[0]['Strategy'][:5] if _rules else None}")
+_tips = _fd.hover_tips(_ft[0]) if _ft else None
+expect(_tips is None or all(("Holds now:" in t) == (s.replace(ft.LIVE_MARK, "") in {c["name"] for c in ft.STRATEGIES} or s == _fd.CURRENT)
+                            for s, t in zip(_ft[0]["Strategy"], _tips["Strategy"])),
+       "leaderboard hover: every strategy row has its rule and holdings, benchmarks/account none")
 _top = [m.value for m in at.markdown if 'sa-card-title">Top 5 consensus<' in m.value]
 _top_syms = re.findall(r'\?symbol=([A-Z0-9.]+)"[^>]*>[^<]*</a> (\d+)/(\d+) strategies', _top[0]) if _top else []
 expect(len(_top) == 1 and len(_top_syms) == 10 and len({s for s, _, _ in _top_syms}) == 10

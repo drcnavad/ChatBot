@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import load_benchmarks, read_report_csv
-from dashboard.style import SPCT, drawdown_tone, esc, show_html, symbol_link, table, toned
+from dashboard.style import drawdown_tone, esc, show_html, symbol_link, toned
 
 @st.cache_data(ttl=900, max_entries=4, show_spinner=False)
 def _board_cached(_daily, _values, key):
@@ -26,7 +26,7 @@ def _forward_files():
     return daily, values, _board_cached(daily, values, key)
 
 @st.fragment(run_every=300)      # re-reads its (mtime-cached) files: new forward-test days show up in place
-def render_forward_test():
+def render_forward_test(p=None):
     """Strategy tab: the forward-test leaderboard from FORWARD_START (forward_test.py): every paper strategy
     (forward_test.STRATEGIES, Reports/forward_strategies.csv), the real account (Reports/forward_test_daily.csv), QQQ, SPY."""
     from backtest_engine import FORWARD_START
@@ -36,6 +36,7 @@ def render_forward_test():
         st.info(f"No forward-test rows yet (started {start}).")
         return
     raw, values = built
+    render_top10(p.by_symbol["Strategy_Rank"].to_dict() if p is not None and "Strategy_Rank" in p.by_symbol else None)
     render_curve(raw, values)
     board = tidy_board(raw, start[:-6])
     f1, f2 = st.columns([2, 3])
@@ -46,11 +47,51 @@ def render_forward_test():
         board = board[board["Strategy"].str.contains(q, case=False, regex=False)]
     if fams:
         board = board[board["Rule"].isin(fams)]
+    board = board.drop(columns="Rule")                   # family: filter only; rule + holdings show on hover
     pct = [c for c in board.columns if c not in ("Rank", "Strategy", "Rule")]
     sty = toned(toned(board, [c for c in pct if c != "Max drawdown"]), ["Max drawdown"], fn=drawdown_tone)
-    table(highlight_rows(sty), fit=True, cols={"Rank": RANK, "Strategy": st.column_config.TextColumn(width="large"),
-                                               **{c: SPCT for c in pct},
-                                               "Last EOD": st.column_config.NumberColumn(format="%+.2f%%", help="End-of-day close")})
+    board_html(highlight_rows(sty), board, pct)
+
+TIP_CSS = ("visibility:hidden; position:absolute; z-index:9; left:6px; top:100%; width:520px; "
+           "background:#0f172a; color:#f8fafc; font-weight:400; font-size:12.5px; line-height:1.45; padding:9px 11px; "
+           "border-radius:8px; box-shadow:0 6px 18px rgba(15,23,42,.3)")
+BOARD_CSS = """<style>
+body{margin:0;font-family:Inter,system-ui,-apple-system,sans-serif;font-size:14px;color:#0f172a}
+.wrap{border:1px solid #e2e8f0;border-radius:8px;overflow:visible}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th{position:sticky;top:0;background:#fff;color:#64748b;font-weight:400;text-align:left;cursor:pointer;user-select:none;white-space:nowrap}
+th,td{height:34px;padding:0 9px;border-bottom:1px solid #f1f5f9;border-right:1px solid #f1f5f9;white-space:nowrap}
+td{position:relative} td.num,th.num{text-align:right}
+th.asc:after{content:" \\2191"} th.desc:after{content:" \\2193"}
+td .pd-t{display:block;white-space:pre-line;__TIP__} td:hover .pd-t{visibility:visible} tr.up td .pd-t{top:auto;bottom:100%}
+</style>""".replace("__TIP__", TIP_CSS)
+SORT_JS = """<script>
+const T=document.querySelector('table'),B=T.tBodies[0];
+const fit=()=>{const h=document.body.scrollHeight;window.frameElement&&(window.frameElement.style.height=h+'px')};
+T.querySelectorAll('thead th').forEach((th,i)=>th.onclick=()=>{const d=th.classList.contains('asc')?-1:1;
+ T.querySelectorAll('th').forEach(x=>x.classList.remove('asc','desc'));th.classList.add(d>0?'asc':'desc');
+ const v=r=>{const c=r.cells[i];const t=c.firstChild&&c.firstChild.nodeType==3?c.firstChild.data:c.innerText;
+  const n=parseFloat(t.replace(/[%+,]/g,''));return isNaN(n)?(t.trim()?t:null):n};
+ [...B.rows].sort((a,b)=>{const x=v(a),y=v(b);if(x===null)return 1;if(y===null)return -1;
+  return (typeof x=='number'&&typeof y=='number'?x-y:String(x).localeCompare(String(y)))*d}).forEach(r=>B.appendChild(r));flip()});
+const flip=()=>[...B.rows].forEach((r,k)=>r.classList.toggle('up',k>=B.rows.length-8&&k>8));flip();
+</script>"""
+
+def board_html(sty, board, pct):
+    """The leaderboard as an HTML table (st.dataframe has no cell tooltips): the same tones and highlighted rows, click a
+    header to sort, and hovering a strategy name shows its rule and current holdings (hover_tips); nothing else visible."""
+    import streamlit.components.v1 as components
+    tips = dict(zip(board["Strategy"], hover_tips(board)["Strategy"]))
+    name = lambda v: esc(v) + (f'<span class="pd-t">{esc(tips[v])}</span>' if tips.get(v) else "")   # noqa: E731
+    sty = (sty.format({"Rank": lambda v: "" if pd.isna(v) else f"{v:.0f}", "Strategy": name,
+                       **{c: "{:+.2f}%" for c in pct}}, na_rep="")
+           .set_td_classes(pd.DataFrame([["num" if c in pct or c == "Rank" else "" for c in board.columns]] * len(board),
+                                        index=board.index, columns=board.columns))
+           .hide(axis="index"))
+    head = "".join(f'<th class="{"num" if c in pct or c == "Rank" else ""}">{esc(c)}</th>' for c in board.columns)
+    body = sty.to_html()
+    body = body[:body.index("<thead>")] + f"<thead><tr>{head}</tr></thead>" + body[body.index("</thead>") + 8:]
+    components.html(f'{BOARD_CSS}<div class="wrap">{body}</div>{SORT_JS}', height=35 * (len(board) + 1) + 4)
 
 def render_curve(board, values):
     """Interactive growth chart since FORWARD_START: the leaderboard's Rank 1-5, the live strategy, QQQ and SPY by default."""
@@ -90,8 +131,6 @@ def render_curve(board, values):
                       yaxis=dict(ticksuffix="%", gridcolor="#f1f5f9", zeroline=False), xaxis=dict(gridcolor="#f1f5f9", tickformat="%b %-d"))
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
-RANK = st.column_config.NumberColumn(format="%d", width="small",
-                                    help="Forward-test rank: total return since Oct 2, smaller max drawdown breaks ties")
 HIGHLIGHT_BG = "background-color: #e2e8f0; font-weight: 700"   # subtle slate on the white table
 
 CURRENT = "Current Strategy (Live from Oct End)"   # display name of the live strategy's row (forward_test.LIVE stays its id)
@@ -108,6 +147,20 @@ def tidy_board(board, start):
     b.insert(2, "Rule", [rule_of(x) for x in b["Strategy"]])
     b["Strategy"] = [CURRENT if str(x).startswith(ft.LIVE) else x for x in b["Strategy"]]   # display name only
     return b.rename(columns=names)
+
+def hover_tips(board):
+    """Hover text per leaderboard row, on the Strategy cell only: the strategy's rule (forward_test.STRATEGIES) and the
+    stocks it holds now (forward_test.holdings, the table below); blank for the account and benchmarks."""
+    import forward_test as ft
+    by_name, held = {c["name"]: c["rule"] for c in ft.STRATEGIES}, ft.holdings()
+    def tip(name):
+        n = ft.LIVE if name == CURRENT else str(name).replace(ft.LIVE_MARK, "")
+        if n not in by_name:
+            return ""
+        return f"{by_name[n]}\n\nHolds now: {held.get(n, 'cash')}"
+    t = pd.DataFrame("", index=board.index, columns=board.columns)
+    t["Strategy"] = [tip(x) for x in board["Strategy"]]
+    return t
 
 def rule_of(name):
     """The family a leaderboard row belongs to (forward_test.GROUP_LABEL), Live / Your account / Benchmark otherwise."""
@@ -151,28 +204,3 @@ def render_top10(ranks=None):
     show_html(f'<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>forward-test Rank 1–5 (total return since Oct 2) · holdings at {c["day"]:%a %b %-d} close</span></div>'
               f'<div class="sa-tier"><b>Stocks</b><div class="sa-tier-syms">{" ".join(chip(r) for r in c["stocks"].itertuples())}</div></div>'
               f'<div class="sa-tier"><b>Strategies</b><div class="sa-tier-syms">{strats}</div></div></div>')
-
-def render_forward_rules(p=None):
-    """Strategy tab: the Top 5 consensus card, then each forward-test strategy's one-line rule and its holdings,
-    ordered like the leaderboard above (total return since Oct 2)."""
-    import forward_test as ft
-    ranks = p.by_symbol["Strategy_Rank"].to_dict() if p is not None and "Strategy_Rank" in p.by_symbol else None
-    render_top10(ranks)
-    held = ft.holdings()
-    by_name = {c["name"]: c for c in ft.STRATEGIES}
-    built = _forward_files()[2]
-    order, rank = [c["name"] for c in ft.STRATEGIES], {}
-    if built:
-        board = built[0]                                     # the same leaderboard (and Rank) as the table above
-        names = board["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)
-        rank = dict(zip(names, board["Rank"]))
-        order = [n for n in names if n in by_name] + [n for n in order if n not in set(names)]
-    rules = pd.DataFrame([{"Rank": rank.get(n, pd.NA), "Strategy": CURRENT if n == ft.LIVE else n,
-                           "Rule": by_name[n]["rule"], "Holdings now": held.get(n, "cash")} for n in order])
-    rules["Rank"] = pd.array(pd.to_numeric(rules["Rank"], errors="coerce"), dtype="Int64")
-    q = st.text_input("Search rules", key="rules_search", placeholder="Search strategy, rule or holding…",
-                      label_visibility="collapsed")
-    if q:
-        rules = rules[rules.apply(lambda r: q.lower() in " ".join(map(str, r.values)).lower(), axis=1)]
-    table(rules, cols={"Rank": RANK, "Strategy": st.column_config.TextColumn(width="medium"),
-                       "Rule": st.column_config.TextColumn(width="large"), "Holdings now": st.column_config.TextColumn(width="large")})
