@@ -125,9 +125,9 @@ def live_table():
         pass
     return pd.DataFrame(rows), feed
 
-@st.fragment(run_every=60)
+@st.fragment(run_every=30)
 def render_live_table():
-    """Refreshes itself every minute (prices cached 30 s)."""
+    """Refreshes itself every 30 s (prices cached 30 s)."""
     try:
         t, feed = live_table()
     except Exception as e:

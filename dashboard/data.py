@@ -129,8 +129,48 @@ try:
 except ImportError:  # graceful degradation: dashboard works without live quotes
     _yf, _YF_OK = None, False
 
-@st.cache_data(ttl=120)
+def refresh_every():
+    """Seconds between live-data refreshes: 30 in the regular session (Alpaca clock), 300 outside it."""
+    from dashboard.page import market_open
+    return 30 if market_open() else 300
+
+def refresh_slot():
+    """A number that changes every refresh_every() seconds: the cache key of every live (Alpaca) read."""
+    import time
+    return int(time.time() // refresh_every())
+
+@st.cache_data(ttl=600, max_entries=200, show_spinner=False)
+def _alpaca_last_trade(ticker: str, slot: int):
+    """(price, trade time UTC) of the latest trade from Alpaca, SIP first and IEX on any SIP error; None if neither."""
+    if _live_off():
+        return None
+    import backtest_engine as be
+    from alpaca.data.enums import DataFeed
+    from alpaca.data.requests import StockLatestTradeRequest
+    client = be.market_data_client()
+    for feed in ("sip", "iex"):
+        try:
+            t = client.get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=ticker, feed=DataFeed(feed)))[ticker]
+            return float(t.price), pd.Timestamp(t.timestamp).tz_convert("UTC") if pd.Timestamp(t.timestamp).tzinfo else pd.Timestamp(t.timestamp, tz="UTC")
+        except Exception:
+            continue
+    return None
+
 def live_quote(ticker: str):
+    """Display-only latest price -> (price, time) or None: Alpaca latest trade (SIP -> IEX), new every refresh slot
+    (30 s in market hours, 5 min outside); yfinance only when Alpaca does not answer (e.g. non-US symbols)."""
+    if not ticker:
+        return None
+    try:
+        q = _alpaca_last_trade(ticker, refresh_slot())
+        if q is not None:
+            return q
+    except Exception:
+        pass
+    return _yf_live_quote(ticker)
+
+@st.cache_data(ttl=120)
+def _yf_live_quote(ticker: str):
     """Latest yfinance quote for one ticker -> (price, bar_time) or None.
 
     Display-only helper for the stock header. The strategy always uses the completed

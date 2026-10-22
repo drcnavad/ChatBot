@@ -52,7 +52,26 @@ def render_stock(p, ticker, tdata):
         render_stock_news(ticker)
         render_stock_chart(ticker, tdata)
 
+@st.fragment(run_every=30)
+def auto_refresh():
+    """Whole-page live refresh: checks every 30 s and reruns the full page when the refresh slot moves (every 30 s in
+    market hours, every 5 min outside), so every panel, quote and Reports file (mtime-keyed caches) is re-read."""
+    from datetime import datetime
+    from dashboard.data import refresh_every, refresh_slot
+    from dashboard.settings import CT
+    slot = refresh_slot()
+    if st.session_state.get("_app_slot") not in (None, slot):
+        st.session_state["_app_slot"] = slot
+        st.rerun(scope="app")
+    every = refresh_every()
+    st.caption(f"🟢 Live · last updated {st.session_state.get('_app_updated', datetime.now(CT)):%I:%M:%S %p} CT · "
+               f"auto-refresh every {'30 s (market open)' if every == 30 else '5 min (market closed)'} · prices and account from Alpaca")
+
 def main():
+    from datetime import datetime
+    from dashboard.data import refresh_slot
+    from dashboard.settings import CT
+    st.session_state["_app_slot"], st.session_state["_app_updated"] = refresh_slot(), datetime.now(CT)
     with st.spinner("Loading data..."):
         p = build_page()
     # ?symbol=X (table clicks, Telegram messages) or ?stock=X (ticker strip, old links) opens X in the Stock Analysis tab
@@ -65,6 +84,7 @@ def main():
             del st.query_params[k]
 
     ticker_box = render_top_bar(p)
+    auto_refresh()
     opening = "_pending_ticker" in st.session_state          # a link or a row click: show the stock
     tab_home, tab_stock, tab_strategy, tab_trading = st.tabs(
         ["Home", "Stock Analysis", "Strategy", "Trading Account"], default="Stock Analysis" if opening else None)

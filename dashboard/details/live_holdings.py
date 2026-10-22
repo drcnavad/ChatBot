@@ -17,7 +17,7 @@ def _fill_history():
     import alpaca_paper as ap
     return ap.FillHistory()
 
-@st.cache_data(ttl=3600, max_entries=4, show_spinner=False)
+@st.cache_data(ttl=600, max_entries=4, show_spinner=False)
 def _read_holdings(refresh_key):
     """One read of the Alpaca LIVE account (GET only: positions, fills, account + deposits/withdrawals as one snapshot,
     daily account history) per refresh_key (alpaca_paper.holdings_refresh_key: a new key each minute in market hours,
@@ -36,7 +36,8 @@ def live_holdings():
         return None, "Live holdings are turned off here (STOCK_ANALYSIS_LIVE_HOLDINGS=off)."
     try:
         import alpaca_paper as ap
-        return _read_holdings(ap.holdings_refresh_key()), None
+        from dashboard.data import refresh_slot
+        return _read_holdings(refresh_slot()), None
     except Exception as e:
         return None, f"Live holdings unavailable right now ({type(e).__name__}: {str(e)[:200]}). It tries again in a minute."
 
@@ -51,13 +52,13 @@ def _run_holdings():
 
 def holdings_this_run():
     """(data, err) of this page run's live holdings read (one Alpaca read per run, also when it fails)."""
-    import alpaca_paper as ap
-    run, key = _run_holdings(), ap.holdings_refresh_key()
+    from dashboard.data import refresh_slot
+    run, key = _run_holdings(), refresh_slot()
     if "v" not in run or run.get("key", key) != key:      # a 5-minute Home fragment rerun reads again once the key moves
         run["v"], run["key"] = live_holdings(), key
     return run["v"]
 
-@st.fragment(run_every=60)        # reruns only this table each minute; it reads Alpaca only when the refresh key changes
+@st.fragment(run_every=30)        # reruns every 30 s; reads Alpaca when the refresh slot moves (30 s open, 5 min closed)
 def render_live_holdings():
     """Trading Account tab: the real Alpaca positions with cost, value, P/L and the first purchase date, then the account
     vs the index ETFs (render_benchmarks)."""

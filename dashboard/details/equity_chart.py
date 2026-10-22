@@ -19,8 +19,8 @@ PERIODS = {"1D": ("1D", "5Min"), "5D": ("5D", "15Min"), SINCE: ("1A", "1D")}
 VIEWS = ["1D", "1W", "1M", "3M", "1Y", "2Y"]
 DATA = {"1D": "1D", "1W": "5D"}             # view -> PERIODS key; any other view: SINCE
 
-@st.cache_data(ttl=60, show_spinner=False)
-def equity_series(key):
+@st.cache_data(ttl=600, max_entries=12, show_spinner=False)
+def equity_series(key, slot=0):
     """(DataFrame equity (actual $), flow (deposits - withdrawals on that bar), twr (time-weighted growth),
     {QQQ, SPY, DIA: closes on the same clock}) for PERIODS[key]."""
     import alpaca_paper as ap
@@ -125,7 +125,7 @@ def equity_figure(d, bench, shown=("QQQ",), show_dd=True, intraday=False):
     fig.update_yaxes(tickformat="$,.0f", row=1, col=1)
     return fig
 
-@st.fragment
+@st.fragment(run_every=30)      # new Alpaca portfolio history every refresh slot (30 s open, 5 min closed)
 def render_equity_chart():
     if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off":
         st.info("Portfolio chart is turned off here (STOCK_ANALYSIS_LIVE_HOLDINGS=off).")
@@ -136,7 +136,8 @@ def render_equity_chart():
     shown = [sym for c, sym in zip(tg, BENCH) if c.toggle(sym, value=sym == "QQQ", key=f"eq_{sym.lower()}")]
     show_dd = tg[3].toggle("Drawdown", value=True, key="eq_dd")
     try:
-        d, bench = equity_series(key)
+        from dashboard.data import refresh_slot
+        d, bench = equity_series(key, refresh_slot())
     except Exception as e:
         st.info(f"Portfolio history unavailable right now ({type(e).__name__}). It tries again in a minute.")
         return

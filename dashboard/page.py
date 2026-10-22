@@ -111,7 +111,7 @@ HOLDINGS = {"XLK": "NVDA AAPL MSFT AMD AVGO", "XLF": "BRK-B JPM V MA BAC", "XLV"
             "XLRE": "WELL PLD EQIX AMT SPG", "XLC": "META GOOGL WBD DIS TTWO", "DBC": "Brent WTI Diesel Gasoline Gold"}
 YF = ("CL=F", "BTC-USD")                     # not on Alpaca stock data: yfinance (free, keyless)
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def market_open():
     """True during the regular session: Alpaca's clock (read-only GET /clock; knows holidays), else Mon-Fri
     9:30-16:00 New York."""
@@ -137,7 +137,7 @@ def render_kpis():
     """The header cards: indexes, crude and bitcoin, then the 11 SPDR sector ETFs and commodities (DBC); live price,
     day %, an inline line and a hover intraday popup. (Portfolio figures live on the Trading Account tab.)
     A fragment: only the cards rerun, every 30 s; new quotes every 30 s in market hours, every 30 min outside."""
-    step = 30 if market_open() else 1800                # reruns every 30 s; new data every 30 s open, 30 min closed
+    step = 30 if market_open() else 300                 # reruns every 30 s; new data every 30 s open, 5 min closed
     q, spark = _card_data((*INDEXES, *SECTORS), int(datetime.now().timestamp() // step))
     def card(sym, name):
         px, chg = q.get(sym, (None, None))
