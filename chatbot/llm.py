@@ -57,7 +57,7 @@ SYMP = {"symbol": {"type": "string", "description": "Ticker, e.g. AAPL"}}
 TOOLS = [
     _fn("get_balance", "Account equity, cash, buying power, today's change."),
     _fn("get_pnl", "Today's P&L vs yesterday's close and unrealized P&L of open positions."),
-    _fn("get_positions", "Open positions (symbol, qty, value, P/L%)."),
+    _fn("get_positions", "Open positions: symbol, qty, value, TODAY change vs prior close (% and USD, sorted biggest drop first), and total P/L since bought. Use the Today column for questions about today."),
     _fn("get_orders", "Open orders (with IDs) and the last 5 orders."),
     _fn("get_quote", "Latest bid/ask for one ticker.", SYMP, ["symbol"]),
     _fn("get_news", "Recent headlines for one ticker, or general market news when symbol is omitted.", SYMP),

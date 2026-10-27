@@ -92,6 +92,22 @@ def latest_quote(sym):
     return float(q.bid_price or 0), float(q.ask_price or 0)
 
 # ---- read-only answers -------------------------------------------------------------------------------------------------
+def _day_moves(syms):
+    """{sym: (today's % change, $ change per share)}: latest daily close vs the close before it (Alpaca daily bars)."""
+    try:
+        import pandas as pd
+        from dashboard.data import NY, alpaca_bars
+        bars = alpaca_bars(tuple(syms), None, pd.Timestamp.now(tz=NY) - pd.Timedelta(days=10))
+        out = {}
+        for s in syms:
+            c = bars.get(s, {}).get("Close") if s in bars else None
+            if c is not None and len(c.dropna()) >= 2:
+                c = c.dropna()
+                out[s] = ((c.iloc[-1] / c.iloc[-2] - 1) * 100, c.iloc[-1] - c.iloc[-2])
+        return out
+    except Exception:
+        return {}
+
 def answer(cmd, account=None):
     """Markdown answer for a read-only command."""
     k = cmd["kind"]
@@ -116,8 +132,16 @@ def answer(cmd, account=None):
         pos = acct.positions()
         if pos.empty:
             return "No open positions."
-        lines = [f"| {r.Symbol} | {r.Qty:g} | {_money(r._5)} | {r._7:+.1f}% |" for r in pos.itertuples()]
-        return "| Symbol | Qty | Value | P/L |\n|---|---|---|---|\n" + "\n".join(lines)
+        day = _day_moves(tuple(pos["Symbol"]))
+        rows = []
+        for r in pos.itertuples():
+            pct, chg = day.get(r.Symbol, (None, None))
+            rows.append((pct if pct is not None else 0.0, f"| {r.Symbol} | {r.Qty:g} | {_money(r._5)} | "
+                         + (f"{pct:+.2f}% ({chg * r.Qty:+,.2f} USD)" if pct is not None else "n/a")
+                         + f" | {r._7:+.1f}% |"))
+        rows.sort(key=lambda x: x[0])                      # biggest drop today first
+        return ("| Symbol | Qty | Value | Today (vs prior close) | Total P/L since bought |\n|---|---|---|---|---|\n"
+                + "\n".join(t for _, t in rows))
     if k == "orders":
         o = acct.open_orders()
         r = acct.recent_orders(5)

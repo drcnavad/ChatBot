@@ -51,7 +51,7 @@ def render_chat():
             with st.container(key="sa_chat_panel"):
                 for role, text in st.session_state.get("sa_chat", [])[-20:]:
                     with st.chat_message(role):
-                        st.markdown(text)
+                        st.markdown(text.replace("$", "\\$"))   # $...$ would render as math
                 pending = st.session_state.get("sa_chat_pending")
                 if pending:
                     from chatbot import pin as chat_pin
