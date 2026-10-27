@@ -205,7 +205,10 @@ CSS = """
   /* title row: title, chip and Refresh wrap; the tab menu drops below it and scrolls sideways */
   [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: 0.5rem; }
   [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stColumn"] { min-width: 0 !important; flex: 1 1 auto !important; width: auto !important; }
-  [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stColumn"]:nth-child(2) { display: none; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stColumn"]:nth-child(3) { display: none; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) [data-testid="stColumn"]:nth-child(2) { order: 5; flex: 1 1 100% !important; overflow-x: auto; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) [role="radiogroup"] { flex-wrap: nowrap; }
+  [data-testid="stLayoutWrapper"]:has(.sa-brand) [role="radiogroup"] label { white-space: nowrap; }
   [data-baseweb="tab-list"] { flex-wrap: nowrap; }
   [data-baseweb="tab"] { white-space: nowrap; }
   .sa-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 0.5rem; }
