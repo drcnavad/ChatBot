@@ -284,7 +284,7 @@ def render_stock_chart(ticker, tdata):
                 from dashboard.live_stream import live_stream
                 ls = live_stream()
                 st.caption(f"1D live · {ls.status() if ls else 'REST polling'} · last candle {b.index[-1]:%H:%M} ET · "
-                           f"close ${b['Close'].iloc[-1]:,.2f}")
+                           f"close \\${b['Close'].iloc[-1]:,.2f}")
             return
         st.caption("Intraday bars are not available right now; showing the daily chart.")
         view = "1Y"

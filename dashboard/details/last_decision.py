@@ -47,7 +47,7 @@ def sleeve_summary(day, positions, ledger, equity):
     out = []
     for h in sl.HALVES:
         v = vals[h]
-        out.append(f"**{sl.LABEL[h]}**: {len(mine[h])} stocks · ${v:,.0f}"
+        out.append(f"**{sl.LABEL[h]}**: {len(mine[h])} stocks · \\${v:,.0f}"
                    + (f" ({100 * v / equity:.1f}% of the account)" if equity else "")
                    + (f" · next full rebalance {nxt:%a %b %-d}" if nxt is not None else "")
                    + (" · Mon-Thu: exit check (worse than rank 20)" if h == "rs_short" else ""))
@@ -235,7 +235,7 @@ def render_preview(positions, led, equity):
     day = sl.inputs()["close"].index[-1]
     sells, buys = o[o.Side == "Sell"]["Value $"].sum(), o[o.Side == "Buy"]["Value $"].sum()
     st.markdown(f"Planned trades (dry run at the {day:%a %b %-d} close, re-planned at the run's 2:30 PM bar): "
-                f"sell ${sells:,.0f} · buy ${buys:,.0f} · cash after ≈ ${cash:,.0f}")
+                f"sell \\${sells:,.0f} · buy \\${buys:,.0f} · cash after ≈ \\${cash:,.0f}")
     from dashboard.settings import symbol_sector
     held = {p_["symbol"] for p_ in positions or [] if float(p_.get("qty") or 0) > 0}
     tgt = dict(zip(t["Symbol"], t["Target %"]))
@@ -253,6 +253,8 @@ def render_preview(positions, led, equity):
         tab, _ = ranking_table(half, day, positions, led, path="__live__", equity=equity)
         tab["Held by"] = ["✓ " + SLEEVE[half] if x in held else "" for x in tab["Stock"]]
         tab.insert(1, "Plan", [plan(x) for x in tab["Stock"]])
+        st.caption("Plan: Buy = new stock · Add = held, bought up to its target · Trim = held, part sold down to its "
+                   "target · Keep = held, already within 1 point of its target (no trade) · blank = not a target")
         table(toned(tab, ["Plan"], fn=lambda v: GOOD if str(v).startswith(("Buy", "Add")) else INK), fit=True,
               cols={"Score": SCORE}, key=f"preview_{half}")
         extra = [x for x in tgt if x not in set(tab["Stock"])]
@@ -260,5 +262,5 @@ def render_preview(positions, led, equity):
             st.caption("Also targeted (outside the top 20 / defensive stocks): "
                        + ", ".join(f"{x} ({symbol_sector.get(x, '—')}) {plan(x)}" for x in extra))
         sold = o[(o.Side == "Sell") & ~o.Symbol.isin(set(tgt))]
-        st.markdown("Would sell: " + (", ".join(f"{r.Symbol} ({symbol_sector.get(r.Symbol, '—')}) ${r[4]:,.0f}"
+        st.markdown("Would sell: " + (", ".join(f"{r.Symbol} ({symbol_sector.get(r.Symbol, '—')}) \\${r[4]:,.0f}"
                                                   for r in sold.itertuples(index=False)) if len(sold) else "nothing"))

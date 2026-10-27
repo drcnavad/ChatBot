@@ -41,7 +41,7 @@ def render_short_stock(sym, r):
         c[3 + i].metric(f"MA {n}", f"${r[f'MA_{n}']:,.2f}")
     ret = lambda v: md_tone(f"{v:+.1f}%", tone(v))
     st.caption(f"Since first close {ret(r['Return_Since_First_Close_%'])} · 21-day {ret(r['Return_21d_%'])} · "
-               f"63-day {ret(r['Return_63d_%'])} · {abs(r['Off_High_%']):.1f}% below its high of ${r['High_Since_First']:,.2f}. "
+               f"63-day {ret(r['Return_63d_%'])} · {abs(r['Off_High_%']):.1f}% below its high of \\${r['High_Since_First']:,.2f}. "
                "Rough signal: Buy if the close is above the 10-day, the 10-day above the 30-day and the 30-day above the 50-day "
                "average with RSI 50-70; Sell if the close is below both the 30- and 50-day averages or RSI is under 40; otherwise "
                "Hold. Less reliable than the real signal (no 200-day history) and never used for trading.")
