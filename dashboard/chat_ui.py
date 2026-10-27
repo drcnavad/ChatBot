@@ -21,7 +21,7 @@ def _handle(text):
         if cmd["kind"] in ("order", "close", "cancel"):
             p, msg = chat.plan(cmd)
             st.session_state["sa_chat_pending"] = p
-            _say("assistant", msg + ("\n\nEnter your PIN below to send it, or Cancel." if p else ""))
+            _say("assistant", msg + ("\n\nConfirm below, or Cancel." if p else ""))
         else:
             _say("assistant", chat.answer(cmd))
     except Exception as e:
@@ -46,9 +46,9 @@ def render_chat():
                 if pending:
                     import chat_pin
                     if not chat_pin.is_set():
-                        st.error("No PIN set yet, so trading is off. Run `python set_chat_pin.py` on the Mac mini.")
+                        st.error("Not available right now.")
                     with st.form("sa_chat_pin_form", clear_on_submit=True):
-                        pin = st.text_input("PIN", type="password", max_chars=12)
+                        pin = st.text_input("Code", type="password", max_chars=12, label_visibility="collapsed")
                         c1, c2 = st.columns(2)
                         go = c1.form_submit_button("Confirm & send", type="primary")
                         stop = c2.form_submit_button("Cancel")
@@ -58,7 +58,7 @@ def render_chat():
                         _rerun()
                     if go:
                         ok, msg = chat.execute(pending, pin)
-                        if ok or "locked" in msg.lower() or "no chat pin" in msg.lower() or "do-not-sell" in msg:
+                        if ok or "locked" in msg.lower() or "not available" in msg.lower() or "do-not-sell" in msg:
                             st.session_state.pop("sa_chat_pending", None)
                         _say("assistant", ("✅ " if ok else "⛔ ") + msg)
                         _rerun()

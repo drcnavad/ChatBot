@@ -11,10 +11,7 @@ import re
 
 SECURITY_WORDS = ("withdraw", "transfer", "wire", " ach ", "deposit", "bank", "password", "2fa", "mfa", "api key",
                   "secret", "email", "phone", "address", "setting", "configur", "margin", "options level", "journal")
-HELP = ("I can answer without a PIN: **balance**, **positions**, **orders**, **P&L**, **quote AAPL**, **news** or "
-        "**news AAPL**.\n\nWith a PIN (I show the exact order first): **buy 5 AAPL**, **buy 5 AAPL limit 200**, "
-        "**buy $1000 AAPL**, **sell 3 AAPL**, **sell all AAPL**, **close AAPL**, **cancel <order id>**, **cancel all**. "
-        "Orders are DAY orders, regular hours.")
+HELP = ("Try **balance**, **positions**, **orders**, **P&L**, **quote AAPL** or **news AAPL**.")
 SYM = r"([A-Za-z]{1,5}(?:[.\-/][A-Za-z]{1,2})?)"
 
 def _money(x):
@@ -63,7 +60,7 @@ def parse(text):
     if m:
         return {"kind": "news", "symbol": (m.group(1) or "").upper() or None}
     if re.search(r"\b(modify|replace|change|edit)\b.*\border", low):
-        return {"kind": "refuse", "msg": "To change an order: **cancel** it, then place the new one (both need the PIN)."}
+        return {"kind": "refuse", "msg": "To change an order: **cancel** it, then place the new one ."}
     for kind, words in (("balance", ("balance", "buying power", "cash", "equity", "account")),
                         ("pnl", ("p&l", "pnl", "p/l", "profit", "return", "gain", "loss", "today")),
                         ("positions", ("position", "portfolio", "holding")),

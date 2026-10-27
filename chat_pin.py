@@ -57,19 +57,19 @@ def verify(pin, path=None, now=None):
     now = now or time.time()
     d = _read(path)
     if not d or not d.get("hash"):
-        return False, "No chat PIN is set, so trading from the chat is off. Run `python set_chat_pin.py` on the Mac mini."
+        return False, "Not available right now."
     left = locked_for(path, now)
     if left:
-        return False, f"Too many wrong PINs. Trading from the chat is locked for {left // 60 + 1} more min."
+        return False, f"Locked. Try again in {left // 60 + 1} min."
     good = hmac.compare_digest(_hash(pin, d["salt"], d.get("iters", ITERATIONS)), d["hash"])
     if good:
         d.update(fails=0, locked_until=0)
         _write(d, path)
-        return True, "PIN OK"
+        return True, "OK"
     d["fails"] = int(d.get("fails", 0)) + 1
     if d["fails"] >= MAX_TRIES:
         d.update(fails=0, locked_until=now + LOCK_SECS)
         _write(d, path)
-        return False, f"Wrong PIN. Locked for {LOCK_SECS // 60} min after {MAX_TRIES} wrong tries."
+        return False, "Incorrect."
     _write(d, path)
     return False, f"Wrong PIN ({MAX_TRIES - d['fails']} tries left before a {LOCK_SECS // 60}-min lock)."
