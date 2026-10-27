@@ -133,7 +133,7 @@ def render_last_decision(p):
                 if others:
                     st.caption(f"Held, not in top 20: {', '.join(others)}")
                 open_symbol(t.rename(columns={"Stock": "Symbol"}), event, f"rank_{half}")
-    st.markdown("##### Next decision preview · based on the latest close")
+    st.markdown("##### Next decision")
     render_preview(positions, led, equity)
 
 # ---------------------------------------------------------------- next decision preview (read-only, no orders)
@@ -190,19 +190,16 @@ def next_run(now=None, ledger=None):
         if D is not None and D.date() != now.date() and how in ("session", "wait"):
             start = now if how == "session" else ra.next_session_start(now)
             if slot is None or start < slot:
-                return start, ("first full rebalance" if ledger is None else f"catch-up of the {D:%a %b %-d} decision")
+                return start, ("full rebalance" if ledger is None else f"catch-up of the {D:%a %b %-d} decision")
     except Exception:
         pass
     if slot is None:
         return None, None
     kind = be.decision_kind(slot.date())
     if ledger is None:
-        kind = "first full rebalance"
+        kind = "full rebalance"
     return slot, kind
 
-SCHEDULE_TEXT = ("Mon-Thu 2:30 PM CT: a holding worse than rank 20 is sold and its slot refilled the same day from the "
-                 "top 10 · Fri 2:30 PM CT (Thu on a holiday): full weekly rebalance to the top 10 + defensive stocks, "
-                 "equal weight, 99% invested")
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _dry_plan(key, positions_t, equity):
@@ -234,7 +231,6 @@ def render_preview(positions, led, equity):
         slot, kind = None, f"unavailable ({str(e)[:80]})"
     if slot is not None:
         st.markdown(f"**Next run: {slot:%a %b %-d, %-I:%M %p} CT** · {kind}")
-    st.caption(SCHEDULE_TEXT)
     try:
         o, t, cash = plan_frames(positions, equity)
     except Exception as e:
@@ -243,8 +239,7 @@ def render_preview(positions, led, equity):
     sl = _sleeves()
     day = sl.inputs()["close"].index[-1]
     sells, buys = o[o.Side == "Sell"]["Value $"].sum(), o[o.Side == "Buy"]["Value $"].sum()
-    st.markdown(f"Planned trades (dry run at the {day:%a %b %-d} close, re-planned at the run's 2:30 PM bar): "
-                f"sell \\${sells:,.0f} · buy \\${buys:,.0f} · cash after ≈ \\${cash:,.0f}")
+    st.markdown(f"Sell \\${sells:,.0f} · Buy \\${buys:,.0f} · Cash after \\${cash:,.0f}")
     from dashboard.settings import symbol_sector
     held = {p_["symbol"] for p_ in positions or [] if float(p_.get("qty") or 0) > 0}
     tgt = dict(zip(t["Symbol"], t["Target %"]))
@@ -270,8 +265,6 @@ def render_preview(positions, led, equity):
             a_ = "Add" if side[x] == "Buy" else "Trim"
         return a_
     for half in sl.HALVES:
-        st.markdown(f"**{sl.LABEL[half]}** · targets at the {day:%a %b %-d} close"
-                    + " (Mon-Thu only the exit check trades)")
         tab, _ = ranking_table(half, day, positions, led, path="__live__", equity=equity)
         tab = tab.drop(columns=["Held by"])
         earn = earn_soon(tab["Stock"])
@@ -284,10 +277,6 @@ def render_preview(positions, led, equity):
         tab["Weight now"] = [round(100 * mv[x] / equity, 1) if x in mv and equity else None for x in tab["Stock"]]
         tab["Today %"] = [round(float(qq[x][1]), 2) if x in qq and qq[x][1] == qq[x][1] else None for x in tab["Stock"]]
         tab.insert(1, "Plan", [plan(x) for x in tab["Stock"]])
-        st.caption("Plan: Buy = new stock · Add = held, bought up to its target · Trim = held, part sold down to "
-                   "its target · Keep = held, within 1 point of its target · Skip: earn = earnings within 5 trading "
-                   "days, not newly bought · Skip: not Fri pick = not in Friday's picks (Mon-Thu only refills a "
-                   "name that falls below rank 20) · Sell = held, not a pick")
         from dashboard.style import BAD
         tone_ = lambda v: (GOOD if v > 0 else BAD if v < 0 else INK) if isinstance(v, (int, float)) and v == v else INK
         sty = toned(tab, ["Plan"], fn=lambda v: GOOD if str(v).startswith(("Buy", "Add")) else BAD if str(v).startswith("Sell") else INK)
@@ -298,6 +287,9 @@ def render_preview(positions, led, equity):
                     "Sector": st.column_config.TextColumn(width=110),
                     "Weight now": st.column_config.NumberColumn("Weight now", format="%.1f%%", width=62),
                     "Today %": st.column_config.NumberColumn("Today %", format="%+.2f", width=58)})
+    with st.expander("Plan legend", expanded=False):
+        st.caption("Buy = new · Add / Trim = held, moved to target · Keep = held, no trade · Sell = held, not a pick · "
+                   "Skip: earn = earnings within 5 trading days · Skip: not Fri pick = not in Friday's picks")
         extra = [x for x in tgt if x not in set(tab["Stock"])]
         if extra:
             st.caption("Also targeted (outside the top 20 / defensive stocks): "
