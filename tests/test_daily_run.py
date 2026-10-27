@@ -162,7 +162,7 @@ _slots = sorted((d["Weekday"], d["Hour"] * 60 + d["Minute"]) for d in sup["Start
 check("support slots: each NewsAPI run more than 24 h after the previous one, and done well before 2:30 PM",
       all(b[1] - a[1] > 0 for a, b in zip(_slots, _slots[1:])) and all(m <= 13 * 60 + 30 for _, m in _slots), _slots)
 from types import SimpleNamespace  # noqa: E402
-_a = lambda **k: SimpleNamespace(**{"only": None, "start": None, "support": False, "sync_live": False, **k})
+_a = lambda **k: SimpleNamespace(**{"only": None, "start": None, "support": False, **k})
 check("the 2:30 PM full run no longer calls the quota steps; --support runs only them",
       [s_[0] for s_ in ra.plan_steps(_a(), "full")] == ["main", "validate"]
       and [s_[0] for s_ in ra.plan_steps(_a(support=True), "full")] == ["fundamentals", "processing", "sentiment", "earnings"]

@@ -8,7 +8,7 @@ Keys live in `.env` (`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY`, never prin
 > **Never place orders when testing.** No `run_all.py --trade` / `--fill-check`, no `paper_trade.py --submit`, no
 > `manual_trade.py buy|sell` without `--dry-run`. Tests mock Alpaca (`tests/run_tests.py` sets
 > `STOCK_ANALYSIS_LIVE_HOLDINGS=off` and temp paths for every state file). Read-only checks are fine:
-> `paper_trade.py --from-account` (dry run), `run_all.py --sync-live`, `trade_audit.py`.
+> `paper_trade.py --from-account` (dry run), `trade_audit.py`.
 
 ## Live strategy (`backtest_engine.WINNER`, from Fri Oct 16, 2026)
 Two independent halves, each with its own cash, tracked in `Reports/sleeve_ledger.json` (`sleeves.py`); no stock in both:
@@ -57,7 +57,7 @@ halves keep only `tradable_symbols`), so it is sold and never rebought. Until th
 | `com.stockanalysis.support` | Mon 1:00, Tue 1:07, Wed 1:14, Thu 1:21, Fri 1:28 PM | `run_all.py --support --scheduled`: company reports, news sentiment, earnings dates (quota APIs) | no |
 | `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled` → `run_all.py`: 2:30 PM signals + decision + orders on decision days (Fridays, Thursday on a holiday: sector half; month's last trading day: low-vol half); from 3:05 PM the after-close step (`run_all.daily_step`: signal refresh, `forward_test.py --record`, `manual_trade.py update-blocks`). Never 4:05-4:30 PM. | **yes** (2:30 PM) |
 | `com.stockanalysis.morning` | Mon-Fri 9:00 AM | `pipeline_watchdog.py --fill-check --scheduled`: sends the pending rests | **yes** |
-| `com.stockanalysis.tradeaudit` | Mon-Fri every 30 min 8:30 AM-3:00 PM + 3:45 PM | `refresh_dashboard_data.sh`: `run_all.sync_live()` (offline `Reports/live_*.csv` snapshot) + `trade_audit.py --write --log` (ledger, round trips, alerts) | no (GET only) |
+| `com.stockanalysis.tradeaudit` | Mon-Fri every 30 min 8:30 AM-3:00 PM + 3:45 PM | `refresh_dashboard_data.sh`: `trade_audit.py --write --log` (ledger, round trips, alerts) | no (GET only) |
 | `com.stockanalysis.earningsstop` | every 5 min + at login | `earnings_stop.py --loop` (no-op while the stop is off) | no (off) |
 | `com.stockanalysis.dashboard-8502` | always on | `run_dashboard_8502.sh` → `streamlit run app.py`. Restart: `launchctl kickstart -k gui/$(id -u)/com.stockanalysis.dashboard-8502` | no |
 
@@ -81,7 +81,7 @@ python manual_trade.py blocks                                   # list active bl
 ## Key files
 | File | Role |
 |---|---|
-| `run_all.py` | The pipeline command (support / trade / fill check / after-close step / `--sync-live`). |
+| `run_all.py` | The pipeline command (support / trade / fill check / after-close step). |
 | `pipeline_watchdog.py` | Retries transient failures for launchd; never retries orders. |
 | `paper_trade.py` | Order planning (`plan_orders` → `plan_sleeve_orders`) and live sending, 9 AM fill check (`complete_unfilled_orders`). |
 | `sleeves.py` | The two halves: plan, ledger, sector rotation weights. |

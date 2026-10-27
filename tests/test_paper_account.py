@@ -1,10 +1,9 @@
-"""alpaca_paper.py / run_all.py --sync-live against a MOCK Alpaca server on 127.0.0.1.
+"""alpaca_paper.py against a MOCK Alpaca server on 127.0.0.1.
 
 No request ever goes to Alpaca: the client is pointed at a local mock (allowed only with the test-only flag), dummy keys are
 passed explicitly (.env is not read), and every file is written to a temporary folder (the real my_positions.csv and
 Reports/ are never touched). Checks: URL guard, read-only GET requests, headers, parsing, files.
 Run: python tests/run_tests.py  (or python tests/test_paper_account.py)"""
-import functools
 import json
 import os
 import sys
@@ -131,27 +130,11 @@ try:
     expect(bool(req_fail) and "403" in req_fail and SECRET not in req_fail and KEY not in req_fail, f"HTTP error without keys: {req_fail}")
     expect(SECRET not in repr(acct) and KEY not in repr(acct), "repr hides the keys")
 
-    # ------------------------------------------------------------ files (temporary paths only)
-    snap, hist = (os.path.join(tmp, n) for n in ("snapshot.csv", "history.csv"))
-    r = ap.sync_paper_account(acct, snapshot_csv=snap, history_csv=hist)
-    ap.sync_paper_account(acct, snapshot_csv=snap, history_csv=hist)
     expect(not hasattr(ap, "POSITIONS_CSV") and not hasattr(ap, "write_positions_csv"), "no my_positions.csv (holdings.py is the only source)")
-    sn = db.read_csv(snap)
-    expect({"CASH", "TOTAL EQUITY", "NVDA", "MRK"} <= set(sn.Symbol), "snapshot has positions + cash/equity rows")
-    expect(len(db.read_csv(hist)) == 2 and r["Positions"] == 2, "history appends one row per sync")
-    expect((db.read_csv(hist)["Net_Deposits"] == 98000).all(), "history records net deposits (canceled transfer excluded)")
-
-    # ------------------------------------------------------------ run_all --sync-live hook (mocked, temp paths)
+    expect(not hasattr(ap, "sync_paper_account") and not hasattr(ap, "SNAPSHOT_CSV"), "no live snapshot / history tables any more")
+    acct.positions(); acct.account_summary()
     import run_all
-    real = ap.PaperAccount, ap.SNAPSHOT_CSV, ap.HISTORY_CSV
-    try:
-        ap.PaperAccount = functools.partial(real[0], KEY, SECRET, base_url=MOCK, _allow_local_test=True)
-        ap.SNAPSHOT_CSV, ap.HISTORY_CSV = (os.path.join(tmp, n) for n in ("rs.csv", "rh.csv"))
-        run_all.sync_live()
-        expect(db.exists(ap.SNAPSHOT_CSV), "run_all.sync_live writes the snapshot file")
-    finally:
-        ap.PaperAccount, ap.SNAPSHOT_CSV, ap.HISTORY_CSV = real
-    expect(run_all.main(["--dry-run", "--quick", "--sync-live"]) == 0, "run_all --dry-run --sync-live plans without calling")
+    expect(run_all.main(["--dry-run", "--quick"]) == 0, "run_all --dry-run plans without calling")
 
     # ------------------------------------------------------------ read-only: only GETs, correct headers, no order code
     expect(REQUESTS and all(q["method"] == "GET" for q in REQUESTS), f"only GET requests ({len(REQUESTS)} made)")

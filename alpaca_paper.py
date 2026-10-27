@@ -4,8 +4,6 @@ activities, daily portfolio history); nothing here places, changes or cancels or
 (ALPACA_LIVE_KEY_ID, ALPACA_LIVE_SECRET_KEY), go only into request headers and are never printed or saved.
 
     python alpaca_paper.py          # print the summary, positions and recent orders (writes nothing)
-    python alpaca_paper.py --sync   # ... and write Reports/live_portfolio_snapshot.csv and
-                                    #     Reports/live_account_history.csv (also run_all.py --sync-live)
 """
 import argparse
 import json
@@ -19,13 +17,10 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 from dotenv import load_dotenv
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
-SNAPSHOT_CSV = os.path.join(REPORTS, "live_portfolio_snapshot.csv")
-HISTORY_CSV = os.path.join(REPORTS, "live_account_history.csv")
 
 LIVE_BASE_URL = "https://api.alpaca.markets/v2"       # the ONLY accepted endpoint
 KEY_ENV, SECRET_ENV = "ALPACA_LIVE_KEY_ID", "ALPACA_LIVE_SECRET_KEY"
@@ -326,37 +321,9 @@ def account_vs_etfs(history, snap, closes, prices_now, start):
     out["Account ahead by (pts)"] = (out["Return %"].iloc[0] - out["Return %"]).where(out.index > 0)
     return out[["Compared with", "Return %", "Value now", "Gain $", "Account ahead by (pts)"]], start, put_in
 
-# --- files for the rest of the pipeline --------------------------------------------------------------------------------
-def write_snapshot(summary, positions, snapshot_csv=SNAPSHOT_CSV, history_csv=HISTORY_CSV, now=None, net_deposits=0.0):
-    """Positions + cash/equity rows (overwritten each sync) and one appended history row."""
-    as_of = (now or datetime.now(CT)).strftime("%Y-%m-%d %H:%M")
-    snap = positions.assign(As_Of=as_of)
-    extra = pd.DataFrame([{"As_Of": as_of, "Symbol": "CASH", "Market value": summary["Cash"]},
-                          {"As_Of": as_of, "Symbol": "TOTAL EQUITY", "Market value": summary["Equity"]}])
-    snap = pd.concat([snap, extra], ignore_index=True)
-    snap[["As_Of"] + [c for c in snap.columns if c != "As_Of"]].pipe(db.to_csv, snapshot_csv, index=False)
-    row = pd.DataFrame([{"As_Of": as_of, "Equity": summary["Equity"], "Cash": summary["Cash"],
-                         "Buying_Power": summary["Buying power"], "Positions": int((positions["Qty"] != 0).sum()),
-                         "Net_Deposits": net_deposits}])
-    row.pipe(db.to_csv, history_csv, mode="a", header=not db.exists(history_csv), index=False)
-    return snapshot_csv, history_csv
-
-def sync_paper_account(account=None, snapshot_csv=None, history_csv=None):
-    """Read the LIVE account (read-only GET calls) and write the offline snapshot files (the dashboard's history; never
-    a holdings source - holdings.py is). Returns the summary dict. Paths default to SNAPSHOT_CSV / HISTORY_CSV."""
-    account = account or PaperAccount()
-    snapshot_csv = snapshot_csv or SNAPSHOT_CSV
-    history_csv = history_csv or HISTORY_CSV
-    summary = account.account_summary()
-    at = pd.Timestamp.now(tz="UTC")                       # deposits booked after the balance read are not in it yet
-    positions = account.positions()
-    write_snapshot(summary, positions, snapshot_csv, history_csv, net_deposits=account.net_deposits(before=at))
-    return {**summary, "Positions": int((positions["Qty"] != 0).sum()), "snapshot_csv": snapshot_csv}
-
 def main(argv=None):
-    """Command line: print the live account (read-only); --sync also writes the files."""
+    """Command line: print the live account (read-only)."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--sync", action="store_true", help="also write the Reports snapshot files")
     p.add_argument("--orders", type=int, default=10, help="how many recent orders to show (default 10)")
     a = p.parse_args(argv)
     acct = PaperAccount()
@@ -366,9 +333,6 @@ def main(argv=None):
     print(f"Market: {'OPEN' if clock['Is open'] else 'CLOSED'} (next open {clock['Next open (CT)'] or 'n/a'})")
     print(acct.positions().round(2).to_string(index=False))
     print(acct.recent_orders(a.orders).to_string(index=False))
-    if a.sync:
-        r = sync_paper_account(acct)
-        print(f"wrote {os.path.relpath(r['snapshot_csv'], ROOT)} ({r['Positions']} positions) and the history row")
 
 if __name__ == "__main__":
     main()

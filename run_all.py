@@ -12,7 +12,6 @@ QUICK any other time: main + validate (no quota APIs).
 
     python run_all.py --full | --quick | --dry-run | --list | --only STEP | --from STEP | --keep-going
     python run_all.py --support [--force-news]   # the supporting data refresh (quota APIs) alone
-    python run_all.py --sync-live            # refresh the Reports/live_*.csv snapshot from the LIVE account (GET)
     python run_all.py --trade [--scheduled]  # trade the due decision on the LIVE account (REAL MONEY), see below
     python run_all.py --fill-check [--scheduled]   # send Reports/live_pending_orders.json (regular hours, 9 AM CT on)
 
@@ -30,7 +29,7 @@ days + forward_test.py --record; never 4:05-4:30 PM CT); morning job 9:00 AM CT 
 State: Reports/run_state.json (last_full_date/at, last_news_at, last_fundamentals_date, last_decision,
 decision_attempts, last_superseded, fill_problem_logged_on, last_daily_date, last_trade_at, last_fill_check_at,
 last_run_at/last_mode). Logs: Reports/logs/run_*.log (last 30) + launchd_*.log; events: Reports/run_log.csv.
-Keys (ALPACA_LIVE_KEY_ID / ALPACA_LIVE_SECRET_KEY in .env) are used only by --sync-live, --trade and --fill-check.
+Keys (ALPACA_LIVE_KEY_ID / ALPACA_LIVE_SECRET_KEY in .env) are used only by --trade and --fill-check.
 """
 import argparse
 import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
@@ -103,16 +102,14 @@ def _critical_failures(failures):
     """Failures that block the trade and set a nonzero exit code.
 
     Optional-step failures degrade gracefully (the main signal notebook reuses
-    the last good tables); 'sync_live' is a read-only refresh, so neither
-    blocks trading.
+    the last good tables), so they do not block trading.
     """
-    return [f for f in failures if f not in OPTIONAL_STEPS and f != "sync_live"]
+    return [f for f in failures if f not in OPTIONAL_STEPS]
 
 def _trade_decision(failures):
     """Trade guard: (proceed, reason).
 
-    Only critical failures block trading. Optional-step failures (and the
-    read-only sync_live) degrade gracefully - the main signals are fresh,
+    Only critical failures block trading. Optional-step failures degrade gracefully - the main signals are fresh,
     so the trade proceeds.
     """
     crit = _critical_failures(failures)
@@ -748,13 +745,6 @@ def data_summary():
                     for r in m.itertuples()]
     return out
 
-def sync_live():
-    """Optional (--sync-live): refresh the offline Reports/live_*.csv snapshot from the Alpaca LIVE account (read-only)."""
-    import alpaca_paper
-    r = alpaca_paper.sync_paper_account()
-    logging.info("  live account: equity $%s, cash $%s, %d positions -> %s", f"{r['Equity']:,.2f}", f"{r['Cash']:,.2f}",
-                 r["Positions"], os.path.relpath(r["snapshot_csv"], ROOT))
-
 def plan_steps(a, mode):
     """The steps to run for this mode and the command-line filters (--only / --from / opt-in flags)."""
     names = [s[0] for s in STEPS]
@@ -807,8 +797,6 @@ def main(argv=None):
     p.add_argument("--from", dest="start", choices=[s[0] for s in STEPS], help="start at this step (mode rules still apply)")
     p.add_argument("--keep-going", action="store_true", help="continue after a failed step (still exits 1)")
     p.add_argument("--list", action="store_true", help="list the steps and exit")
-    p.add_argument("--sync-live", action="store_true",
-                   help="refresh the Reports/live_*.csv snapshot from the Alpaca LIVE account before the alert (read-only GET calls only)")
     p.add_argument("--trade", action="store_true",
                    help="after the pipeline, auto-trade the Alpaca LIVE account (REAL MONEY) from the fresh signals "
                         "(pulls live positions + equity, submits extended-hours DAY limit orders; LIVE only)")
@@ -943,8 +931,6 @@ def main(argv=None):
     for name, kind, target, _ in ([] if a.fill_check else steps):     # a fill check runs no notebooks
         extra = f"  [{EXPECTED_CALLS[name]} calls]" if name in EXPECTED_CALLS and name not in skip else ""
         logging.info("  %-13s %s%s", name, f"SKIP - {skip[name]}" if name in skip else (target or "report checks"), extra)
-    if a.sync_live:
-        logging.info("  %-13s %s", "sync_live", "alpaca_paper.py  [Alpaca LIVE account: read-only GET calls only]")
     if a.trade:
         logging.info("  %-13s %s", "trade", "paper_trade.auto_trade  [Alpaca LIVE (REAL MONEY): reads positions+equity, " + (
             "sends regular-hours limit orders now, 2-decimal shares]" if how == "session" else
@@ -1195,15 +1181,6 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
     if mode == "full" and not _critical_failures(failures) and not a.only and not a.start and not getattr(a, "support", False):
         done.update(last_full_date=now.date().isoformat(), last_full_at=clock())
     state.update(update_state(**done))
-    live_synced = False
-    if a.sync_live:                                        # opt-in: refresh the positions file (read-only)
-        logging.info("=== sync_live (alpaca_paper.py, read-only)")
-        try:
-            sync_live()
-            live_synced = True
-        except Exception as e:                              # missing keys / network: the rest of the run still counts
-            logging.warning("  live account sync failed: %s", e)
-            failures.append("sync_live")
 
     trade_results, trade_meta = None, None
     if a.trade:
@@ -1227,8 +1204,6 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
     quota = {k: v for k, v in calls.items() if k in ("newsapi", "finnhub", "alphavantage")}
     logging.info("  API calls used: %s", ", ".join(f"{k} {v}" for k, v in quota.items()) if quota
                  else "none (Alpaca market-data bars only)")
-    if live_synced:
-        logging.info("  Alpaca LIVE account: read-only GET calls only (snapshot refreshed)")
     if trade_results is not None and not trade_results.empty:
         logging.info("  %s", trade_summary(trade_results, (trade_meta or {}).get("sent_now")))
     if info["data_date"]:
