@@ -9,9 +9,8 @@ ask + 0.05%, sell at the bid - 0.05%, skipped on a stale / wide quote); outside 
 (also a dry run or a refusal) is appended to Reports/manual_orders.json.
 
 Sell + replace (Chirag, Oct 16): once the sell FILLS (waits up to FILL_WAIT_SECS), the freed cash buys the next-in-line
-stock of the same half (low volatility: best Strategy-ranked low_vol stock; sector rotation: best sector_rot stock in the
-top-3 sectors) that is not held, not blocked, not do-not-buy and not stopped out - a DAY limit at min(quote limit, ask),
-never above the ask - and the stock is tagged to that half (owned only once Alpaca shows the fill). --no-replace keeps the cash. An unfilled sell buys
+stock of the same half (sleeves.ranking: RS short-term or RS Fridays; a stock held by both halves -> RS short-term) that is not held, not blocked, not do-not-buy and not stopped out - a DAY limit at min(quote limit, ask),
+never above the ask - and its shares go to that half of the v3 ledger. --no-replace keeps the cash. An unfilled sell buys
 nothing (logged).
 Sell: the half's tag goes once the stock is out of the live positions (sleeves.reconcile); the fill credits that half.
 --block-until-drop N adds Reports/manual_block.json[SYMBOL] = {reference_close, block_until_price = close x (1 - N%),
@@ -106,107 +105,34 @@ def half_of(sym, ledger=None):
     led = sleeves.load_ledger() if ledger is None else ledger
     return sleeves.owners(led).get(str(sym).upper()) if led else None
 
-def tag(sym, half):
-    """Tag `sym` as `half`'s (a queued / sent buy): no shares, no cash - those come from Alpaca once it fills."""
+def tag(sym, half, qty=None):
+    """Put `sym` in `half`'s part of the ledger (a queued / sent buy). v3 ledger (from Oct 27, 2026): `qty` shares are
+    added to the half ('both': split evenly); its cash is settled by the next run (sleeves.reconcile)."""
     import sleeves
     led = sleeves.load_ledger()
     if not led:
         return None
-    for h in sleeves.HALVES:
+    sym = str(sym).upper()
+    hs = list(sleeves.HALVES) if half == "both" else [half]
+    for h in hs:
         L = led["halves"][h]
-        L["tags"] = sorted({str(x).upper() for x in (L.get("tags") or []) + list(L.pop("shares", {}) or {})} - {sym})
-        L.pop("prices", None)
-    led["halves"][half]["tags"] = sorted(set(led["halves"][half]["tags"]) | {sym})
+        L.setdefault("shares", {})
+        L["shares"][sym] = round(float(L["shares"].get(sym, 0.0)) + float(qty or 0.0) / len(hs), 4)
+        L["tags"] = sorted(set(L.get("tags") or []) | {sym})
     sleeves.save_ledger(led)
     return half
 
 def next_in_line(half, exclude, rankings=None):
-    """The best-ranked stock of `half` ('lowvol' / 'sector') not in `exclude` (held, blocked, do-not-buy, ...), or None.
-    rankings: {half: [symbols best first]} (tests); default the latest close's rankings (dashboard.stock_groups)."""
+    """The best-ranked stock of `half` ('rs_short' / 'friday'; 'both' = the shorter RS ranking) not in `exclude` (held,
+    blocked, do-not-buy, ...), or None. rankings: {half: [symbols best first]} (tests); default the latest close's
+    rankings (dashboard.stock_groups)."""
+    if half == "both":
+        half = "rs_short"
     if rankings is None:
         from dashboard.stock_groups import _rankings
-        _lv_t, _sec_t, lv, sr = _rankings()
-        rankings = {"lowvol": lv, "sector": sr}
+        _a, _b, ra, rb = _rankings()
+        rankings = {"rs_short": ra, "friday": rb}
     return next((s for s in rankings.get(half, []) if s.upper() not in exclude), None)
-
-LEFTOVER_MIN = 500.0        # leftover sleeve cash under max($500, 2% of the half) stays cash
-
-def queue_leftover_cash(dry_run=False, rankings=None, prices=None, positions=None, pending_path=None, min_cash=LEFTOVER_MIN):
-    """Standing rule (Chirag, Oct 19, 2026): after a rebalance, a half's leftover cash (e.g. a blocked target such as KO
-    under a manual block) buys that half's next-in-line stock, like a manual sell's replacement: one BUY row per half in
-    Reports/live_pending_orders.json (staged, at_ask = the limit is never above the ask) that the 9 AM CT fill check sends,
-    and the shares go into that half of the sleeve ledger. Only halves that rebalanced on the ledger's day; never twice
-    (a queued leftover buy for the half, or any queued BUY of the stock, skips it). Places no order itself.
-    Returns [{half, symbol, qty, limit, cash, status}]."""
-    import json
-    import paper_trade as pt
-    import sector_mapping as sm
-    import sleeves
-    pending_path = pending_path or pt.PENDING_ORDERS_JSON
-    led = sleeves.load_ledger()
-    if led is None:
-        return []
-    try:
-        pend = json.load(open(pending_path)).get("orders") or []
-    except (OSError, ValueError, AttributeError):
-        pend = []
-    if positions is None:
-        import holdings
-        positions = list(holdings.get_positions())
-    queued = {str(o.get("symbol", "")).upper() for o in pend if str(o.get("side", "")).upper() == "BUY"}
-    in_led = set(sleeves.owners(led))
-    stop = pt.earnings_stop_blocked(_now().date().isoformat())
-    excl = ({str(s).upper() for s in positions} | in_led | queued | set(pt.manual_list("buy")) | set(stop)
-            | {s for s in sm.symbol_sector if s not in set(sm.tradable_symbols)})
-    out = []
-    for h in sleeves.HALVES:
-        L = led["halves"][h]
-        cash, value = float(L.get("cash", 0.0)), float(L.get("value", 0.0) or 0.0)
-        row = {"half": h, "cash": round(cash, 2)}
-        if not L.get("rebalanced") or cash < max(min_cash, 0.02 * value):
-            continue
-        if any(o.get("source") == "leftover-cash" and o.get("half") == h for o in pend):
-            out.append({**row, "status": "already queued (not doubled)"})
-            continue
-        import backtest_engine as be
-        n_held = sum(1 for s, o in sleeves.owners(led).items() if o == h)
-        if n_held >= be.WINNER["n"]:                    # (Oct 21, 2026) the half already holds its n stocks: cash left by
-            out.append({**row, "status": f"half holds its {be.WINNER['n']} stocks (cash stays, as in the forward test)"})
-            continue                                     # only a missing slot is refilled
-        lv_picks = set()
-        if h == "sector":                                # no overlap: the low-volatility half's picks stay its own
-            try:
-                import pandas as pd
-                p = db.read_csv(pt.PICKS_CSV)
-                lv_picks = set(p.loc[pd.to_numeric(p["Provisional_Weight"], errors="coerce").fillna(0) > 0, "Symbol"].str.upper())
-            except (OSError, KeyError, ValueError):
-                pass
-        sym = next_in_line(h, excl | lv_picks, rankings)
-        if not sym:
-            out.append({**row, "status": "no next-in-line stock (cash stays)"})
-            continue
-        px = float((prices or {}).get(sym) or ((latest_closes([sym]).get(sym) or [(None, 0)])[-1][1]) or 0)
-        if px <= 0:
-            out.append({**row, "symbol": sym, "status": "no price (cash stays)"})
-            continue
-        limit = round(px * 1.005, 2)                     # ceiling for sizing; the 9 AM limit is the live ask or lower
-        qty = math.floor(cash * 0.99 / limit * 100) / 100
-        row = {**row, "symbol": sym, "qty": qty, "limit": limit}
-        if qty <= 0:
-            out.append({**row, "status": "buys no share"})
-            continue
-        excl.add(sym)
-        if dry_run:
-            out.append({**row, "status": "dry run (nothing queued)"})
-            continue
-        pt.record_pending_order({"symbol": sym, "side": "BUY", "qty": qty, "limit_price": limit, "order_id": None,
-                                 "at_ask": True, "source": "leftover-cash", "half": h},
-                                {"source": "leftover-cash"}, pending_path)
-        tag(sym, h)                                      # a tag only: owned (and its cash spent) once Alpaca shows the fill
-        out.append({**row, "status": "queued for the 9 AM CT fill check"})
-        log({"action": "buy (leftover cash)", "half": h, "symbol": sym, "qty": qty, "limit": limit, "dry_run": False,
-             "status": "queued for the 9 AM CT fill check"})
-    return out
 
 def _wait_fill(client, order_id, secs=None, sleep=None):
     """(filled qty, avg price) once the order is filled, else None after `secs`."""
@@ -249,7 +175,7 @@ def replace_buy(half, cash, client, quote, rankings=None, sold=None):
                                                   side=OrderSide.BUY, client_order_id=f"manual-{_now():%Y%m%d%H%M%S}-BUY-{sym}"[:48]))
     except Exception as e:
         return log({**base, "symbol": sym, "qty": qty, "limit": limit, "status": f"FAILED: {str(e)[:200]}"})
-    tag(sym, half)                                       # a tag only: owned once Alpaca shows the fill
+    tag(sym, half, qty)                                  # the half's shares (its cash settles at the next run)
     return log({**base, "symbol": sym, "qty": qty, "limit": limit, "bid": q.get("bid"), "ask": q.get("ask"),
                 "value": round(qty * limit, 2), "order_id": str(getattr(o, "id", "")),
                 "status": f"submitted ({getattr(o.status, 'value', o.status)})", "ledger_half_tag": half})

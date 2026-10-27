@@ -120,7 +120,7 @@ import run_all  # noqa: E402
 
 check("backtest/live engine universe == sector_mapping.tradable_symbols", be.TRADABLE == list(sm.tradable_symbols))
 check("strategy tag U-count == stocks scored (the list minus short-history stocks)",
-      be.WINNER["tag"].startswith((f"C6-U{be.scored_stock_count()}-", f"LV-M-U{be.scored_stock_count()}")), be.WINNER["tag"])
+      be.WINNER["tag"].startswith((f"C6-U{be.scored_stock_count()}-", f"LV-M-U{be.scored_stock_count()}", f"RS-H-U{be.scored_stock_count()}")), be.WINNER["tag"])
 # company_report_autofetch.py is checked from its source (importing it would load .env for the Alpha Vantage key)
 _af = ast.parse(open("company_report_autofetch.py", encoding="utf-8").read())
 _all = [ast.unparse(n.value) for n in ast.walk(_af) if isinstance(n, ast.Assign)

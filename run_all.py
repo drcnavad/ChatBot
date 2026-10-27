@@ -1,7 +1,7 @@
 """ONE command for the whole pipeline:   python run_all.py   (mode chosen by the US Central clock)
 
-FULL  on a decision day (Sector half: Friday, Thursday if Friday is a holiday; Low Vol half: the month's last trading day; holiday-shifted,
-      backtest_engine.next_decision) after 2:30 PM CT,
+FULL  on a decision day (from Tue Oct 27, 2026 every session: the two halves "RS short-term (weekly + Mon–Thu sells)" (Friday rebalance + Mon-Thu
+      exit checks) and "RS standard (Fridays only)" (Friday; Thursday if Friday is a holiday), backtest_engine.next_decision) after 2:30 PM CT,
       once a day: main (main_signal_analysis.ipynb: Alpaca bars, ranks, picks, mid-week check) -> validate (the report
       files), reading the latest supporting tables.
 SUPPORT (--support, launchd com.stockanalysis.support, Mon 1:00 PM CT +7 min each weekday): fundamentals
@@ -19,9 +19,9 @@ QUICK any other time: main + validate (no quota APIs).
 market hours: regular-hours orders at once (sells first, buys from the buying power after the sells); later that day
 (until 7 PM CT): whole-share extended-hours DAY limits, the rest at the 9 AM fill check; missed (Mac asleep): caught up at
 the next regular session with that decision's picks; superseded once the next decision slot arrives (one run-log row).
-Decision days rebalance only the half that is due (sleeves.plan via paper_trade.plan_sleeve_orders: 1-point no-trade
-band, 99% invested); every other session holds (no daily rank checks). After a rebalance, a half's leftover cash is
-queued as one buy of its next-in-line stock for the 9 AM fill check (manual_trade.queue_leftover_cash). --scheduled (launchd): idle starts print one
+Each half trades exactly like its forward-test line (sleeves.plan via paper_trade.plan_sleeve_orders: the names whose
+target changed, every name on Fridays; 1-point no-trade band, 99% invested); a stock both halves pick is held by both (one
+netted order). --scheduled (launchd): idle starts print one
 "idle:" line; a failed decision is retried at most 3 times, 60+ min apart.
 Schedule (launchd/install_schedule.sh): evening job Mon-Fri 2:30 + 3:05 PM CT (+ login, wake, every 30 min) = --trade
 --scheduled, then from 3:05 PM CT once per trading day the after-close step (daily_step: signal refresh on non-decision
@@ -1099,14 +1099,6 @@ def _trade(D, how, failures, state, clock, ckpt):
             except Exception as e:                          # still pending (send_now): the fill-check job retries
                 logging.warning("  sending failed: %s - the orders stay in Reports/live_pending_orders.json", e)
                 failures.append("send_now")
-        try:                                     # leftover half cash -> that half's next-in-line, sent by the 9 AM check
-            import manual_trade
-            meta["leftover"] = manual_trade.queue_leftover_cash()
-            for r in meta["leftover"]:
-                logging.info("  leftover cash %s $%.2f -> %s", r["half"], r["cash"], r.get("symbol") and
-                             f"BUY {r['symbol']} {r['qty']} (max ${r['limit']}) {r['status']}" or r["status"])
-        except Exception as e:
-            logging.warning("  leftover-cash queue failed: %s (cash stays)", e)
         return results, meta
     finally:
         if session:
@@ -1289,7 +1281,7 @@ def finished_text(label, end, ran, failures, trade_run, how, trades, sent_now=No
     else:
         moved, money = "no", "No trades needed - no orders, no money moved."
     nxt = be.next_decision_slot(end)
-    kind = {"full rebalance": "rebalance", "mid-week check": "check", be.SECTOR_KIND: "rebalance"}.get(be.decision_kind(nxt) if nxt else None)
+    kind = {"full rebalance": "rebalance", "mid-week check": "check"}.get(be.decision_kind(nxt) if nxt else None)
     next_up = f"Next: {nxt:%a %b} {nxt.day} {kind} at {_hm(nxt)}." if kind else ""
     return moved, " ".join(f"{label} done {_hm(end)}. {steps} {money} {next_up} Nothing to do.".split())
 

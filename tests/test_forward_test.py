@@ -347,7 +347,7 @@ with tempfile.TemporaryDirectory() as tmp:
     for k in ("path", "hold_path"):
         d_ = rd(P("a")[k]); d_[d_["Date"] <= "2026-10-05"].pipe(db.to_csv, P("c")[k], index=False)
     hc = rd(P("c")["hold_path"])
-    FO = "Now: Friday only"                                               # no decision on Tue Oct 6 (Mon-Thu checks would)
+    FO = "RS standard (Fridays only)"                                               # no decision on Tue Oct 6 (Mon-Thu checks would)
     L = (hc["Strategy"] == FO) & (hc["Date"] == "2026-10-05") & (hc["Shares"] > 0)
     alien = next(s for s in sorted(SIG["Symbol"].unique()) if s not in set(hc.loc[hc["Strategy"] == FO, "Symbol"]))
     gone = hc.loc[L, "Symbol"].iloc[0]
@@ -462,7 +462,7 @@ with tempfile.TemporaryDirectory() as tmp:
           abs(ht.at[pd.Timestamp("2026-10-07"), "Value"] - t7) < 1e-12 and (ht["Cash"] >= -1e-12).all(), ht.round(8).to_dict())
     rd = {c["name"]: ft.rebalance_days(c, {"weekly": "W", "monthly": "M"}) for c in ft.STRATEGIES}
     check("rebalance days: the calendar of each rule (Fridays, month ends, never for the dip and threshold rules)",
-          rd[ft.LIVE] == rd["Now: Friday only"] == "W" and rd["Monthly"] == "M"
+          rd[ft.LIVE] == rd["RS standard (Fridays only)"] == "W" and rd["Monthly"] == "M"
           and rd["Buy the dip"] is None and set(rd.values()) <= {"W", "M", None}, rd)
 
 # 200-day breakout family (Oct 19, 2026): 3 closes above the 200-day after one below, bought on the 3rd; TP / stop / 200-day exit

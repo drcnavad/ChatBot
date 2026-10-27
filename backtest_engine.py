@@ -68,13 +68,13 @@ RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 # read this one dict.
 # Change a rule here, then run `python run_all.py`.
 WINNER = {
-    # LIVE from Fri Oct 16, 2026 (Chirag, final): "Low volatility in uptrend (monthly)" = forward_test.py's "Low volatility
-    # in uptrend" strategy (score low_vol, calendar monthly, select EQ, earnings None, equal weight) + do_not_buy never bought:
-    # a normal full rebalance on Oct 16 and the last trading day of each month. No Mon-Thu trading, no sleeve, no earnings rule.
-    # Top 5 per half (Chirag, Oct 21, 2026) = forward_test's "Current Strategy (Live from Oct End)" (ft.TOP5): from each half's next
-    # rebalance (sector half Fri Oct 23, low vol half Fri Oct 30); max 2 per sector (sector_cap 0.4 x 5), equal weight 1/5 each.
-    # Non-rebalance days place no orders (unchanged). Was 10 (Oct 16-25).
-    "n": 5,                 # stocks held per half (the low vol half here; sleeves.sector_args uses the same n)
+    # LIVE from the 2:30 PM CT run of Tue Oct 27, 2026 (Chirag, Oct 26, final): two independent 50% halves (sleeves.py,
+    # Reports/sleeve_ledger.json) = forward_test's "RS short-term (weekly + Mon–Thu sells)" + "RS standard (Fridays only)",
+    # each exactly as the forward test runs it; a stock both pick is held by both, each half paying from its own budget.
+    # The selection fields below are NOT the halves' rules: they only drive the pipeline's Strategy_Score / Strategy_Rank
+    # columns (a forward-test input; unchanged so rules_version / saved scores stay comparable). Oct 16-26 the live rules
+    # were 50% low volatility (monthly) + 50% sector rotation (weekly) - forward_test's "Old live: Low vol + Sector rotation".
+    "n": 5,                 # Strategy_Score selection size (pipeline column only)
     "score": "low_vol",     # winner_score: 1 / 63-day volatility (calmest first) while above the 200-day average, else -1
     "use_regime": True,     # soft market regime (below)
     "regime_symbol": "QQQ", # regime is on while QQQ closes above its 200-day average
@@ -94,17 +94,8 @@ WINNER = {
     "earnings_block_days": None,  # no earnings rule (the forward strategy has none)
     "sleeve": False,            # no defensive sleeve (sector_mapping.defensive is kept only for the pinned forward strategies)
     "earnings_day_stop": False, # earnings_stop.py places no orders (not in the backtest; no Mon-Thu trading)
-    # Two halves (Chirag, Oct 15, 8:44 PM; live from Fri Oct 16): 50% of the account = the low-volatility rules above (monthly)
-    # and 50% = forward_test's "Sector rotation" (63-day sector ETF return, top 3 sectors, its top n (5 from Fri Oct 23, 2026) by the C6 score,
-    # equal weights, max 2 per sector (4 with 10), QQQ halving, do_not_buy) with a full
-    # rebalance of that half every Friday (the week's last session); no overlap (the sector half never holds a name the
-    # low-volatility half holds or targets). Two independent halves, each with its own cash (sleeves.py,
-    # Reports/sleeve_ledger.json) = the backtested '50/50 + SR weekly, no overlap'. None = 100% low volatility.
-    "sleeves": {"lowvol": 0.5, "sector": 0.5},
-    # The sector-rotation half's weekly full rebalance (Chirag, Oct 16, 2026 evening): "monday" = the week's FIRST session
-    # (Monday, or Tuesday after a Monday holiday), 2:30 PM CT, from Mon Oct 19; "friday" = the week's last session.
-    # Fridays again from Fri Oct 23, 2026 (Chirag, Oct 21): the week's last session, Thursday when Friday is a holiday.
-    "sector_day": "friday",
+    "sleeves": {"rs_short": 0.5, "friday": 0.5},
+    "halves": True,
     # Rebalance: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).
     "rebalance_band": 0.01,
 }
@@ -137,15 +128,15 @@ def scored_stock_count():
 def winner_label(n_stocks):
     """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'LV-M-U84' / 'C6-U91-NS-MW30R10-E5'."""
     S, mw = WINNER, WINNER.get("midweek_swap")
+    if S.get("halves"):
+        return (f"RS-H-U{n_stocks}", "Live: RS short-term + RS Fridays - 50% RS short-term (weekly + Mon–Thu sells: 10/21/63-day "
+                "relative strength, Friday rebalance + Mon-Thu exit below rank 20) + 50% RS standard (Fridays only: 21/63/126-day "
+                f"relative strength): top 10 + the defensive stocks each, soft QQQ regime ({n_stocks} stocks)")
     if S.get("score") == "low_vol" and S.get("calendar") == "monthly":
-        tag = f"LV-M-U{n_stocks}" + ("+SR-W" if S.get("sleeves") else "")
+        tag = f"LV-M-U{n_stocks}"
         name = (f"Low volatility in uptrend (monthly): the {S['n']} calmest stocks above their 200-day average, equal weight, "
                 f"max {winner_max_per_sector()} per sector, rebalanced on the last trading day of the month + soft QQQ regime "
                 f"({n_stocks} stocks)")
-        if S.get("sleeves"):
-            name = (f"{S['sleeves']['lowvol']:.0%} " + name + f" + {S['sleeves']['sector']:.0%} Sector rotation (top 3 sectors by "
-                    f"63-day ETF return, top {S['n']}, rebalanced every " + ("Monday" if S.get("sector_day") == "monday" else "Friday")
-                    + ", no overlap)")
         return tag, name
     tag = f"C6-U{n_stocks}"
     if S.get("sector_cap", 0.4) >= 1.0 - 1e-12:
@@ -1650,8 +1641,6 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
                               keep=args.get("sleeve") or ())
     return tgt, checks
 
-SECTOR_KIND = "sector half rebalance"   # decision kind: the weekly rebalance of the sector-rotation half only (WINNER["sleeves"])
-
 def is_week_start(d):
     """True when session d is the first session of its ISO week (Monday, or Tuesday after a Monday holiday)."""
     d = pd.Timestamp(d).normalize()
@@ -1660,22 +1649,17 @@ def is_week_start(d):
     prev = pd.date_range(d - pd.Timedelta(days=10), d - pd.Timedelta(days=1), freq=NYSE_SESSION)[-1]
     return prev.isocalendar()[:2] != d.isocalendar()[:2]
 
-MONDAY_SECTOR = (pd.Timestamp("2026-10-19"), pd.Timestamp("2026-10-22"))   # the sector half rebalanced on Mondays then
-
-def is_sector_day(d):
-    """The sector-rotation half's weekly rebalance session (WINNER['sector_day']: 'monday' = week start, else week end)."""
-    d = pd.Timestamp(d)
-    d = (d.tz_localize(None) if d.tzinfo else d).normalize()   # CT clock times are tz-aware (run_all.finished_text)
-    if WINNER.get("sector_day") == "monday" or MONDAY_SECTOR[0] <= d <= MONDAY_SECTOR[1]:
-        return is_week_start(d)                          # (the live Monday rebalances Oct 19-22, 2026 stay in the history)
-    return is_session(d) and next_sessions(d, 1)[0].isocalendar()[:2] != d.isocalendar()[:2]
-
 def next_decision(latest, days=None):
     """Next decision session after ``latest``: (date, 'full rebalance' | 'mid-week check', fill_date).
 
     Weekly rebalance = last session of an ISO week; mid-week check = first session on/after each check day (live: Mon-Thu)
     that is not the week's last session (same rules as weekly_rebalance_days / midweek_check_days)."""
     mw = WINNER.get("midweek_swap")
+    if days is None and WINNER.get("halves"):                  # (Oct 27, 2026) shorter RS half: every session decides
+        latest = pd.Timestamp(latest).normalize()
+        sess = list(next_sessions(latest, 3))
+        kind = "full rebalance" if sess[0].isocalendar()[:2] != sess[1].isocalendar()[:2] else "mid-week check"
+        return sess[0], kind, sess[1]
     if days is None and WINNER.get("calendar") == "monthly":     # monthly: the next rebalance day, no mid-week checks
         latest = pd.Timestamp(latest).normalize()
         sess = list(next_sessions(latest, 70))
@@ -1683,8 +1667,6 @@ def next_decision(latest, days=None):
         for i, d in enumerate(sess[:-1]):
             if reb.iloc[i]:
                 return d, "full rebalance", sess[i + 1]
-            if WINNER.get("sleeves") and is_sector_day(d):
-                return d, SECTOR_KIND, sess[i + 1]             # the sector-rotation half's weekly rebalance
         return sess[0], "full rebalance", sess[1]
     if days is None:
         days = mw.get("days", ("Mon", "Wed")) if mw else ()

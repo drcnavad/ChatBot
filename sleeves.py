@@ -1,24 +1,27 @@
-"""Two independent halves in one Alpaca account (Chirag, Oct 15, 2026; live from Fri Oct 16) - backtest_engine.WINNER["sleeves"].
+"""Two independent halves in one Alpaca account - backtest_engine.WINNER["sleeves"] / WINNER["halves"].
 
-  lowvol  50%: the monthly low-volatility rules (the pipeline's Provisional_Weight in strategy_picks.csv), rebalanced on
-               the last trading day of each month (+ the Oct 16 switch).
-  sector  50%: forward_test.py's "Sector rotation" (top 3 sector ETFs by 63-day return, then their top WINNER["n"] (5 from Fri Oct 23, 2026; was 10) by the C6 score,
-               equal weights, max 2 per sector (4 with 10), QQQ halving, do_not_buy), full rebalance of this half
-               every Friday (the week's last session, Thursday when Friday is a holiday; Mondays Oct 19-22, 2026, Fridays before). No overlap: it never buys a name the low-volatility half holds or
-               targets; when the low-volatility half buys a name this half holds, the shares move to the low-volatility half
-               at the current price (no trade) and this half rebalances the same day without it.
+Live from the 2:30 PM CT run of Tue Oct 27, 2026 (Chirag, Oct 26, 2026, final: "switch our current strategy to Now: Shorter
+RS, Now: Friday Only ... If a stock is in both strategy, simply buy it on top from that strategy half budget"):
 
-Each half is sized from its OWN value (its shares at today's prices + its own cash) and trades with paper_trade.build_orders
-as if it were its own account (1-point band of the half, 99% invested, trims, rounding) - the backtested '50/50 + SR weekly,
-no overlap' (two sleeves, each with its own cash). A half that does not rebalance today is left alone.
+  rs_short  50%: forward_test.py's "RS short-term (weekly + Mon–Thu sells)" - relative strength over 10/21/63 days, top 10 + the
+                 defensive stocks (sector_mapping.defensive), Friday rebalance (the week's last session) and the Mon-Thu
+                 exit check (a stock worse than rank 20 is sold and replaced by the best top-10 stock not held), earnings
+                 within 5 days not newly bought, soft QQQ regime, do_not_buy never bought.
+  friday    50%: forward_test.py's "RS standard (Fridays only)" - the same rules with the 21/63/126-day relative strength and the
+                 Friday rebalance only (no Mon-Thu checks).
 
-Ledger (Reports/sleeve_ledger.json): per half only TAGS (which half a symbol belongs to) and the half's cash claim at
-`cash_at`; never shares (Chirag, Oct 19, 2026: live Alpaca positions - holdings.py - are the only record of what is owned).
-Next run (reconcile): a half's shares = the live shares of its tagged symbols; the Alpaca fills since cash_at move that
-half's cash (a buy that never filled costs nothing); whatever is left (slippage, dividends, interest, a deposit) is split
-pro rata to value; a tag whose stock is neither held nor has a queued BUY is dropped; a position no half tags is sold.
-First run (no ledger, the Oct 16 switch): each half = 50% of equity in cash; a held stock that one half targets is taken
-over by that half at the current price, every other holding is sold.
+Each half's targets are forward_test.strategy_targets of its strategy (the very code the backtest / forward test runs), and
+each half trades like forward_test.update_strategies: on a session where its target changed (or on its Friday rebalance,
+every name) the names that move are brought to their target weight of the HALF's own value (1-point band, 99% invested);
+the others are left alone. No overlap rule: when both halves hold the same stock each buys it from its own budget, and the
+account holds the sum. The two halves' orders are netted into one order per symbol (sells first); do_not_sell is never
+sold; manual buy blocks / earnings-day stops are not bought.
+
+Ledger (Reports/sleeve_ledger.json, version 3): per half its share count per symbol and its cash after the planned trades.
+Next run (reconcile): each live position is split between the halves in proportion to their ledger shares; a position no
+half claims is sold (do_not_sell kept); whatever the ledger does not explain (fills vs plan, dividends, a deposit) is split
+pro rata to the halves' values. No v3 ledger (the switch run): each half = 50% of equity, every holding is unclaimed, and
+the netting keeps any held stock a half targets (no sell + rebuy).
 """
 import json
 import math
@@ -34,105 +37,106 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
 LEDGER_JSON = os.environ.get("STOCK_ANALYSIS_SLEEVE_LEDGER") or os.path.join(REPORTS, "sleeve_ledger.json")
 PLAN_CSV = os.environ.get("STOCK_ANALYSIS_SLEEVE_PLAN") or os.path.join(REPORTS, "sleeve_plan.csv")
-HALVES = ("lowvol", "sector")
-LABEL = {"lowvol": "Low volatility (monthly)", "sector": "Sector rotation (weekly)"}
-SECTOR_STRATEGY = "Sector rotation"          # forward_test.STRATEGIES entry this half trades
+HALVES = ("rs_short", "friday")
+STRATEGY = {"rs_short": "RS short-term (weekly + Mon–Thu sells)", "friday": "RS standard (Fridays only)"}
+LABEL = {"rs_short": "RS short-term (weekly + Mon–Thu sells)", "friday": "RS standard (Fridays only)"}
+SHORT = {"rs_short": "RS short-term", "friday": "RS Fridays"}
+VERSION = 3
 CT = ZoneInfo("America/Chicago")
 
 def config():
-    """{'lowvol': 0.5, 'sector': 0.5} when the two halves are live, else None."""
+    """{'rs_short': 0.5, 'friday': 0.5} when the two halves are live, else None."""
     import backtest_engine as be
     s = be.WINNER.get("sleeves")
     return dict(s) if s else None
 
-def sector_day(day):
-    """True when session `day` is the sector half's weekly rebalance (backtest_engine.is_sector_day, WINNER['sector_day']:
-    'friday' = the week's last session, Thursday when Friday is a holiday; from Fri Oct 23, 2026; Mondays Oct 19-22)."""
-    import backtest_engine as be
-    return be.is_sector_day(day)
+def _cfg(h):
+    import forward_test as ft
+    return next(c for c in ft.STRATEGIES if c["name"] == STRATEGY[h])
 
-def lowvol_day(day):
-    """True when session `day` is a low-volatility rebalance (last trading day of the month, or a switch day)."""
+def full_day(h, day):
+    """True on half h's full rebalance session: the week's last session (Thursday when Friday is a holiday)."""
     import backtest_engine as be
     d = pd.Timestamp(day).normalize()
-    return be.is_session(d) and bool(be.winner_rebalance_days(pd.DatetimeIndex([d])).iloc[0])
+    return be.is_session(d) and be.next_sessions(d, 1)[0].isocalendar()[:2] != d.isocalendar()[:2]
+
+def half_day(h, day):
+    """True when half h may trade on session `day`: rs_short every session (Mon-Thu checks), friday on its rebalance only."""
+    import backtest_engine as be
+    d = pd.Timestamp(day).normalize()
+    if not be.is_session(d):
+        return False
+    return True if h == "rs_short" else full_day(h, d)
 
 def calendar(start, sessions=30):
-    """[(date, halves trading)] for the next decision sessions from `start` (inclusive)."""
+    """[(date, halves that rebalance in full)] for the next sessions from `start` (inclusive); rs_short also checks Mon-Thu."""
     import backtest_engine as be
     d0 = pd.Timestamp(start).normalize()
     days = [d0] + list(be.next_sessions(d0, sessions)) if be.is_session(d0) else list(be.next_sessions(d0, sessions))
-    out = []
-    for d in days:
-        h = (["lowvol"] if lowvol_day(d) else []) + (["sector"] if sector_day(d) else [])
-        if h:
-            out.append((d, h))
-    return out
+    return [(d, list(HALVES)) for d in days if full_day(HALVES[0], d)]
 
-# ----------------------------------------------------------------------------- the sector-rotation half's targets
-_INPUTS = {}
+# ----------------------------------------------------------------------------- targets (forward_test's own code)
+_INPUTS, _TARGETS = {}, {}
 
-def sector_inputs(signal_csv=None, bench_csv=None):
-    """forward_test.strategy_inputs on the saved data (cached per file modification time)."""
+def inputs(signal_csv=None, bench_csv=None):
+    """forward_test.strategy_inputs on the saved data (cached per table modification time)."""
     import forward_test as ft
     signal_csv, bench_csv = signal_csv or ft.SIGNAL_CSV, bench_csv or ft.BENCH_CSV
     key = (signal_csv, db.mtime(signal_csv), bench_csv, db.mtime(bench_csv))
     if key not in _INPUTS:
         sig = db.read_csv(signal_csv, usecols=ft.SIG_COLS, parse_dates=["Date"])
         _INPUTS.clear()
+        _TARGETS.clear()
         _INPUTS[key] = ft.strategy_inputs(sig, None, None, ft._read(bench_csv), bars=[])   # no bar download
     return _INPUTS[key]
 
-def sector_args(inp):
-    """rank_targets settings of forward_test's Sector rotation (as forward_test.strategy_targets passes them), WINNER["n"]
-    stocks (5 from Oct 21, 2026: first used at the Fri Oct 23 rebalance; was 10)."""
-    import backtest_engine as be
-    import forward_test as ft
-    cfg = next(c for c in ft.STRATEGIES if c["name"] == SECTOR_STRATEGY)
-    a = be.winner_rank_args(inp["regime"])
-    a.update({**ft.PIN, **(cfg.get("select") or {}), "sleeve": ()})
-    a["n"] = be.WINNER["n"]
-    return a, cfg
+sector_inputs = inputs          # old name (dashboard / decision_ranks)
 
-def sector_weights(day, exclude=(), held=None, inp=None):
-    """The sector half's target weights (fractions of the half, 99% invested) on session `day`, as a Series by symbol:
-    forward_test's Sector rotation selection for that one day, `exclude` (the low-volatility half's names) not
-    eligible, do_not_buy never bought, `held` {symbol: weight in the half} = the half's holdings before the rebalance."""
-    import backtest_engine as be
+def targets(h, inp=None):
+    """Date x Symbol live weights (fractions of the half, 99% invested) of half h = forward_test.strategy_targets."""
     import forward_test as ft
+    inp = inp or inputs()
+    key = (h, id(inp))
+    if key not in _TARGETS:
+        _TARGETS[key] = ft.strategy_targets(_cfg(h), inp)
+    return _TARGETS[key]
+
+def half_weights(h, day, inp=None):
+    """Half h's target weights on session `day` (Series, fractions of the half; stocks removed from the list dropped)."""
     import sector_mapping as sm
-    inp = inp or sector_inputs()
+    inp = inp or inputs()
+    w = targets(h, inp)
     d = pd.Timestamp(day).normalize()
-    idx = inp["close"].index
-    if d not in idx:
-        raise ValueError(f"no data for {d:%Y-%m-%d} in signal_analysis.csv - the sector half cannot be ranked")
-    t = idx.get_loc(d)
-    cols = list(inp["close"].columns)
-    args, cfg = sector_args(inp)
-    score = inp["scores"][cfg.get("score", "live")]
-    el = inp["eligible"].copy()
-    gone = [x for x in el.columns if x not in set(sm.tradable_symbols)]   # removed from the stock list: never a target
-    ex = sorted({x for x in list(exclude) + gone if x in el.columns})
-    if ex:
-        el.loc[idx[[t]], ex] = False
-    block = pd.DataFrame(np.nan, index=idx[[t]], columns=cols)
-    if cfg.get("earnings", ft.EARN_DAYS):          # (Sector rotation has no earnings rule)
-        block = be.earnings_days_ahead(idx[[t]], cols, inp["earnings"], cfg.get("earnings", ft.EARN_DAYS)).reindex(columns=cols)
-    block.loc[:, [x for x in sm.do_not_buy if x in cols]] = 999.0
-    hw = np.array([float((held or {}).get(c, 0.0)) for c in cols])
-    w = be.rank_targets(score.iloc[[t]], el, inp["vol"], rebalance_days=pd.Series(True, index=idx[[t]]),
-                        tiebreak_w=inp["scores"].get(cfg.get("tiebreak", "rs")), buy_block=block, start_holdings=hw,
-                        **args).iloc[0]
-    return be.live_weights(w).reindex(cols).fillna(0.0)                     # equal weight: 1/n each (Oct 21, 2026)
+    if d not in w.index:
+        raise ValueError(f"no data for {d:%Y-%m-%d} in signal_analysis.csv - the {LABEL[h]} half cannot be ranked")
+    s = w.loc[d]
+    return s.where(s.index.isin(set(sm.tradable_symbols)), 0.0)
+
+def ranking(h, day, inp=None):
+    """Half h's score on `day`, best first (eligible, score above 0, do_not_buy out) - display / next in line."""
+    import sector_mapping as sm
+    inp = inp or inputs()
+    sc = inp["scores"][_cfg(h).get("score", "live")]
+    d = pd.Timestamp(day).normalize()
+    if d not in sc.index:
+        d = sc.index[sc.index <= d][-1]
+    s = sc.loc[d].where(inp["eligible"].loc[d])
+    s = s[(s > 0) & ~s.index.isin(sm.do_not_buy) & s.index.isin(set(sm.tradable_symbols))]
+    return s.sort_values(ascending=False, kind="stable")
 
 # ----------------------------------------------------------------------------- ledger
 def load_ledger(path=None):
+    """The v3 ledger, or None (none yet, or the pre-Oct 27 lowvol / sector ledger: the switch run starts fresh)."""
     path = path or LEDGER_JSON
-    if not db.exists(path):
+    if not os.path.exists(path):
         return None
     with open(path) as f:
         led = json.load(f)
-    if not isinstance(led, dict) or set(led.get("halves", {})) != set(HALVES):
+    if not isinstance(led, dict):
+        raise ValueError(f"{path} is not a valid sleeve ledger - fix or remove it (no orders until then)")
+    if int(led.get("version", 0)) < VERSION:
+        return None
+    if set(led.get("halves", {})) != set(HALVES):
         raise ValueError(f"{path} is not a valid sleeve ledger - fix or remove it (no orders until then)")
     return led
 
@@ -145,15 +149,18 @@ def save_ledger(led, path=None):
     os.replace(tmp, path)
     return path
 
-def owners(led):
-    """{SYMBOL: half} from the ledger's tags (old ledgers: the keys of 'shares')."""
+def holders(led):
+    """{SYMBOL: [halves claiming it]}."""
     out = {}
     for h in HALVES:
-        L = (led or {}).get("halves", {}).get(h, {})
-        old = [s for s, q in (L.get("shares") or {}).items() if float(q or 0) > 0]      # pre-Oct 19 ledgers
-        for sym in list(L.get("tags") or []) + old:
-            out.setdefault(str(sym).upper(), h)
+        for s, q in ((led or {}).get("halves", {}).get(h, {}).get("shares") or {}).items():
+            if float(q or 0) > 0:
+                out.setdefault(str(s).upper(), []).append(h)
     return out
+
+def owners(led):
+    """{SYMBOL: half} (a stock both halves hold: 'both')."""
+    return {s: (hs[0] if len(hs) == 1 else "both") for s, hs in holders(led).items()}
 
 def _num(x):
     try:
@@ -163,167 +170,194 @@ def _num(x):
     return f if math.isfinite(f) and f > 0 else None
 
 def reconcile(led, positions, prices, equity, shares=None, fills=None, pending=()):
-    """(state, unowned, info): state = {half: {'shares': {sym: LIVE qty}, 'cash': $}} after the reconciliation in the
-    module doc; unowned = {sym: qty} the account holds that no half tags. fills = holdings.fills_since(led['cash_at'])
-    (None: not readable - the residual split covers it); pending = symbols with a queued BUY (their tag is kept).
-    No ledger -> each half = its share of equity in cash."""
-    shares = shares or config() or {"lowvol": 0.5, "sector": 0.5}
+    """(state, unowned, info): state = {half: {'shares': {sym: qty}, 'cash': $}}; unowned = {sym: qty} no half claims.
+    fills / pending: accepted for the old call signature (the residual split covers fills that differ from the plan)."""
+    shares = shares or config() or {h: 1 / len(HALVES) for h in HALVES}
     pos = {str(k).upper(): float(v) for k, v in (positions or {}).items() if float(v or 0) > 0}
     if led is None:
         return ({h: {"shares": {}, "cash": equity * shares[h]} for h in HALVES}, dict(pos),
                 {"init": True, "residual": 0.0, "dropped": [], "tags": {}})
-    owner = owners(led)
-    cash = {h: float(led["halves"][h].get("cash", 0.0)) for h in HALVES}
-    for f in fills or []:                               # real fills only: what a half actually paid / received
-        h = owner.get(f["symbol"])
-        if h:
-            cash[h] += f["qty"] * f["price"] * (-1 if f["side"] == "BUY" else 1)
-    pend = {str(x).upper() for x in pending or ()}
-    dropped = sorted(s for s in owner if s not in pos and s not in pend)
-    tags = {s: h for s, h in owner.items() if s not in dropped}
-    state = {h: {"shares": {s: pos[s] for s, o in tags.items() if o == h and s in pos}, "cash": cash[h]} for h in HALVES}
-    unowned = {s: q for s, q in pos.items() if s not in tags}
-    val = {h: state[h]["cash"] + sum(q * (_num(prices.get(s)) or 0.0) for s, q in state[h]["shares"].items()) for h in HALVES}
-    resid = equity - sum(val.values())
+    L = {h: {str(s).upper(): float(q or 0) for s, q in (led["halves"][h].get("shares") or {}).items() if float(q or 0) > 0}
+         for h in HALVES}
+    state = {h: {"shares": {}, "cash": float(led["halves"][h].get("cash", 0.0))} for h in HALVES}
+    unowned, dropped = {}, []
+    for s in set(pos) | {x for h in HALVES for x in L[h]}:
+        tot = sum(L[h].get(s, 0.0) for h in HALVES)
+        if s not in pos:
+            dropped.append(s)
+            continue
+        if tot <= 0:
+            unowned[s] = pos[s]
+            continue
+        for h in HALVES:
+            if L[h].get(s):
+                state[h]["shares"][s] = pos[s] * L[h][s] / tot
+    val = {h: half_value(state[h], prices) for h in HALVES}
+    resid = equity - sum(val.values()) - sum(q * (_num(prices.get(s)) or 0.0) for s, q in unowned.items())
     tot = sum(max(v, 0.0) for v in val.values())
     for h in HALVES:
         state[h]["cash"] += resid * (max(val[h], 0.0) / tot if tot > 0 else shares[h])
-    return state, unowned, {"init": False, "residual": resid, "dropped": dropped, "tags": tags}
+    return state, unowned, {"init": False, "residual": resid, "dropped": sorted(dropped), "tags": owners(led)}
 
 def half_value(st, prices):
     return st["cash"] + sum(q * (_num(prices.get(s)) or 0.0) for s, q in st["shares"].items())
 
-def _take(state, h, sym, qty, price, frm=None):
-    """Half h takes `qty` shares of sym at `price` (from half `frm`, or an unowned holding) - no trade."""
-    v = qty * price
-    state[h]["shares"][sym] = state[h]["shares"].get(sym, 0.0) + qty
-    state[h]["cash"] -= v
-    if frm is not None:
-        state[frm]["shares"].pop(sym, None)
-        state[frm]["cash"] += v
+# ----------------------------------------------------------------------------- the plan
+def _prev_session(d, idx):
+    before = idx[idx < d]
+    return before[-1] if len(before) else None
 
-def plan(day, positions, equity, prices, lv_targets=None, lv_statuses=None, no_buy=None, fractional=True, ledger="load",
-         min_value=1.0, inp=None, fills=None, pending=()):
-    """Orders for session `day` (2:30 PM run). lv_targets: DataFrame Symbol, Weight (fractions of the low-volatility half,
-    = Provisional_Weight), Price - needed when the low-volatility half rebalances. prices {sym: price} for every held / target
-    symbol. Returns (orders, info); info['ledger'] = the ledger to save after the orders are sent."""
+def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_value):
+    """build_orders rows for half h (its own account): the names that move (target changed, or every name on its full
+    rebalance / the switch) go to their target weight; the others keep their shares - forward_test.update_strategies."""
+    import forward_test as ft
+    import paper_trade as pt
+    w_all = targets(h, inp)
+    w = half_weights(h, d, inp)
+    cols = w.index
+    prev_d = _prev_session(d, w_all.index)
+    prev = w_all.loc[prev_d].reindex(cols).fillna(0.0) if prev_d is not None else pd.Series(0.0, index=cols)
+    full = init or full_day(h, d)
+    trade_today = init or half_day(h, d)
+    held_v = {s: q * (_num(px.get(s)) or 0.0) for s, q in st["shares"].items()}
+    held_w = pd.Series({s: v / value for s, v in held_v.items()}, dtype=float) if value > 0 else pd.Series(dtype=float)
+    names = sorted(set(cols[w > 0]) | set(st["shares"]))
+    wd = w.reindex(names).fillna(0.0)
+    pv = prev.reindex(names).fillna(0.0)
+    hw = held_w.reindex(names).fillna(0.0)
+    changed = ~np.isclose(wd, pv, rtol=0, atol=1e-12)
+    if not init:   # a saved holding the recomputed target disagrees with is re-decided (forward_test's Oct 26 fix)
+        changed |= ((hw > 0) != (wd > 0)) & (not full and half_day(h, d))
+    move = (changed | (full & ((wd > 0) | (hw > 0)))) if trade_today else pd.Series(False, index=names)
+    soon = inp.get("soon")
+    soon_d = (soon.loc[d] if soon is not None and d in soon.index else pd.Series(False, index=cols)).reindex(names).fillna(False)
+    tw = {}
+    for s in names:
+        if move[s]:
+            if wd[s] > 0:
+                tw[s] = float(wd[s])
+        elif hw[s] > 0:
+            tw[s] = float(hw[s])              # left alone (within its own weight: the band keeps it untraded)
+    tg = pd.DataFrame({"Symbol": list(tw), "Weight": [tw[s] for s in tw], "Price": [px.get(s) for s in tw]})
+    if tg["Weight"].sum() > 1:
+        tg["Weight"] = tg["Weight"] / tg["Weight"].sum()
+    stat = {s: ("hold" if s in st["shares"] else "add") for s in tw}
+    blocked = {**{s: n for s, n in (no_buy or {}).items()},
+               **{s: "earnings within 5 days (held: not topped up)" for s in names if soon_d[s] and hw[s] > 0
+                  and s in tw and tw[s] > hw[s]}}
+    o = pt.build_orders(tg, value, st["shares"], px, min_value=min_value, fractional=fractional, statuses=stat,
+                        blocked=blocked, keep=no_sell)
+    return o, {s: float(wd[s]) for s in names if wd[s] > 0}, bool(move.any())
+
+def plan(day, positions, equity, prices, no_buy=None, no_sell=None, fractional=True, ledger="load", min_value=1.0,
+         inp=None, fills=None, pending=(), **_old):
+    """Orders for session `day` (2:30 PM run): one netted order per symbol. Returns (orders, info); info['ledger'] = the
+    ledger to save after the orders are sent."""
     import paper_trade as pt
     shares = config()
     if not shares:
         raise ValueError("WINNER['sleeves'] is off")
     led = load_ledger() if ledger == "load" else ledger
     d = pd.Timestamp(day).normalize()
-    do_lv, do_sec = lowvol_day(d), sector_day(d)
-    if led is None and not do_lv:
-        raise ValueError("no sleeve ledger (Reports/sleeve_ledger.json) and today is not a low-volatility rebalance - "
-                         "the two halves start at a full rebalance; no orders")
     if led is not None and str(led.get("day", "")) > d.date().isoformat():
         raise ValueError(f"the sleeve ledger is from {led.get('day')}, after {d:%Y-%m-%d} - an old decision is not traded")
+    inp = inp or inputs()
     px = {str(k).upper(): v for k, v in (prices or {}).items()}
+    close = inp["close"]
+    for h in HALVES:                                        # a target with no live price: the saved close
+        for s in half_weights(h, d, inp).pipe(lambda x: x[x > 0]).index:
+            if not _num(px.get(s)) and s in close.columns and d in close.index and _num(close.at[d, s]):
+                px[s] = float(close.at[d, s])
     state, unowned, info = reconcile(led, positions, px, equity, shares, fills=fills, pending=pending)
-    if info["init"]:
-        do_sec = True                                   # the switch: both halves are bought
-    transfers = []
-    lv_w = {}
-    if do_lv:
-        if lv_targets is None:
-            raise ValueError("the low-volatility half rebalances today but its targets are missing")
-        lv_w = {str(s).upper(): float(w) for s, w in zip(lv_targets["Symbol"], lv_targets["Weight"]) if float(w) > 0}
-        for s, p in zip(lv_targets["Symbol"], lv_targets["Price"]):
-            px.setdefault(str(s).upper(), p)
-        for sym in lv_w:
-            p = _num(px.get(sym))
-            if sym in state["sector"]["shares"] and p:
-                transfers.append((sym, "sector", "lowvol", state["sector"]["shares"][sym], p))
-                _take(state, "lowvol", sym, state["sector"]["shares"][sym], p, frm="sector")
-                do_sec = True                           # the sector half rebalances without it (backtest: a clash)
-            elif sym in unowned and p:
-                transfers.append((sym, None, "lowvol", unowned[sym], p))
-                _take(state, "lowvol", sym, unowned.pop(sym), p)
-    sec_w = {}
-    if do_sec:
-        lv_names = set(state["lowvol"]["shares"]) | set(lv_w)
-        vs = half_value(state["sector"], px)
-        held = {s: q * (_num(px.get(s)) or 0.0) / vs for s, q in state["sector"]["shares"].items()} if vs > 0 else {}
-        # (Oct 21, 2026) a buy-blocked stock (manual block, earnings stop) not held is no target: its slot goes to the
-        # next pick that same day, as in the forward test (it used to stay cash for the next-morning leftover buy)
-        nb = {str(x).upper() for x in (no_buy or {})} - set(held)
-        w = sector_weights(d, exclude=lv_names | nb, held=held, inp=inp)
-        sec_w = {s: float(x) for s, x in w.items() if x > 0}
-        missing = [s for s in sec_w if not _num(px.get(s))]
-        if missing:
-            ip = sector_inputs()["close"]
-            for s in missing:
-                if s in ip.columns and d in ip.index and _num(ip.at[d, s]):
-                    px[s] = float(ip.at[d, s])
-        for sym in sec_w:
-            if sym in unowned and _num(px.get(sym)):
-                transfers.append((sym, None, "sector", unowned[sym], px[sym]))
-                _take(state, "sector", sym, unowned.pop(sym), px[sym])
-    no_buy = no_buy or {}
-    parts, values = [], {h: half_value(state[h], px) for h in HALVES}
-    for h, on, wts, stat in (("lowvol", do_lv, lv_w, lv_statuses), ("sector", do_sec, sec_w, None)):
-        st = state[h]
-        if on:
-            if values[h] <= 0:
-                raise ValueError(f"the {LABEL[h]} half is worth ${values[h]:,.2f} - refusing to size its orders")
-            tg = pd.DataFrame({"Symbol": list(wts), "Weight": [wts[s] for s in wts], "Price": [px.get(s) for s in wts]})
-            if stat is None:                            # the sector half's own picks: bought / kept (no signal file)
-                stat = {s: ("hold" if s in st["shares"] else "add") for s in wts}
-            o = pt.build_orders(tg, values[h], st["shares"], px, min_value=min_value, fractional=fractional,
-                                statuses=stat, blocked=no_buy)
+    init = info["init"]
+    no_sell = no_sell or {}
+    values = {h: half_value(state[h], px) for h in HALVES}
+    parts, tgts, traded = {}, {}, {}
+    for h in HALVES:
+        if values[h] <= 0:
+            raise ValueError(f"the {LABEL[h]} half is worth ${values[h]:,.2f} - refusing to size its orders")
+        parts[h], tgts[h], traded[h] = half_plan(h, d, state[h], px, values[h], init, inp, no_buy, no_sell, fractional, min_value)
+    # ---- net the halves into one order per symbol
+    pos = {str(k).upper(): float(v) for k, v in (positions or {}).items() if float(v or 0) > 0}
+    tgt_sh = {}
+    half_sh = {h: {} for h in HALVES}
+    for h in HALVES:
+        for r in parts[h].itertuples():
+            t = r.Target_Shares if r.Target_Shares is not None and not pd.isna(r.Target_Shares) else r.Current_Shares
+            t = float(t or 0)
+            if t > 0:
+                half_sh[h][r.Symbol] = t
+            tgt_sh[r.Symbol] = tgt_sh.get(r.Symbol, 0.0) + t
+    for s, q in unowned.items():                            # claimed by no half: sold (do_not_sell kept)
+        if s in no_sell:
+            tgt_sh[s] = tgt_sh.get(s, 0.0) + q
         else:
-            o = pt.build_hold_orders(st["shares"], px)
-        parts.append(o.assign(Half=h))
-    if unowned:                                         # held by no half: sold in full
-        o = pt.build_orders(pd.DataFrame(columns=["Symbol", "Weight", "Price"]), equity, unowned, px,
-                            min_value=0.0, fractional=fractional)
-        parts.append(o.assign(Half="none"))
-    orders = pd.concat(parts, ignore_index=True)
-    trade = orders[orders["Side"].isin(["BUY", "SELL"])]
-    dup = trade["Symbol"][trade["Symbol"].duplicated()]
-    if len(dup):
-        raise ValueError(f"both halves trade {sorted(set(dup))} - refusing (no-overlap broken)")
+            tgt_sh.setdefault(s, 0.0)
+    rows = []
+    for s in sorted(set(tgt_sh) | set(pos)):
+        cur, tgt, p = pos.get(s, 0.0), tgt_sh.get(s, 0.0), _num(px.get(s))
+        if s in no_sell and tgt < cur:
+            tgt = cur
+        diff = tgt - cur
+        if fractional:
+            q = math.floor(abs(diff) * 100 + 1e-6) / 100
+        else:
+            q = math.floor(abs(diff) + 1e-9)
+        if tgt <= 0 and cur > 0:
+            q = cur                                         # a full exit sells every share
+        side = "HOLD"
+        if p and q > 0 and q * p >= min_value:
+            side = "BUY" if diff > 0 else "SELL"
+        elif not p and q > 0:
+            side = "SKIP (no price)"
+        tv = tgt * p if p else None
+        rows.append({"Symbol": s, "Side": side, "Shares": q if side in ("BUY", "SELL") else 0, "Price": p,
+                     "Est_Value": round(q * p, 2) if side in ("BUY", "SELL") else 0.0, "Current_Shares": cur,
+                     "Target_Shares": round(tgt, 4) if side in ("BUY", "SELL", "HOLD") else None,
+                     "Target_Weight_%": round(100 * tv / equity, 2) if tv is not None and equity else None,
+                     "Target_Value": round(tv, 2) if tv is not None else None,
+                     "Half": "+".join(h for h in HALVES if s in half_sh[h]) or "none"})
+    orders = pd.DataFrame(rows, columns=pt.ORDER_COLUMNS + ["Half"])
     orders["_o"] = orders["Side"].map({"SELL": 0}).fillna(1)
-    orders = orders.sort_values(["_o"], kind="stable").drop(columns="_o").reset_index(drop=True)
-    # the ledger after this run: tags (held + this run's buys) and each half's cash NOW; the fills move it next run
-    new = {"version": 2, "day": d.date().isoformat(), "cash_at": datetime.now(ZoneInfo("UTC")).isoformat(timespec="seconds"),
+    orders = orders.sort_values(["_o", "Symbol"], kind="stable").drop(columns="_o").reset_index(drop=True)
+    new = {"version": VERSION, "day": d.date().isoformat(), "cash_at": datetime.now(ZoneInfo("UTC")).isoformat(timespec="seconds"),
            "halves": {}}
     for h in HALVES:
-        st = state[h]
-        buys = orders.loc[(orders["Half"] == h) & (orders["Side"] == "BUY"), "Symbol"].tolist()
-        tags = sorted(set(st["shares"]) | set(buys) | {s for s, o in info.get("tags", {}).items() if o == h and s in pending})
-        held_v = sum(q * (_num(px.get(s)) or 0.0) for s, q in st["shares"].items())
-        new["halves"][h] = {"tags": tags, "cash": round(values[h] - held_v, 2), "value": round(values[h], 2),
-                            "rebalanced": bool(do_lv if h == "lowvol" else do_sec)}
-    info.update(day=d.date().isoformat(), lowvol=do_lv, sector=do_sec, transfers=transfers, values=values,
-                lv_targets=lv_w, sector_targets=sec_w, unowned=unowned, ledger=new, orders=orders)
+        hv = sum(q * (_num(px.get(s)) or 0.0) for s, q in half_sh[h].items())
+        new["halves"][h] = {"shares": {s: round(q, 4) for s, q in sorted(half_sh[h].items())},
+                            "tags": sorted(half_sh[h]), "cash": round(values[h] - hv, 2), "value": round(values[h], 2),
+                            "rebalanced": bool(traded[h])}
+    info.update(day=d.date().isoformat(), values=values, targets=tgts, traded=traded, unowned=unowned, ledger=new,
+                orders=orders, half_orders=parts, half_shares=half_sh, transfers=[])
     return orders, info
 
 def plan_table(info, orders=None):
-    """One row per symbol of each half: live shares, the plan's target shares (orders.Target_Shares), weights."""
+    """One row per symbol per half: the half's planned shares, price, value, % of the half and of the account."""
     rows, total = [], sum(info["values"].values()) or 1.0
-    o = orders if orders is not None else info.get("orders")
-    for r in (o.itertuples() if o is not None else []):
-        if r.Half not in HALVES:
-            continue
-        v = float(r.Target_Shares or 0) * float(r.Price or 0)
-        hv = info["values"][r.Half]
-        rows.append({"Half": LABEL[r.Half], "Symbol": r.Symbol, "Held_Shares": r.Current_Shares, "Target_Shares": r.Target_Shares,
-                     "Price": r.Price, "Target_Value": round(v, 2), "Target_in_half_%": round(100 * v / hv, 2) if hv else None,
-                     "Target_of_account_%": round(100 * v / total, 2)})
-    return pd.DataFrame(rows)
+    for h in HALVES:
+        hv = info["values"][h]
+        for r in info["half_orders"][h].itertuples():
+            t = r.Target_Shares if r.Target_Shares is not None and not pd.isna(r.Target_Shares) else r.Current_Shares
+            v = float(t or 0) * float(r.Price or 0)
+            if v <= 0:
+                continue
+            rows.append({"Half": LABEL[h], "Symbol": r.Symbol, "Held_Shares": r.Current_Shares, "Target_Shares": t,
+                         "Price": r.Price, "Target_Value": round(v, 2), "Target_in_half_%": round(100 * v / hv, 2) if hv else None,
+                         "Target_of_account_%": round(100 * v / total, 2)})
+    return pd.DataFrame(rows, columns=["Half", "Symbol", "Held_Shares", "Target_Shares", "Price", "Target_Value",
+                                       "Target_in_half_%", "Target_of_account_%"])
 
 def summary_text(info):
     v = info["values"]
-    t = (f"halves: {LABEL['lowvol']} ${v['lowvol']:,.0f} ({'rebalanced' if info['lowvol'] else 'held'}), "
-         f"{LABEL['sector']} ${v['sector']:,.0f} ({'rebalanced' if info['sector'] else 'held'})")
+    t = "halves: " + ", ".join(f"{LABEL[h]} ${v[h]:,.0f} ({'traded' if info['traded'][h] else 'held'})" for h in HALVES)
+    both = sorted(set(info["half_shares"][HALVES[0]]) & set(info["half_shares"][HALVES[1]]))
+    if both:
+        t += "; held by both halves: " + ", ".join(both)
     if info.get("init"):
         t += "; first run: each half starts at 50% of equity"
-    if info.get("transfers"):
-        t += "; moved without a trade: " + ", ".join(f"{s} {q:g} sh {a or 'unowned'} -> {b}" for s, a, b, q, _ in info["transfers"])
-    if info.get("unowned"):
-        t += "; sold (no half owns them): " + ", ".join(sorted(info["unowned"]))
+    gone = sorted(set(info.get("unowned") or {}) - set(info["half_shares"][HALVES[0]]) - set(info["half_shares"][HALVES[1]]))
+    if gone:
+        t += "; sold (no half wants them): " + ", ".join(gone)
     if abs(info.get("residual", 0.0)) >= 1:
         t += f"; ${info['residual']:,.2f} not explained by the ledger split pro rata"
     return t

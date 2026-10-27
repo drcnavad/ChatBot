@@ -38,9 +38,10 @@ MONTHLY = WINNER.get("calendar") == "monthly"                       # rebalance 
 STRATEGY_NAME = ("Low volatility in uptrend (monthly)" if LOW_VOL and MONTHLY else
                  "Low volatility in uptrend" if LOW_VOL else "C6 (relative strength)")
 SLEEVES = WINNER.get("sleeves")                                      # two halves (sleeves.py), else None
-if SLEEVES:
-    STRATEGY_NAME = (f"{SLEEVES['lowvol']:.0%} Low volatility in uptrend (monthly) + "
-                     f"{SLEEVES['sector']:.0%} Sector rotation (weekly)")
+HALVES = bool(WINNER.get("halves"))                                 # (Oct 27, 2026) RS short-term (weekly + Mon–Thu sells) + RS standard (Fridays only)
+if SLEEVES and HALVES:
+    STRATEGY_NAME = (f"{SLEEVES['rs_short']:.0%} RS short-term (weekly + Mon–Thu sells) + "
+                     f"{SLEEVES['friday']:.0%} RS standard (Fridays only)")
 REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day average"   # market filter off
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
@@ -49,45 +50,30 @@ try:                                                                 # Friday re
 except Exception:
     FRIDAY_SUB_MAX_RANK = 20
 
-def low_vol_rules_text():
-    """The monthly low-volatility rules (live from Fri Oct 16, 2026) in plain words."""
-    band = WINNER.get("rebalance_band")
-    per_sector = max(1, int(WINNER.get("sector_cap", 1.0) * N_PICKS))
+def halves_rules_text():
+    """The two live halves (from the 2:30 PM CT run of Tue Oct 27, 2026) in plain words."""
     return (f"**Strategy rules: {STRATEGY_NAME} ({STRATEGY_TAG})**\n"
-            "- **When:** a full rebalance on Fri Oct 16, 2026 (the switch), then on the last trading day of each month"
-            + (" (the low-volatility half; the sector half every Friday, from Fri Oct 23; Mondays Oct 19-22)" if SLEEVES else "") + ", with "
-            "the prices at about 2:30 PM CT (sells first, then buys from the cash free after the sells; any rest at 9 AM CT "
-            "the next trading day)"
-            + ". **Other days:** the 2:30 PM runs only refresh the data and place no orders (a month-end on Mon-Thu is still a "
-            "rebalance day).\n"
-            "- **Score:** 1 / 63-day volatility (calmest first), only stocks whose close is above their 200-day average; "
-            f"ties by relative strength. At least {MIN_BARS} trading days of prices.\n"
-            f"- **Picks:** the {N_PICKS} best, max {per_sector} per sector; do_not_buy stocks are never bought (the next "
-            "stock takes the slot). No earnings rule.\n"
-            f"- **Size:** equal weights, scaled to {LIVE_INVESTED:.0%} invested, each rounded down to 0.01%"
-            + ".\n"
-            + (f"- **Market filter:** with {REGIME_OFF} at a rebalance, every weight is {HALVED}.\n" if SCALE else "")
-            + (f"- **Rebalance:** every pick is brought back to its weight unless within {band * 100:g} point of it.\n" if band else "")
-            + ("- **Earnings-day stop:** off (no orders from earnings_stop.py).\n" if not WINNER.get("earnings_day_stop", True) else "")
-            + (f"- **Two halves:** the account is split {SLEEVES['lowvol']:.0%} / {SLEEVES['sector']:.0%}. The rules above run the "
-               "**low-volatility half** (weights are fractions of that half). The **sector-rotation half**: the 3 sector "
-               "ETFs with the best 63-day return, then the best stocks of those sectors by the C6 score (50% technical + "
-               f"50% relative strength), top {N_PICKS}, equal weights, max {max(1, int(0.4 * N_PICKS))} per sector, "
-               f"{HALVED} with {REGIME_OFF}, do_not_buy never bought; a full rebalance of that half every Friday 2:30 PM CT "
-               "(the week's last trading day: Thursday when Friday is a holiday; Mondays Oct 19-22, 2026). When the month's last "
-               "trading day is a Friday both halves rebalance that day, without overlap. **No overlap:** the sector half never buys a stock the low-volatility half "
-               "holds or targets; if the low-volatility half buys one the sector half holds, the shares move over at the "
-               "current price (no trade) and the sector half rebalances that day without it. Each half is sized from its "
-               "own value and keeps its own cash (Reports/sleeve_ledger.json); a half that is not rebalancing is left "
-               "alone. Holdings no half owns are sold at the next trade run.\n" if SLEEVES else "")
-            + "- **Orders:** limit orders at the live quote (buy at the ask + 0.05%, sell at the bid - 0.05%); the 9 AM CT "
-            "check the next trading day sends any rest. A missed rebalance is caught up at the next market session.\n")
+            f"- **Two halves:** the account is split {SLEEVES['rs_short']:.0%} / {SLEEVES['friday']:.0%}; each half is run "
+            "exactly like its forward-test strategy, sized from its own value with its own cash (Reports/sleeve_ledger.json).\n"
+            "- **RS short-term half** (\"RS short-term (weekly + Mon–Thu sells)\"): relative strength over 10, 21 and 63 trading days "
+            "(60% stock vs its sector ETF, 40% that ETF vs SPY); the top 10 plus the defensive stocks, equal weights, "
+            "99% invested; full rebalance every Friday 2:30 PM CT (Thursday when Friday is a holiday); Mon-Thu 2:30 PM a "
+            "holding worse than rank 20 is sold and replaced by the best top-10 stock not held.\n"
+            "- **RS Fridays half** (\"RS standard (Fridays only)\"): the same rules with the 21/63/126-day relative strength and "
+            "only the Friday rebalance (Mon-Thu nothing is sold or replaced).\n"
+            "- **Both:** no new buy with earnings within 5 days (a held stock is not topped up); with "
+            f"{REGIME_OFF} every weight is {HALVED}; do_not_buy never bought, do_not_sell never sold; a holding within 1 "
+            "point of its weight is not traded.\n"
+            "- **Same stock in both halves:** allowed - each half buys it from its own budget and the account holds the sum "
+            "(one order per stock).\n"
+            "- **Orders:** sells first, limit orders at the live quote (buy at the ask + 0.05%, sell at the bid - 0.05%); the "
+            "9 AM CT check the next trading day sends any rest.\n")
 
 def rules_text():
     """The live trading rules in plain words, in one place (numbers from backtest_engine.WINNER). The weekly C6 text is
     the non-low-volatility fallback (a switch back); the Mon-Thu rules are gone from the live code (Oct 16, 2026)."""
-    if LOW_VOL:
-        return low_vol_rules_text()
+    if SLEEVES and HALVES:
+        return halves_rules_text()
     band = WINNER.get("rebalance_band")
     return (f"**Strategy rules ({STRATEGY_TAG})**\n"
             "- **When:** decisions use the prices at about 2:30 PM CT, 30 min before the close (the pipeline starts at 2:30 PM CT "

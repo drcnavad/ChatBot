@@ -5,11 +5,11 @@
     python paper_trade.py --from-account                               # dry run with the live account (read only)
     python paper_trade.py --submit                                      # manual: DAY market orders, sells first
 
-Live rules (backtest_engine.WINNER['sleeves'], from Fri Oct 16, 2026): two halves planned by sleeves.py
-(plan_sleeve_orders) - 50% low volatility, rebalanced on the month's last trading day (targets = Provisional_Weight in
-Reports/strategy_picks.csv), 50% sector rotation, rebalanced every week's last session; any other session holds
-everything (no Mon-Thu trading). do_not_buy, manual sell blocks (manual_trade.py) and earnings-day stop sales
-(earnings_stop.py) are never bought. Without sleeves (WINNER['sleeves'] None) plan_orders brings the account to one target
+Live rules (backtest_engine.WINNER['sleeves'], from the 2:30 PM CT run of Tue Oct 27, 2026): two halves planned by
+sleeves.py (plan_sleeve_orders) - 50% forward_test's "RS short-term (weekly + Mon–Thu sells)" (Friday rebalance + Mon-Thu exit
+checks) and 50% "RS standard (Fridays only)" (Friday rebalance), each exactly as the forward test runs it; a stock both pick is held
+by both (one netted order per symbol). do_not_buy, manual sell blocks (manual_trade.py) and earnings-day stop sales
+(earnings_stop.py) are never bought; do_not_sell is never sold. Without sleeves (WINNER['sleeves'] None) plan_orders brings the account to one target
 list: current = Strategy_Weight, provisional = Provisional_Weight, auto = provisional on a rebalance day, else hold.
 auto_trade() (run_all.py --trade) checks the signal files are fresh, then sends sells first and whole-share limit orders at
 the live quote (extended-hours DAY limits after the close; regular-hours limits for a daytime catch-up); fractional rests
@@ -536,8 +536,8 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     decision) keeps every position unchanged."""
     import backtest_engine as be
     if be.WINNER.get("sleeves") and source in ("auto", "provisional"):
-        # Two halves (50% low volatility monthly + 50% sector rotation weekly, sleeves.py): each half is planned as its
-        # own account; replaces everything below.
+        # Two halves (50% RS short-term (weekly + Mon–Thu sells) + 50% RS standard (Fridays only), sleeves.py, from Oct 27, 2026): each half is planned
+        # as its own account; replaces everything below.
         return plan_sleeve_orders(source, account_size, positions, picks_csv, signal_csv, decision,
                                   live_prices, min_value, fractional)
     targets, meta = load_targets(source, picks_csv, decision=decision)
@@ -594,11 +594,10 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
 
 def plan_sleeve_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signal_csv=SIGNAL_CSV,
                        decision=None, live_prices=None, min_value=1.0, fractional=False):
-    """plan_orders with WINNER['sleeves'] (live from Fri Oct 16, 2026): on a decision session the low-volatility half
-    rebalances on its monthly days (its targets = Provisional_Weight, as fractions of the half, with the usual add/hold
-    statuses, fail closed) and the sector-rotation half every week's last session; a half that does not rebalance is left
-    alone; a session that is no decision holds everything. Returns (orders, meta, targets) like plan_orders;
-    meta['sleeves'] = sleeves.plan info, meta['sleeve_ledger'] = the ledger auto_trade saves after sending the orders;
+    """plan_orders with WINNER['sleeves'] (live from Tue Oct 27, 2026): the two halves (RS short-term + RS Fridays, sleeves.py)
+    each trade exactly as their forward-test line on this session, netted into one order per symbol.
+    Returns (orders, meta, targets) like plan_orders; meta['sleeves'] = sleeves.plan info, meta['sleeve_ledger'] = the
+    ledger auto_trade saves after sending the orders;
     targets = the account-level weights of both halves after the plan (display)."""
     import backtest_engine as be
     import sleeves
@@ -619,23 +618,14 @@ def plan_sleeve_orders(source, account_size, positions=None, picks_csv=PICKS_CSV
         px.update(current_prices(unpriced))
     if source == "auto" and not be.decision_kind(day):
         return build_hold_orders(positions, px), {**meta, "source": "hold"}, pd.DataFrame(columns=["Symbol", "Weight", "Price"])
-    lv_t, statuses = None, None
-    if sleeves.lowvol_day(day):
-        lv_t, lv_meta = load_targets("provisional" if source == "provisional" else "auto", picks_csv, decision=decision)
-        if not lv_meta["source"].startswith("provisional"):
-            raise ValueError(f"the low-volatility half rebalances on {day} but strategy_picks.csv has no rebalance for it "
-                             f"(last rebalance {last_reb}, data as of {as_of}) - no orders")
-        lv_t = lv_t.assign(Price=lv_t["Symbol"].map(live_prices).fillna(lv_t["Price"]))
-        import sector_mapping as sm                 # a stock removed from the stock list is never a target (sold if held)
-        lv_t = lv_t[lv_t["Symbol"].astype(str).str.upper().isin(set(sm.tradable_symbols))].reset_index(drop=True)
-        statuses = latest_signal_status(as_of=as_of)
+    # (Oct 27, 2026) the halves = forward_test's "RS short-term (weekly + Mon–Thu sells)" + "RS standard (Fridays only)" (sleeves.py): each half's targets
+    # come from forward_test.strategy_targets; one netted order per symbol; a stock both hold = both halves' shares.
     no_buy = {**manual_list("buy"), **earnings_stop_blocked(as_of)}
-    import holdings
     led = sleeves.load_ledger()
-    orders, info = sleeves.plan(day, positions, account_size, px, lv_targets=lv_t, lv_statuses=statuses, no_buy=no_buy,
-                                fractional=fractional, min_value=min_value, ledger=led,
-                                fills=holdings.fills_since((led or {}).get("cash_at")), pending=holdings.pending_symbols())
-    meta.update(source=("provisional" if info["lowvol"] else "sector") + "+sleeves", sleeves=info, sleeve_ledger=info["ledger"])
+    orders, info = sleeves.plan(day, positions, account_size, px, no_buy=no_buy, no_sell=manual_list("sell"),
+                                fractional=fractional, min_value=min_value, ledger=led)
+    orders = orders[ORDER_COLUMNS]
+    meta.update(source="halves+sleeves", sleeves=info, sleeve_ledger=info["ledger"])
     tab = sleeves.plan_table(info)
     tab = tab[pd.to_numeric(tab.get("Target_Shares"), errors="coerce").fillna(0) > 0] if len(tab) else tab
     targets = pd.DataFrame({"Symbol": tab.get("Symbol", []), "Weight": tab.get("Target_of_account_%", pd.Series(dtype=float)) / 100,

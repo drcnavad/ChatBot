@@ -1,6 +1,7 @@
-"""Strategy tab, Last decision: a line per half (stocks, value, next rebalance), then each half's top-20 ranking at its
-own latest rebalance (Reports/decision_ranks.csv, saved by the trade run), side by side, held stocks marked. Sleeve =
-the half that owns a stock in Reports/sleeve_ledger.json; weights from the live Alpaca positions."""
+"""Strategy tab, Last decision (the two live halves from Oct 27, 2026: "RS short-term (weekly + Mon–Thu sells)" + "RS standard (Fridays only)"): a line per
+half (stocks, value, next rebalance), each half's top-20 ranking at its latest decision (Reports/decision_ranks.csv, saved
+by the trade run) with held stocks marked, then the next decision preview from the latest close. A stock both halves hold
+is marked "Both". Weights from the live Alpaca positions; the ledger is never written here."""
 import os
 
 import pandas as pd
@@ -9,272 +10,205 @@ import streamlit as st
 from dashboard.page import open_symbol
 from dashboard.style import GOOD, INK, SCORE, table, toned
 
-SLEEVE = {"lowvol": "Low vol", "sector": "Sector rotation"}
-@st.cache_data(ttl=60, show_spinner=False)
-def _fills_since(after):
-    import holdings
-    return holdings.fills_since(after)
-
-def half_values(positions, ledger, equity):
-    """{half: $ value} reconciled like the bot at trade time (sleeves.reconcile: the ledger's cash moved by the real fills
-    since its cash_at, the rest split pro rata) - read-only, the ledger is never written."""
-    import holdings
+def _sleeves():
     import sleeves
+    return sleeves
+
+SLEEVE = {"rs_short": "RS short-term", "friday": "RS Fridays"}
+
+def _state(positions, ledger, equity):
+    """(reconciled state {half: {'shares', 'cash'}}, prices, market values) like the bot at trade time (read-only)."""
+    sl = _sleeves()
     qty = {p["symbol"]: float(p.get("qty") or 0) for p in positions or []}
     px = {p["symbol"]: float(p.get("current_price") or 0) for p in positions or []}
-    state, _, _ = sleeves.reconcile(ledger, qty, px, equity, fills=_fills_since(ledger.get("cash_at")),
-                                    pending=holdings.pending_symbols())
-    return {h: sleeves.half_value(state[h], px) for h in state}
+    value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
+    state, _, _ = sl.reconcile(ledger, qty, px, equity)
+    return state, px, value
+
+def half_values(positions, ledger, equity):
+    """{half: $ value} reconciled like the bot (sleeves.reconcile)."""
+    sl = _sleeves()
+    state, px, _ = _state(positions, ledger, equity)
+    return {h: sl.half_value(state[h], px) for h in state}
+
+def _mine(positions, ledger, equity):
+    state, _, value = _state(positions, ledger, equity)
+    return {h: sorted(s for s, q in state[h]["shares"].items() if q > 0 and s in value) for h in state}
+
+def _next_full(after):
+    sl = _sleeves()
+    cal = sl.calendar(pd.Timestamp(after) + pd.Timedelta(days=1), 15)
+    return cal[0][0] if cal else None
 
 def sleeve_summary(day, positions, ledger, equity):
-    """One line per half: its live positions (by tag) + its cash, share of the account, next rebalance; a queued buy is
-    'Pending order', never a holding."""
-    import holdings
-    import sleeves
-    value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
-    pend = holdings.pending_symbols()
-    cal = sleeves.calendar(pd.Timestamp(day) + pd.Timedelta(days=1), 45)
-    halves = half_values(positions, ledger, equity)
+    """One line per half: its stocks, value, share of the account, next full rebalance."""
+    sl = _sleeves()
+    vals, mine, nxt = half_values(positions, ledger, equity), _mine(positions, ledger, equity), _next_full(day)
     out = []
-    for h, label in SLEEVE.items():
-        syms = [s for s, o in sleeves.owners(ledger).items() if o == h and s in value]
-        v = halves[h]
-        waiting = sorted(s for s, o in pend.items() if (o or sleeves.owners(ledger).get(s)) == h and s not in value)
-        nxt = next((d for d, hs in cal if h in hs), None)
-        out.append(f"**{sleeves.LABEL[h]}**: {len(syms)} stocks · ${v:,.0f}"
+    for h in sl.HALVES:
+        v = vals[h]
+        out.append(f"**{sl.LABEL[h]}**: {len(mine[h])} stocks · ${v:,.0f}"
                    + (f" ({100 * v / equity:.1f}% of the account)" if equity else "")
-                   + (f" · next rebalance {nxt:%a %b %-d}" if nxt is not None else "")
-                   + (f" · Pending order: {', '.join(waiting)}" if waiting else ""))
+                   + (f" · next full rebalance {nxt:%a %b %-d}" if nxt is not None else "")
+                   + (" · Mon-Thu: exit check (worse than rank 20)" if h == "rs_short" else ""))
+    both = sorted(set(mine["rs_short"]) & set(mine["friday"]))
+    if both:
+        out.append("Held by both halves (each from its own budget): " + ", ".join(both))
     return out
 
 def half_decision_day(half, path=None):
-    """The latest day in Reports/decision_ranks.csv on which `half` rebalanced (sleeves.lowvol_day / sector_day)."""
+    """The latest day in Reports/decision_ranks.csv on which `half` decided (rs_short every session, friday on Fridays)."""
     import decision_ranks
-    import sleeves
+    sl = _sleeves()
     path = path or decision_ranks.RANKS_CSV
-    if not os.path.exists(path):
-        return None
     from dashboard.data import read_report_csv
-    days = sorted({str(d)[:10] for d in read_report_csv(path)["Date"]}, reverse=True)
-    test = sleeves.lowvol_day if half == "lowvol" else sleeves.sector_day
-    return next((pd.Timestamp(d) for d in days if test(d)), None)
+    try:
+        r = read_report_csv(path)
+    except Exception:
+        return None
+    if r is None or "Date" not in r or decision_ranks.RANK_COL[half] not in r.columns:
+        return None
+    days = sorted({str(d)[:10] for d in r["Date"]}, reverse=True)
+    return next((pd.Timestamp(d) for d in days if sl.half_day(half, d)), None)
 
-def ranking_table(half, day, positions, ledger, top=20, path=None, values=None):
-    """(table, others): Rank, Stock, Sector, Score, Held by, Weight in half % for the half's top `top` ranks at its
-    decision `day`; others = the stocks the half holds outside that top. Score = Strategy_Score (low vol) / the sector-rotation score (sector)."""
+def _scores(half, day):
+    sl = _sleeves()
+    try:
+        s = sl.ranking(half, day)
+    except Exception:
+        return {}
+    return s.to_dict()
+
+def ranking_table(half, day, positions, ledger, top=20, path=None, values=None, equity=None):
+    """(table, others): Rank, Stock, Sector, Score, Held by for the half's top `top` ranks at `day`; others = the stocks
+    the half holds outside that top."""
     import decision_ranks
-    import sleeves
     from dashboard.settings import symbol_sector
-    col = "Rank_Vol" if half == "lowvol" else "Rank_Sector"
+    col = decision_ranks.RANK_COL[half]
     r = decision_ranks.ranks_on(day)[1] if path == "__live__" else decision_ranks.load(day, path=path)
     r = r.dropna(subset=[col]).sort_values(col) if r is not None else pd.DataFrame(columns=["Symbol", col])
-    owner = sleeves.owners(ledger)
-    value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
-    mine = [x for x, h in owner.items() if h == half and x in value]
-    half_v = (values or {}).get(half) or sum(value[x] for x in mine) + float(ledger["halves"][half].get("cash", 0.0))
+    eq = equity if equity is not None else sum(float(p.get("market_value") or 0) for p in positions or [])
+    mine = _mine(positions, ledger, eq)
     score = _scores(half, day)
     r = r[r[col] <= top]
-    others = sorted(set(mine) - set(r["Symbol"]))                 # held by the half, not in its top `top` that day
-    held = lambda x: ("✓ " + SLEEVE[owner[x]]) if x in value and owner.get(x) in SLEEVE else ("✓ (untagged)" if x in value else "")
+    others = sorted(set(mine[half]) - set(r["Symbol"]))
+    def held(x):
+        hs = [h for h in mine if x in mine[h]]
+        return "✓ Both" if len(hs) == 2 else ("✓ " + SLEEVE[hs[0]]) if hs else ""
     t = pd.DataFrame({"Rank": pd.array(pd.to_numeric(r[col], errors="coerce").round(), dtype="Int64"), "Stock": r["Symbol"].to_numpy(),
-                         "Sector": [symbol_sector.get(x, "—") for x in r["Symbol"]],
-                         "Score": [round(float(score.get(x)), 1) if pd.notna(score.get(x)) else None for x in r["Symbol"]],
-                         "Held by": [held(x) for x in r["Symbol"]],
-                         "Weight in half %": [round(100 * value[x] / half_v, 1) if owner.get(x) == half and x in value
-                                              and half_v else None for x in r["Symbol"]]})
+                      "Sector": [symbol_sector.get(x, "—") for x in r["Symbol"]],
+                      "Score": [round(float(score.get(x)), 2) if score.get(x) is not None and pd.notna(score.get(x)) else None
+                                for x in r["Symbol"]],
+                      "Held by": [held(x) for x in r["Symbol"]]})
     return t, others
 
-@st.fragment(run_every=30)      # half values / held marks follow the live account
+@st.fragment(run_every=30)
 def render_last_decision(p):
-    """Strategy tab: per-half summary, then each half's ranking at its own latest rebalance, side by side (held stocks
-    marked). Click a row to open the stock."""
+    """Strategy tab: per-half summary, each half's ranking at its latest decision, then the next decision preview."""
     from dashboard.page import fresh
     p = fresh(p)
-    import sleeves
+    sl = _sleeves()
     from dashboard.details.live_holdings import holdings_this_run
-    led = sleeves.load_ledger()
-    if led is None:
-        st.info("No trade run yet (Reports/sleeve_ledger.json is written by the first one).")
-        return
+    led = sl.load_ledger()
     data, err = holdings_this_run()
-    if data is None:                        # Alpaca not readable: nothing is assumed held
+    if data is None:
         st.info(f"Last decision: {err} (live positions are the only holdings source)")
         return
     positions, equity = data["positions"], data["equity"]
-    for line in sleeve_summary(pd.Timestamp(led["day"]), positions, led, equity):
-        st.markdown(line)
-    cols = st.columns(2)
-    for c, half in zip(cols, ("sector", "lowvol")):
-        with c:
-            day = half_decision_day(half)
-            if day is None:
-                st.info(f"{sleeves.LABEL[half]}: no saved rebalance ranks yet.")
-                continue
-            st.markdown(f"**{sleeves.LABEL[half]}** · ranks at its rebalance of {day:%a %b %-d}")
-            t, others = ranking_table(half, day, positions, led, values=half_values(positions, led, equity))
-            t = t.drop(columns=["Weight in half %"])           # equal weights: no weight columns shown (Oct 21, 2026)
-            sty = toned(t, ["Held by"], fn=lambda v: GOOD if str(v).startswith("✓") else INK)
-            event = table(sty, fit=True, cols={"Score": SCORE}, on_select="rerun", selection_mode="single-row",
-                          key=f"rank_tbl_{half}")
-            if others:
-                st.caption(f"Held, not in top 20: {', '.join(others)}")
-            t = t.rename(columns={"Stock": "Symbol"})
-            open_symbol(t, event, f"rank_{half}")
-    st.markdown("##### Next rebalance preview · based on yesterday's close")
+    if led is None:
+        st.info("The two halves (RS short-term (weekly + Mon–Thu sells) + RS standard (Fridays only)) start at the first trade run from Tue Oct 27, 2026 "
+                "2:30 PM CT (Reports/sleeve_ledger.json is written then).")
+    else:
+        for line in sleeve_summary(pd.Timestamp(led["day"]), positions, led, equity):
+            st.markdown(line)
+        cols = st.columns(2)
+        for c, half in zip(cols, sl.HALVES):
+            with c:
+                day = half_decision_day(half)
+                if day is None:
+                    st.info(f"{sl.LABEL[half]}: no saved decision ranks yet.")
+                    continue
+                st.markdown(f"**{sl.LABEL[half]}** · ranks at its decision of {day:%a %b %-d}")
+                t, others = ranking_table(half, day, positions, led, equity=equity)
+                sty = toned(t, ["Held by"], fn=lambda v: GOOD if str(v).startswith("✓") else INK)
+                event = table(sty, fit=True, cols={"Score": SCORE}, on_select="rerun", selection_mode="single-row",
+                              key=f"rank_tbl_{half}")
+                if others:
+                    st.caption(f"Held, not in top 20: {', '.join(others)}")
+                open_symbol(t.rename(columns={"Stock": "Symbol"}), event, f"rank_{half}")
+    st.markdown("##### Next decision preview · based on the latest close")
     render_preview(positions, led, equity)
 
-# ---------------------------------------------------------------- next rebalance preview (read-only, no orders)
+# ---------------------------------------------------------------- next decision preview (read-only, no orders)
 @st.cache_data(ttl=600, show_spinner=False)
-def _preview_targets(day, lv_held, sec_held):
-    """{half: {symbol: target weight in the half}} at the close `day`, by the bot's own selection: the sector half =
-    sleeves.sector_weights (the low-vol half's names excluded, as in sleeves.plan); the low-vol half = the pipeline's
-    Provisional_Weight in strategy_picks.csv when it holds n (5) names, else the same low_vol ranking (top n, max per
-    sector); a manually blocked stock is skipped for the next in line (the leftover-cash rule). Stock list only."""
-    import paper_trade as pt
-    import sector_mapping as sm
-    import sleeves
-    blocked = set(pt.manual_list("buy"))              # (Oct 21) a blocked stock's slot goes to the next in line, as the
-    w = sleeves.sector_weights(day, exclude=set(lv_held) | blocked, held=dict(sec_held))   # leftover-cash buy / forward test
-    from dashboard.data import read_report_csv
-    picks = read_report_csv(pt.PICKS_CSV)
-    import backtest_engine as be
-    p = picks[pd.to_numeric(picks["Provisional_Weight"], errors="coerce").fillna(0) > 0]
-    n, cap, per, lv = be.WINNER["n"], be.winner_max_per_sector(), {}, []
-    sw = {s: float(x) for s, x in w.items() if x > 0}
-    if len(p) == n:                                     # the pipeline already wrote the top-n targets
-        return {"sector": sw, "lowvol": {str(s).upper(): float(x) for s, x in zip(p["Symbol"], p["Provisional_Weight"])
-                                          if str(s).upper() in set(sm.tradable_symbols) and str(s).upper() not in blocked}}
-    inp = sleeves.sector_inputs()                       # else (Oct 21, until its next run): the same low_vol ranking,
-    d = pd.Timestamp(day) if pd.Timestamp(day) in inp["close"].index else inp["close"].index[-1]   # top n, max per sector
-    sc = inp["scores"]["low_vol"].loc[d].where(inp["eligible"].loc[d])
-    for s in sc[sc > 0].sort_values(ascending=False, kind="stable").index:
-        sec = sm.symbol_sector.get(s, "Other")
-        if s in set(sm.tradable_symbols) and s not in set(sm.do_not_buy) | blocked and len(lv) < n and per.get(sec, 0) < cap:
-            lv.append(s)
-            per[sec] = per.get(sec, 0) + 1
-    return {"sector": sw, "lowvol": {s: 0.99 / n for s in lv}}   # equal weight, 99% invested
-
-def _scores(half, day):
-    """{symbol: score} at close `day`: Strategy_Score (low vol) / the sector-rotation score (sector)."""
-    import sleeves
-    if half == "lowvol":
-        from dashboard.data import signals
-        sig = signals()
-        return sig[sig["Date"] == day].drop_duplicates("Symbol").set_index("Symbol")["Strategy_Score"].to_dict()
-    return sleeves.sector_inputs()["scores"]["sector_rot"].loc[day].dropna().to_dict()
-
-def sell_table(half, day, sells, value, half_v, ranks, targets):
-    """Stock, Sector, Rank, Score, Weight in half %, Reason for each holding the half would sell at its next rebalance."""
-    import sector_mapping as sm
-    from dashboard.settings import symbol_sector
-    col = "Rank_Vol" if half == "lowvol" else "Rank_Sector"
-    score = _scores(half, day)
-    other = "lowvol" if half == "sector" else "sector"
-    def reason(x, rk, sc):
-        if x not in set(sm.tradable_symbols):
-            return "Removed from the stock list"
-        if half == "lowvol" and sc is not None and pd.notna(sc) and sc < 0:
-            return "Below its 200-day average"
-        why = ("Sector not in the top 3" if half == "sector" else "Not ranked") if pd.isna(rk) else "Out of the top picks"
-        return why + (f" ({SLEEVE[other]} targets it at its rebalance)" if x in targets[other] else "")
-    rows = []
-    for x in sells:
-        rk = ranks[col].get(x, pd.NA) if col in ranks else pd.NA
-        sc = score.get(x)
-        rows.append({"Stock": x, "Sector": symbol_sector.get(x, "—"), "Rank": rk,
-                     "Score": round(float(sc), 1) if sc is not None and pd.notna(sc) else None,
-                     "Weight in half %": round(100 * value.get(x, 0.0) / half_v, 1) if half_v else None,
-                     "Reason": reason(x, rk, sc)})
-    t = pd.DataFrame(rows, columns=["Stock", "Sector", "Rank", "Score", "Weight in half %", "Reason"])
-    t["Rank"] = pd.array(pd.to_numeric(t["Rank"], errors="coerce"), dtype="Int64")
-    return t
+def _preview_targets(day):
+    """{half: {symbol: target weight in the half}} at the close `day` = sleeves.half_weights (the forward test's own
+    targets; manual buy blocks shown as Blocked)."""
+    sl = _sleeves()
+    return {h: {s: float(w) for s, w in sl.half_weights(h, day).items() if w > 0} for h in sl.HALVES}
 
 def next_plan():
-    """The Next rebalance preview for the whole page (Oct 21, 2026), or None when Alpaca / the ledger cannot be read:
-    {"asof", "days": {half: next rebalance}, "targets": {half: {sym: weight in half}}, "plan": {sym: (action, % of
-    account, day)}} - action Keep / Buy / Take over / Sell. Same cached _preview_targets. Display only."""
-    import decision_ranks
-    import sleeves
+    """{"asof", "days": {half: next decision}, "targets", "plan": {sym: (action, % of account, day)}} or None.
+    Action: Keep / Buy / Sell / Blocked (both halves' weights summed). Display only."""
+    import paper_trade as pt
+    sl = _sleeves()
     from dashboard.details.live_holdings import holdings_this_run
     try:
-        led = sleeves.load_ledger()
+        led = sl.load_ledger()
         data, _ = holdings_this_run()
-        if led is None or data is None:
+        if data is None:
             return None
         positions, equity = data["positions"], data["equity"]
-        asof, _ = decision_ranks.ranks_on()
-        value, mine, vals, sec_held = _half_state(positions, led, equity)
-        t = _preview_targets(asof, tuple(sorted(mine["lowvol"])), sec_held)
-        cal = _calendar()
+        asof = sl.inputs()["close"].index[-1]
+        t = _preview_targets(asof)
+        vals = half_values(positions, led, equity)
+        value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
     except Exception:
         return None
-    days = {h: next((d for d, hs in cal if h in hs), None) for h in SLEEVE}
+    import backtest_engine as be
+    nxt = be.next_sessions(pd.Timestamp.now().normalize() - pd.Timedelta(days=1), 1)[0]
+    full = _next_full(pd.Timestamp.now().normalize() - pd.Timedelta(days=1))
+    days = {"rs_short": nxt, "friday": full}
     tot = sum(vals.values()) or 1.0
+    blocked = set(pt.manual_list("buy"))
     plan = {}
-    for h in ("sector", "lowvol"):                      # the low-vol half last: it takes over what it targets
-        other = "lowvol" if h == "sector" else "sector"
+    for h in sl.HALVES:
         for s, w in t[h].items():
-            act = "Keep" if s in mine[h] else "Take over" if s in mine[other] else "Buy"
-            plan[s] = (act, 100 * w * vals[h] / tot, days[h])
-    for h in SLEEVE:
-        for s in mine[h]:
-            plan.setdefault(s, ("Sell", 0.0, days[h]))
-    import paper_trade as pt
-    for s in pt.manual_list("buy"):
-        plan.setdefault(s, ("Blocked", 0.0, min(d for d in days.values() if d is not None)))
+            a, pct, d = plan.get(s, ("Keep" if s in value else "Buy", 0.0, days[h]))
+            plan[s] = (a, pct + 100 * w * vals[h] / tot, min(d, days[h]) if d is not None and days[h] is not None else d)
+    for s in value:
+        plan.setdefault(s, ("Sell", 0.0, nxt))
+    for s in blocked:
+        if s in plan and plan[s][0] == "Buy":
+            plan[s] = ("Blocked", 0.0, plan[s][2])
     return {"asof": asof, "days": days, "targets": t, "plan": plan}
 
-def _half_state(positions, led, equity):
-    """(value by symbol, {half: its held symbols}, half values, sector half's (symbol, weight) holdings)."""
-    import sleeves
-    owner = sleeves.owners(led)
-    value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
-    mine = {h: [x for x, o in owner.items() if o == h and x in value] for h in SLEEVE}
-    vals = half_values(positions, led, equity)
-    vs = vals["sector"]
-    return value, mine, vals, tuple(sorted((x, value[x] / vs) for x in mine["sector"])) if vs else ()
-
-def _calendar():
-    """The next 45 days' rebalance calendar [(day, halves)] from tomorrow."""
-    import sleeves
-    return sleeves.calendar(pd.Timestamp.now().normalize() + pd.Timedelta(days=1), 45)
-
 def render_preview(positions, led, equity):
-    """Next rebalance preview: each half's top 20 at the latest close with Keep / Buy / Blocked, and what it would sell."""
+    """Each half's top 20 at the latest close with its plan (Keep / Buy / Blocked) and what it would sell."""
     import decision_ranks
     import paper_trade as pt
-    import sleeves
-    day, _ = decision_ranks.ranks_on()
-    value, mine, vals, sec_held = _half_state(positions, led, equity)
+    sl = _sleeves()
     try:
-        targets = _preview_targets(day, tuple(sorted(mine["lowvol"])), sec_held)
+        day = sl.inputs()["close"].index[-1]
+        targets = _preview_targets(day)
     except Exception as e:
-        st.info(f"Next rebalance preview unavailable: {str(e)[:150]}")
+        st.info(f"Next decision preview unavailable: {str(e)[:150]}")
         return
     blocked = set(pt.manual_list("buy"))
-    ranks = decision_ranks.ranks_on(day)[1].set_index("Symbol")
-    cal = _calendar()
+    mine = _mine(positions, led, equity) if led is not None else {h: [] for h in sl.HALVES}
     cols = st.columns(2)
-    for c, half in zip(cols, ("sector", "lowvol")):
+    for c, half in zip(cols, sl.HALVES):
         with c:
-            nxt = next((d for d, hs in cal if half in hs), None)
-            st.markdown(f"**{sleeves.LABEL[half]}** · next rebalance {nxt:%a %b %-d}" if nxt is not None
-                        else f"**{sleeves.LABEL[half]}**")
-            t, _ = ranking_table(half, day, positions, led, path="__live__", values=vals)
+            st.markdown(f"**{sl.LABEL[half]}** · targets at the {day:%a %b %-d} close"
+                        + (" (Mon-Thu only the exit check trades)" if half == "rs_short" else " (traded on Fridays)"))
+            t, _ = ranking_table(half, day, positions, led, path="__live__", equity=equity)
             tg = targets[half]
-            other = "lowvol" if half == "sector" else "sector"
-            plan = lambda s: "Blocked" if s in blocked else ("Keep" if s in mine[half] else
-                              f"Take over from {SLEEVE[other]}" if s in mine[other] else "Buy") if s in tg else ""
+            plan = lambda s: ("Blocked" if s in blocked else "Keep" if s in mine[half] else "Buy") if s in tg else ""
             t.insert(1, "Plan", [plan(s) for s in t["Stock"]])
-            t = t.drop(columns=["Weight in half %"])           # equal weights: no weight columns shown
-            sty = toned(t, ["Plan"], fn=lambda v: GOOD if v == "Buy" else INK)
-            table(sty, fit=True, cols={"Score": SCORE}, key=f"preview_{half}")
-            buys_out = sorted(set(tg) - set(t["Stock"]) - set(mine[half]) - blocked)
-            sells = sell_table(half, day, sorted(set(mine[half]) - set(tg)), value, vals[half], ranks, targets)
-            if len(sells):
-                sells = sells.drop(columns=["Weight in half %"])
-            st.markdown("Would sell" + ("" if len(sells) else ": nothing"))
-            if len(sells):
-                table(sells, cols={"Score": SCORE}, key=f"preview_sell_{half}")
-            if buys_out:
-                st.caption(f"Would also buy (ranked below 20): {', '.join(buys_out)}")
+            table(toned(t, ["Plan"], fn=lambda v: GOOD if v == "Buy" else INK), fit=True, cols={"Score": SCORE},
+                  key=f"preview_{half}")
+            extra = sorted(set(tg) - set(t["Stock"]))
+            if extra:
+                st.caption(f"Also targeted (outside the top 20 / defensive stocks): {', '.join(extra)}")
+            sells = sorted(set(mine[half]) - set(tg))
+            st.markdown("Would sell: " + (", ".join(sells) if sells else "nothing"))

@@ -203,7 +203,7 @@ def render_curve(board, values):
 
 HIGHLIGHT_BG = "background-color: #e2e8f0; font-weight: 700"   # subtle slate on the white table
 
-CURRENT = "Current Strategy (Live from Oct End)"   # display name of the live strategy's row (forward_test.LIVE stays its id)
+CURRENT = "Live: RS short-term + RS Fridays"   # display name of the live strategy's row (forward_test.LIVE stays its id)
 
 def tidy_board(board, start):
     """Leaderboard for display: short column names (Total since <start>, Last EOD, Max drawdown, Wk 1..), integer Rank
@@ -243,11 +243,17 @@ def rule_of(name):
     g = ft.GROUP_OF.get(name.replace(ft.LIVE_MARK, ""))
     return ft.GROUP_LABEL.get(g, g) if g else "Benchmark"
 
+def live_components():
+    """The forward-test lines the live strategy is built from (backtest_engine.WINNER['sleeves'] -> sleeves.STRATEGY)."""
+    import backtest_engine as be
+    import sleeves
+    return tuple(sleeves.STRATEGY[h] for h in (be.WINNER.get("sleeves") or {}) if h in sleeves.STRATEGY)
+
 def highlight_rows(sty):
-    """Darker rows: your Alpaca account, the current (live) strategy, Low volatility in uptrend, Sector rotation."""
+    """Darker rows: your Alpaca account, the current (live) strategy and the lines its halves are (live_components)."""
     import forward_test as ft
-    keys = ("My Alpaca account", "Low volatility in uptrend", "Sector rotation")
-    on = lambda name: str(name).startswith(ft.LIVE) or str(name) in (*keys, CURRENT)
+    keys = ("My Alpaca account", CURRENT, *live_components())
+    on = lambda name: str(name).startswith(ft.LIVE) or str(name).replace(ft.LIVE_MARK, "") in keys
     return sty.apply(lambda r: [HIGHLIGHT_BG if on(r["Strategy"]) else ""] * len(r), axis=1)
 
 

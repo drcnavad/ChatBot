@@ -10,20 +10,18 @@ Keys live in `.env` (`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY`, never prin
 > `STOCK_ANALYSIS_LIVE_HOLDINGS=off` and temp paths for every state file). Read-only checks are fine:
 > `paper_trade.py --from-account` (dry run), `trade_audit.py`.
 
-## Live strategy (`backtest_engine.WINNER`, from Fri Oct 16, 2026)
-Two independent halves, each with its own cash, tracked in `Reports/sleeve_ledger.json` (`sleeves.py`); no stock in both:
-**Top 5 per half from Oct 21, 2026** (`WINNER['n'] = 5`; first used at the sector half's Fri Oct 23 and the low-vol
-half's Fri Oct 30 rebalance; 10 per half before; forward row "Current Strategy (Live from Oct End)").
-- **50% Low volatility in uptrend (monthly):** the 5 calmest stocks (1 / 63-day volatility) whose close is above the
-  200-day average, equal weight, max 2 per sector; rebalanced on the **last trading day of the month**
-  (targets = `Provisional_Weight` in `Reports/strategy_picks.csv`). QQQ below its 200-day average: weights halved.
-- **50% Sector rotation (weekly):** top 5 by C6 score (equal weight, 20% of the half each, max 2 per sector) in the 3 sectors with the best 63-day ETF return (not held by
-  the low-vol half), rebalanced **every Friday** at 2:30 PM CT (the week's last session: Thursday when Friday is a
-  holiday; `WINNER['sector_day'] = "friday"`, `backtest_engine.is_sector_day`). Fridays until Oct 16, 2026, Mondays
-  Oct 19-22, Fridays again from Oct 23 (Chirag, Oct 21). When the month's last trading day is a Friday (e.g. Oct 30),
-  both halves rebalance that day without overlap.
-- Decisions use the ~2:30 PM CT bar. A session that is no decision **holds everything** (no Mon-Thu trading, no Friday
-  falling check, no earnings rule). A holding within 1 point of its target is not traded. A position in no half of the
+## Live strategy (`backtest_engine.WINNER`, from the 2:30 PM CT run of Tue Oct 27, 2026)
+"Live: RS short-term + RS Fridays": two independent 50% halves, each with its own cash and share counts in
+`Reports/sleeve_ledger.json` (v3, `sleeves.py`), each run exactly as its `forward_test.py` line:
+- **50% RS short-term (weekly + Mon–Thu sells):** relative strength over 10/21/63 days, top 10 + the defensive stocks,
+  equal weight, 99% invested; full rebalance every Friday 2:30 PM CT (Thursday on a holiday); Mon-Thu 2:30 PM a holding
+  worse than rank 20 is sold and refilled from the top 10.
+- **50% RS standard (Fridays only):** the same with 21/63/126-day relative strength and only the Friday rebalance.
+- Both: no new buy with earnings within 5 days; QQQ below its 200-day average: weights halved. A stock both halves pick
+  is bought by each from its own budget (one combined position, one netted order).
+- Oct 16-26, 2026 the live rules were 50% low volatility (monthly) + 50% sector rotation (weekly); that history is the
+  forward line "Old live: Low vol + Sector rotation (Oct 16-26)".
+- Decisions use the ~2:30 PM CT bar (every session: Friday = both halves, Mon-Thu = the RS short-term exit check). A holding within 1 point of its target is not traded. A position in no half of the
   ledger is sold at the next trade run.
 - Never bought: `sector_mapping.do_not_buy`, manual sell blocks (`Reports/manual_block.json`), stocks sold by the
   earnings-day stop. Never sold: `sector_mapping.do_not_sell`. `earnings_stop.py` is loaded but places no orders
@@ -35,18 +33,14 @@ half's Fri Oct 30 rebalance; 10 per half before; forward row "Current Strategy (
 
 **Holdings: one source** (Chirag, Oct 19, 2026): live Alpaca positions, read only through `holdings.py`
 (`get_positions()`, 60 s cache; order code reads fresh through its trading client). Nothing is recorded as owned before a
-fill. `Reports/sleeve_ledger.json` keeps per half only the symbols' tags (which half a held stock belongs to) and the
-half's cash at `cash_at`; each run a half = the live shares of its tags + its cash moved by the real Alpaca fills since
-then (an unfilled buy costs nothing). A queued buy (`Reports/live_pending_orders.json`) shows as "Pending order", never as a
-holding; a tag goes once its stock is neither held nor queued. There is no `my_positions.csv` any more.
-
-**Leftover sleeve cash** (Oct 19): after a rebalance, a half's cash of at least max($500, 2% of the half) (e.g. a target
-blocked by a manual block) is queued for the 9 AM CT fill check as a buy of that half's next-in-line stock, limit never
-above the ask (`manual_trade.queue_leftover_cash`, called by the trade run; never doubled).
+fill. `Reports/sleeve_ledger.json` (v3) keeps per half its share count per symbol and its cash; each run splits every live
+position between the halves pro rata to those shares and splits whatever the ledger does not explain (fills vs plan,
+dividends) by value. A queued buy (`Reports/live_pending_orders.json`) shows as "Pending order", never as a
+holding. There is no `my_positions.csv` any more.
 
 **Removing a stock** (Oct 19, 2026): comment it out of `stock_symbols` in `sector_mapping.py`. It leaves the rankings,
 the dashboard lists and the forward test at once. If the account still holds it, nothing special happens until its half
-rebalances (sector = Fridays 2:30 PM CT, low volatility = last trading day of the month): it is no target there (both
+rebalances (Fridays 2:30 PM CT): it is no target there (both
 halves keep only `tradable_symbols`), so it is sold and never rebought. Until then it stays in `Reports/sleeve_ledger.json`
 (not an orphan) and is priced from Alpaca market data. No cleanup is needed after the sell. Removed Oct 19: PG
 (sector, sells Fri Oct 23), EMR and PFE (low vol, sell Fri Oct 30), plus ECL, SHW, NUE, URI, SHOP, PEP, VMC, CRCL, ETN (not held).
@@ -55,7 +49,7 @@ halves keep only `tradable_symbols`), so it is sold and never rebought. Until th
 | Job | When | What | Trades? |
 |---|---|---|---|
 | `com.stockanalysis.support` | Mon 1:00, Tue 1:07, Wed 1:14, Thu 1:21, Fri 1:28 PM | `run_all.py --support --scheduled`: company reports, news sentiment, earnings dates (quota APIs) | no |
-| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled` → `run_all.py`: 2:30 PM signals + decision + orders on decision days (Fridays, Thursday on a holiday: sector half; month's last trading day: low-vol half); from 3:05 PM the after-close step (`run_all.daily_step`: signal refresh, `forward_test.py --record`, `manual_trade.py update-blocks`). Never 4:05-4:30 PM. | **yes** (2:30 PM) |
+| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled` → `run_all.py`: 2:30 PM signals + decision + orders every session (Friday: both halves' full rebalance; Mon-Thu: RS short-term rank-20 exit check); from 3:05 PM the after-close step (`run_all.daily_step`: signal refresh, `forward_test.py --record`, `manual_trade.py update-blocks`). Never 4:05-4:30 PM. | **yes** (2:30 PM) |
 | `com.stockanalysis.morning` | Mon-Fri 9:00 AM | `pipeline_watchdog.py --fill-check --scheduled`: sends the pending rests | **yes** |
 | `com.stockanalysis.tradeaudit` | Mon-Fri every 30 min 8:30 AM-3:00 PM + 3:45 PM | `refresh_dashboard_data.sh`: `trade_audit.py --write --log` (ledger, round trips, alerts) | no (GET only) |
 | `com.stockanalysis.earningsstop` | every 5 min + at login | `earnings_stop.py --loop` (no-op while the stop is off) | no (off) |

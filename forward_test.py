@@ -54,13 +54,16 @@ BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of it
 WEEKS_TO_WIN = 12
 MON5 = "Live 50/50, top 5, sector on Mondays"   # Oct 21: the top-5 rules with the sector half on Mondays (live Oct 21 morning)
 MON = "Live 50/50, top 10 each half"    # the live rules Oct 19-25 (sector half on Mondays, 10 stocks per half)
-TOP5 = "Current Strategy (Live from Oct End)"   # = the current live rules (Chirag, Oct 21, 2026: 5 per half from Fri Oct 23 / Fri Oct 30)
-MARKED = TOP5
-LIVE = TOP5         # the line the verdict and the dashboard compare against
+TOP5 = "Old live: Low vol + Sector rotation (Oct 16-26)"   # the live rules Oct 21-26, 2026 (was "Current Strategy (Live from Oct End)")
+# (Chirag, Oct 26, 2026, final) the live rules from the 2:30 PM CT run of Tue Oct 27: 50% "RS short-term (weekly + Mon–Thu sells) (10/21/63 days)" + 50% "RS standard (Fridays only)", two independent halves (sleeves.py) = the average of the two lines from Oct 2
+NOW_HALVES = ("RS short-term (weekly + Mon–Thu sells)", "RS standard (Fridays only)")
+LIVE_NOW = "Live: RS short-term + RS Fridays"
+MARKED = LIVE_NOW
+LIVE = LIVE_NOW     # the line the verdict and the dashboard compare against
 # Removed Oct 20, 2026 (Chirag): "Live 50/50 combined (no overlap)" (was "Live rules (C6)"), a near-duplicate of MON;
 # its saved rows are dropped (REMOVED, purge_removed).
 # Removed Oct 21, 2026 (Chirag): near-duplicates (MACD cross + TP20 = MACD cross so far; breakouts cut to 2 and 4 days;
-# Friday only ~ Oct 2 rules without Mon-Thu checks, Now: Friday only covers that).
+# Friday only ~ Oct 2 rules without Mon-Thu checks, RS standard (Fridays only) covers that).
 REMOVED = {"Short-term reversal", "12-1 month momentum", "RSI pullback in uptrend", "Worst 3 sectors 3M, +10%/-3%",
            "Breakout with volume", "Relative strength only", "MACD cross, weekly", "MA10 & MA30 x MA50",
            "Live 50/50 combined (no overlap)", "Live rules (C6)", "MACD cross + TP20", "Friday only",
@@ -77,7 +80,7 @@ OLD_NAMES = {
     "Worst 2 sectors 1M, +10%/-3%": "Worst 3 sectors 1M, +10%/-3%",
     "Quant Score": "Quant Score top 10",
     "Now: calmer half": "Now: RS, calmer half of the list",
-    "Now: RS 10/21/63 days": "Now: shorter RS (10/21/63 days)",
+    "Now: RS 10/21/63 days": "RS short-term (weekly + Mon–Thu sells)",
     "Now: RS 63/126/252 days": "Now: longer RS (63/126/252 days)",
     "Now: 30% technical": "Now: 30% technical + 70% RS",
     "Now: exit below 15": "Now: Mon-Thu sell below rank 15",
@@ -85,6 +88,10 @@ OLD_NAMES = {
     "Live 50/50, sector rotation on Mondays": MON,   # Oct 21: the top-10 live line, kept as the previous rules
     "Live 50/50, top 5 each half": MON5,             # Oct 21: the top-5 Monday line
     "Live 50/50, top 5, sector on Fridays": TOP5,    # Oct 21 (Chirag): the live rules = top 5, sector half on Fridays
+    "Now: shorter RS (10/21/63 days)": "RS short-term (weekly + Mon–Thu sells)",   # Oct 26 (Chirag): the live halves' names
+    "Now: Friday only": "RS standard (Fridays only)",
+    "Current Strategy (Live: Shorter RS + Friday only)": "Live: RS short-term + RS Fridays",
+    "Current Strategy (Live from Oct End)": TOP5,    # Oct 26 (Chirag): replaced by LIVE_NOW, kept under its old-rules name
     "Live half: Sector rotation weekly (63d)": "Live half: Sector rotation Mondays (63d)",   # Oct 21: it rebalances Mondays
 }
 # the live 50/50 (be.WINNER "sleeves", from the Oct 16, 2026 switch): forward_combos legs, low-volatility half first
@@ -208,13 +215,13 @@ STRATEGIES = [
               "20 days. This line uses the top 30 of the Oct 2 score, and it does not sell after 10 days. It sells when "
               "signal analysis says SELL (score below 0) or the rank falls below 30. 10% each, at most 10, best rank first."),
     # ---- the live rules of Oct 15, 2026 (pinned) with one change each (added Oct 15, computed from Oct 2)
-    dict(name="Now: Friday only", **NOW, calendar="weekly", group="rs",
+    dict(name="RS standard (Fridays only)", **NOW, calendar="weekly", group="rs",
          rule="The Oct 15 rules (relative strength, top 10, the five defensive stocks) with the Friday rebalance only. "
               "Mon-Thu does not sell or replace anything."),
     dict(name="Now: top 15", **NOW, select={"n": 15}, group="rs",
          rule="The Oct 15 rules (relative strength only, Friday rebalance, Mon-Thu sell below rank 20) with 15 ranked stocks "
               "plus the five defensive stocks."),
-    dict(name="Now: shorter RS (10/21/63 days)", **{**NOW, "score": "rs_short"}, group="rs",
+    dict(name="RS short-term (weekly + Mon–Thu sells)", **{**NOW, "score": "rs_short"}, group="rs",
          rule="The Oct 15 rules, with relative strength measured over 10, 21 and 63 trading days (about 2 weeks, 1 month and "
               "3 months). The Oct 15 windows are 21, 63 and 126 days (about 1, 3 and 6 months). Same blend on each window: "
               "60% the stock versus its sector ETF, 40% that ETF versus SPY."),
@@ -241,7 +248,7 @@ STRATEGIES = [
          rule="The live account's sector-rotation half on its own (from the Oct 16 close, 1.0 then): the best C6-score "
               "stocks in the 3 sectors whose ETF has the best 63-day return, top 10, equal weights, rebalanced every Monday (the first session of the week); never buys a stock the low-volatility half holds. Not ranked (starts Oct 16)."),
     dict(name=MON5, combo=dict(legs=MON5_LEGS), group="combo",
-         rule="The live top-5 rules (Current Strategy (Live from Oct End)) computed from Oct 2 with the sector half rebalanced "
+         rule="The old live top-5 rules (Old live: Low vol + Sector rotation (Oct 16-26)) computed from Oct 2 with the sector half rebalanced "
               "every Monday (Tuesday after a Monday holiday) instead of Friday: top 5 per half, max 2 per sector, equal "
               "weight, no overlap, do_not_buy and the live manual buy blocks such as KO never bought."),
     dict(name=MON, combo=dict(legs=PREV_LEGS), group="combo",
@@ -253,6 +260,11 @@ STRATEGIES = [
               "rebalance): the 50/50 (low vol half on the last trading day of the month + sector rotation 63-day half every "
               "Friday (Thursday when Friday is a holiday), no overlap, do_not_buy and the live manual buy blocks such as KO never bought) computed from Oct 2, with each half holding its top 5 instead of "
               "10: max 2 per sector (the 40% sector cap on 5 stocks), the same 20% max per stock (the extra stays cash)."),
+    dict(name=LIVE_NOW, blend=NOW_HALVES, ranked=True, group="combo",
+         rule="The live rules from Tue Oct 27, 2026 (Chirag): two independent halves of 50% each, computed from Oct 2. Half 1 = "
+              "\"RS short-term (weekly + Mon–Thu sells)\" (Friday rebalance + Mon-Thu sell below rank 20, refilled from the top 10); "
+              "half 2 = \"RS standard (Fridays only)\" (Friday rebalance only). Each half follows its own line exactly; a stock both "
+              "pick is held by both, each paying from its own half (no overlap rule). Value = the average of the two lines."),
     dict(name="50/50: Low vol + SR every 2 weeks 63d", combo=dict(legs=(LV, ("sr63", "full", "2week", 0.5))),
          group="combo",
          rule="50/50, the sector-rotation half (63 days) rebalanced every other Friday (from Oct 2), no overlap."),
@@ -307,7 +319,9 @@ STRATEGIES = [
 def _common_rules(c):
     """The limits a line inherits from strategy_targets / be.winner_targets, said once (appended to its rule)."""
     if c.get("combo"):
-        return "" if c["name"].startswith("Live") or c["name"] == LIVE else " do_not_buy stocks are never held."
+        return "" if c["name"].startswith("Live") or c["name"] in (LIVE, TOP5) else " do_not_buy stocks are never held."
+    if c.get("blend"):
+        return ""
     if c.get("event") or c.get("b200") or c.get("weights"):
         return " do_not_buy stocks are never held."
     if c.get("worst"):
@@ -781,9 +795,13 @@ def strategy_targets(cfg, inp):
     """Daily live target weights of one STRATEGIES entry (Date x Symbol). Ranked ones go through the engine's own selection
     code (be.winner_targets): only overrides are passed, WINNER itself is never changed. A "stop" strategy also leaves its
     open-sale prices in inp["open_sells"][name]."""
+    if cfg.get("blend"):                               # two independent halves: the average of their target weights
+        a, b = (strategy_targets(next(c for c in STRATEGIES if c["name"] == n), inp) for n in cfg["blend"])
+        cols = a.columns.union(b.columns)
+        return 0.5 * a.reindex(columns=cols, fill_value=0.0) + 0.5 * b.reindex(columns=cols, fill_value=0.0)
     if cfg.get("combo"):                               # forward_combos line: the simulated end-of-day weights
         w = combo_weights(cfg, inp)
-        if cfg["name"].startswith("Live") or cfg["name"] == LIVE:               # the live account's rules: as they are
+        if cfg["name"].startswith("Live") or cfg["name"] in (LIVE, TOP5):      # the live account's rules: as they are
             return w
         return w.mask(_dnb(inp).reindex(index=w.index, columns=w.columns, fill_value=False), 0.0)
     if cfg.get("event"):                             # event lines (Oct 19): only their entries / exits trade
@@ -867,6 +885,32 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
         last = mine["Date"].max() if len(mine) else None
         todo = days if last is None else days[days > last]
         if not len(todo):
+            continue
+        if cfg.get("blend"):                                  # 50/50 of two lines, each from its own 1.0 start
+            parts = []
+            for n in cfg["blend"]:
+                v = pd.DataFrame([r for r in rows if r["Strategy"] == n], columns=["Date", "Strategy", "Value", "Cash"])
+                if old is not None:
+                    v = pd.concat([old[old["Strategy"] == n][["Date", "Strategy", "Value", "Cash"]], v], ignore_index=True)
+                v = v.assign(Date=pd.to_datetime(v["Date"])).drop_duplicates("Date", keep="last").set_index("Date").sort_index()
+                hh = pd.DataFrame([r for r in hold if r["Strategy"] == n], columns=["Date", "Strategy", "Symbol", "Weight", "Shares", "Price"])
+                if old_h is not None:
+                    hh = pd.concat([old_h[old_h["Strategy"] == n], hh], ignore_index=True)
+                hh = hh.assign(Date=pd.to_datetime(hh["Date"])).drop_duplicates(["Date", "Symbol"], keep="last")
+                parts.append((v.loc[v.index >= pd.Timestamp(start)], hh))
+            base = [float(v["Value"].iloc[0]) if len(v) else np.nan for v, _ in parts]
+            for d in todo:
+                if not all(d in v.index for v, _ in parts):
+                    continue
+                rows.append({"Date": d, "Strategy": name, "Value": sum(0.5 * v.at[d, "Value"] / b_ for (v, _), b_ in zip(parts, base)),
+                             "Cash": sum(0.5 * v.at[d, "Cash"] / b_ for (v, _), b_ in zip(parts, base))})
+                hd = {}
+                for (_, hh), b_ in zip(parts, base):
+                    for r in hh[hh["Date"] == d].itertuples():
+                        w0, s0, _p = hd.get(r.Symbol, (0.0, 0.0, r.Price))
+                        hd[r.Symbol] = (w0 + 0.5 * r.Weight, s0 + 0.5 * r.Shares / b_, r.Price)
+                hold += [{"Date": d, "Strategy": name, "Symbol": k, "Weight": w_, "Shares": s_, "Price": p_}
+                         for k, (w_, s_, p_) in hd.items()]
             continue
         if cfg.get("combo"):                                  # forward_combos: replayed from its start, new days appended
             import forward_combos as fc

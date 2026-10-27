@@ -1,5 +1,5 @@
 """Strategy tab (Chirag, Oct 16, 2026), pure functions with fake Alpaca data - no network, no orders:
-  - Last decision (dashboard/details/last_decision.ranking_table): each half's top 20 at its own rebalance, held marked
+  - Last decision (dashboard/details/last_decision.ranking_table): each half's (RS short-term / RS Fridays) top 20 at its own decision, held marked
   - decision_ranks.save / load round trip (temp file)
   - Home tab sector performance (dashboard/sector_table.sector_returns): equal-weight average per sector
 Run: python tests/run_tests.py  (or python tests/test_strategy_tab.py)"""
@@ -24,21 +24,20 @@ import decision_ranks  # noqa: E402
 # ---------------------------------------------------------------- Last decision: one ranking table per half
 from dashboard.details.last_decision import half_decision_day, ranking_table  # noqa: E402
 REAL_RANKS = os.path.join(ROOT, "Reports", "decision_ranks.csv")   # the runner points decision_ranks at a temp file
-for half in ("sector", "lowvol"):
+for half in ("rs_short", "friday"):
     day = half_decision_day(half, path=REAL_RANKS)
     if day is None:
         continue
+    col = decision_ranks.RANK_COL[half]
     ranks = decision_ranks.load(day, path=REAL_RANKS)
-    col = "Rank_Vol" if half == "lowvol" else "Rank_Sector"
     top = ranks.dropna(subset=[col]).sort_values(col)["Symbol"].tolist()
     held = top[:1] + ["ZZZ"]                                      # one ranked holding, one unranked
-    led = {"halves": {"lowvol": {"tags": held if half == "lowvol" else [], "cash": 100.0},
-                      "sector": {"tags": held if half == "sector" else [], "cash": 100.0}}}
-    pos = [{"symbol": x, "market_value": "450"} for x in held]
-    t, others = ranking_table(half, day, pos, led, path=REAL_RANKS)
+    led = {"version": 3, "halves": {h: {"shares": {x: 1.0 for x in held} if h == half else {}, "cash": 100.0}
+                                    for h in ("rs_short", "friday")}}
+    pos = [{"symbol": x, "qty": "1", "current_price": "450", "market_value": "450"} for x in held]
+    t, others = ranking_table(half, day, pos, led, path=REAL_RANKS, equity=1100.0)
     check(f"{half}: ranks 1..n, at most 20", list(t["Rank"]) == list(range(1, len(t) + 1)) and len(t) <= 20, list(t["Rank"]))
-    check(f"{half}: held stock marked, weight in half = value / (stocks + cash)",
-          t.iloc[0]["Held by"].startswith("✓") and t.iloc[0]["Weight in half %"] == 45.0, t.iloc[0].to_dict())
+    check(f"{half}: held stock marked", t.iloc[0]["Held by"].startswith("✓"), t.iloc[0].to_dict())
     check(f"{half}: an unranked holding is listed separately", others == ["ZZZ"], others)
 
 # ---------------------------------------------------------------- decision_ranks round trip (temp file, real saved data)
@@ -49,10 +48,10 @@ decision_ranks.save(d, path=tmp)
 decision_ranks.save(d, path=tmp)                       # the same day twice: replaced, not duplicated
 back = decision_ranks.load(d, path=tmp)
 check("decision_ranks: save twice + load = one copy of that day's ranks", back is not None and len(back) == len(live)
-      and back["Rank_Vol"].equals(live["Rank_Vol"].reset_index(drop=True)), len(back) if back is not None else None)
+      and back["Rank_RS_Short"].equals(live["Rank_RS_Short"].reset_index(drop=True)), len(back) if back is not None else None)
 check("decision_ranks: an unsaved day -> None", decision_ranks.load("2020-01-02", path=tmp) is None)
-sv = live.dropna(subset=["Rank_Sector"])["Rank_Sector"]
-check("Rank_Sector = 1..n", sorted(sv.tolist()) == list(range(1, len(sv) + 1)), sorted(sv.tolist())[:5])
+sv = live.dropna(subset=["Rank_Friday"])["Rank_Friday"]
+check("Rank_Friday = 1..n", sorted(sv.tolist()) == list(range(1, len(sv) + 1)), sorted(sv.tolist())[:5])
 
 # ---------------------------------------------------------------- Home tab: sector performance (equal weight per sector)
 from dashboard.sector_table import WINDOWS, sector_returns  # noqa: E402

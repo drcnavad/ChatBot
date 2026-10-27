@@ -73,7 +73,7 @@ def render_live_holdings():
         render_positions(table, data)
     render_benchmarks(data)
 
-HALF_NAMES = {"lowvol": "Low Vol", "sector": "Sector"}
+HALF_NAMES = {"rs_short": "RS short-term", "friday": "RS Fridays"}
 
 MANUAL_BUYS = {"MNST"}   # bought on Chirag's request but run by the 9 AM fill check, so not in manual_orders.json
 
@@ -85,7 +85,10 @@ def strategy_of(symbols, reports=None):
     reports = reports or os.path.join(ROOT, "Reports")
     try:
         halves = json.load(open(os.path.join(reports, "sleeve_ledger.json")))["halves"]
-        tag = {s: HALF_NAMES.get(h, h) for h, v in halves.items() for s in v.get("tags", [])}
+        tag = {}
+        for h, v in halves.items():                 # a stock both halves hold (from Oct 27, 2026): "RS short-term + RS Fridays"
+            for s in v.get("tags", []):
+                tag[s] = (tag[s] + " + " if s in tag else "") + HALF_NAMES.get(h, h)
     except Exception:
         return {s: "Unknown" for s in symbols}
     manual = set(MANUAL_BUYS)
@@ -99,7 +102,8 @@ def strategy_of(symbols, reports=None):
 def rank_at_buy(sym, strategy, bought):
     """The stock's rank in its half at the latest saved decision on or before its first buy (Reports/decision_ranks.csv);
     None for manual buys or when no rank was saved then (ranks are saved from Fri Oct 16, 2026)."""
-    col = {"Low Vol": "Rank_Vol", "Sector": "Rank_Sector"}.get(strategy)
+    col = {"RS short-term": "Rank_RS_Short",
+           "RS Fridays": "Rank_Friday"}.get(str(strategy).split(" + ")[0].replace(" (M)", ""))
     if col is None or bought is None or bought != bought:
         return None
     try:
@@ -109,6 +113,8 @@ def rank_at_buy(sym, strategy, bought):
     except Exception:
         return None
     r = r[(r["Symbol"] == sym) & (r["Date"].dt.date <= pd.Timestamp(bought).date())].sort_values("Date")
+    if col not in r.columns:
+        return None
     return int(r[col].iloc[-1]) if len(r) and pd.notna(r[col].iloc[-1]) else None
 
 def render_positions(table, data):
