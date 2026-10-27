@@ -287,9 +287,6 @@ def render_preview(positions, led, equity):
                     "Sector": st.column_config.TextColumn(width=110),
                     "Weight now": st.column_config.NumberColumn("Weight now", format="%.1f%%", width=62),
                     "Today %": st.column_config.NumberColumn("Today %", format="%+.2f", width=58)})
-    with st.expander("Plan legend", expanded=False):
-        st.caption("Buy = new · Add / Trim = held, moved to target · Keep = held, no trade · Sell = held, not a pick · "
-                   "Skip: earn = earnings within 5 trading days · Skip: not Fri pick = not in Friday's picks")
         extra = [x for x in tgt if x not in set(tab["Stock"])]
         if extra:
             st.caption("Also targeted (outside the top 20 / defensive stocks): "
