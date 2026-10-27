@@ -11,7 +11,8 @@ Page layout, top to bottom:
   5. "Trading Account" tab: portfolio value, live holdings, trade audit, tax view, strategy rules.
 
 The app only READS the Reports/*.csv files written by `python run_all.py` for strategy data, plus the live holdings from the
-Alpaca account (read-only GETs via alpaca_paper.py, at most once a minute). It never places orders and never calls
+Alpaca account (read-only GETs via alpaca_paper.py, at most once a minute). The dashboard itself never places orders except from the bottom-right chat button (dashboard/chat.py), which
+asks for your PIN (chat_pin.py) before every order / cancel / close. It never calls
 a paid data API (the optional "AI analysis" button uses the Hugging Face token from .env). The stock header additionally
 shows a display-only live quote from yfinance (free), and yfinance also draws the price chart of stocks too new to trade
 (short history); neither ever feeds back into signals, picks, backtests, or orders.
@@ -29,6 +30,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)  # project modules (backtest_engine, sector_mapping, dashboard) importable from any cwd
 
 from dashboard.details import render_strategy_tab, render_trading_tab  # noqa: E402
+from dashboard.chat_ui import render_chat  # noqa: E402
 from dashboard.details.live_holdings import new_run  # noqa: E402
 from dashboard.notes import render_notes  # noqa: E402
 from dashboard.news import render_news_banner, render_stock_news  # noqa: E402
@@ -125,5 +127,6 @@ def main():
         render_trading_tab(p)
     render_ticker(ticker_box, p)
     render_news_banner(ticker_box)
+    render_chat()                     # floating bottom-right chat button (every tab)
 
 main()
