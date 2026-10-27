@@ -402,22 +402,42 @@ def render_current_holdings():
         spark = intraday(tuple(t["Ticker"])) or {}
     except Exception:
         pass
+    # the Top 5 consensus tiles' own color logic: this week's return so far (the previous week's last close -> the
+    # Alpaca price now), tile_color(r / 1.5); same cached batched requests
+    from dashboard.data import NY, index_quotes, prior_week_close
+    from dashboard.heatmap import _symbols
+    syms = tuple(t["Ticker"])
+    grid = tuple(_symbols())
+    req = grid if set(syms) <= set(grid) else tuple(sorted(set(grid) | set(syms)))
+    monday = (pd.Timestamp.now(tz=NY).normalize() - pd.Timedelta(days=pd.Timestamp.now(tz=NY).weekday())).tz_localize(None)
+    good = st.session_state.setdefault("_ch_last", {"q": {}, "base": {}})
+    for name, fn in (("q", lambda: index_quotes(req)), ("base", lambda: prior_week_close(syms, f"{monday:%Y-%m-%d}"))):
+        try:
+            good[name].update({k: v for k, v in (fn() or {}).items() if k in syms})
+        except Exception:
+            pass
+    q, base = good["q"], good["base"]
+    def r5(s):
+        px, b = q.get(s, (float("nan"),))[0], base.get(s, float("nan"))
+        return (px / b - 1) * 100 if px == px and b == b and b else float("nan")
+    wk = {s: r5(s) for s in syms}
     eq = float(data.get("equity") or 0)
     rows = list(t.itertuples(index=False))
     css = TILE_CSS.replace("cs_grid", "ch_grid")
     st.markdown(f'<div class="sa-card-title">Current holdings<span>{len(rows)} stocks in the live account ({CURRENT})'
                 + (f" · {100 * t['Value $'].sum() / eq:.1f}% invested" if eq else "")
-                + ". Colored by today's change; label = weight of the holdings.</span></div>" + css
-                + "".join(f'<style>.st-key-cs_b_h_{r[0].replace(".", "_")} button{{background:{tile_color(r[4] / 1.5 if r[4] == r[4] and r[4] is not None else float("nan"))}!important}}</style>'
+                + ". Colored by this week's return, like the Top 5 consensus; label = weight, this week's return.</span></div>" + css
+                + "".join(f'<style>.st-key-cs_b_h_{r[0].replace(".", "_")} button{{background:{tile_color(wk[r[0]] / 1.5 if wk[r[0]] == wk[r[0]] else wk[r[0]])}!important}}</style>'
                           for r in rows), unsafe_allow_html=True)
     with st.container(horizontal=True, gap=None, key="ch_grid"):
         for sym, w, val, rk, ch in rows:
             key = sym.replace(".", "_")
             ok = ch is not None and ch == ch
             with st.container(key=f"cs_t_h_{key}"):
-                st.button(f"{sym}  {w:.1f}%\n" + (f"{ch:+.2f}%" if ok else "–"), key=f"cs_b_h_{key}", on_click=_cs_open, args=(sym,))
+                r = wk[sym]
+                st.button(f"{sym}  {w:.1f}%\n" + (f"{r:+.2f}%" if r == r else "–"), key=f"cs_b_h_{key}", on_click=_cs_open, args=(sym,))
                 head = (f"{esc(sym)} · {esc(sm.symbol_name.get(sym, sym))} · ${val:,.0f} ({w:.1f}%)"
                         + (f" · RS short-term rank {int(rk)}" if rk == rk and rk is not None else " · not ranked")
-                        + (f" · {ch:+.2f}% today" if ok else ""))
+                        + (f" · {wk[sym]:+.2f}% this week" if wk[sym] == wk[sym] else "") + (f" · {ch:+.2f}% today" if ok else ""))
                 body = sparkline(*spark[sym], ",.2f") if sym in spark else '<div class="sa-pop-empty">No intraday data right now</div>'
                 st.markdown(f'<div class="sa-pop"><div class="sa-pop-title">{head}</div>{body}</div>', unsafe_allow_html=True)

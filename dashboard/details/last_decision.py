@@ -235,9 +235,5 @@ def render_preview(positions, led, equity):
     sells, buys = o[o.Side == "Sell"]["Value $"].sum(), o[o.Side == "Buy"]["Value $"].sum()
     st.markdown(f"Planned trades (dry run at the {day:%a %b %-d} close, re-planned at the run's 2:30 PM bar): "
                 f"sell ${sells:,.0f} · buy ${buys:,.0f} · cash after ≈ ${cash:,.0f}")
-    c1, c2 = st.columns([3, 2])
-    with c1:
-        table(toned(o, ["Side"], fn=lambda v: GOOD if v == "Buy" else INK), fit=True, key="preview_orders")
-    with c2:
-        st.markdown(f"**Holdings after** · {len(t)} stocks")
-        table(t, fit=True, key="preview_targets")
+    table(toned(o, ["Side"], fn=lambda v: GOOD if v == "Buy" else INK), fit=True, key="preview_orders")
+    st.caption(f"After the run: {len(t)} stocks · " + ", ".join(f"{r.Symbol} {r[1]:.1f}%" for r in t.itertuples(index=False)))
