@@ -2,7 +2,6 @@
 a summary line (stocks, value, next rebalance), the top-20 ranking at the latest decision (Reports/decision_ranks.csv,
 saved by the trade run) with held stocks marked, then the next decision preview from the latest close. Weights from the
 live Alpaca positions; the ledger is never written here."""
-import os
 
 import pandas as pd
 import streamlit as st
@@ -14,7 +13,6 @@ def _sleeves():
     import sleeves
     return sleeves
 
-SLEEVE = {"rs_short": "RS short-term"}
 
 def _state(positions, ledger, equity):
     """(reconciled state {half: {'shares', 'cash'}}, prices, market values) like the bot at trade time (read-only)."""
@@ -77,7 +75,7 @@ def _scores(half, day):
     return s.to_dict()
 
 def ranking_table(half, day, positions, ledger, top=20, path=None, values=None, equity=None):
-    """(table, others): Rank, Stock, Sector, Score, Held by for the half's top `top` ranks at `day`; others = the stocks
+    """(table, others): Rank, Stock, Sector, Score, Held (✓) for the half's top `top` ranks at `day`; others = the stocks
     the half holds outside that top."""
     import decision_ranks
     from dashboard.settings import symbol_sector
@@ -89,14 +87,11 @@ def ranking_table(half, day, positions, ledger, top=20, path=None, values=None, 
     score = _scores(half, day)
     r = r[r[col] <= top]
     others = sorted(set(mine[half]) - set(r["Symbol"]))
-    def held(x):
-        hs = [h for h in mine if x in mine[h]]
-        return "✓ Both" if len(hs) == 2 else ("✓ " + SLEEVE[hs[0]]) if hs else ""
     t = pd.DataFrame({"Rank": pd.array(pd.to_numeric(r[col], errors="coerce").round(), dtype="Int64"), "Stock": r["Symbol"].to_numpy(),
                       "Sector": [symbol_sector.get(x, "—") for x in r["Symbol"]],
                       "Score": [round(float(score.get(x)), 2) if score.get(x) is not None and pd.notna(score.get(x)) else None
                                 for x in r["Symbol"]],
-                      "Held by": [held(x) for x in r["Symbol"]]})
+                      "Held": ["✓" if x in mine[half] else "" for x in r["Symbol"]]})
     return t, others
 
 @st.fragment(run_every=30)
@@ -113,8 +108,8 @@ def render_last_decision(p):
         return
     positions, equity = data["positions"], data["equity"]
     if led is None:
-        st.info("RS short-term (weekly + Mon–Thu sells) starts at the first trade run, Tue Oct 27, 2026 "
-                "2:30 PM CT (Reports/sleeve_ledger.json is written then).")
+        st.info("RS short-term (weekly + Mon–Thu sells) starts at its first full rebalance, Tue Oct 27, 2026 "
+                "9:00 AM CT (Reports/sleeve_ledger.json is written then).")
     else:
         for line in sleeve_summary(pd.Timestamp(led["day"]), positions, led, equity):
             st.markdown(line)
@@ -127,7 +122,7 @@ def render_last_decision(p):
                     continue
                 st.markdown(f"**{sl.LABEL[half]}** · ranks at its decision of {day:%a %b %-d}")
                 t, others = ranking_table(half, day, positions, led, equity=equity)
-                sty = toned(t, ["Held by"], fn=lambda v: GOOD if str(v).startswith("✓") else INK)
+                sty = toned(t, ["Held"], fn=lambda v: GOOD if v == "✓" else INK)
                 event = table(sty, fit=True, cols={"Score": SCORE}, on_select="rerun", selection_mode="single-row",
                               key=f"rank_tbl_{half}")
                 if others:
@@ -266,7 +261,7 @@ def render_preview(positions, led, equity):
         return a_
     for half in sl.HALVES:
         tab, _ = ranking_table(half, day, positions, led, path="__live__", equity=equity)
-        tab = tab.drop(columns=["Held by"])
+        tab = tab.drop(columns=["Held"])
         earn = earn_soon(tab["Stock"])
         mv = {p_["symbol"]: float(p_.get("market_value") or 0) for p_ in positions or []}
         try:
