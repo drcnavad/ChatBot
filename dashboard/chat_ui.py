@@ -38,7 +38,6 @@ def render_chat():
     with st.container(key="sa_chat_fab"):
         with st.popover("💬 Chat"):
             with st.container(key="sa_chat_panel"):
-                st.caption("Alpaca chat (LIVE account). Reads need no PIN; trades need your PIN every time. Type **help**.")
                 for role, text in st.session_state.get("sa_chat", [])[-20:]:
                     with st.chat_message(role):
                         st.markdown(text)
