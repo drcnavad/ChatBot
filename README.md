@@ -11,17 +11,17 @@ Keys live in `.env` (`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY`, never prin
 > `paper_trade.py --from-account` (dry run), `trade_audit.py`.
 
 ## Live strategy (`backtest_engine.WINNER`, from the 2:30 PM CT run of Tue Oct 27, 2026)
-"Live: RS short-term + RS Fridays": two independent 50% halves, each with its own cash and share counts in
-`Reports/sleeve_ledger.json` (v3, `sleeves.py`), each run exactly as its `forward_test.py` line:
-- **50% RS short-term (weekly + Mon–Thu sells):** relative strength over 10/21/63 days, top 10 + the defensive stocks,
+"Live: RS short-term": one line with its own cash and share counts in `Reports/sleeve_ledger.json` (v4,
+`sleeves.py`), run exactly as its `forward_test.py` line:
+- **100% RS short-term (weekly + Mon–Thu sells):** relative strength over 10/21/63 days, top 10 + the defensive stocks,
   equal weight, 99% invested; full rebalance every Friday 2:30 PM CT (Thursday on a holiday); Mon-Thu 2:30 PM a holding
   worse than rank 20 is sold and refilled from the top 10.
-- **50% RS standard (Fridays only):** the same with 21/63/126-day relative strength and only the Friday rebalance.
-- Both: no new buy with earnings within 5 days; QQQ below its 200-day average: weights halved. A stock both halves pick
-  is bought by each from its own budget (one combined position, one netted order).
+- No new buy with earnings within 5 days; QQQ below its 200-day average: weights halved. No idle cash: the weight of a
+  blocked or unpriced pick goes pro rata to the names that trade (1% cash reserve). RS standard (Fridays only) and the
+  50/50 blend stay as paper lines on the leaderboard (live Oct 27, 2026 onward: RS short-term only).
 - Oct 16-26, 2026 the live rules were 50% low volatility (monthly) + 50% sector rotation (weekly); that history is the
   forward line "Old live: Low vol + Sector rotation (Oct 16-26)".
-- Decisions use the ~2:30 PM CT bar (every session: Friday = both halves, Mon-Thu = the RS short-term exit check). A holding within 1 point of its target is not traded. A position in no half of the
+- Decisions use the ~2:30 PM CT bar (every session: Friday = full RS short-term rebalance, Mon-Thu = its exit check). A holding within 1 point of its target is not traded. A position in no half of the
   ledger is sold at the next trade run.
 - Never bought: `sector_mapping.do_not_buy`, manual sell blocks (`Reports/manual_block.json`), stocks sold by the
   earnings-day stop. Never sold: `sector_mapping.do_not_sell`. `earnings_stop.py` is loaded but places no orders
@@ -78,7 +78,7 @@ python manual_trade.py blocks                                   # list active bl
 | `run_all.py` | The pipeline command (support / trade / fill check / after-close step). |
 | `pipeline_watchdog.py` | Retries transient failures for launchd; never retries orders. |
 | `paper_trade.py` | Order planning (`plan_orders` → `plan_sleeve_orders`) and live sending, 9 AM fill check (`complete_unfilled_orders`). |
-| `sleeves.py` | The two halves: plan, ledger, sector rotation weights. |
+| `sleeves.py` | The live RS short-term line: plan, ledger, no-idle-cash fill. |
 | `backtest_engine.py` | The live engine despite its name: rules (`WINNER`), scores, ranking, NYSE calendar, and the simulator the forward test uses. Backtest-only code, tests and pins were removed Oct 19, 2026 (forward testing only). |
 | `manual_trade.py` | Manual orders, blocks, replacement buys. |
 | `decision_ranks.py` | Rank snapshot per decision (`Reports/decision_ranks.csv`, for the Last decision view). |

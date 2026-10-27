@@ -1,8 +1,7 @@
-"""Each stock's two ranks at every decision - Reports/decision_ranks.csv (Oct 27, 2026: the two live halves).
+"""Each stock's live rank at every decision - Reports/decision_ranks.csv (Oct 27, 2026: RS short-term).
 
-One row per stock per decision day: Date, Symbol, Rank_RS_Short, Rank_Friday.
-  Rank_RS_Short = the "RS short-term (weekly + Mon–Thu sells)" half's rank (sleeves.ranking: eligible, score above 0).
-  Rank_Friday   = the "RS standard (Fridays only)" half's rank (21/63/126-day relative strength).
+One row per stock per decision day: Date, Symbol, Rank_RS_Short.
+  Rank_RS_Short = the "RS short-term (weekly + Mon–Thu sells)" rank (sleeves.ranking: eligible, score above 0).
 Written by the trade run right after it saves the sleeve ledger (paper_trade.auto_trade). Display only."""
 import os
 
@@ -12,11 +11,11 @@ import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 ROOT = os.path.dirname(os.path.abspath(__file__))
 RANKS_CSV = os.environ.get("STOCK_ANALYSIS_DECISION_RANKS") or os.path.join(ROOT, "Reports", "decision_ranks.csv")
 SIGNAL_CSV = os.path.join(ROOT, "Reports", "signal_analysis.csv")
-COLS = ["Date", "Symbol", "Rank_RS_Short", "Rank_Friday"]
-RANK_COL = {"rs_short": "Rank_RS_Short", "friday": "Rank_Friday"}
+COLS = ["Date", "Symbol", "Rank_RS_Short"]
+RANK_COL = {"rs_short": "Rank_RS_Short"}
 
 def ranks_on(day=None, signal_csv=SIGNAL_CSV, inp=None):
-    """(date, DataFrame Symbol, Rank_RS_Short, Rank_Friday) for session `day` (default: the latest saved session)."""
+    """(date, DataFrame Symbol, Rank_RS_Short) for session `day` (default: the latest saved session)."""
     import sleeves
     inp = inp or sleeves.inputs(signal_csv)
     idx = inp["close"].index

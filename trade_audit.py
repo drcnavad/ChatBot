@@ -270,7 +270,7 @@ def reconcile(data, pending=None, stop_state=None, picks=None):
         # The live account also holds today's top-n rule picks (Provisional_Weight: Mon-Thu refills and spare-cash buys).
         prov = pd.to_numeric(picks.reindex(columns=["Provisional_Weight"])["Provisional_Weight"], errors="coerce").fillna(0)
         live = set(target) | {str(s).upper() for s, w in zip(picks["Symbol"], prov) if w > 0}
-        try:                                    # two halves (sleeves.py): the targets are the ledger's planned holdings
+        try:                                    # live sleeve (sleeves.py): the targets are the ledger's planned holdings
             import backtest_engine as be
             import sleeves
             led = sleeves.load_ledger() if be.WINNER.get("sleeves") else None

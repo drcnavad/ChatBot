@@ -1,27 +1,21 @@
-"""Two independent halves in one Alpaca account - backtest_engine.WINNER["sleeves"] / WINNER["halves"].
+"""The live account as one sleeve - backtest_engine.WINNER["sleeves"] = {"rs_short": 1.0}.
 
-Live from the 2:30 PM CT run of Tue Oct 27, 2026 (Chirag, Oct 26, 2026, final: "switch our current strategy to Now: Shorter
-RS, Now: Friday Only ... If a stock is in both strategy, simply buy it on top from that strategy half budget"):
+Live from the 2:30 PM CT run of Tue Oct 27, 2026 (Chirag, Oct 27, final: "keep it simple and do RS short-term (weekly +
+Mon–Thu sells)"): 100% forward_test.py's "RS short-term (weekly + Mon–Thu sells)" - relative strength over 10/21/63 days,
+top 10 + the defensive stocks (sector_mapping.defensive), Friday rebalance (the week's last session) and the Mon-Thu exit
+check (a stock worse than rank 20 is sold and replaced by the best top-10 stock not held), earnings within 5 days not
+newly bought, soft QQQ regime, do_not_buy never bought, do_not_sell never sold.
 
-  rs_short  50%: forward_test.py's "RS short-term (weekly + Mon–Thu sells)" - relative strength over 10/21/63 days, top 10 + the
-                 defensive stocks (sector_mapping.defensive), Friday rebalance (the week's last session) and the Mon-Thu
-                 exit check (a stock worse than rank 20 is sold and replaced by the best top-10 stock not held), earnings
-                 within 5 days not newly bought, soft QQQ regime, do_not_buy never bought.
-  friday    50%: forward_test.py's "RS standard (Fridays only)" - the same rules with the 21/63/126-day relative strength and the
-                 Friday rebalance only (no Mon-Thu checks).
+Targets = forward_test.strategy_targets of that line (the very code the backtest / forward test runs); trades like
+forward_test.update_strategies: names whose target changed (every name on the Friday rebalance) go to their target
+weight (1-point band, 99% invested), the others are left alone. No idle cash (Chirag, Oct 26 - not in the backtest):
+fill_idle spreads a blocked pick's weight and residual cash over the names that trade.
 
-Each half's targets are forward_test.strategy_targets of its strategy (the very code the backtest / forward test runs), and
-each half trades like forward_test.update_strategies: on a session where its target changed (or on its Friday rebalance,
-every name) the names that move are brought to their target weight of the HALF's own value (1-point band, 99% invested);
-the others are left alone. No overlap rule: when both halves hold the same stock each buys it from its own budget, and the
-account holds the sum. The two halves' orders are netted into one order per symbol (sells first); do_not_sell is never
-sold; manual buy blocks / earnings-day stops are not bought.
-
-Ledger (Reports/sleeve_ledger.json, version 3): per half its share count per symbol and its cash after the planned trades.
-Next run (reconcile): each live position is split between the halves in proportion to their ledger shares; a position no
-half claims is sold (do_not_sell kept); whatever the ledger does not explain (fills vs plan, dividends, a deposit) is split
-pro rata to the halves' values. No v3 ledger (the switch run): each half = 50% of equity, every holding is unclaimed, and
-the netting keeps any held stock a half targets (no sell + rebuy).
+Ledger (Reports/sleeve_ledger.json, version 4): share count per symbol and cash after the planned trades. Next run
+(reconcile): live positions are matched to the ledger; a position the ledger does not claim is sold (do_not_sell kept);
+whatever the ledger does not explain (fills vs plan, dividends, a deposit) goes to the sleeve's cash. No v4 ledger (the
+switch run): the sleeve = the whole equity, every holding unclaimed, and a held stock it targets is kept (no sell + rebuy).
+The code stays general over HALVES (one entry now).
 """
 import json
 import math
@@ -37,15 +31,15 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
 LEDGER_JSON = os.environ.get("STOCK_ANALYSIS_SLEEVE_LEDGER") or os.path.join(REPORTS, "sleeve_ledger.json")
 PLAN_CSV = os.environ.get("STOCK_ANALYSIS_SLEEVE_PLAN") or os.path.join(REPORTS, "sleeve_plan.csv")
-HALVES = ("rs_short", "friday")
-STRATEGY = {"rs_short": "RS short-term (weekly + Mon–Thu sells)", "friday": "RS standard (Fridays only)"}
-LABEL = {"rs_short": "RS short-term (weekly + Mon–Thu sells)", "friday": "RS standard (Fridays only)"}
-SHORT = {"rs_short": "RS short-term", "friday": "RS Fridays"}
-VERSION = 3
+HALVES = ("rs_short",)
+STRATEGY = {"rs_short": "RS short-term (weekly + Mon–Thu sells)"}
+LABEL = {"rs_short": "RS short-term (weekly + Mon–Thu sells)"}
+SHORT = {"rs_short": "RS short-term"}
+VERSION = 4
 CT = ZoneInfo("America/Chicago")
 
 def config():
-    """{'rs_short': 0.5, 'friday': 0.5} when the two halves are live, else None."""
+    """{'rs_short': 1.0} (WINNER['sleeves']), else None."""
     import backtest_engine as be
     s = be.WINNER.get("sleeves")
     return dict(s) if s else None
@@ -159,7 +153,7 @@ def holders(led):
     return out
 
 def owners(led):
-    """{SYMBOL: half} (a stock both halves hold: 'both')."""
+    """{SYMBOL: half} (the live RS short-term line)."""
     return {s: (hs[0] if len(hs) == 1 else "both") for s, hs in holders(led).items()}
 
 def _num(x):
@@ -370,15 +364,13 @@ def plan_table(info, orders=None):
 
 def summary_text(info):
     v = info["values"]
-    t = "halves: " + ", ".join(f"{LABEL[h]} ${v[h]:,.0f} ({'traded' if info['traded'][h] else 'held'})" for h in HALVES)
-    both = sorted(set(info["half_shares"][HALVES[0]]) & set(info["half_shares"][HALVES[1]]))
-    if both:
-        t += "; held by both halves: " + ", ".join(both)
+    t = ", ".join(f"{LABEL[h]} ${v[h]:,.0f} ({'traded' if info['traded'][h] else 'held'})" for h in HALVES)
     if info.get("init"):
-        t += "; first run: each half starts at 50% of equity"
-    gone = sorted(set(info.get("unowned") or {}) - set(info["half_shares"][HALVES[0]]) - set(info["half_shares"][HALVES[1]]))
+        t += "; first run: the sleeve starts at the whole equity"
+    kept = set().union(*(info["half_shares"][h] for h in HALVES))
+    gone = sorted(set(info.get("unowned") or {}) - kept)
     if gone:
-        t += "; sold (no half wants them): " + ", ".join(gone)
+        t += "; sold (not a target): " + ", ".join(gone)
     if abs(info.get("residual", 0.0)) >= 1:
         t += f"; ${info['residual']:,.2f} not explained by the ledger split pro rata"
     return t

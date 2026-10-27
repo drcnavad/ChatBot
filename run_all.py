@@ -1,7 +1,7 @@
 """ONE command for the whole pipeline:   python run_all.py   (mode chosen by the US Central clock)
 
-FULL  on a decision day (from Tue Oct 27, 2026 every session: the two halves "RS short-term (weekly + Mon–Thu sells)" (Friday rebalance + Mon-Thu
-      exit checks) and "RS standard (Fridays only)" (Friday; Thursday if Friday is a holiday), backtest_engine.next_decision) after 2:30 PM CT,
+FULL  on a decision day (from Tue Oct 27, 2026 every session: "RS short-term (weekly + Mon–Thu sells)" - Friday rebalance
+      (Thursday if Friday is a holiday) + Mon-Thu exit checks, backtest_engine.next_decision) after 2:30 PM CT,
       once a day: main (main_signal_analysis.ipynb: Alpaca bars, ranks, picks, mid-week check) -> validate (the report
       files), reading the latest supporting tables.
 SUPPORT (--support, launchd com.stockanalysis.support, Mon 1:00 PM CT +7 min each weekday): fundamentals
@@ -19,9 +19,8 @@ QUICK any other time: main + validate (no quota APIs).
 market hours: regular-hours orders at once (sells first, buys from the buying power after the sells); later that day
 (until 7 PM CT): whole-share extended-hours DAY limits, the rest at the 9 AM fill check; missed (Mac asleep): caught up at
 the next regular session with that decision's picks; superseded once the next decision slot arrives (one run-log row).
-Each half trades exactly like its forward-test line (sleeves.plan via paper_trade.plan_sleeve_orders: the names whose
-target changed, every name on Fridays; 1-point no-trade band, 99% invested); a stock both halves pick is held by both (one
-netted order). --scheduled (launchd): idle starts print one
+The account trades exactly like the forward-test line (sleeves.plan via paper_trade.plan_sleeve_orders: the names whose
+target changed, every name on Fridays; 1-point no-trade band, 99% invested; no idle cash). --scheduled (launchd): idle starts print one
 "idle:" line; a failed decision is retried at most 3 times, 60+ min apart.
 Schedule (launchd/install_schedule.sh): evening job Mon-Fri 2:30 + 3:05 PM CT (+ login, wake, every 30 min) = --trade
 --scheduled, then from 3:05 PM CT once per trading day the after-close step (daily_step: signal refresh on non-decision

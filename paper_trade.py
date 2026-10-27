@@ -5,10 +5,9 @@
     python paper_trade.py --from-account                               # dry run with the live account (read only)
     python paper_trade.py --submit                                      # manual: DAY market orders, sells first
 
-Live rules (backtest_engine.WINNER['sleeves'], from the 2:30 PM CT run of Tue Oct 27, 2026): two halves planned by
-sleeves.py (plan_sleeve_orders) - 50% forward_test's "RS short-term (weekly + Mon–Thu sells)" (Friday rebalance + Mon-Thu exit
-checks) and 50% "RS standard (Fridays only)" (Friday rebalance), each exactly as the forward test runs it; a stock both pick is held
-by both (one netted order per symbol). do_not_buy, manual sell blocks (manual_trade.py) and earnings-day stop sales
+Live rules (backtest_engine.WINNER['sleeves'], from the 2:30 PM CT run of Tue Oct 27, 2026): planned by sleeves.py
+(plan_sleeve_orders) - 100% forward_test's "RS short-term (weekly + Mon–Thu sells)" (Friday rebalance + Mon-Thu exit
+checks), exactly as the forward test runs it. do_not_buy, manual sell blocks (manual_trade.py) and earnings-day stop sales
 (earnings_stop.py) are never bought; do_not_sell is never sold. Without sleeves (WINNER['sleeves'] None) plan_orders brings the account to one target
 list: current = Strategy_Weight, provisional = Provisional_Weight, auto = provisional on a rebalance day, else hold.
 auto_trade() (run_all.py --trade) checks the signal files are fresh, then sends sells first and whole-share limit orders at
@@ -536,8 +535,7 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     decision) keeps every position unchanged."""
     import backtest_engine as be
     if be.WINNER.get("sleeves") and source in ("auto", "provisional"):
-        # Two halves (50% RS short-term (weekly + Mon–Thu sells) + 50% RS standard (Fridays only), sleeves.py, from Oct 27, 2026): each half is planned
-        # as its own account; replaces everything below.
+        # The live sleeve (RS short-term (weekly + Mon–Thu sells), sleeves.py, from Oct 27, 2026); replaces everything below.
         return plan_sleeve_orders(source, account_size, positions, picks_csv, signal_csv, decision,
                                   live_prices, min_value, fractional)
     targets, meta = load_targets(source, picks_csv, decision=decision)
@@ -594,11 +592,11 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
 
 def plan_sleeve_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signal_csv=SIGNAL_CSV,
                        decision=None, live_prices=None, min_value=1.0, fractional=False):
-    """plan_orders with WINNER['sleeves'] (live from Tue Oct 27, 2026): the two halves (RS short-term + RS Fridays, sleeves.py)
-    each trade exactly as their forward-test line on this session, netted into one order per symbol.
+    """plan_orders with WINNER['sleeves'] (live from Tue Oct 27, 2026): RS short-term (sleeves.py) trades
+    exactly as its forward-test line on this session.
     Returns (orders, meta, targets) like plan_orders; meta['sleeves'] = sleeves.plan info, meta['sleeve_ledger'] = the
     ledger auto_trade saves after sending the orders;
-    targets = the account-level weights of both halves after the plan (display)."""
+    targets = the account-level weights after the plan (display)."""
     import backtest_engine as be
     import sleeves
     picks = db.read_csv(picks_csv)
@@ -618,14 +616,14 @@ def plan_sleeve_orders(source, account_size, positions=None, picks_csv=PICKS_CSV
         px.update(current_prices(unpriced))
     if source == "auto" and not be.decision_kind(day):
         return build_hold_orders(positions, px), {**meta, "source": "hold"}, pd.DataFrame(columns=["Symbol", "Weight", "Price"])
-    # (Oct 27, 2026) the halves = forward_test's "RS short-term (weekly + Mon–Thu sells)" + "RS standard (Fridays only)" (sleeves.py): each half's targets
-    # come from forward_test.strategy_targets; one netted order per symbol; a stock both hold = both halves' shares.
+    # (Oct 27, 2026) the live sleeve = forward_test's "RS short-term (weekly + Mon–Thu sells)" (sleeves.py): targets from
+    # forward_test.strategy_targets.
     no_buy = {**manual_list("buy"), **earnings_stop_blocked(as_of)}
     led = sleeves.load_ledger()
     orders, info = sleeves.plan(day, positions, account_size, px, no_buy=no_buy, no_sell=manual_list("sell"),
                                 fractional=fractional, min_value=min_value, ledger=led)
     orders = orders[ORDER_COLUMNS]
-    meta.update(source="halves+sleeves", sleeves=info, sleeve_ledger=info["ledger"])
+    meta.update(source="sleeve", sleeves=info, sleeve_ledger=info["ledger"])
     tab = sleeves.plan_table(info)
     tab = tab[pd.to_numeric(tab.get("Target_Shares"), errors="coerce").fillna(0) > 0] if len(tab) else tab
     targets = pd.DataFrame({"Symbol": tab.get("Symbol", []), "Weight": tab.get("Target_of_account_%", pd.Series(dtype=float)) / 100,
@@ -2159,7 +2157,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
       its target is not traded. A pick the account does not own with earnings within 5 days is not
       bought (earnings rule); its weight goes to the next eligible stock ranked up to 20 that is not already a pick
       (substitute_blocked_picks, also for an earnings-day stop sale). Non-target stocks are sold entirely (the exact shares held).
-      With WINNER['sleeves'] (live) the two halves are planned by plan_sleeve_orders; a session that is no decision holds.
+      With WINNER['sleeves'] (live) the RS short-term line is planned by plan_sleeve_orders; a session that is no decision holds.
     - Caps total BUY spending at Alpaca's BUYING POWER less a 1% cushion via
       apply_buying_power_guard(): buys are scaled down to the part that fits instead of being
       rejected by the broker. Margin is disabled on this account, so buying power equals cash.
@@ -2239,7 +2237,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         print(f"  Kept outside the picks (do-not-sell / in profit + uptrend): {kept_text(meta['kept_outside'])} - the picks share the rest")
     if meta.get("sleeves"):
         import sleeves
-        print("  Two halves: " + sleeves.summary_text(meta["sleeves"]))
+        print("  Live sleeve: " + sleeves.summary_text(meta["sleeves"]))
     meta.update(decision=pd.Timestamp(decision).date().isoformat() if decision is not None else None, session=session)
     n_buy = int((orders["Side"] == "BUY").sum())
     n_sell = int((orders["Side"] == "SELL").sum())
@@ -2344,7 +2342,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
             print(f"  Sleeve ledger saved: {os.path.relpath(sleeves.LEDGER_JSON, PROJECT_ROOT)}")
         except Exception as e:   # never hides the trade: logged, the next run reconciles from the account
             log_event("Trade", "warning", "yes" if n_submitted else "no",
-                      "Couldn't save the two halves' ledger (Reports/sleeve_ledger.json). The orders are not affected; "
+                      "Couldn't save the live ledger (Reports/sleeve_ledger.json). The orders are not affected; "
                       "check the file before the next Friday run.", details=str(e))
         try:   # the ranks this decision used, for the Strategy tab (display only; the orders are already sent)
             import decision_ranks

@@ -9,7 +9,7 @@ ask + 0.05%, sell at the bid - 0.05%, skipped on a stale / wide quote); outside 
 (also a dry run or a refusal) is appended to Reports/manual_orders.json.
 
 Sell + replace (Chirag, Oct 16): once the sell FILLS (waits up to FILL_WAIT_SECS), the freed cash buys the next-in-line
-stock of the same half (sleeves.ranking: RS short-term or RS Fridays; a stock held by both halves -> RS short-term) that is not held, not blocked, not do-not-buy and not stopped out - a DAY limit at min(quote limit, ask),
+stock of the live ranking (sleeves.ranking: RS short-term) that is not held, not blocked, not do-not-buy and not stopped out - a DAY limit at min(quote limit, ask),
 never above the ask - and its shares go to that half of the v3 ledger. --no-replace keeps the cash. An unfilled sell buys
 nothing (logged).
 Sell: the half's tag goes once the stock is out of the live positions (sleeves.reconcile); the fill credits that half.
@@ -106,14 +106,14 @@ def half_of(sym, ledger=None):
     return sleeves.owners(led).get(str(sym).upper()) if led else None
 
 def tag(sym, half, qty=None):
-    """Put `sym` in `half`'s part of the ledger (a queued / sent buy). v3 ledger (from Oct 27, 2026): `qty` shares are
-    added to the half ('both': split evenly); its cash is settled by the next run (sleeves.reconcile)."""
+    """Put `sym` in `half`'s part of the ledger (a queued / sent buy). `qty` shares are added
+    to the sleeve; its cash is settled by the next run (sleeves.reconcile)."""
     import sleeves
     led = sleeves.load_ledger()
     if not led:
         return None
     sym = str(sym).upper()
-    hs = list(sleeves.HALVES) if half == "both" else [half]
+    hs = list(sleeves.HALVES) if half not in sleeves.HALVES else [half]
     for h in hs:
         L = led["halves"][h]
         L.setdefault("shares", {})
@@ -123,15 +123,12 @@ def tag(sym, half, qty=None):
     return half
 
 def next_in_line(half, exclude, rankings=None):
-    """The best-ranked stock of `half` ('rs_short' / 'friday'; 'both' = the shorter RS ranking) not in `exclude` (held,
+    """The best-ranked stock of `half` ('rs_short') not in `exclude` (held,
     blocked, do-not-buy, ...), or None. rankings: {half: [symbols best first]} (tests); default the latest close's
     rankings (dashboard.stock_groups)."""
-    if half == "both":
-        half = "rs_short"
     if rankings is None:
         from dashboard.stock_groups import _rankings
-        _a, _b, ra, rb = _rankings()
-        rankings = {"rs_short": ra, "friday": rb}
+        rankings = {h: r for h, (_t, r) in _rankings().items()}
     return next((s for s in rankings.get(half, []) if s.upper() not in exclude), None)
 
 def _wait_fill(client, order_id, secs=None, sleep=None):

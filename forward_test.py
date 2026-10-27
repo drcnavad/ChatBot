@@ -55,9 +55,11 @@ WEEKS_TO_WIN = 12
 MON5 = "Live 50/50, top 5, sector on Mondays"   # Oct 21: the top-5 rules with the sector half on Mondays (live Oct 21 morning)
 MON = "Live 50/50, top 10 each half"    # the live rules Oct 19-25 (sector half on Mondays, 10 stocks per half)
 TOP5 = "Old live: Low vol + Sector rotation (Oct 16-26)"   # the live rules Oct 21-26, 2026 (was "Current Strategy (Live from Oct End)")
-# (Chirag, Oct 26, 2026, final) the live rules from the 2:30 PM CT run of Tue Oct 27: 50% "RS short-term (weekly + Mon–Thu sells) (10/21/63 days)" + 50% "RS standard (Fridays only)", two independent halves (sleeves.py) = the average of the two lines from Oct 2
-NOW_HALVES = ("RS short-term (weekly + Mon–Thu sells)", "RS standard (Fridays only)")
-LIVE_NOW = "Live: RS short-term + RS Fridays"
+# (Chirag, Oct 27, 2026, final) the live rules from the 2:30 PM CT run of Tue Oct 27: 100% "RS short-term (weekly + Mon–Thu
+# sells)" (sleeves.py, one sleeve = the whole account). That line itself is the live line (shown as "Live: RS short-term").
+NOW_HALVES = ("RS short-term (weekly + Mon–Thu sells)", "RS standard (Fridays only)")   # the 50/50 paper line's two halves
+BLEND = "50/50: RS short-term + RS Fridays"      # paper line (was the live line "Live: RS short-term + RS Fridays", Oct 26 only)
+LIVE_NOW = NOW_HALVES[0]
 MARKED = LIVE_NOW
 LIVE = LIVE_NOW     # the line the verdict and the dashboard compare against
 # Removed Oct 20, 2026 (Chirag): "Live 50/50 combined (no overlap)" (was "Live rules (C6)"), a near-duplicate of MON;
@@ -90,7 +92,8 @@ OLD_NAMES = {
     "Live 50/50, top 5, sector on Fridays": TOP5,    # Oct 21 (Chirag): the live rules = top 5, sector half on Fridays
     "Now: shorter RS (10/21/63 days)": "RS short-term (weekly + Mon–Thu sells)",   # Oct 26 (Chirag): the live halves' names
     "Now: Friday only": "RS standard (Fridays only)",
-    "Current Strategy (Live: Shorter RS + Friday only)": "Live: RS short-term + RS Fridays",
+    "Current Strategy (Live: Shorter RS + Friday only)": BLEND,
+    "Live: RS short-term + RS Fridays": BLEND,       # Oct 27 (Chirag): live = RS short-term only; the 50/50 kept as a paper line
     "Current Strategy (Live from Oct End)": TOP5,    # Oct 26 (Chirag): replaced by LIVE_NOW, kept under its old-rules name
     "Live half: Sector rotation weekly (63d)": "Live half: Sector rotation Mondays (63d)",   # Oct 21: it rebalances Mondays
 }
@@ -260,8 +263,8 @@ STRATEGIES = [
               "rebalance): the 50/50 (low vol half on the last trading day of the month + sector rotation 63-day half every "
               "Friday (Thursday when Friday is a holiday), no overlap, do_not_buy and the live manual buy blocks such as KO never bought) computed from Oct 2, with each half holding its top 5 instead of "
               "10: max 2 per sector (the 40% sector cap on 5 stocks), the same 20% max per stock (the extra stays cash)."),
-    dict(name=LIVE_NOW, blend=NOW_HALVES, ranked=True, group="combo",
-         rule="The live rules from Tue Oct 27, 2026 (Chirag): two independent halves of 50% each, computed from Oct 2. Half 1 = "
+    dict(name=BLEND, blend=NOW_HALVES, ranked=True, group="combo",
+         rule="Paper line (was the planned live rules on Oct 26, 2026): two independent halves of 50% each, computed from Oct 2. Half 1 = "
               "\"RS short-term (weekly + Mon–Thu sells)\" (Friday rebalance + Mon-Thu sell below rank 20, refilled from the top 10); "
               "half 2 = \"RS standard (Fridays only)\" (Friday rebalance only). Each half follows its own line exactly; a stock both "
               "pick is held by both, each paying from its own half (no overlap rule). Value = the average of the two lines."),

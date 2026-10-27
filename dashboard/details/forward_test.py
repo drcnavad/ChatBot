@@ -203,7 +203,7 @@ def render_curve(board, values):
 
 HIGHLIGHT_BG = "background-color: #e2e8f0; font-weight: 700"   # subtle slate on the white table
 
-CURRENT = "Live: RS short-term + RS Fridays"   # display name of the live strategy's row (forward_test.LIVE stays its id)
+CURRENT = "Live: RS short-term"   # display name of the live strategy's row (forward_test.LIVE stays its id)
 
 def tidy_board(board, start):
     """Leaderboard for display: short column names (Total since <start>, Last EOD, Max drawdown, Wk 1..), integer Rank

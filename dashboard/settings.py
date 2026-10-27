@@ -37,11 +37,10 @@ LOW_VOL = WINNER.get("score") == "low_vol"                          # low volati
 MONTHLY = WINNER.get("calendar") == "monthly"                       # rebalance on the last trading day of the month
 STRATEGY_NAME = ("Low volatility in uptrend (monthly)" if LOW_VOL and MONTHLY else
                  "Low volatility in uptrend" if LOW_VOL else "C6 (relative strength)")
-SLEEVES = WINNER.get("sleeves")                                      # two halves (sleeves.py), else None
-HALVES = bool(WINNER.get("halves"))                                 # (Oct 27, 2026) RS short-term (weekly + Mon–Thu sells) + RS standard (Fridays only)
+SLEEVES = WINNER.get("sleeves")                                      # the live sleeve (sleeves.py), else None
+HALVES = bool(WINNER.get("halves"))                                 # (Oct 27, 2026) live = RS short-term (weekly + Mon–Thu sells)
 if SLEEVES and HALVES:
-    STRATEGY_NAME = (f"{SLEEVES['rs_short']:.0%} RS short-term (weekly + Mon–Thu sells) + "
-                     f"{SLEEVES['friday']:.0%} RS standard (Fridays only)")
+    STRATEGY_NAME = "Live: RS short-term (weekly + Mon–Thu sells)"
 REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day average"   # market filter off
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
@@ -51,21 +50,18 @@ except Exception:
     FRIDAY_SUB_MAX_RANK = 20
 
 def halves_rules_text():
-    """The two live halves (from the 2:30 PM CT run of Tue Oct 27, 2026) in plain words."""
+    """The live rules (from the 2:30 PM CT run of Tue Oct 27, 2026) in plain words."""
     return (f"**Strategy rules: {STRATEGY_NAME} ({STRATEGY_TAG})**\n"
-            f"- **Two halves:** the account is split {SLEEVES['rs_short']:.0%} / {SLEEVES['friday']:.0%}; each half is run "
-            "exactly like its forward-test strategy, sized from its own value with its own cash (Reports/sleeve_ledger.json).\n"
-            "- **RS short-term half** (\"RS short-term (weekly + Mon–Thu sells)\"): relative strength over 10, 21 and 63 trading days "
-            "(60% stock vs its sector ETF, 40% that ETF vs SPY); the top 10 plus the defensive stocks, equal weights, "
-            "99% invested; full rebalance every Friday 2:30 PM CT (Thursday when Friday is a holiday); Mon-Thu 2:30 PM a "
-            "holding worse than rank 20 is sold and replaced by the best top-10 stock not held.\n"
-            "- **RS Fridays half** (\"RS standard (Fridays only)\"): the same rules with the 21/63/126-day relative strength and "
-            "only the Friday rebalance (Mon-Thu nothing is sold or replaced).\n"
-            "- **Both:** no new buy with earnings within 5 days (a held stock is not topped up); with "
+            "- **Whole account** runs forward_test's \"RS short-term (weekly + Mon–Thu sells)\" exactly (Reports/sleeve_ledger.json).\n"
+            "- **Score:** relative strength over 10, 21 and 63 trading days (60% stock vs its sector ETF, 40% that ETF vs SPY); "
+            "the top 10 plus the defensive stocks, equal weights, 99% invested.\n"
+            "- **When:** full rebalance every Friday 2:30 PM CT (Thursday when Friday is a holiday); Mon-Thu 2:30 PM a holding "
+            "worse than rank 20 is sold and replaced by the best top-10 stock not held.\n"
+            "- **Filters:** no new buy with earnings within 5 days (a held stock is not topped up); with "
             f"{REGIME_OFF} every weight is {HALVED}; do_not_buy never bought, do_not_sell never sold; a holding within 1 "
             "point of its weight is not traded.\n"
-            "- **Same stock in both halves:** allowed - each half buys it from its own budget and the account holds the sum "
-            "(one order per stock).\n"
+            "- **No idle cash:** a pick that cannot be bought (manual block, earnings) and leftover cash are spread over that "
+            "day's buys in proportion (not in the backtest, which keeps that cash).\n"
             "- **Orders:** sells first, limit orders at the live quote (buy at the ask + 0.05%, sell at the bid - 0.05%); the "
             "9 AM CT check the next trading day sends any rest.\n")
 

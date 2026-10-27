@@ -73,7 +73,7 @@ def render_live_holdings():
         render_positions(table, data)
     render_benchmarks(data)
 
-HALF_NAMES = {"rs_short": "RS short-term", "friday": "RS Fridays"}
+HALF_NAMES = {"rs_short": "RS short-term"}
 
 MANUAL_BUYS = {"MNST"}   # bought on Chirag's request but run by the 9 AM fill check, so not in manual_orders.json
 
@@ -86,7 +86,7 @@ def strategy_of(symbols, reports=None):
     try:
         halves = json.load(open(os.path.join(reports, "sleeve_ledger.json")))["halves"]
         tag = {}
-        for h, v in halves.items():                 # a stock both halves hold (from Oct 27, 2026): "RS short-term + RS Fridays"
+        for h, v in halves.items():                 # the live sleeve (Oct 27, 2026: RS short-term)
             for s in v.get("tags", []):
                 tag[s] = (tag[s] + " + " if s in tag else "") + HALF_NAMES.get(h, h)
     except Exception:
@@ -102,8 +102,7 @@ def strategy_of(symbols, reports=None):
 def rank_at_buy(sym, strategy, bought):
     """The stock's rank in its half at the latest saved decision on or before its first buy (Reports/decision_ranks.csv);
     None for manual buys or when no rank was saved then (ranks are saved from Fri Oct 16, 2026)."""
-    col = {"RS short-term": "Rank_RS_Short",
-           "RS Fridays": "Rank_Friday"}.get(str(strategy).split(" + ")[0].replace(" (M)", ""))
+    col = {"RS short-term": "Rank_RS_Short"}.get(str(strategy).split(" + ")[0].replace(" (M)", ""))
     if col is None or bought is None or bought != bought:
         return None
     try:

@@ -1,7 +1,7 @@
-"""Strategy tab, Last decision (the two live halves from Oct 27, 2026: "RS short-term (weekly + Mon–Thu sells)" + "RS standard (Fridays only)"): a line per
-half (stocks, value, next rebalance), each half's top-20 ranking at its latest decision (Reports/decision_ranks.csv, saved
-by the trade run) with held stocks marked, then the next decision preview from the latest close. A stock both halves hold
-is marked "Both". Weights from the live Alpaca positions; the ledger is never written here."""
+"""Strategy tab, Last decision (live from Oct 27, 2026: "RS short-term (weekly + Mon–Thu sells)", one sleeve = the account):
+a summary line (stocks, value, next rebalance), the top-20 ranking at the latest decision (Reports/decision_ranks.csv,
+saved by the trade run) with held stocks marked, then the next decision preview from the latest close. Weights from the
+live Alpaca positions; the ledger is never written here."""
 import os
 
 import pandas as pd
@@ -14,7 +14,7 @@ def _sleeves():
     import sleeves
     return sleeves
 
-SLEEVE = {"rs_short": "RS short-term", "friday": "RS Fridays"}
+SLEEVE = {"rs_short": "RS short-term"}
 
 def _state(positions, ledger, equity):
     """(reconciled state {half: {'shares', 'cash'}}, prices, market values) like the bot at trade time (read-only)."""
@@ -51,9 +51,6 @@ def sleeve_summary(day, positions, ledger, equity):
                    + (f" ({100 * v / equity:.1f}% of the account)" if equity else "")
                    + (f" · next full rebalance {nxt:%a %b %-d}" if nxt is not None else "")
                    + (" · Mon-Thu: exit check (worse than rank 20)" if h == "rs_short" else ""))
-    both = sorted(set(mine["rs_short"]) & set(mine["friday"]))
-    if both:
-        out.append("Held by both halves (each from its own budget): " + ", ".join(both))
     return out
 
 def half_decision_day(half, path=None):
@@ -116,12 +113,12 @@ def render_last_decision(p):
         return
     positions, equity = data["positions"], data["equity"]
     if led is None:
-        st.info("The two halves (RS short-term (weekly + Mon–Thu sells) + RS standard (Fridays only)) start at the first trade run from Tue Oct 27, 2026 "
+        st.info("RS short-term (weekly + Mon–Thu sells) starts at the first trade run, Tue Oct 27, 2026 "
                 "2:30 PM CT (Reports/sleeve_ledger.json is written then).")
     else:
         for line in sleeve_summary(pd.Timestamp(led["day"]), positions, led, equity):
             st.markdown(line)
-        cols = st.columns(2)
+        cols = st.columns(len(sl.HALVES))
         for c, half in zip(cols, sl.HALVES):
             with c:
                 day = half_decision_day(half)
@@ -149,7 +146,7 @@ def _preview_targets(day):
 
 def next_plan():
     """{"asof", "days": {half: next decision}, "targets", "plan": {sym: (action, % of account, day)}} or None.
-    Action: Keep / Buy / Sell / Blocked (both halves' weights summed). Display only."""
+    Action: Keep / Buy / Sell / Blocked. Display only."""
     import paper_trade as pt
     sl = _sleeves()
     from dashboard.details.live_holdings import holdings_this_run
@@ -167,8 +164,7 @@ def next_plan():
         return None
     import backtest_engine as be
     nxt = be.next_sessions(pd.Timestamp.now().normalize() - pd.Timedelta(days=1), 1)[0]
-    full = _next_full(pd.Timestamp.now().normalize() - pd.Timedelta(days=1))
-    days = {"rs_short": nxt, "friday": full}
+    days = {h: nxt for h in sl.HALVES}
     tot = sum(vals.values()) or 1.0
     blocked = set(pt.manual_list("buy"))
     plan = {}
@@ -196,11 +192,11 @@ def render_preview(positions, led, equity):
         return
     blocked = set(pt.manual_list("buy"))
     mine = _mine(positions, led, equity) if led is not None else {h: [] for h in sl.HALVES}
-    cols = st.columns(2)
+    cols = st.columns(len(sl.HALVES))
     for c, half in zip(cols, sl.HALVES):
         with c:
             st.markdown(f"**{sl.LABEL[half]}** · targets at the {day:%a %b %-d} close"
-                        + (" (Mon-Thu only the exit check trades)" if half == "rs_short" else " (traded on Fridays)"))
+                        + " (Mon-Thu only the exit check trades)")
             t, _ = ranking_table(half, day, positions, led, path="__live__", equity=equity)
             tg = targets[half]
             plan = lambda s: ("Blocked" if s in blocked else "Keep" if s in mine[half] else "Buy") if s in tg else ""

@@ -68,10 +68,9 @@ RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 # read this one dict.
 # Change a rule here, then run `python run_all.py`.
 WINNER = {
-    # LIVE from the 2:30 PM CT run of Tue Oct 27, 2026 (Chirag, Oct 26, final): two independent 50% halves (sleeves.py,
-    # Reports/sleeve_ledger.json) = forward_test's "RS short-term (weekly + Mon–Thu sells)" + "RS standard (Fridays only)",
-    # each exactly as the forward test runs it; a stock both pick is held by both, each half paying from its own budget.
-    # The selection fields below are NOT the halves' rules: they only drive the pipeline's Strategy_Score / Strategy_Rank
+    # LIVE from the 2:30 PM CT run of Tue Oct 27, 2026 (Chirag, Oct 27, final): 100% forward_test's "RS short-term (weekly +
+    # Mon–Thu sells)", exactly as the forward test runs it (sleeves.py, one sleeve, Reports/sleeve_ledger.json).
+    # The selection fields below are NOT the live rules: they only drive the pipeline's Strategy_Score / Strategy_Rank
     # columns (a forward-test input; unchanged so rules_version / saved scores stay comparable). Oct 16-26 the live rules
     # were 50% low volatility (monthly) + 50% sector rotation (weekly) - forward_test's "Old live: Low vol + Sector rotation".
     "n": 5,                 # Strategy_Score selection size (pipeline column only)
@@ -94,7 +93,7 @@ WINNER = {
     "earnings_block_days": None,  # no earnings rule (the forward strategy has none)
     "sleeve": False,            # no defensive sleeve (sector_mapping.defensive is kept only for the pinned forward strategies)
     "earnings_day_stop": False, # earnings_stop.py places no orders (not in the backtest; no Mon-Thu trading)
-    "sleeves": {"rs_short": 0.5, "friday": 0.5},
+    "sleeves": {"rs_short": 1.0},
     "halves": True,
     # Rebalance: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).
     "rebalance_band": 0.01,
@@ -129,9 +128,9 @@ def winner_label(n_stocks):
     """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'LV-M-U84' / 'C6-U91-NS-MW30R10-E5'."""
     S, mw = WINNER, WINNER.get("midweek_swap")
     if S.get("halves"):
-        return (f"RS-H-U{n_stocks}", "Live: RS short-term + RS Fridays - 50% RS short-term (weekly + Mon–Thu sells: 10/21/63-day "
-                "relative strength, Friday rebalance + Mon-Thu exit below rank 20) + 50% RS standard (Fridays only: 21/63/126-day "
-                f"relative strength): top 10 + the defensive stocks each, soft QQQ regime ({n_stocks} stocks)")
+        return (f"RS-S-U{n_stocks}", "Live: RS short-term - RS short-term (weekly + Mon–Thu sells): 10/21/63-day relative "
+                "strength, top 10 + the defensive stocks, Friday rebalance + Mon-Thu exit below rank 20 refilled from the top 10, "
+                f"soft QQQ regime ({n_stocks} stocks)")
     if S.get("score") == "low_vol" and S.get("calendar") == "monthly":
         tag = f"LV-M-U{n_stocks}"
         name = (f"Low volatility in uptrend (monthly): the {S['n']} calmest stocks above their 200-day average, equal weight, "
@@ -1655,7 +1654,7 @@ def next_decision(latest, days=None):
     Weekly rebalance = last session of an ISO week; mid-week check = first session on/after each check day (live: Mon-Thu)
     that is not the week's last session (same rules as weekly_rebalance_days / midweek_check_days)."""
     mw = WINNER.get("midweek_swap")
-    if days is None and WINNER.get("halves"):                  # (Oct 27, 2026) shorter RS half: every session decides
+    if days is None and WINNER.get("halves"):                  # (Oct 27, 2026) RS short-term: every session decides
         latest = pd.Timestamp(latest).normalize()
         sess = list(next_sessions(latest, 3))
         kind = "full rebalance" if sess[0].isocalendar()[:2] != sess[1].isocalendar()[:2] else "mid-week check"

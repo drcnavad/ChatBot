@@ -42,7 +42,7 @@ class FakeClient:
         return NS(id="abc", status=NS(value="accepted"))
 
 quote = lambda sym, side: {"bid": 60.0, "ask": 60.1, "limit": 59.97 if side == "SELL" else 60.13, "skip": None}
-sleeves.save_ledger({"version": 3, "day": "2026-10-27", "halves": {"rs_short": {"shares": {"KO": 98.5, "PFE": 10}, "cash": 0}, "friday": {"shares": {"OXY": 5}, "cash": 0}}})
+sleeves.save_ledger({"version": 4, "day": "2026-10-27", "halves": {"rs_short": {"shares": {"KO": 98.5, "PFE": 10, "OXY": 5}, "cash": 0}}})
 
 c = FakeClient(is_open=False)
 e = mt.run("SELL", "KO", block_drop=10, client=c, quote=quote)
@@ -55,7 +55,7 @@ check("--dry-run: planned and logged, nothing sent, ledger and blocks untouched"
       and mt.load_blocks() == {}, e)
 
 e = mt.run("SELL", "KO", block_drop=10, client=c, quote=quote, wait=lambda cl, oid: (98.5, 60.0),
-           rankings={"rs_short": ["KO", "PFE", "JCI", "NUE"], "friday": ["OXY"]})
+           rankings={"rs_short": ["KO", "PFE", "JCI", "NUE"]})
 r = c.sent[0] if c.sent else None
 check("sell: whole position, DAY limit at the bid side price", r is not None and r.symbol == "KO" and float(r.qty) == 98.5
       and float(r.limit_price) == 59.97 and r.side.value == "sell" and r.time_in_force.value == "day"
@@ -93,14 +93,14 @@ check("buy --amount 1000: floor(1000 / ask limit) to 0.01 shares, buy side", c.s
 c = FakeClient()
 mt.run("BUY", "XYZ", client=c, quote=quote)
 check("buy default: 10% of equity ($20,000 of $200,000)", mt.DEFAULT_PCT == 0.10 and c.sent and float(c.sent[0].qty) == 332.61, c.sent)
-sleeves.save_ledger({"version": 3, "day": "2026-10-27", "halves": {"rs_short": {"shares": {"PFE": 10}, "cash": 0}, "friday": {"shares": {"KO": 98.5}, "cash": 0}}})
+sleeves.save_ledger({"version": 4, "day": "2026-10-27", "halves": {"rs_short": {"shares": {"PFE": 10, "KO": 98.5}, "cash": 0}}})
 c = FakeClient()
 mt.run("SELL", "KO", client=c, quote=quote, replace=False, wait=lambda cl, oid: (98.5, 60.0))
 check("--no-replace: the sell only; the ledger is untouched (the fill moves the half's cash at the next run)", len(c.sent) == 1
-      and sleeves.load_ledger()["halves"]["friday"]["cash"] == 0, c.sent)
-sleeves.save_ledger({"version": 3, "day": "2026-10-27", "halves": {"rs_short": {"shares": {}, "cash": 0}, "friday": {"shares": {"KO": 98.5}, "cash": 0}}})
+      and sleeves.load_ledger()["halves"]["rs_short"]["cash"] == 0, c.sent)
+sleeves.save_ledger({"version": 4, "day": "2026-10-27", "halves": {"rs_short": {"shares": {"KO": 98.5}, "cash": 0}}})
 c = FakeClient()
-mt.run("SELL", "KO", client=c, quote=quote, wait=lambda cl, oid: None, rankings={"friday": ["OXY"]})
+mt.run("SELL", "KO", client=c, quote=quote, wait=lambda cl, oid: None, rankings={"rs_short": ["OXY"]})
 check("sell not filled in time: no replacement buy (logged)", len(c.sent) == 1
       and json.load(open(mt.ORDERS_JSON))[-1]["status"].startswith("no replacement: the sell was not filled"), c.sent)
 c = FakeClient()
