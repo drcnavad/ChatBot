@@ -109,7 +109,7 @@ def render_last_decision(p):
     positions, equity = data["positions"], data["equity"]
     if led is None:
         st.info("RS short-term (weekly + Mon–Thu sells) starts at its first full rebalance, Fri Oct 30, 2026 "
-                "9:00 AM CT (Reports/sleeve_ledger.json is written then).")
+                "2:30 PM CT (Reports/sleeve_ledger.json is written then).")
     else:
         for line in sleeve_summary(pd.Timestamp(led["day"]), positions, led, equity):
             st.markdown(line)
