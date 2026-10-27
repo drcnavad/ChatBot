@@ -8,7 +8,6 @@ from dashboard.details.equity_chart import render_equity_chart
 from dashboard.details.forward_test import render_forward_test, render_live_push, render_top10
 from dashboard.details.last_decision import render_last_decision
 from dashboard.details.live_holdings import render_live_holdings
-from dashboard.details.manual_orders import render_manual_orders
 from dashboard.details.tax_view import render_tax_view
 from dashboard.details.trade_audit import render_trade_audit
 from dashboard.settings import rules_text
@@ -23,8 +22,6 @@ def render_strategy_tab(p):
         render_top10(p)
         render_forward_test(p)
         render_live_push()
-    with st.expander("Manual orders and buy blocks (manual_trade.py)", expanded=False):
-        render_manual_orders()
     with st.expander("Data freshness and settings", expanded=False):
         render_data_and_settings(p)
 
