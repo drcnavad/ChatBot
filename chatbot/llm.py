@@ -158,11 +158,20 @@ def stock_info(sym, account=None):
             out.append("Not in the dashboard's watchlist (no signal/rank).")
         else:
             r = r.iloc[0]
-            keys = ["Date", "Close", "final_trade", "Strategy_Rank", "Strategy_Score", "combined_signal", "Technical_Score", "RS_Score",
-                    "RSI", "ma_50", "ma_200", "Strategy_Weight", "Buy Streak", "Sell Streak", "Regime_On"]
-            out.append("Dashboard signal: " + ", ".join(f"{k}={r[k]:.2f}" if isinstance(r[k], float) else f"{k}={r[k]}"
+            # live-strategy fields only (the old final_trade BUY/HOLD/SELL and technical score are not used by the bot)
+            keys = ["Date", "Close", "Strategy_Rank", "Strategy_Score", "Strategy_Weight", "RSI", "ma_50", "ma_200", "Regime_On"]
+            out.append("Live strategy data: " + ", ".join(f"{k}={r[k]:.2f}" if isinstance(r[k], float) else f"{k}={r[k]}"
                                                       for k in keys if k in r.index and str(r[k]) != "nan"))
             out.append(f"(Strategy_Rank is out of {s['Symbol'].nunique()} watchlist stocks, 1 = best)")
+            try:
+                from dashboard.signals import rebalance_plan
+                day, asof, plan = rebalance_plan(s)
+                e = plan.get(sym)
+                out.append(f"Next rebalance preview ({day:%a %b %-d}, from the {asof:%b %-d} close): "
+                           + (f"{e[0]}, target weight {e[1] * 100:.1f}%" if e else "not picked"))
+            except Exception:
+                pass
+            out.append("There is no BUY/HOLD/SELL signal; describe the stock with its rank and the rebalance preview only.")
         m = data.company_metrics(sym, data.load_company())
         if m:
             out.append("Fundamentals: " + ", ".join(f"{k}={v:.2f}" for k, v in m.items()))
