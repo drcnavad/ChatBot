@@ -397,6 +397,9 @@ def decision_gate(now_ct, state, scheduled=False):
     if D is None:
         return None, None, "no decision found in the last 15 days"
     label = f"{D:%a %b %d} {be.decision_kind(D)}"
+    hold = str(state.get("hold_until") or "")      # Chirag, Oct 27: first RS short-term rebalance postponed (Fed week)
+    if hold and D.date().isoformat() < hold:
+        return None, None, f"live trading on hold until the {hold} 2:30 PM CT decision (run_state hold_until)"
     done = str(state.get("last_decision") or "")
     if done >= D.date().isoformat():
         return None, None, f"the {label} already ran (last_decision {done})"
