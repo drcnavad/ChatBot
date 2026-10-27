@@ -207,6 +207,25 @@ def _prev_session(d, idx):
     before = idx[idx < d]
     return before[-1] if len(before) else None
 
+def fill_idle(tw, hw, move, blocked, px, invested):
+    """No idle cash (Chirag, Oct 26, 2026 - NOT in the backtest, which keeps that cash): the weight of a target that cannot
+    be bought (manual block / do_not_buy / earnings-soon top-up / no price) and any cash below `invested` (the strategy's own total weight today: 99%, or less under the QQQ halving) (rounding, unfilled
+    orders, dividends) are spread over the half's buyable names that trade today, in proportion to their target weights.
+    Returns the new {symbol: weight}."""
+    tw = dict(tw)
+    for s in list(tw):
+        if (s in blocked or not _num(px.get(s))) and tw[s] > hw.get(s, 0.0):
+            tw[s] = float(hw.get(s, 0.0))      # held: kept as is; not held: 0
+            if tw[s] <= 0:
+                del tw[s]
+    free = invested - sum(tw.values())
+    ok = [s for s in tw if move.get(s, False) and s not in blocked and _num(px.get(s))]
+    base = sum(tw[s] for s in ok)
+    if free > 1e-9 and base > 0:
+        for s in ok:
+            tw[s] += free * tw[s] / base
+    return tw
+
 def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_value):
     """build_orders rows for half h (its own account): the names that move (target changed, or every name on its full
     rebalance / the switch) go to their target weight; the others keep their shares - forward_test.update_strategies."""
@@ -238,13 +257,15 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
                 tw[s] = float(wd[s])
         elif hw[s] > 0:
             tw[s] = float(hw[s])              # left alone (within its own weight: the band keeps it untraded)
+    blocked = {**{s: n for s, n in (no_buy or {}).items()},
+               **{s: "earnings within 5 days (held: not topped up)" for s in names if soon_d[s] and hw[s] > 0
+                  and s in tw and tw[s] > hw[s]}}
+    if trade_today and move.any():
+        tw = fill_idle(tw, hw, move, blocked, px, float(wd[wd > 0].sum()))
     tg = pd.DataFrame({"Symbol": list(tw), "Weight": [tw[s] for s in tw], "Price": [px.get(s) for s in tw]})
     if tg["Weight"].sum() > 1:
         tg["Weight"] = tg["Weight"] / tg["Weight"].sum()
     stat = {s: ("hold" if s in st["shares"] else "add") for s in tw}
-    blocked = {**{s: n for s, n in (no_buy or {}).items()},
-               **{s: "earnings within 5 days (held: not topped up)" for s in names if soon_d[s] and hw[s] > 0
-                  and s in tw and tw[s] > hw[s]}}
     o = pt.build_orders(tg, value, st["shares"], px, min_value=min_value, fractional=fractional, statuses=stat,
                         blocked=blocked, keep=no_sell)
     return o, {s: float(wd[s]) for s in names if wd[s] > 0}, bool(move.any())

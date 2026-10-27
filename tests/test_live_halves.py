@@ -63,5 +63,14 @@ blk = next(iter(buys.index))
 o3, _ = sleeves.plan(d, {}, 100000.0, px, ledger=None, inp=inp, no_buy={blk: "x"})
 check(blk not in set(o3[o3["Side"] == "BUY"]["Symbol"]), "do_not_buy: never bought")
 
+# no idle cash (Oct 26, 2026): a blocked target's weight goes to the half's other buys, pro rata; total = the strategy's own
+o4, i4 = sleeves.plan(d, {}, 100000.0, px, ledger=None, inp=inp, no_buy={blk: "x"})
+b4 = o4[o4["Side"] == "BUY"]["Est_Value"].sum()
+check(abs(b4 - orders[orders["Side"] == "BUY"]["Est_Value"].sum()) < 300, "blocked pick: its cash is spread over the other buys", b4)
+tw = sleeves.fill_idle({"A": 0.5, "B": 0.25, "C": 0.24}, {}, {"A": True, "B": True, "C": True}, {"C": "x"}, {"A": 1, "B": 1, "C": 1}, 0.99)
+check(abs(tw["A"] - 0.66) < 1e-9 and abs(tw["B"] - 0.33) < 1e-9 and "C" not in tw, "fill_idle: pro rata, blocked dropped", tw)
+tw = sleeves.fill_idle({"A": 0.2, "B": 0.2}, {}, {"A": True, "B": True}, {}, {"A": 1, "B": 1}, 0.495)
+check(abs(sum(tw.values()) - 0.495) < 1e-9, "fill_idle: never above the strategy's own total (QQQ halving kept)", tw)
+
 print("LIVE HALVES OK" if not FAIL else f"LIVE HALVES FAILURES ({len(FAIL)}): {FAIL}")
 sys.exit(1 if FAIL else 0)
