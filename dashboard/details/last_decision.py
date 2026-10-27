@@ -231,9 +231,34 @@ def render_preview(positions, led, equity):
     except Exception as e:
         st.info(f"Planned trades unavailable: {str(e)[:150]}")
         return
-    day = _sleeves().inputs()["close"].index[-1]
+    sl = _sleeves()
+    day = sl.inputs()["close"].index[-1]
     sells, buys = o[o.Side == "Sell"]["Value $"].sum(), o[o.Side == "Buy"]["Value $"].sum()
     st.markdown(f"Planned trades (dry run at the {day:%a %b %-d} close, re-planned at the run's 2:30 PM bar): "
                 f"sell ${sells:,.0f} · buy ${buys:,.0f} · cash after ≈ ${cash:,.0f}")
-    table(toned(o, ["Side"], fn=lambda v: GOOD if v == "Buy" else INK), fit=True, key="preview_orders")
-    st.caption(f"After the run: {len(t)} stocks · " + ", ".join(f"{r.Symbol} {r[1]:.1f}%" for r in t.itertuples(index=False)))
+    from dashboard.settings import symbol_sector
+    held = {p_["symbol"] for p_ in positions or [] if float(p_.get("qty") or 0) > 0}
+    tgt = dict(zip(t["Symbol"], t["Target %"]))
+    side = dict(zip(o["Symbol"], o["Side"]))
+    def plan(x):
+        if x not in tgt:
+            return ""
+        a_ = "Keep" if x in held else "Buy"
+        if x in held and side.get(x) in ("Buy", "Sell"):
+            a_ = "Add" if side[x] == "Buy" else "Trim"
+        return f"{a_} {tgt[x]:.1f}%"
+    for half in sl.HALVES:
+        st.markdown(f"**{sl.LABEL[half]}** · targets at the {day:%a %b %-d} close"
+                    + " (Mon-Thu only the exit check trades)")
+        tab, _ = ranking_table(half, day, positions, led, path="__live__", equity=equity)
+        tab["Held by"] = ["✓ " + SLEEVE[half] if x in held else "" for x in tab["Stock"]]
+        tab.insert(1, "Plan", [plan(x) for x in tab["Stock"]])
+        table(toned(tab, ["Plan"], fn=lambda v: GOOD if str(v).startswith(("Buy", "Add")) else INK), fit=True,
+              cols={"Score": SCORE}, key=f"preview_{half}")
+        extra = [x for x in tgt if x not in set(tab["Stock"])]
+        if extra:
+            st.caption("Also targeted (outside the top 20 / defensive stocks): "
+                       + ", ".join(f"{x} ({symbol_sector.get(x, '—')}) {plan(x)}" for x in extra))
+        sold = o[(o.Side == "Sell") & ~o.Symbol.isin(set(tgt))]
+        st.markdown("Would sell: " + (", ".join(f"{r.Symbol} ({symbol_sector.get(r.Symbol, '—')}) ${r[4]:,.0f}"
+                                                  for r in sold.itertuples(index=False)) if len(sold) else "nothing"))
