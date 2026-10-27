@@ -5,6 +5,7 @@ import streamlit as st
 from dashboard import chat
 
 CSS = """<style>
+.st-key-sa_chat_panel [data-testid="InputInstructions"] { display: none !important; }
 .st-key-sa_chat_fab { position: fixed; right: 1.1rem; bottom: 1.1rem; z-index: 999990; width: auto !important; }
 .st-key-sa_chat_fab button { border-radius: 999px; padding: .55rem 1rem; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
 div[data-testid="stPopoverBody"]:has(.st-key-sa_chat_panel) { width: min(430px, 94vw); max-height: 75vh; overflow-y: auto; }
