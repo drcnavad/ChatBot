@@ -98,11 +98,14 @@ State files in `Reports/`: `sleeve_ledger.json` (halves: tags + cash, no shares)
 `manual_block.json`, `run_state.json` (decision done / last daily), `earnings_stop_state.json`, `trade_audit_state.json`;
 logs: `run_log.csv`, `live_orders_log.csv`, `logs/`.
 
+Report tables: every `Reports/*.csv` name in the code is a table in SQLite `data/stock_analysis.db` (via `db.py`;
+`db.read_csv` / `db.to_csv` take the old paths). The old CSV files are backed up in `backups/csv_backup_2026-10-26.zip`.
+
 ## Dashboard (`app.py`, `dashboard/`)
 - **Home:** My notes (`Reports/my_notes.csv`), stock list (Keep / Buy next / Sell next / Next in line / Others, DNB tag;
   `dashboard/stock_groups.py`), stock view (signal_analysis.csv + live quote), sector performance table.
 - **Strategy:** Last decision (Alpaca fills + ledger + decision_ranks.csv), Live vs benchmark (Alpaca portfolio history vs
-  QQQ/SPY), Forward test (forward_*.csv), Strategy rules and paper holdings, Manual orders and buy blocks, Data freshness, What each strategy does. The next-rebalance plan compares picks with the live Alpaca positions and marks a do-not-buy or manually blocked new buy as Blocked.
+  QQQ/SPY), Forward test (forward_*.csv), Strategy rules and paper holdings, Data freshness, What each strategy does. The next-rebalance plan compares picks with the live Alpaca positions and marks a do-not-buy or manually blocked new buy as Blocked.
 - **Trading Account:** Live holdings (Alpaca, read-only), Trade audit (live_trade_ledger.csv), Tax view (tax_lots), rules.
 
 ## Tests and setup

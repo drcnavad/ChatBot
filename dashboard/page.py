@@ -1,5 +1,4 @@
 """Page state (everything the render functions need, computed once per run) and the title bar."""
-import os
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -131,9 +130,9 @@ def render_top_bar(p):
         show_html(f'<div style="text-align:right"><span class="sa-chip{" sa-chip-warn" if stale else ""}" '
                   f'title="{esc(", ".join(stale) or "All data files are fresh")}">Updated {esc(updated + note)}</span></div>')
     with c3:
-        # every data cache is keyed on the Reports/*.csv modification times: clearing them reloads the newest output
+        # every data cache is keyed on the Reports/*.csv update times (SQLite, data/stock_analysis.db): clearing them reloads the newest output
         if st.button("Refresh data", width="stretch",
-                     help="Clear all cached data and reload the latest Reports/*.csv files and live quotes."):
+                     help="Clear all cached data and reload the latest report tables and live quotes."):
             st.cache_data.clear()
             st.cache_resource.clear()
             st.rerun()

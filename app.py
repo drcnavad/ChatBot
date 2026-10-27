@@ -10,7 +10,7 @@ Page layout, top to bottom:
   4. "Strategy" tab: last decision, forward test, strategy rules and holdings, data freshness and settings.
   5. "Trading Account" tab: portfolio value, live holdings, trade audit, tax view, strategy rules.
 
-The app only READS the Reports/*.csv files written by `python run_all.py` for strategy data, plus the live holdings from the
+The app only READS the report tables (SQLite data/stock_analysis.db, via db.py) written by `python run_all.py` for strategy data, plus the live holdings from the
 Alpaca account (read-only GETs via alpaca_paper.py, at most once a minute). The dashboard itself never places orders except from the bottom-right chat button (chatbot/core.py), which
 asks for your PIN (chatbot/pin.py) before every order / cancel / close. It never calls
 a paid data API (the optional "AI analysis" button uses the Hugging Face token from .env). The stock header additionally

@@ -2,9 +2,9 @@
 Only a salted hash is saved (.chat_pin.json, gitignored). Changing it needs the old PIN; if you forgot it, delete
 .chat_pin.json and run this again."""
 import getpass
+import os
 import sys
 
-import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from chatbot import pin as chat_pin
 

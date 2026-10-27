@@ -229,7 +229,6 @@ def glob(pattern):
     found = set(_g.glob(os.fspath(pattern)))
     if is_csv_path(pattern):
         pat = table_name(pattern)
-        base = os.path.abspath(os.fspath(pattern))
         for t in tables():
             if fnmatch.fnmatchcase(t, pat):
                 found.add(path_of(t))

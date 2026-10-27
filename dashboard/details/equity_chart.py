@@ -1,5 +1,5 @@
 """Trading Account tab: the account's equity over a chosen period (Alpaca portfolio history, read-only GET), with the
-period's gain, QQQ / SPY / DIA bought with the same cash flows and the drawdown. The line is the real equity in $ (from Oct 9); the
+period's gain, QQQ / SPY / DIA bought with the same cash flows. The line is the real equity in $ (from Oct 9); the
 $ gain and the % return leave deposits / withdrawals out, so money moved in is never a gain (nor out a loss)."""
 import os
 
@@ -94,9 +94,9 @@ def _bench(sym, index, tf):
     except Exception:
         return pd.Series(dtype=float)
 
-def equity_figure(d, bench, shown=("QQQ",), show_dd=False, intraday=False):
+def equity_figure(d, bench, shown=("QQQ",), intraday=False):
     """The actual equity in $ (green / red fill vs a dashed line at the period's start value), QQQ / SPY / DIA from the
-    same start (plus any later deposits, on the same days), and the drawdown of the time-weighted return."""
+    same start (plus any later deposits, on the same days)."""
     d = d.copy()
     if intraday:                                       # the component's clock: New York time, no zone (as the stock chart)
         d.index = d.index.tz_convert("America/New_York").tz_localize(None)
@@ -105,8 +105,7 @@ def equity_figure(d, bench, shown=("QQQ",), show_dd=False, intraday=False):
     base = float(eq.iloc[0])
     up = gains(d)["gain"] >= 0
     color, fill = (GOOD, "rgba(21,128,61,0.10)") if up else (BAD, "rgba(185,28,28,0.10)")
-    fig = make_subplots(rows=2 if show_dd else 1, cols=1, shared_xaxes=True, vertical_spacing=0.04,
-                        row_heights=[0.75, 0.25] if show_dd else [1])
+    fig = make_subplots(rows=1, cols=1)
     fig.add_trace(go.Scatter(x=eq.index, y=[base] * len(eq), mode="lines", line=dict(width=0), hoverinfo="skip",
                              showlegend=False), row=1, col=1)
     fig.add_trace(go.Scatter(x=eq.index, y=eq.values, mode="lines", name="Portfolio", fill="tonexty", fillcolor=fill,
@@ -120,13 +119,7 @@ def equity_figure(d, bench, shown=("QQQ",), show_dd=False, intraday=False):
         qv = ((eq.iloc[0] / px.iloc[0]) + (d["flow"] / px).cumsum()) * px
         fig.add_trace(go.Scatter(x=qv.index, y=qv.values, mode="lines", name=f"{sym} (same start)",
                                  line=dict(color=BENCH[sym], width=1.4, dash="dot"), hoverinfo="none"), row=1, col=1)
-    if show_dd:
-        dd = (d["twr"] / d["twr"].cummax() - 1) * 100
-        fig.add_trace(go.Scatter(x=dd.index, y=dd.values, mode="lines", name="Drawdown", fill="tozeroy",
-                                 line=dict(color=BAD, width=1), fillcolor="rgba(185,28,28,0.12)", showlegend=False,
-                                 hoverinfo="none"), row=2, col=1)
-        fig.update_yaxes(title_text="Drawdown", ticksuffix="%", tickformat=".1f", row=2, col=1)
-    fig.update_layout(height=470 if show_dd else 380, margin=dict(l=10, r=70, t=44, b=24), hovermode="closest",
+    fig.update_layout(height=380, margin=dict(l=10, r=70, t=44, b=24), hovermode="closest",
                       dragmode=False, plot_bgcolor="#fff", paper_bgcolor="#fff",
                       font=dict(family=CHART_FONT, size=11, color="#334155"),
                       legend=dict(orientation="h", x=1, xanchor="right", y=1.0, yanchor="bottom", font=dict(size=10),
@@ -146,7 +139,6 @@ def render_equity_chart():
     key = DATA.get(view, SINCE)
     tg = st.columns(3)
     shown = [sym for c, sym in zip(tg, BENCH) if c.toggle(sym, value=sym == "QQQ", key=f"eq_{sym.lower()}")]
-    show_dd = False                                   # drawdown panel removed from this chart
     try:
         from dashboard.data import refresh_slot
         d, bench = equity_series(key, refresh_slot())
@@ -163,7 +155,7 @@ def render_equity_chart():
               f'<span class="sa-eq-chg" style="color:{GOOD if m["gain"] >= 0 else BAD}">{usd(m["gain"])} ({m["twr_pct"]:+.2f}%)</span>'
               f'<span class="sa-eq-sub">{view if view in DATA else SINCE} · net of {usd(m["net_flows"])} deposits / withdrawals · time-weighted{qtxt}</span></div>')
     intraday = PERIODS[key][1] != "1D"
-    fig = equity_figure(d, bench, shown, show_dd, intraday=intraday)
+    fig = equity_figure(d, bench, shown, intraday=intraday)
     x = d.index.tz_convert("America/New_York").tz_localize(None) if intraday else d.index
     fmt = "%Y-%m-%dT%H:%M" if intraday else "%Y-%m-%d"           # as the stock chart
     eq = [float(v) for v in d["equity"]]
