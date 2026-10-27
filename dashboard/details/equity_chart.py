@@ -49,6 +49,12 @@ def equity_series(key, slot=0):
             eq_now = float(ap.PaperAccount()._get("/account").get("equity") or 0)
             if eq_now > 0:
                 raw.loc[now], flow.loc[now] = eq_now, 0.0
+        if key == "1D" and len(raw):                    # start the day at yesterday's close, not at today's open
+            prev_close = float(ap.PaperAccount()._get("/account").get("last_equity") or 0)
+            if prev_close > 0:
+                t0 = raw.index[0] - pd.Timedelta(minutes=5)
+                raw = pd.concat([pd.Series([prev_close], index=[t0]), raw])
+                flow = pd.concat([pd.Series([0.0], index=[t0]), flow])
     keep_from = raw.index.tz_localize(None) >= START if raw.index.tz is not None else raw.index >= START
     raw, flow = raw[keep_from], flow[keep_from]
     prev = raw.shift(1)
@@ -88,7 +94,7 @@ def _bench(sym, index, tf):
     except Exception:
         return pd.Series(dtype=float)
 
-def equity_figure(d, bench, shown=("QQQ",), show_dd=True, intraday=False):
+def equity_figure(d, bench, shown=("QQQ",), show_dd=False, intraday=False):
     """The actual equity in $ (green / red fill vs a dashed line at the period's start value), QQQ / SPY / DIA from the
     same start (plus any later deposits, on the same days), and the drawdown of the time-weighted return."""
     d = d.copy()
@@ -126,7 +132,7 @@ def equity_figure(d, bench, shown=("QQQ",), show_dd=True, intraday=False):
                       legend=dict(orientation="h", x=1, xanchor="right", y=1.0, yanchor="bottom", font=dict(size=10),
                                   bgcolor="rgba(0,0,0,0)"))
     fig.update_xaxes(showgrid=False, fixedrange=True, tickformat="%-I:%M %p" if intraday else "%b %-d",
-                     rangebreaks=[dict(bounds=["sat", "mon"])] + ([dict(bounds=[16, 9.5], pattern="hour")] if intraday else []))
+                     rangebreaks=[dict(bounds=["sat", "mon"])] + ([dict(bounds=[16, 9.4], pattern="hour")] if intraday else []))
     fig.update_yaxes(side="right", gridcolor="#f1f5f9", zeroline=False, fixedrange=True, tickfont=dict(size=10, color="#64748b"))
     fig.update_yaxes(tickformat="$,.0f", row=1, col=1)
     return fig
@@ -138,9 +144,9 @@ def render_equity_chart():
         return
     view = st.session_state.get("eq_view", "1D")      # a fresh load shows today; a picked range is kept for the session
     key = DATA.get(view, SINCE)
-    tg = st.columns(4)
+    tg = st.columns(3)
     shown = [sym for c, sym in zip(tg, BENCH) if c.toggle(sym, value=sym == "QQQ", key=f"eq_{sym.lower()}")]
-    show_dd = tg[3].toggle("Drawdown", value=True, key="eq_dd")
+    show_dd = False                                   # drawdown panel removed from this chart
     try:
         from dashboard.data import refresh_slot
         d, bench = equity_series(key, refresh_slot())
