@@ -184,6 +184,15 @@ def next_run(now=None, ledger=None):
     import backtest_engine as be
     now = now or pd.Timestamp.now(tz=be.CENTRAL).to_pydatetime()
     slot = be.next_decision_slot(now)
+    try:   # a missed decision not yet run (run_all.decision_gate) trades first: now if the market is open, else 9:00 AM CT
+        import run_all as ra
+        D, how, _ = ra.decision_gate(now, ra.load_state())
+        if D is not None and D.date() != now.date() and how in ("session", "wait"):
+            start = now if how == "session" else ra.next_session_start(now)
+            if slot is None or start < slot:
+                return start, ("first full rebalance" if ledger is None else f"catch-up of the {D:%a %b %-d} decision")
+    except Exception:
+        pass
     if slot is None:
         return None, None
     kind = be.decision_kind(slot.date())
@@ -240,23 +249,55 @@ def render_preview(positions, led, equity):
     held = {p_["symbol"] for p_ in positions or [] if float(p_.get("qty") or 0) > 0}
     tgt = dict(zip(t["Symbol"], t["Target %"]))
     side = dict(zip(o["Symbol"], o["Side"]))
+    def earn_soon(syms):
+        """{SYMBOL: 'Oct 28'} for names with earnings within the 5-day rule (the engine's own check: not newly bought)."""
+        try:
+            import backtest_engine as be, forward_test as ft
+            inp = sl.inputs()
+            a = be.earnings_days_ahead([day], list(syms), inp["earnings"], ft.EARN_DAYS).iloc[0].dropna()
+            return {k: f"{day + pd.offsets.BDay(int(v)):%b %-d}" for k, v in a.items()}
+        except Exception:
+            return {}
     def plan(x):
         if x not in tgt:
-            return ""
+            if x in earn:
+                return f"{'Sell' if side.get(x) == 'Sell' else 'Skip'}: earn {earn[x]}"
+            if side.get(x) == "Sell":
+                return "Sell: not a pick"
+            return "Skip: not Fri pick"   # entered the top 20 after the Friday rebalance; Mon-Thu only refills exits
         a_ = "Keep" if x in held else "Buy"
         if x in held and side.get(x) in ("Buy", "Sell"):
             a_ = "Add" if side[x] == "Buy" else "Trim"
-        return f"{a_} {tgt[x]:.1f}%"
+        return a_
     for half in sl.HALVES:
         st.markdown(f"**{sl.LABEL[half]}** · targets at the {day:%a %b %-d} close"
                     + " (Mon-Thu only the exit check trades)")
         tab, _ = ranking_table(half, day, positions, led, path="__live__", equity=equity)
-        tab["Held by"] = ["✓ " + SLEEVE[half] if x in held else "" for x in tab["Stock"]]
+        tab = tab.drop(columns=["Held by"])
+        earn = earn_soon(tab["Stock"])
+        mv = {p_["symbol"]: float(p_.get("market_value") or 0) for p_ in positions or []}
+        try:
+            from dashboard.data import index_quotes
+            qq = index_quotes(tuple(tab["Stock"])) or {}
+        except Exception:
+            qq = {}
+        tab["Weight now"] = [round(100 * mv[x] / equity, 1) if x in mv and equity else None for x in tab["Stock"]]
+        tab["Today %"] = [round(float(qq[x][1]), 2) if x in qq and qq[x][1] == qq[x][1] else None for x in tab["Stock"]]
         tab.insert(1, "Plan", [plan(x) for x in tab["Stock"]])
-        st.caption("Plan: Buy = new stock · Add = held, bought up to its target · Trim = held, part sold down to its "
-                   "target · Keep = held, already within 1 point of its target (no trade) · blank = not a target")
-        table(toned(tab, ["Plan"], fn=lambda v: GOOD if str(v).startswith(("Buy", "Add")) else INK), fit=True,
-              cols={"Score": SCORE}, key=f"preview_{half}")
+        st.caption("Plan: Buy = new stock · Add = held, bought up to its target · Trim = held, part sold down to "
+                   "its target · Keep = held, within 1 point of its target · Skip: earn = earnings within 5 trading "
+                   "days, not newly bought · Skip: not Fri pick = not in Friday's picks (Mon-Thu only refills a "
+                   "name that falls below rank 20) · Sell = held, not a pick")
+        from dashboard.style import BAD
+        tone_ = lambda v: (GOOD if v > 0 else BAD if v < 0 else INK) if isinstance(v, (int, float)) and v == v else INK
+        sty = toned(tab, ["Plan"], fn=lambda v: GOOD if str(v).startswith(("Buy", "Add")) else BAD if str(v).startswith("Sell") else INK)
+        sty = toned(sty, ["Today %"], fn=tone_)
+        table(sty, fit=True, key=f"preview_{half}",
+              cols={"Score": SCORE, "Rank": st.column_config.NumberColumn("#", width=30),
+                    "Plan": st.column_config.TextColumn(width=96), "Stock": st.column_config.TextColumn(width=52),
+                    "Sector": st.column_config.TextColumn(width=110),
+                    "Weight now": st.column_config.NumberColumn("Weight now", format="%.1f%%", width=62),
+                    "Today %": st.column_config.NumberColumn("Today %", format="%+.2f", width=58)})
         extra = [x for x in tgt if x not in set(tab["Stock"])]
         if extra:
             st.caption("Also targeted (outside the top 20 / defensive stocks): "

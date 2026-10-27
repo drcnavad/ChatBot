@@ -73,37 +73,11 @@ def render_live_holdings():
         render_positions(table, data)
     render_benchmarks(data)
 
-HALF_NAMES = {"rs_short": "RS short-term"}
-
-MANUAL_BUYS = {"MNST"}   # bought on Chirag's request but run by the 9 AM fill check, so not in manual_orders.json
-
-def strategy_of(symbols, reports=None):
-    """{symbol: strategy}: the half that owns it in Reports/sleeve_ledger.json (the bot's own tags); not tagged = Manual.
-    " (M)" = a manual buy: a BUY in Reports/manual_orders.json (manual_trade.py's log) or MANUAL_BUYS."""
-    import json
-    from dashboard.settings import ROOT
-    reports = reports or os.path.join(ROOT, "Reports")
-    try:
-        halves = json.load(open(os.path.join(reports, "sleeve_ledger.json")))["halves"]
-        tag = {}
-        for h, v in halves.items():                 # the live sleeve (Oct 27, 2026: RS short-term)
-            for s in v.get("tags", []):
-                tag[s] = (tag[s] + " + " if s in tag else "") + HALF_NAMES.get(h, h)
-    except Exception:
-        return {s: "Unknown" for s in symbols}
-    manual = set(MANUAL_BUYS)
-    try:
-        mo = json.load(open(os.path.join(reports, "manual_orders.json")))
-        manual |= {o["symbol"] for o in mo if str(o.get("action", "")).startswith("buy")}
-    except Exception:
-        pass
-    return {s: (tag[s] + (" (M)" if s in manual else "")) if s in tag else "Manual" for s in symbols}
-
-def rank_at_buy(sym, strategy, bought):
-    """The stock's rank in its half at the latest saved decision on or before its first buy (Reports/decision_ranks.csv);
-    None for manual buys or when no rank was saved then (ranks are saved from Fri Oct 16, 2026)."""
-    col = {"RS short-term": "Rank_RS_Short"}.get(str(strategy).split(" + ")[0].replace(" (M)", ""))
-    if col is None or bought is None or bought != bought:
+def rank_at_buy(sym, bought):
+    """The stock's RS short-term rank at the latest saved decision on or before its first buy (Reports/decision_ranks.csv);
+    None when no rank was saved then (ranks are saved from Fri Oct 16, 2026)."""
+    col = "Rank_RS_Short"
+    if bought is None or bought != bought:
         return None
     try:
         import decision_ranks
@@ -118,14 +92,12 @@ def rank_at_buy(sym, strategy, bought):
 
 def render_positions(table, data):
     """The holdings table (alpaca_paper.holdings_table) and its caption."""
-    strat = strategy_of(list(table["Stock"]))
-    table.insert(1, "Strategy", [strat.get(s, "") if not str(s).startswith("Total") else "" for s in table["Stock"]])
-    table.insert(2, "Rank", pd.array([rank_at_buy(s, g, d) for s, g, d in zip(table["Stock"], table["Strategy"], table["First bought"])],
-                                     dtype="Int64"))
+    table.insert(1, "Rank", pd.array([rank_at_buy(s, d) if not str(s).startswith("Total") else None
+                                      for s, d in zip(table["Stock"], table["First bought"])], dtype="Int64"))
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
     t = table.drop(columns=["Weight %"], errors="ignore")   # equal weights: not shown (Oct 21, 2026)
     show(t, ["P/L $", "P/L %", "Today %"], fit=True,
-         cols={"Rank": st.column_config.NumberColumn(format="%d", help="Rank in its half on the day it was first bought"),
+         cols={"Rank": st.column_config.NumberColumn(format="%d", help="RS short-term rank on the day it was first bought"),
                "Shares": st.column_config.NumberColumn(format="%.2f"), "P/L %": SPCT, "Today %": SPCT,
                **dict.fromkeys(("Avg price", "Cost basis", "Market value", "P/L $", "Price"), MONEY)})
 

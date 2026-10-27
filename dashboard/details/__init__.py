@@ -56,7 +56,7 @@ def _prefetch():
             ex.submit(quiet, tv._read_tax_inputs, key)
 
 def render_trading_tab(p):
-    """Trading Account tab: live holdings, trade audit, tax view, strategy rules (the portfolio by half and both strategies'
+    """Trading Account tab: live holdings, trade audit, tax view, strategy rules (the portfolio and the RS short-term
     ranks are in the Strategy tab's Last decision)."""
     _prefetch()
     with st.expander("Portfolio value", expanded=True):
