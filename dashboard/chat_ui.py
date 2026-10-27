@@ -15,8 +15,18 @@ def _say(role, text):
     st.session_state.setdefault("sa_chat", []).append((role, text))
 
 def _handle(text):
+    hist = list(st.session_state.get("sa_chat", []))
     _say("user", text)
-    cmd = chat.parse(text)
+    try:
+        from dashboard import chat_llm
+        r = chat_llm.respond(hist, text)
+    except Exception:
+        r = None
+    if r is not None:
+        st.session_state["sa_chat_pending"] = r["plan"]
+        _say("assistant", r["text"])
+        return
+    cmd = chat.parse(text)          # no model reachable: keyword commands
     try:
         if cmd["kind"] in ("order", "close", "cancel"):
             p, msg = chat.plan(cmd)
