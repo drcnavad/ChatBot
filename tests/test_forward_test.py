@@ -425,6 +425,18 @@ with tempfile.TemporaryDirectory() as tmp:
     _held = lambda n: set(hn.loc[(hn["Strategy"] == n) & (hn["Date"] == "2026-10-06") & (hn["Shares"] > 0), "Symbol"])
     check("resume: a target the saved book does not hold is bought the next day (daily lines), monthly lines wait",
           _held("N") == {"AAA"} and _held("E") == {"AAA"} and _held("M") == {"BBB"}, (_held("N"), _held("E"), _held("M")))
+    # an all-cash first run (no holdings rows at all) must still save, and a later run resumes from it
+    try:
+        ft.strategy_inputs = fake_inputs_n
+        ft.strategy_targets = lambda cfg, inp_: pd.DataFrame(0.0, index=inp_["close"].index, columns=inp_["close"].columns)
+        ft.STRATEGIES = [{"name": "C", "rule": "C", "event": {"kind": "x"}}]
+        n_c = ft.update_strategies(hs[hs["Date"] <= "2026-10-05"], None, NO_EARN, **P("cash"))
+        n_c2 = ft.update_strategies(hs, None, NO_EARN, **P("cash"))
+    finally:
+        ft.strategy_inputs, ft.strategy_targets, ft.STRATEGIES = real_inputs, real_targets, real_list
+    vc = db.read_csv(P("cash")["path"])
+    check("all-cash strategy: saves its rows with no holdings (no KeyError) and resumes",
+          n_c == 2 and n_c2 == 4 and (vc["Value"] == 1.0).all() and (vc["Cash"] == 1.0).all(), (n_c, n_c2, len(vc)))
     hy = db.read_csv(P("h")["path"], parse_dates=["Date"])
     ht = hy[hy["Strategy"] == "T"].set_index("Date")
     hv, hy, hz, hw = (hy[hy["Strategy"] == x].set_index("Date")["Value"] for x in "XYZV")

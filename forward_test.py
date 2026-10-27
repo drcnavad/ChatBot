@@ -943,8 +943,10 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
             hold += [{"Date": d, "Strategy": name, "Symbol": s, "Weight": wd[s], "Shares": shares[s], "Price": px[s]}
                      for s in cols[on.to_numpy()]]
     if rows:
-        for p, new, prior in ((path, rows, old), (hold_path, hold, old_h)):
-            out = pd.concat([prior, pd.DataFrame(new)], ignore_index=True) if prior is not None else pd.DataFrame(new)
+        for p, new, prior, cols_ in ((path, rows, old, ["Date", "Strategy", "Value", "Cash"]),
+                                     (hold_path, hold, old_h, ["Date", "Strategy", "Symbol", "Weight", "Shares", "Price"])):
+            new = pd.DataFrame(new, columns=cols_)    # all-cash days add no holdings rows: keep the columns (no KeyError)
+            out = pd.concat([prior, new], ignore_index=True) if prior is not None else new
             out = out.assign(Date=pd.to_datetime(out["Date"])).sort_values("Date", kind="stable")   # by day, registry order
             out.assign(Date=out["Date"].dt.strftime("%Y-%m-%d")).pipe(db.to_csv, p, index=False)
     return len(rows)
