@@ -6,7 +6,6 @@ Markdown ends an HTML block at the first blank line and turns 4-space-indented l
 HTML block goes through show_html(): one line, no indentation, dynamic text escaped with esc()."""
 import html
 import re
-from urllib.parse import quote
 
 import pandas as pd
 from pandas.io.formats.style import Styler
@@ -255,9 +254,6 @@ esc = html.escape
 
 def show_html(markup):
     st.markdown("".join(line.strip() for line in str(markup).splitlines()), unsafe_allow_html=True)
-
-def symbol_link(sym, cls=""):
-    return f'<a href="?symbol={quote(sym)}" class="symbol-link {cls}" target="_self">{esc(sym)}</a>'
 
 def section(title):
     show_html(f'<div class="sa-section">{esc(title)}</div>')

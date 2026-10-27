@@ -1640,14 +1640,6 @@ def winner_targets(score_w, eligible_w, vol_w, regime, rebalance_days, tiebreak_
                               keep=args.get("sleeve") or ())
     return tgt, checks
 
-def is_week_start(d):
-    """True when session d is the first session of its ISO week (Monday, or Tuesday after a Monday holiday)."""
-    d = pd.Timestamp(d).normalize()
-    if not is_session(d):
-        return False
-    prev = pd.date_range(d - pd.Timedelta(days=10), d - pd.Timedelta(days=1), freq=NYSE_SESSION)[-1]
-    return prev.isocalendar()[:2] != d.isocalendar()[:2]
-
 def next_decision(latest, days=None):
     """Next decision session after ``latest``: (date, 'full rebalance' | 'mid-week check', fill_date).
 

@@ -7,7 +7,6 @@ before a fill - the sleeve ledger only tags which half a symbol belongs to, and 
     fills_since(iso)           Alpaca fills after a time (the sleeves' cash attribution), None when unreadable
     pending_symbols()          symbols with a queued BUY in Reports/live_pending_orders.json (shown as 'Pending order')
 """
-import json
 import os
 import time
 
@@ -58,33 +57,3 @@ def get_positions(client=None, fresh=False, account=None):
 
 def held_qty(client=None, fresh=False, account=None):
     return {s: p["qty"] for s, p in get_positions(client, fresh, account).items()}
-
-
-def fills_since(after):
-    """[{symbol, side BUY/SELL, qty, price}] of the Alpaca fills after `after` (ISO); None when unreadable or off."""
-    if not after or os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off":
-        return None
-    try:
-        import alpaca_paper as ap
-        rows = ap.PaperAccount().fills(after=after)
-    except Exception:
-        return None
-    rows = rows.to_dict("records") if hasattr(rows, "to_dict") else rows
-    out = []
-    for r in rows or []:
-        sym, q, px = r.get("symbol") or r.get("Symbol"), _f(r.get("qty") or r.get("Qty")), _f(r.get("price") or r.get("Price"))
-        side = str(r.get("side") or r.get("Side") or "").upper()
-        if sym and q and px and side in ("BUY", "SELL"):
-            out.append({"symbol": str(sym).upper(), "side": side, "qty": q, "price": px})
-    return out
-
-
-def pending_symbols(path=None):
-    """{SYMBOL: half or None} with a queued BUY row (not yet a holding)."""
-    try:
-        with open(path or PENDING_JSON) as f:
-            rows = json.load(f).get("orders") or []
-    except (OSError, ValueError, AttributeError):
-        return {}
-    return {str(o.get("symbol", "")).upper(): o.get("half") for o in rows
-            if isinstance(o, dict) and str(o.get("side", "")).upper() == "BUY" and not o.get("completed_order_id")}
