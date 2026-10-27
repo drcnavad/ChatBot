@@ -250,7 +250,7 @@ def live_components():
     return tuple(sleeves.STRATEGY[h] for h in (be.WINNER.get("sleeves") or {}) if h in sleeves.STRATEGY)
 
 def highlight_rows(sty):
-    """Darker rows: your Alpaca account, the current (live) strategy and the lines its halves are (live_components)."""
+    """Darker rows: your Alpaca account, the current (live) strategy and its component line (live_components)."""
     import forward_test as ft
     keys = ("My Alpaca account", CURRENT, *live_components())
     on = lambda name: str(name).startswith(ft.LIVE) or str(name).replace(ft.LIVE_MARK, "") in keys
@@ -355,4 +355,69 @@ def render_top10(p=None):
                 head = (f"{esc(s)} · {esc(sm.symbol_name.get(s, s))}" + (f" · ${px:,.2f}" if px == px else "")
                         + (f" · {r:+.2f}% this week" if r == r else "") + f" · held by {k}/{n}: {esc(', '.join(by.get(s, [])))}")
                 body = sparkline(*spark[s], ",.2f") if s in spark else '<div class="sa-pop-empty">No intraday data right now</div>'
+                st.markdown(f'<div class="sa-pop"><div class="sa-pop-title">{head}</div>{body}</div>', unsafe_allow_html=True)
+
+
+def current_holdings_table(positions, ranks=None):
+    """Ticker, Weight % (of the holdings' market value + cash is not counted), RS short-term rank, Today % - from the
+    live Alpaca positions (read-only)."""
+    rows, tot = [], sum(float(x.get("market_value") or 0) for x in positions or []) or 1.0
+    for x in positions or []:
+        s, mv = x["symbol"], float(x.get("market_value") or 0)
+        ch = x.get("change_today")
+        rows.append({"Ticker": s, "Weight %": 100 * mv / tot, "Value $": mv,
+                     "RS short-term rank": (ranks or {}).get(s), "Today %": float(ch) * 100 if ch not in (None, "") else None})
+    return pd.DataFrame(rows, columns=["Ticker", "Weight %", "Value $", "RS short-term rank", "Today %"]).sort_values(
+        "Weight %", ascending=False).reset_index(drop=True)
+
+@st.fragment(run_every=60)
+def render_current_holdings():
+    """Current holdings of the live account (Alpaca positions, read-only) as the Top 5 consensus tiles, right below
+    them: label = weight %, today %; color = today's change; hover = name, rank, value + today's sparkline; click = open
+    in Stock Analysis (same as the consensus tiles)."""
+    import sector_mapping as sm
+    from dashboard.details.live_holdings import holdings_this_run
+    from dashboard.heatmap import tile_color
+    from dashboard.page import sparkline
+    if st.session_state.get("_cs_open"):
+        st.session_state["_pending_ticker"] = st.session_state.pop("_cs_open")
+        st.rerun(scope="app")
+    data, err = holdings_this_run()
+    if data is None:
+        show_html(f'<div class="sa-card"><div class="sa-card-title">Current holdings<span>{esc(str(err))}</span></div></div>')
+        return
+    try:
+        import sleeves
+        day = sleeves.inputs()["close"].index[-1]
+        ranks = {s: i + 1 for i, s in enumerate(sleeves.ranking("rs_short", day).index)}
+    except Exception:
+        ranks = None
+    t = current_holdings_table(data["positions"], ranks)
+    if t.empty:
+        show_html('<div class="sa-card"><div class="sa-card-title">Current holdings<span>no positions</span></div></div>')
+        return
+    spark = {}
+    try:
+        from dashboard.data import intraday
+        spark = intraday(tuple(t["Ticker"])) or {}
+    except Exception:
+        pass
+    eq = float(data.get("equity") or 0)
+    rows = list(t.itertuples(index=False))
+    css = TILE_CSS.replace("cs_grid", "ch_grid")
+    st.markdown(f'<div class="sa-card-title">Current holdings<span>{len(rows)} stocks in the live account ({CURRENT})'
+                + (f" · {100 * t['Value $'].sum() / eq:.1f}% invested" if eq else "")
+                + ". Colored by today's change; label = weight of the holdings.</span></div>" + css
+                + "".join(f'<style>.st-key-cs_b_h_{r[0].replace(".", "_")} button{{background:{tile_color(r[4] / 1.5 if r[4] == r[4] and r[4] is not None else float("nan"))}!important}}</style>'
+                          for r in rows), unsafe_allow_html=True)
+    with st.container(horizontal=True, gap=None, key="ch_grid"):
+        for sym, w, val, rk, ch in rows:
+            key = sym.replace(".", "_")
+            ok = ch is not None and ch == ch
+            with st.container(key=f"cs_t_h_{key}"):
+                st.button(f"{sym}  {w:.1f}%\n" + (f"{ch:+.2f}%" if ok else "–"), key=f"cs_b_h_{key}", on_click=_cs_open, args=(sym,))
+                head = (f"{esc(sym)} · {esc(sm.symbol_name.get(sym, sym))} · ${val:,.0f} ({w:.1f}%)"
+                        + (f" · RS short-term rank {int(rk)}" if rk == rk and rk is not None else " · not ranked")
+                        + (f" · {ch:+.2f}% today" if ok else ""))
+                body = sparkline(*spark[sym], ",.2f") if sym in spark else '<div class="sa-pop-empty">No intraday data right now</div>'
                 st.markdown(f'<div class="sa-pop"><div class="sa-pop-title">{head}</div>{body}</div>', unsafe_allow_html=True)

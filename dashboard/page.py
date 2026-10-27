@@ -18,6 +18,14 @@ def build_page():
     latest = latest_rows(df, mtime)
     import sector_mapping as sm                   # a stock commented out of the list leaves the page at once (Oct 19)
     latest = latest[latest['Symbol'].isin(set(sm.stock_symbols))]
+    try:                                          # live RS short-term rank / score (not the pipeline's old columns)
+        import sleeves
+        lr = sleeves.live_ranks()
+        latest = latest.assign(Strategy_Rank=latest["Symbol"].map(lambda s: lr.get(s, (float("nan"),))[0]),
+                               Strategy_Score=latest["Symbol"].map(lambda s: lr.get(s, (None, float("nan")))[1]))
+        latest = latest.assign(combined_signal=latest["Strategy_Score"])
+    except Exception:
+        pass
     board_off, off_date = signal_board(df)
     plan_day, plan_asof, plan = rebalance_plan(df)
     ref = load_short_history()

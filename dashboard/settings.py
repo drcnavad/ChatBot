@@ -31,7 +31,7 @@ EXIT_BELOW = WINNER.get("midweek_exit_below") if MIDWEEK else None   # mid-week 
 EXIT_TO_TOP = WINNER.get("midweek_exit_to_top") if EXIT_BELOW else None  # refill an exit from the best non-held top-N
 EARNINGS = WINNER.get("earnings_block_days")                         # no new buys with earnings within N days (None = off)
 
-N_PICKS = WINNER.get("n", 10)                                        # stocks per half (5 from Oct 21, 2026)
+N_PICKS = WINNER.get("n", 10)                                        # stocks picked (10, live RS short-term from Oct 27, 2026)
 W_TECH = WINNER.get("w_tech", 0.5)                                   # score = W_TECH x technical + (1 - W_TECH) x RS
 LOW_VOL = WINNER.get("score") == "low_vol"                          # low volatility in uptrend (else relative strength)
 MONTHLY = WINNER.get("calendar") == "monthly"                       # rebalance on the last trading day of the month

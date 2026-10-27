@@ -159,16 +159,23 @@ def stock_info(sym, account=None):
         else:
             r = r.iloc[0]
             # live-strategy fields only (the old final_trade BUY/HOLD/SELL and technical score are not used by the bot)
-            keys = ["Date", "Close", "Strategy_Rank", "Strategy_Score", "Strategy_Weight", "RSI", "ma_50", "ma_200", "Regime_On"]
+            keys = ["Date", "Close", "RSI", "ma_50", "ma_200", "Regime_On"]
             out.append("Live strategy data: " + ", ".join(f"{k}={r[k]:.2f}" if isinstance(r[k], float) else f"{k}={r[k]}"
                                                       for k in keys if k in r.index and str(r[k]) != "nan"))
-            out.append(f"(Strategy_Rank is out of {s['Symbol'].nunique()} watchlist stocks, 1 = best)")
+            try:                                   # the live line's own rank (RS short-term), not the pipeline column
+                import sleeves
+                lr = sleeves.live_ranks()
+                rk = lr.get(sym)
+                out.append(f"Live strategy (Live: RS short-term) rank: " + (f"{rk[0]} of {len(lr)} ranked (1 = best), RS score {rk[1]:.2f}"
+                           if rk else "not ranked (not eligible / score not above 0)") + "; the top 10 + defensive stocks are held.")
+            except Exception:
+                out.append(f"(Strategy_Rank is out of {s['Symbol'].nunique()} watchlist stocks, 1 = best)")
             try:
                 from dashboard.signals import rebalance_plan
                 day, asof, plan = rebalance_plan(s)
                 e = plan.get(sym)
                 out.append(f"Next rebalance preview ({day:%a %b %-d}, from the {asof:%b %-d} close): "
-                           + (f"{e[0]}, target weight {e[1] * 100:.1f}%" if e else "not picked"))
+                           + (f"{e[0]}, target {e[1]:.1f}% of the account" if e else "not picked"))
             except Exception:
                 pass
             out.append("There is no BUY/HOLD/SELL signal; describe the stock with its rank and the rebalance preview only.")

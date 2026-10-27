@@ -54,7 +54,7 @@ def sleeve_summary(day, positions, ledger, equity):
     return out
 
 def half_decision_day(half, path=None):
-    """The latest day in Reports/decision_ranks.csv on which `half` decided (rs_short every session, friday on Fridays)."""
+    """The latest day in Reports/decision_ranks.csv on which `half` decided (rs_short: every session)."""
     import decision_ranks
     sl = _sleeves()
     path = path or decision_ranks.RANKS_CSV
@@ -179,32 +179,65 @@ def next_plan():
             plan[s] = ("Blocked", 0.0, plan[s][2])
     return {"asof": asof, "days": days, "targets": t, "plan": plan}
 
-def render_preview(positions, led, equity):
-    """Each half's top 20 at the latest close with its plan (Keep / Buy / Blocked) and what it would sell."""
-    import decision_ranks
+def next_run(now=None, ledger=None):
+    """(slot datetime CT, kind text) of the next 2:30 PM CT decision. With no ledger yet the first run is a full rebalance."""
+    import backtest_engine as be
+    now = now or pd.Timestamp.now(tz=be.CENTRAL).to_pydatetime()
+    slot = be.next_decision_slot(now)
+    if slot is None:
+        return None, None
+    kind = be.decision_kind(slot.date())
+    if ledger is None:
+        kind = "first full rebalance"
+    return slot, kind
+
+SCHEDULE_TEXT = ("Mon-Thu 2:30 PM CT: a holding worse than rank 20 is sold and its slot refilled the same day from the "
+                 "top 10 · Fri 2:30 PM CT (Thu on a holiday): full weekly rebalance to the top 10 + defensive stocks, "
+                 "equal weight, 99% invested")
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _dry_plan(key, positions_t, equity):
+    """The trade step's own plan (paper_trade.plan_orders, read-only, no broker calls, no orders) at the latest close."""
     import paper_trade as pt
-    sl = _sleeves()
+    orders, meta, targets = pt.plan_orders("provisional", equity, positions=dict(positions_t), fractional=True)
+    return orders, targets
+
+def plan_frames(positions, equity):
+    """(orders table, targets table, cash after) for the next decision from the current dry-run plan."""
+    pos = tuple(sorted((p["symbol"], float(p.get("qty") or 0)) for p in positions or []))
+    key = str(_sleeves().inputs()["close"].index[-1].date())
+    orders, targets = _dry_plan(key, pos, float(equity))
+    o = orders[orders["Side"].isin(["buy", "sell", "BUY", "SELL"])].copy() if len(orders) else orders
+    o = o.assign(Side=o["Side"].str.capitalize())
+    o = o[["Side", "Symbol", "Shares", "Price", "Est_Value", "Current_Shares", "Target_Shares"]].rename(
+        columns={"Est_Value": "Value $", "Current_Shares": "Now shares", "Target_Shares": "Target shares"})
+    o = o.sort_values(["Side", "Value $"], ascending=[False, False]).reset_index(drop=True)
+    t = targets.assign(**{"Target %": targets["Weight"] * 100})[["Symbol", "Target %"]].sort_values(
+        "Target %", ascending=False).reset_index(drop=True)
+    cash = float(equity) * (1 - float(targets["Weight"].sum()))
+    return o, t, cash
+
+def render_preview(positions, led, equity):
+    """Next run (date/time CT, kind), the rule schedule, and the planned trades from the trade step's dry-run plan."""
     try:
-        day = sl.inputs()["close"].index[-1]
-        targets = _preview_targets(day)
+        slot, kind = next_run(ledger=led)
     except Exception as e:
-        st.info(f"Next decision preview unavailable: {str(e)[:150]}")
+        slot, kind = None, f"unavailable ({str(e)[:80]})"
+    if slot is not None:
+        st.markdown(f"**Next run: {slot:%a %b %-d, %-I:%M %p} CT** · {kind}")
+    st.caption(SCHEDULE_TEXT)
+    try:
+        o, t, cash = plan_frames(positions, equity)
+    except Exception as e:
+        st.info(f"Planned trades unavailable: {str(e)[:150]}")
         return
-    blocked = set(pt.manual_list("buy"))
-    mine = _mine(positions, led, equity) if led is not None else {h: [] for h in sl.HALVES}
-    cols = st.columns(len(sl.HALVES))
-    for c, half in zip(cols, sl.HALVES):
-        with c:
-            st.markdown(f"**{sl.LABEL[half]}** · targets at the {day:%a %b %-d} close"
-                        + " (Mon-Thu only the exit check trades)")
-            t, _ = ranking_table(half, day, positions, led, path="__live__", equity=equity)
-            tg = targets[half]
-            plan = lambda s: ("Blocked" if s in blocked else "Keep" if s in mine[half] else "Buy") if s in tg else ""
-            t.insert(1, "Plan", [plan(s) for s in t["Stock"]])
-            table(toned(t, ["Plan"], fn=lambda v: GOOD if v == "Buy" else INK), fit=True, cols={"Score": SCORE},
-                  key=f"preview_{half}")
-            extra = sorted(set(tg) - set(t["Stock"]))
-            if extra:
-                st.caption(f"Also targeted (outside the top 20 / defensive stocks): {', '.join(extra)}")
-            sells = sorted(set(mine[half]) - set(tg))
-            st.markdown("Would sell: " + (", ".join(sells) if sells else "nothing"))
+    day = _sleeves().inputs()["close"].index[-1]
+    sells, buys = o[o.Side == "Sell"]["Value $"].sum(), o[o.Side == "Buy"]["Value $"].sum()
+    st.markdown(f"Planned trades (dry run at the {day:%a %b %-d} close, re-planned at the run's 2:30 PM bar): "
+                f"sell ${sells:,.0f} · buy ${buys:,.0f} · cash after ≈ ${cash:,.0f}")
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        table(toned(o, ["Side"], fn=lambda v: GOOD if v == "Buy" else INK), fit=True, key="preview_orders")
+    with c2:
+        st.markdown(f"**Holdings after** · {len(t)} stocks")
+        table(t, fit=True, key="preview_targets")

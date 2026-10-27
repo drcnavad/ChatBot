@@ -593,7 +593,7 @@ if db.exists(ft.SIGNAL_CSV):
             for dd in (be.WINNER["midweek_swap"]["days"], ["Mon", "Wed"])]
     mw = os.path.join(os.path.dirname(ft.SIGNAL_CSV), "strategy_midweek_check.csv")
     file_tag = str(db.read_csv(mw)["Rules"].iloc[0]) if db.exists(mw) else ""
-    if file_tag.startswith("LV-"):   # reports written by the live monthly low-vol rules (from Oct 16): checked in test_low_vol_monthly / test_rank_audit
+    if file_tag.startswith(("LV-", "RS-S-")):   # reports by the Oct 16 low-vol rules or the Oct 27 RS short-term sleeve (pipeline columns keep the low-vol fields)
         print(f"skip  live strategy = the pipeline's Strategy_Weight (reports carry {file_tag}, not the pinned Oct 15 rules)")
     else:
         check("live strategy = the pipeline's Strategy_Weight on every day since Oct 2 (same be.WINNER rules)", min(fits) < 1e-9, fits)

@@ -118,6 +118,15 @@ def ranking(h, day, inp=None):
     s = s[(s > 0) & ~s.index.isin(sm.do_not_buy) & s.index.isin(set(sm.tradable_symbols))]
     return s.sort_values(ascending=False, kind="stable")
 
+def live_ranks(day=None, inp=None):
+    """{symbol: (rank, score)} of the live line (RS short-term) at `day` (default: the latest close) - display only. The
+    pipeline's Strategy_Rank / Strategy_Score columns are a forward-test input with the old selection fields, so the
+    dashboard and the chatbot show these instead (Oct 27, 2026)."""
+    inp = inp or inputs()
+    day = inp["close"].index[-1] if day is None else day
+    r = ranking(HALVES[0], day, inp)
+    return {s: (i + 1, float(v)) for i, (s, v) in enumerate(r.items())}
+
 # ----------------------------------------------------------------------------- ledger
 def load_ledger(path=None):
     """The v3 ledger, or None (none yet, or the pre-Oct 27 lowvol / sector ledger: the switch run starts fresh)."""

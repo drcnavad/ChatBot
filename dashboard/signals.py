@@ -105,8 +105,8 @@ def next_full_rebalance(day):
     return None
 
 def rebalance_plan(df):
-    """The Next rebalance preview (both halves, Oct 21, 2026): (next rebalance, as-of, {SYMBOL: (action, % of account,
-    day)}); falls back to the pipeline's low-vol plan below when Alpaca cannot be read."""
+    """The Next rebalance preview (live RS short-term, Oct 27, 2026): (next rebalance, as-of, {SYMBOL: (action, % of account,
+    day)}); falls back to strategy_picks.csv below when Alpaca cannot be read."""
     try:
         from dashboard.details.last_decision import next_plan
         np_ = next_plan()

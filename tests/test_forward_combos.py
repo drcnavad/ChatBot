@@ -81,7 +81,7 @@ fc._CACHE.clear()
 ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)
 v1, h1 = db.read_csv(vp), db.read_csv(hp)
 check(not set(v1["Strategy"]) & ft.REMOVED and not set(h1["Strategy"]) & ft.REMOVED, "removed lines purged from both files")
-check(ft.LIVE == ft.LIVE_NOW and {ft.LIVE, ft.TOP5, ft.MON} <= set(v1["Strategy"]), "the live line is the RS short-term + RS Fridays blend (old live kept)")
+check(ft.LIVE == ft.LIVE_NOW and {ft.LIVE, ft.TOP5, ft.MON} <= set(v1["Strategy"]), "the live line is RS short-term (old live kept)")
 new = v1[v1["Strategy"].isin(names)]
 starts = new.groupby("Strategy")["Date"].min()
 halves = list(ft.LIVE_HALVES)

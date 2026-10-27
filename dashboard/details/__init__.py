@@ -14,12 +14,14 @@ from dashboard.settings import rules_text
 
 def render_strategy_tab(p):
     """Strategy tab: last decision, forward test (Top 5 consensus, chart, leaderboard with rule/holdings on hover), data freshness and settings."""
-    with st.expander("Last decision · portfolio and both strategies' ranks", expanded=True):
+    with st.expander("Last decision · portfolio and RS short-term ranks", expanded=True):
         render_last_decision(p)
     import forward_test as ft
     with st.expander(f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
                      expanded=True):
         render_top10(p)
+        from dashboard.details.forward_test import render_current_holdings
+        render_current_holdings()
         render_forward_test(p)
         render_live_push()
     with st.expander("Data freshness and settings", expanded=False):

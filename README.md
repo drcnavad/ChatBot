@@ -39,11 +39,9 @@ dividends) by value. A queued buy (`Reports/live_pending_orders.json`) shows as 
 holding. There is no `my_positions.csv` any more.
 
 **Removing a stock** (Oct 19, 2026): comment it out of `stock_symbols` in `sector_mapping.py`. It leaves the rankings,
-the dashboard lists and the forward test at once. If the account still holds it, nothing special happens until its half
-rebalances (Fridays 2:30 PM CT): it is no target there (both
-halves keep only `tradable_symbols`), so it is sold and never rebought. Until then it stays in `Reports/sleeve_ledger.json`
-(not an orphan) and is priced from Alpaca market data. No cleanup is needed after the sell. Removed Oct 19: PG
-(sector, sells Fri Oct 23), EMR and PFE (low vol, sell Fri Oct 30), plus ECL, SHW, NUE, URI, SHOP, PEP, VMC, CRCL, ETN (not held).
+the dashboard lists and the forward test at once. If the account still holds it, it is no target at the next 2:30 PM CT decision (the
+rankings keep only `tradable_symbols`), so it is sold and never rebought; until then it stays in
+`Reports/sleeve_ledger.json` (not an orphan) and is priced from Alpaca market data. Removed Oct 19: PG, EMR, PFE, plus ECL, SHW, NUE, URI, SHOP, PEP, VMC, CRCL, ETN (not held).
 
 ## Schedule (launchd, `launchd/*.plist`, installed by `launchd/install_schedule.sh`; times CT)
 | Job | When | What | Trades? |
