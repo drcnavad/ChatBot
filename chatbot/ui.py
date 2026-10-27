@@ -12,10 +12,18 @@ div[data-testid="stPopoverBody"]:has(.st-key-sa_chat_panel) { width: min(430px, 
 </style>"""
 
 def _say(role, text):
-    st.session_state.setdefault("sa_chat", []).append((role, text))
+    from chatbot import history
+    _messages().append((role, text))
+    history.add(role, text)                      # saved in SQLite for 1 year
+
+def _messages():
+    if "sa_chat" not in st.session_state:        # a new page load picks up where the saved chat left off
+        from chatbot import history
+        st.session_state["sa_chat"] = history.recent(20)
+    return st.session_state["sa_chat"]
 
 def _handle(text):
-    hist = list(st.session_state.get("sa_chat", []))
+    hist = list(_messages())
     _say("user", text)
     try:
         from chatbot import llm as chat_llm
@@ -49,7 +57,7 @@ def render_chat():
     with st.container(key="sa_chat_fab"):
         with st.popover("💬 Chat"):
             with st.container(key="sa_chat_panel"):
-                for role, text in st.session_state.get("sa_chat", [])[-20:]:
+                for role, text in _messages()[-20:]:
                     with st.chat_message(role):
                         st.markdown(text.replace("$", "\\$"))   # $...$ would render as math
                 pending = st.session_state.get("sa_chat_pending")
