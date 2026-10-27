@@ -142,9 +142,9 @@ job = plistlib.load(open(os.path.join(ROOT, "launchd", "com.stockanalysis.evenin
 args = job["ProgramArguments"]
 check("evening plist: pipeline_watchdog.py --trade --scheduled (unchanged command)",
       args[1].endswith("/pipeline_watchdog.py") and args[2:] == ["--trade", "--scheduled"], args)
-check("evening plist: Mon-Fri 2:30 PM (decision) + 3:05 PM CT (after-close step), RunAtLoad, every 30 min",
+check("evening plist: Mon-Fri 9:00 AM (missed-decision catch-up) + 2:30 PM (decision) + 3:05 PM CT (after-close step), RunAtLoad, every 30 min",
       sorted((d["Weekday"], d["Hour"], d["Minute"]) for d in job["StartCalendarInterval"])
-      == sorted([(w, 14, 30) for w in range(1, 6)] + [(w, 15, 5) for w in range(1, 6)])
+      == sorted([(w, 9, 0) for w in range(1, 6)] + [(w, 14, 30) for w in range(1, 6)] + [(w, 15, 5) for w in range(1, 6)])
       and job.get("RunAtLoad") is True and job.get("StartInterval") == 1800, job)
 names = sorted(os.listdir(os.path.join(ROOT, "launchd")))
 check("retired jobs removed: no refresh / forwardtest plist",
