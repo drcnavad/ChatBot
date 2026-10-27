@@ -63,7 +63,7 @@ def render_chat():
                         _rerun()
                 else:
                     with st.form("sa_chat_form", clear_on_submit=True):
-                        text = st.text_input("Message", placeholder="balance · positions · buy 5 AAPL limit 200",
+                        text = st.text_input("Message", placeholder="",
                                              label_visibility="collapsed")
                         if st.form_submit_button("Send") and text.strip():
                             with st.spinner("..."):
