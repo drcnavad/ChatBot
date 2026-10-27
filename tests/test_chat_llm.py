@@ -1,4 +1,4 @@
-"""dashboard/chat_llm.py with the LLM and Alpaca MOCKED (no network, never an order): tool calls become validated
+"""chatbot/llm.py with the LLM and Alpaca MOCKED (no network, never an order): tool calls become validated
 commands for chat.plan; bad args rejected; security refused before the model; fallback chain; no PIN wording.
 Run: python3 tests/test_chat_llm.py"""
 import json
@@ -8,7 +8,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
-from dashboard import chat, chat_llm as L
+from chatbot import core as chat, llm as L
 
 FAIL = []
 def check(name, ok):

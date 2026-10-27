@@ -1,4 +1,4 @@
-"""Chatbot brain for the dashboard's bottom-right chat button (UI: dashboard/chat_ui.py). No AI model and no agent quota:
+"""Chatbot brain for the dashboard's bottom-right chat button (UI: chatbot/ui.py). No AI model and no agent quota:
 plain commands are parsed here in code.
 
 Read-only (no PIN): balance, positions, orders, P&L, quote SYM, news [SYM], help.
@@ -198,7 +198,7 @@ def plan(cmd, account=None, quote=latest_quote):
 
 def execute(p, pin, client=None, verify=None):
     """PIN first, then do_not_sell again, then send. Returns a message. Nothing is sent unless the PIN checks out."""
-    import chat_pin
+    from chatbot import pin as chat_pin
     ok, msg = (verify or chat_pin.verify)(pin)
     if not ok:
         return False, msg

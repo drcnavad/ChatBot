@@ -1,10 +1,12 @@
-"""Set or change the dashboard chatbot's trading PIN (4-12 digits). Run it yourself:  python set_chat_pin.py
+"""Set or change the dashboard chatbot's trading PIN (4-12 digits). Run it yourself:  python chatbot/set_pin.py
 Only a salted hash is saved (.chat_pin.json, gitignored). Changing it needs the old PIN; if you forgot it, delete
 .chat_pin.json and run this again."""
 import getpass
 import sys
 
-import chat_pin
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from chatbot import pin as chat_pin
 
 def main():
     if chat_pin.is_set():

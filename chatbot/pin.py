@@ -1,8 +1,8 @@
-"""PIN gate for the dashboard chatbot's money-moving actions (dashboard/chat.py).
+"""PIN gate for the dashboard chatbot's money-moving actions (chatbot/core.py).
 
 The PIN is never stored: only a salted PBKDF2-SHA256 hash in .chat_pin.json (gitignored, file mode 600).
 5 wrong tries lock trading for 15 minutes. No PIN file = every trade is refused.
-Set or change it yourself:  python set_chat_pin.py
+Set or change it yourself:  python chatbot/set_pin.py
 """
 import hashlib
 import hmac
@@ -11,7 +11,7 @@ import os
 import secrets
 import time
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root: .chat_pin.json stays there
 PIN_FILE = os.getenv("STOCK_ANALYSIS_CHAT_PIN", os.path.join(ROOT, ".chat_pin.json"))
 ITERATIONS = 300_000
 MAX_TRIES = 5

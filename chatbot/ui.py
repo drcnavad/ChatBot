@@ -1,8 +1,8 @@
-"""The floating chat button (bottom-right, every tab, phone too) and its panel. Logic and the PIN gate: dashboard/chat.py,
-chat_pin.py. A fragment, so chatting never reruns the rest of the page."""
+"""The floating chat button (bottom-right, every tab, phone too) and its panel. Logic and the PIN gate: chatbot/core.py,
+chatbot/pin.py. A fragment, so chatting never reruns the rest of the page."""
 import streamlit as st
 
-from dashboard import chat
+from chatbot import core as chat
 
 CSS = """<style>
 .st-key-sa_chat_panel [data-testid="InputInstructions"] { display: none !important; }
@@ -18,7 +18,7 @@ def _handle(text):
     hist = list(st.session_state.get("sa_chat", []))
     _say("user", text)
     try:
-        from dashboard import chat_llm
+        from chatbot import llm as chat_llm
         r = chat_llm.respond(hist, text)
     except Exception:
         r = None
@@ -54,7 +54,7 @@ def render_chat():
                         st.markdown(text)
                 pending = st.session_state.get("sa_chat_pending")
                 if pending:
-                    import chat_pin
+                    from chatbot import pin as chat_pin
                     if not chat_pin.is_set():
                         st.error("Not available right now.")
                     with st.form("sa_chat_pin_form", clear_on_submit=True):

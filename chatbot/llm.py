@@ -1,4 +1,4 @@
-"""Natural-language brain for the dashboard chat (UI: dashboard/chat_ui.py, actions: dashboard/chat.py).
+"""Natural-language brain for the dashboard chat (UI: chatbot/ui.py, actions: chatbot/core.py).
 
 An LLM with tool calling reads the user's message (plus the last few turns) and calls tools below. Providers, in order:
 Groq (openai/gpt-oss-120b) -> Gemini (gemini-flash-latest) -> local Ollama (qwen2.5:7b) -> None (caller falls back to the
@@ -132,7 +132,7 @@ _ASSETS = {}
 ERRORS = []   # last provider failures (diagnostics only)
 
 def find_symbol(name, account=None):
-    from dashboard import chat
+    from chatbot import core as chat
     if "list" not in _ASSETS:
         acct = account or chat._account()
         _ASSETS["list"] = [(a["symbol"], a.get("name") or "") for a in acct._get("/assets", {"status": "active", "asset_class": "us_equity"})
@@ -143,7 +143,7 @@ def find_symbol(name, account=None):
     return ("\n".join(f"{s}: {n}" for s, n in hits[:8]) + "\n(Now call stock_info / get_quote / get_news for the right ticker.)") if hits else "No match."
 
 def stock_info(sym, account=None):
-    from dashboard import chat
+    from chatbot import core as chat
     out = [f"Symbol {sym}"]
     try:
         bid, ask = chat.latest_quote(sym)
@@ -183,7 +183,7 @@ def stock_info(sym, account=None):
     return "\n".join(out)
 
 def run_read(name, a, account=None):
-    from dashboard import chat
+    from chatbot import core as chat
     simple = {"get_balance": "balance", "get_pnl": "pnl", "get_positions": "positions", "get_orders": "orders"}
     if name in simple:
         return chat.answer({"kind": simple[name]}, account)
@@ -220,7 +220,7 @@ def clean(text):
 def respond(history, text, account=None, call=None, plan=None):
     """history: [(role, text)] before this message. Returns dict(text, plan, model) or None when no model answered
     (caller then uses the keyword parser). `plan` is a chat.plan-style function; `call(provider, messages)` is injectable."""
-    from dashboard import chat
+    from chatbot import core as chat
     cmd = chat.parse(text)
     if cmd["kind"] == "refuse" and "Alpaca app" in cmd.get("msg", ""):     # security / money-movement: never reaches the model
         return {"text": cmd["msg"], "plan": None, "model": "rules"}

@@ -37,6 +37,11 @@ data/drawings/
 # News read-aloud audio cache (dashboard/news_voice.py)
 dashboard/news_voice/audio/
 
-# Dashboard chatbot trading PIN (salted hash only, set with python set_chat_pin.py)
+# Dashboard chatbot trading PIN (salted hash only, set with python chatbot/set_pin.py)
 .chat_pin.json
 .chat_pin.json.tmp
+
+# SQLite database (all former Reports/*.csv tables; see db.py). Account data: kept local, never committed
+data/stock_analysis.db
+data/stock_analysis.db-*
+backups/

@@ -1,4 +1,4 @@
-"""Dashboard chatbot (dashboard/chat.py + chat_pin.py) with Alpaca MOCKED - never a real order: command parsing,
+"""Dashboard chatbot (chatbot/core.py + chatbot/pin.py) with Alpaca MOCKED - never a real order: command parsing,
 withdrawals / security refused, do-not-sell refused, PIN hashed (no plaintext), wrong PIN sends nothing, lockout,
 no PIN set = refused, right PIN sends exactly the summarized order. Temp PIN file only.
 Run: python tests/run_tests.py  (or python tests/test_chat.py)"""
@@ -12,8 +12,8 @@ sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 os.environ["STOCK_ANALYSIS_CHAT_PIN"] = os.path.join(tempfile.mkdtemp(), "pin.json")
 import pandas as pd
-import chat_pin
-from dashboard import chat
+from chatbot import pin as chat_pin
+from chatbot import core as chat
 
 FAIL = []
 def check(name, ok):
