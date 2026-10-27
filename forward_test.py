@@ -896,8 +896,14 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
             # that must not make a strategy trade on a day with no decision of its own - the saved holdings stay until a
             # target really changes or the next rebalance (like the live account). Rules with no calendar (dip /
             # threshold) sell a saved holding they no longer target, since no rebalance would ever clear it.
-            stale = (shares > 0) & (w.loc[last] <= 0) if full is None else pd.Series(False, index=cols)
-            prev = w.loc[last].where(~stale, np.nan)
+            # Names whose saved holding disagrees with the recomputed target are re-decided on the next day (Oct 26,
+            # 2026 fix: a rule change on Oct 21 put new names in the recomputed last-day target, so they never
+            # showed as "changed" and were never bought; their cash sat idle). Applies to the rules that decide
+            # names day by day (no calendar: dip / event / breakout lines; "mwf" ranked lines with Mon-Thu checks).
+            # Weekly- and monthly-only lines keep their holdings until their own rebalance day, as their rule says.
+            daily = full is None or (cfg.get("calendar", "mwf") == "mwf" and not cfg.get("weights"))
+            missed = ((shares > 0) != (w.loc[last] > 0)) if daily else pd.Series(False, index=cols)
+            prev = w.loc[last].where(~missed, np.nan)
         full = pd.Series(False, index=todo) if full is None else full.reindex(todo).fillna(False).astype(bool)
         soon = inp.get("soon") if not cfg.get("weights") and cfg.get("earnings", "winner") is not None else None
         soon = (pd.DataFrame(False, index=todo, columns=cols) if soon is None else

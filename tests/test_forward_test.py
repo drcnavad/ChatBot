@@ -400,6 +400,31 @@ with tempfile.TemporaryDirectory() as tmp:
         ft.update_strategies(hs, None, NO_EARN, **P("h"))
     finally:
         ft.strategy_inputs, ft.strategy_targets, ft.STRATEGIES = real_inputs, real_targets, real_list
+    # Oct 26, 2026 regression: a rule change rewrote the past so the last saved day's recomputed target already has AAA,
+    # but the saved book holds BBB. A line with daily decisions must buy AAA on the next day (Tue Oct 6), not leave
+    # the cash idle forever; a monthly line keeps its saved book until its own rebalance day.
+    _phase = {"rewritten": False}
+    def fake_targets_n(cfg, inp_):
+        t = pd.DataFrame(0.0, index=inp_["close"].index, columns=inp_["close"].columns)
+        t["AAA" if _phase["rewritten"] else "BBB"] = 0.99
+        return t
+    try:
+        def fake_inputs_n(sig, *a, **k):
+            c = sig.pivot(index="Date", columns="Symbol", values="Close")
+            return {"close": c, "weekly": pd.Series(c.index.dayofweek == 4, index=c.index),
+                    "monthly": pd.Series(False, index=c.index)}
+        ft.strategy_inputs, ft.strategy_targets = fake_inputs_n, fake_targets_n
+        ft.STRATEGIES = [{"name": "N", "rule": "N"}, {"name": "E", "rule": "E", "event": {"kind": "x"}},
+                         {"name": "M", "rule": "M", "calendar": "monthly"}]
+        ft.update_strategies(hs[hs["Date"] <= "2026-10-05"], None, NO_EARN, **P("n"))
+        _phase["rewritten"] = True
+        ft.update_strategies(hs[hs["Date"] <= "2026-10-06"], None, NO_EARN, **P("n"))
+    finally:
+        ft.strategy_inputs, ft.strategy_targets, ft.STRATEGIES = real_inputs, real_targets, real_list
+    hn = db.read_csv(P("n")["hold_path"], parse_dates=["Date"])
+    _held = lambda n: set(hn.loc[(hn["Strategy"] == n) & (hn["Date"] == "2026-10-06") & (hn["Shares"] > 0), "Symbol"])
+    check("resume: a target the saved book does not hold is bought the next day (daily lines), monthly lines wait",
+          _held("N") == {"AAA"} and _held("E") == {"AAA"} and _held("M") == {"BBB"}, (_held("N"), _held("E"), _held("M")))
     hy = db.read_csv(P("h")["path"], parse_dates=["Date"])
     ht = hy[hy["Strategy"] == "T"].set_index("Date")
     hv, hy, hz, hw = (hy[hy["Strategy"] == x].set_index("Date")["Value"] for x in "XYZV")
