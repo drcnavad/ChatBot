@@ -126,7 +126,7 @@ def _trade_decision(failures):
 REQUIRED = {
     "signal_analysis.csv": ["Date", "Symbol", "Close", "ma_10", "ma_30", "ma_50", "ma_100", "ma_200", "RSI", "macd", "MACD Signal",
                             "Technical_Score", "SentimentScore", "Fundamental_Weight", "combined_signal", "final_trade",
-                            "Buy Streak", "Sell Streak", "Hold Streak", "is_earnings_date", "RS_Score", "Strategy_Score",
+                            "is_earnings_date", "RS_Score", "Strategy_Score",
                             "Strategy_Rank", "Strategy_Weight", "Provisional_Weight", "Regime_On", "Rebalance_Day"],
     "strategy_picks.csv": ["As_Of", "Last_Rebalance", "Strategy", "Symbol", "Strategy_Weight", "Provisional_Weight", "Close"],
     "strategy_changes.csv": ["Date", "Symbol", "Status", "Reason", "Rank", "Score", "Sector", "Old_Weight", "New_Weight", "View"],
