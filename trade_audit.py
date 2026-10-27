@@ -32,6 +32,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 from tax_lots import _num   # float or nan (one helper for both account views)
 
@@ -277,7 +278,7 @@ def reconcile(data, pending=None, stop_state=None, picks=None):
             led = None
         if led is not None:                     # the halves' tags (no shares: live positions are the record) + the plan's targets
             try:
-                plan = pd.read_csv(sleeves.PLAN_CSV)
+                plan = db.read_csv(sleeves.PLAN_CSV)
                 target = {str(s).upper(): float(w) / 100 for s, w in zip(plan["Symbol"], plan["Target_of_account_%"]) if float(w) > 0}
             except (OSError, KeyError, ValueError):
                 target = {}
@@ -386,7 +387,7 @@ def report(data=None, now=None, pending=None, stop_state=None, picks=None):
     stop_state = stop_state if stop_state is not None else _read_json(STOP_STATE_JSON)
     if picks is None:
         try:
-            picks = pd.read_csv(PICKS_CSV, usecols=["Symbol", "Strategy_Weight", "Provisional_Weight"])
+            picks = db.read_csv(PICKS_CSV, usecols=["Symbol", "Strategy_Weight", "Provisional_Weight"])
         except Exception:
             picks = None
     led = ledger(data.get("orders"))
@@ -423,8 +424,7 @@ def write_files(rep, ledger_csv=None, trips_csv=None):
     ledger_csv, trips_csv = ledger_csv or LEDGER_CSV, trips_csv or ROUND_TRIPS_CSV
     for df, path in ((rep["ledger"], ledger_csv), (rep["round_trips"], trips_csv)):
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        df.to_csv(path + ".tmp", index=False)
-        os.replace(path + ".tmp", path)
+        df.pipe(db.to_csv, path, index=False)
 
 def main(argv=None):
     os.spawnlp(os.P_NOWAIT, "caffeinate", "caffeinate", "-i", "-w", str(os.getpid()))  # keep the Mac awake until this run ends (lid closed / sleeping)

@@ -17,6 +17,7 @@ sys.path.insert(0, ROOT)
 import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 import numpy as np
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import backtest_engine as be
 
@@ -48,10 +49,10 @@ run = lambda b, now: be.keep_decision_bars(b, now=now, path=P, state_path=S)
 
 b230 = bars(110.0)
 out = run(b230, at(5, 14, 30))
-check("2:30 run on Mon (decision day, not traded): today's bar saved", os.path.exists(P)
-      and sorted(pd.read_csv(P)["Symbol"]) == ["AAA", "BBB"] and (pd.read_csv(P)["Date"] == "2026-10-05").all())
+check("2:30 run on Mon (decision day, not traded): today's bar saved", db.exists(P)
+      and sorted(db.read_csv(P)["Symbol"]) == ["AAA", "BBB"] and (db.read_csv(P)["Date"] == "2026-10-05").all())
 check("2:30 run: its bars are used as is", out.equals(b230))
-saved = pd.read_csv(P).set_index("Symbol")
+saved = db.read_csv(P).set_index("Symbol")
 check("saved as ratios to the previous session (AAA close 110 / 103)", abs(saved.at["AAA", "Close"] - 110 / 103) < 1e-12,
       saved.loc["AAA"].to_dict())
 
@@ -76,13 +77,13 @@ check("after the trade: a later 2:50 run never overwrites the saved bar", open(P
 check("after the trade: the 2:50 run uses the 2:30 bar", np.allclose(out.loc[mon, "Close"], [110.0, 55.0]))
 json.dump({"last_decision": "2026-10-02"}, open(S, "w"))
 run(bars(111.0), at(5, 14, 50))                      # the trade failed and is retried: the retry's bar is the one traded
-check("retry before the trade: the retry's bar replaces it", abs(pd.read_csv(P).set_index("Symbol").at["AAA", "Close"] - 111 / 103) < 1e-12)
+check("retry before the trade: the retry's bar replaces it", abs(db.read_csv(P).set_index("Symbol").at["AAA", "Close"] - 111 / 103) < 1e-12)
 
 os.remove(P)
 b = bars(110.0)
 check("no saved file: bars unchanged, nothing written (Tue 2:45 is no decision day)",
-      run(b, at(6, 14, 45)).equals(b) and not os.path.exists(P))
-check("before 2:30 on a decision day: nothing saved", run(b, at(5, 14, 0)).equals(b) and not os.path.exists(P))
+      run(b, at(6, 14, 45)).equals(b) and not db.exists(P))
+check("before 2:30 on a decision day: nothing saved", run(b, at(5, 14, 0)).equals(b) and not db.exists(P))
 open(P, "w").write("not,a\nvalid file")
 check("a bad file: bars unchanged, no crash", run(b, at(6, 9, 0)).equals(b))
 check("the live file lives in Reports/", be.DECISION_BARS_CSV == be.REPORTS_DIR / "decision_bars.csv")

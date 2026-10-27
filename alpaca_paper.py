@@ -19,6 +19,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 from dotenv import load_dotenv
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -333,11 +334,11 @@ def write_snapshot(summary, positions, snapshot_csv=SNAPSHOT_CSV, history_csv=HI
     extra = pd.DataFrame([{"As_Of": as_of, "Symbol": "CASH", "Market value": summary["Cash"]},
                           {"As_Of": as_of, "Symbol": "TOTAL EQUITY", "Market value": summary["Equity"]}])
     snap = pd.concat([snap, extra], ignore_index=True)
-    snap[["As_Of"] + [c for c in snap.columns if c != "As_Of"]].to_csv(snapshot_csv, index=False)
+    snap[["As_Of"] + [c for c in snap.columns if c != "As_Of"]].pipe(db.to_csv, snapshot_csv, index=False)
     row = pd.DataFrame([{"As_Of": as_of, "Equity": summary["Equity"], "Cash": summary["Cash"],
                          "Buying_Power": summary["Buying power"], "Positions": int((positions["Qty"] != 0).sum()),
                          "Net_Deposits": net_deposits}])
-    row.to_csv(history_csv, mode="a", header=not os.path.exists(history_csv), index=False)
+    row.pipe(db.to_csv, history_csv, mode="a", header=not db.exists(history_csv), index=False)
     return snapshot_csv, history_csv
 
 def sync_paper_account(account=None, snapshot_csv=None, history_csv=None):

@@ -11,6 +11,7 @@ sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 import numpy as np
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import backtest_engine as be
 import sector_mapping as sm
@@ -29,7 +30,7 @@ SOFT = bool(be.WINNER.get("cap_soft"))             # T20: fill free slots ignori
 _CSV_RULES = (be.WINNER.get("max_pick_rank") == 20 and SOFT and be.WINNER.get("sector_cap", 0.4) < 1.0 - 1e-12)
 MODE = be.WINNER.get("rs_benchmark", "etf")
 EARN_DAYS = be.WINNER.get("earnings_block_days")   # E5: no new buy with earnings in the next N calendar days
-_ed = pd.read_csv("Reports/earnings_date.csv")
+_ed = db.read_csv("Reports/earnings_date.csv")
 EARN = {}
 for _s, _d in zip(_ed["Symbol"].astype(str).str.strip().str.upper(), pd.to_datetime(_ed["Earnings Date"], errors="coerce")):
     if pd.notna(_d):
@@ -47,7 +48,7 @@ def held_before(D):
     return set() if i == 0 else set(sa[(sa.Date == sess[i - 1]) & (sa.Strategy_Weight > 0)].Symbol)
 print("RS benchmark:", MODE)
 
-sa = pd.read_csv("Reports/signal_analysis.csv", parse_dates=["Date"])
+sa = db.read_csv("Reports/signal_analysis.csv", parse_dates=["Date"])
 bars = pd.read_pickle("Reports/cache/bars_daily_long.pkl")
 close = bars.pivot(index="Date", columns="Symbol", values="Close").sort_index()
 _missing = sorted(set(sm.tradable_symbols) - set(bars["Symbol"]))
@@ -230,7 +231,7 @@ def audit_midweek(D, exit_all, top_n=None):
             held.pop(s)
     actual = sa[(sa.Date == D) & (sa.Strategy_Weight > 0)].set_index("Symbol").Strategy_Weight.to_dict()
     same = set(held) == set(actual) and all(abs(held[s] - actual[s]) < 1e-3 for s in held)
-    dec = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
+    dec = db.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
     dd = dec[dec.Date == D]
     logged = (sorted(dd.loc[dd.Status == "drop", "Symbol"]), sorted(dd.loc[dd.Status == "add", "Symbol"]))
     mine = (sorted(x for x, _ in exits), sorted(refills))
@@ -245,13 +246,13 @@ off = sa.loc[(sa.Rebalance_Day == 1) & (sa.Regime_On == 0), "Date"].drop_duplica
 dates = [(reb.iloc[-1], "Strategy_Weight"), (pd.Timestamp("2026-07-10"), "Strategy_Weight"), (pd.Timestamp("2026-06-18"), "Strategy_Weight"), (off.iloc[-1], "Strategy_Weight")]
 latest = sa.Date.max()
 if MAX_RANK or SOFT:                              # also audit the latest weekly decisions where the T20 rule changed the picks
-    dec0 = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
+    dec0 = db.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
     t20_days = sorted(dec0.loc[dec0.Reason.astype(str).str.contains("sector cap relaxed|worse than 20 \\(picks", regex=True), "Date"].unique())
     print(f"T20: {len(t20_days)} weekly decisions in the window used the relaxed cap or dropped a holding ranked worse than {MAX_RANK}; "
           f"last: {[str(pd.Timestamp(d).date()) for d in t20_days[-3:]]}")
     dates += [(pd.Timestamp(d), "Strategy_Weight") for d in t20_days[-2:] if pd.Timestamp(d) not in {x for x, _ in dates}]
 if EARN_DAYS:                                     # also audit the latest weekly decisions where the earnings rule skipped a stock
-    dec_e = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
+    dec_e = db.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
     e_days = sorted(dec_e.loc[dec_e.Reason.astype(str).str.startswith("earnings in") & dec_e.Date.isin(set(reb)), "Date"].unique())
     print(f"Earnings rule: {len(e_days)} weekly decisions in the window skipped a stock; last: "
           f"{[str(pd.Timestamp(d).date()) for d in e_days[-3:]]}")
@@ -279,7 +280,7 @@ elif be.WINNER.get("midweek_swap"):
     MW_RULES = (be.WINNER.get("midweek_exit_below"), be.WINNER.get("midweek_exit_to_top"))
 if MW_RULES:
     exit_all, top_n = MW_RULES
-    dec = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
+    dec = db.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
     exit_days = sorted(dec.loc[dec.Reason.astype(str).str.startswith("mid-week exit"), "Date"].unique())
     checks = sorted(sa.loc[sa.Midweek_Check == 1, "Date"].unique())
     print(f"\nMid-week: {len(checks)} check sessions in the window, {len(exit_days)} with a rank-{exit_all} exit; "

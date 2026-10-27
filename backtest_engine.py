@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 from pandas.tseries.holiday import (AbstractHolidayCalendar, GoodFriday, Holiday, USLaborDay, USMartinLutherKingJr,
                                     USMemorialDay, USPresidentsDay, USThanksgivingDay, nearest_workday, sunday_to_monday)
@@ -128,7 +129,7 @@ C6_RULES_OCT15 = {
 def scored_stock_count():
     """Stocks the strategy scores: the list minus the short-history stocks of the latest run."""
     try:
-        short = set(pd.read_csv(SHORT_HISTORY_CSV)["Symbol"])
+        short = set(db.read_csv(SHORT_HISTORY_CSV)["Symbol"])
     except (OSError, KeyError, pd.errors.EmptyDataError):
         short = set()
     return len([s for s in TRADABLE if s not in short])
@@ -365,7 +366,7 @@ def keep_decision_bars(bars, now=None, path=DECISION_BARS_CSV, state_path=REPORT
         today, path = pd.Timestamp(et.date()), Path(path)
         prev = bars.groupby("Symbol")[["Close", "Volume"]].shift(1)
         base = np.column_stack([prev["Close"]] * 4 + [prev["Volume"]]).astype(float)
-        saved = pd.read_csv(path, parse_dates=["Date"]) if path.exists() else pd.DataFrame(columns=["Date", "Symbol", *BAR_COLS])
+        saved = db.read_csv(path, parse_dates=["Date"]) if db.exists(path) else pd.DataFrame(columns=["Date", "Symbol", *BAR_COLS])
         state = json.loads(Path(state_path).read_text()) if Path(state_path).exists() else {}
         traded = str(state.get("last_decision") or "") >= str(today.date())
         live = bars["Date"].eq(today) & (decision_bar_ready(now) and et.hour * 60 + et.minute < 16 * 60 + 30 and not traded)
@@ -374,8 +375,7 @@ def keep_decision_bars(bars, now=None, path=DECISION_BARS_CSV, state_path=REPORT
                 ratio = bars.loc[live, BAR_COLS].to_numpy(float) / base[live.to_numpy()]
             new = bars.loc[live, ["Date", "Symbol"]].assign(**dict(zip(BAR_COLS, ratio.T)))
             saved = pd.concat([saved[saved["Date"] != today], new]) if len(saved) else new
-            saved.to_csv(path.with_suffix(".tmp"), index=False)
-            path.with_suffix(".tmp").replace(path)
+            saved.pipe(db.to_csv, path, index=False)          # one SQLite transaction (all or nothing)
             saved = saved[saved["Date"] != today]
         if not len(saved):
             return bars
@@ -962,7 +962,7 @@ def regime_series(close_w, symbol=None, ma=200):
 # ----------------------------------------------------------------------------- earnings
 def load_earnings(path=None):
     """Reports/earnings_date.csv with clean symbols and normalized dates."""
-    e = pd.read_csv(path or REPORTS_DIR / "earnings_date.csv")
+    e = db.read_csv(path or REPORTS_DIR / "earnings_date.csv")
     e["Symbol"] = e["Symbol"].str.strip().str.upper()
     e["Earnings Date"] = pd.to_datetime(e["Earnings Date"], errors="coerce").dt.normalize()
     return e.dropna(subset=["Earnings Date"])

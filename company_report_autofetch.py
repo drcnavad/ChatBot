@@ -26,6 +26,7 @@ from datetime import date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 import requests
 from dotenv import load_dotenv
 
@@ -120,24 +121,24 @@ def build_fundamentals(income, balance):
 
 def save_fundamentals(new_df):
     """Replace these symbols' rows in balance_sheet.csv; other symbols stay untouched."""
-    existing = pd.read_csv(BALANCE_CSV, parse_dates=["FiscalDateEnding"])
+    existing = db.read_csv(BALANCE_CSV, parse_dates=["FiscalDateEnding"])
     result = pd.concat([existing[~existing["Symbol"].isin(new_df["Symbol"])], new_df], ignore_index=True)
     result = result.sort_values(["Symbol", "FiscalDateEnding"], ascending=[True, False])
-    result[OUTPUT_COLUMNS].to_csv(BALANCE_CSV, index=False)
+    result[OUTPUT_COLUMNS].pipe(db.to_csv, BALANCE_CSV, index=False)
 
 # --- ROTATION ----------------------------------------------------------------
 
 def load_run_log():
-    if not os.path.exists(RUN_LOG_CSV):
+    if not db.exists(RUN_LOG_CSV):
         return pd.DataFrame(columns=["Symbol", "RunDate", "IncomeStatus", "BalanceStatus"])
-    log = pd.read_csv(RUN_LOG_CSV)
+    log = db.read_csv(RUN_LOG_CSV)
     log["RunDate"] = pd.to_datetime(log["RunDate"], errors="coerce").dt.date
     return log.dropna(subset=["RunDate"])
 
 def log_run(symbol, income_status, balance_status):
     pd.DataFrame([[symbol, datetime.now().date(), income_status, balance_status]],
-                 columns=["Symbol", "RunDate", "IncomeStatus", "BalanceStatus"]).to_csv(
-        RUN_LOG_CSV, mode="a", header=not os.path.exists(RUN_LOG_CSV), index=False
+                 columns=["Symbol", "RunDate", "IncomeStatus", "BalanceStatus"]).pipe(db.to_csv, 
+        RUN_LOG_CSV, mode="a", header=not db.exists(RUN_LOG_CSV), index=False
     )
 
 def get_stale_symbols():

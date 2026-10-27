@@ -33,6 +33,7 @@ last_run_at/last_mode). Logs: Reports/logs/run_*.log (last 30) + launchd_*.log; 
 Keys (ALPACA_LIVE_KEY_ID / ALPACA_LIVE_SECRET_KEY in .env) are used only by --sync-live, --trade and --fill-check.
 """
 import argparse
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 import contextlib
 import glob
 import json
@@ -156,24 +157,15 @@ def log_event(run, status, money_moved, message, details=""):
     """One plain-language row in Reports/run_log.csv for every real run event (finished, failed, orders sent, fill-check
     actions; idle checks write nothing). status: ok / warning / failed. money_moved: yes / no / unknown. Also printed to
     the run log. Keeps the newest RUN_LOG_KEEP rows. Never raises: a full disk must not stop a trade."""
-    import csv
     row = [datetime.now(CT).strftime("%Y-%m-%d %H:%M:%S"), run, status, money_moved,
            " ".join(str(message).split()), " ".join(str(details or "").split())]
     (logging.info if logging.getLogger().handlers else print)(
         f"RUN LOG: {run} | {status} | money moved: {money_moved} | {row[4]}" + (f" | {row[5]}" if row[5] else ""))
     try:
-        new = not os.path.exists(RUN_LOG)
-        with open(RUN_LOG, "a", newline="") as f:           # appends are safe when two jobs write at once
-            w = csv.writer(f)
-            if new:
-                w.writerow(RUN_LOG_COLUMNS)
-            w.writerow(row)
-        with open(RUN_LOG, newline="") as f:
-            rows = list(csv.reader(f))
+        db.append_rows(RUN_LOG, [row], RUN_LOG_COLUMNS)    # one SQLite transaction: safe when two jobs write at once
+        rows = db.read_csv(RUN_LOG, dtype=str, keep_default_na=False)
         if len(rows) > RUN_LOG_KEEP + 100:                  # trim now and then, not on every write
-            with open(RUN_LOG + ".tmp", "w", newline="") as f:
-                csv.writer(f).writerows([RUN_LOG_COLUMNS] + rows[-RUN_LOG_KEEP:])
-            os.replace(RUN_LOG + ".tmp", RUN_LOG)
+            rows.tail(RUN_LOG_KEEP).pipe(db.to_csv, RUN_LOG, index=False)
     except Exception as e:
         print(f"  run log not written ({e})", flush=True)
 
@@ -208,12 +200,12 @@ def load_state(path=None):
         pass
     state = {}
     hist = os.path.join(REPORTS, "sentiment_history.csv")
-    if os.path.exists(hist):
-        state["last_news_at"] = datetime.fromtimestamp(os.path.getmtime(hist), CT).isoformat(timespec="seconds")
+    if db.exists(hist):
+        state["last_news_at"] = datetime.fromtimestamp(db.mtime(hist), CT).isoformat(timespec="seconds")
     runlog = os.path.join(REPORTS, "fetch_run_log.csv")
-    if os.path.exists(runlog):
-        with open(runlog) as f:
-            dates = [line.split(",")[1] for line in f.read().splitlines()[1:] if line.count(",") >= 3]
+    if db.exists(runlog):
+        log = db.read_csv(runlog, dtype=str, keep_default_na=False)
+        dates = [d for d in log.iloc[:, 1].tolist() if d] if log.shape[1] >= 4 else []
         if dates:
             state["last_fundamentals_date"] = max(dates)[:10]
     return state
@@ -677,7 +669,7 @@ def read_calls(path):
     A corrupt line (e.g. a notebook killed mid-write) is skipped, never fatal: this runs in the
     final summary, after the trade, so it must not turn a good run into a reported failure."""
     calls = {}
-    if os.path.exists(path):
+    if db.exists(path):
         with open(path) as f:
             for line in f:
                 try:
@@ -698,17 +690,17 @@ def validate():
     problems = []
     for name, cols in REQUIRED.items():
         path = os.path.join(REPORTS, name)
-        if not os.path.exists(path):
+        if not db.exists(path):
             problems.append(f"{name}: missing")
             continue
-        df = pd.read_csv(path, nrows=200)
+        df = db.read_csv(path, nrows=200)
         missing = [c for c in cols if c not in df.columns]
         if missing:
             problems.append(f"{name}: missing columns {missing}")
         elif df.empty and name != "news_cleaned_df.csv":
             problems.append(f"{name}: no rows")
     xlsx = os.path.join(REPORTS, "complete_company_analysis.xlsx")
-    if not os.path.exists(xlsx):
+    if not db.exists(xlsx):
         problems.append("complete_company_analysis.xlsx: missing")
     else:
         latest = pd.read_excel(xlsx, sheet_name="2_Latest_Quarter_Complete", nrows=5)
@@ -716,8 +708,8 @@ def validate():
         if missing:
             problems.append(f"complete_company_analysis.xlsx: missing columns {missing}")
     sig_path = os.path.join(REPORTS, "signal_analysis.csv")
-    if os.path.exists(sig_path):
-        sig = pd.read_csv(sig_path, usecols=["Date", "Symbol"])
+    if db.exists(sig_path):
+        sig = db.read_csv(sig_path, usecols=["Date", "Symbol"])
         if sig.duplicated(["Date", "Symbol"]).any():
             problems.append("signal_analysis.csv: duplicate (Date, Symbol) rows")
     logging.info("  %d report files checked, %d problem(s)", len(REQUIRED) + 1, len(problems))
@@ -740,8 +732,8 @@ def data_summary():
     import pandas as pd
     out = {"data_date": None, "decisions": [], "next": None, "rules": None}
     path = os.path.join(REPORTS, "strategy_midweek_check.csv")
-    if os.path.exists(path):
-        m = pd.read_csv(path)
+    if db.exists(path):
+        m = db.read_csv(path)
         if len(m):
             # A malformed report must degrade the summary, never crash the pipeline (validate already flags it).
             get = lambda c: m[c].iloc[0] if c in m.columns else None

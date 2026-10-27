@@ -11,6 +11,7 @@ import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 import backtest_engine as be
 import forward_test as ft
@@ -159,11 +160,11 @@ with tempfile.TemporaryDirectory() as tmp:
     at = lambda s: datetime.fromisoformat(s).replace(tzinfo=ft.CT)
     check("record: idle on a holiday / weekend / before the start",
           ft.record(FakeAccount(), at("2026-10-03 16:15"), path) is None and ft.record(FakeAccount(), at("2026-11-26 16:15"), path) is None
-          and ft.record(FakeAccount(), at("2026-10-01 16:15"), path) is None and not os.path.exists(path))
+          and ft.record(FakeAccount(), at("2026-10-01 16:15"), path) is None and not db.exists(path))
     r1 = ft.record(FakeAccount(), at("2026-10-05 16:15"), path)
     ft.record(FakeAccount(), at("2026-10-05 16:40"), path)         # same day again: replaces the row
     ft.record(FakeAccount(), at("2026-10-06 16:15"), path)
-    saved = pd.read_csv(path)
+    saved = db.read_csv(path)
     check("record: one row per trading day, a re-run replaces it", list(saved["Date"]) == ["2026-10-05", "2026-10-06"]
           and saved["Time_CT"].iloc[0] == "16:40" and list(saved.columns) == ft.DAILY_COLS, saved)
     check("record: picks, winners and positions saved", r1["Closed_Picks"] == 2 and r1["Winning_Picks"] == 1 and r1["Positions"] == 1, r1)
@@ -311,7 +312,7 @@ import filecmp  # noqa: E402
 with tempfile.TemporaryDirectory() as tmp:
     P = lambda n: dict(path=os.path.join(tmp, n + ".csv"), hold_path=os.path.join(tmp, n + "_h.csv"))
     n1 = ft.update_strategies(SIG, FACTS, NO_EARN, BENCH, BARS, **P("a"))
-    v = pd.read_csv(P("a")["path"], parse_dates=["Date"])
+    v = db.read_csv(P("a")["path"], parse_dates=["Date"])
     check("no margin: no strategy's cash is ever below 0", v["Cash"].min() >= -1e-12, v.loc[v["Cash"].idxmin()].to_dict())
     _st = [pd.Timestamp((c.get("combo") or {}).get("start") or be.FORWARD_START) for c in ft.STRATEGIES]
     n_rows = lambda lo, hi=None: sum(int(((sdays >= max(lo, s0)) & (sdays <= (hi or sdays.max()))).sum()) for s0 in _st)
@@ -334,24 +335,24 @@ with tempfile.TemporaryDirectory() as tmp:
     check("update: days after the last volume bar wait for the bars", n_early == n_rows(pd.Timestamp(be.FORWARD_START), pd.Timestamp("2026-10-05")), n_early)
     ft.update_strategies(SIG[SIG["Date"] <= "2026-10-07"], FACTS, NO_EARN, BENCH, BARS, **P("b"))  # missed days ...
     nb = ft.update_strategies(SIG, FACTS, NO_EARN, BENCH, BARS, **P("b"))                          # ... caught up later
-    a_, b_ = pd.read_csv(P("a")["path"]), pd.read_csv(P("b")["path"])
-    ha, hb = pd.read_csv(P("a")["hold_path"]), pd.read_csv(P("b")["hold_path"])
+    a_, b_ = db.read_csv(P("a")["path"]), db.read_csv(P("b")["path"])
+    ha, hb = db.read_csv(P("a")["hold_path"]), db.read_csv(P("b")["hold_path"])
     check("catch-up: missed days are added from the saved bars, same values and holdings as running every day",
           nb == n_rows(pd.Timestamp("2026-10-08")) and len(a_) == len(b_)
           and np.allclose(a_["Value"], b_["Value"], rtol=0, atol=1e-12) and ha[["Date", "Strategy", "Symbol"]].equals(hb[["Date", "Strategy", "Symbol"]]),
           (nb, len(a_), len(b_), sorted(set(a_.loc[(a_["Value"] - b_["Value"]).abs() > 1e-12, "Strategy"]))))
     # A later pipeline run rewrote the past (e.g. the 8f57015 rule change: Oct 2 BE -> MRVL). The saved holdings must stay
     # put on a day with no decision (Tue Oct 6) instead of trading the retroactive difference.
-    rd = lambda f: pd.read_csv(f, dtype={"Date": str}, float_precision="round_trip")
+    rd = lambda f: db.read_csv(f, dtype={"Date": str}, float_precision="round_trip")
     for k in ("path", "hold_path"):
-        d_ = rd(P("a")[k]); d_[d_["Date"] <= "2026-10-05"].to_csv(P("c")[k], index=False)
+        d_ = rd(P("a")[k]); d_[d_["Date"] <= "2026-10-05"].pipe(db.to_csv, P("c")[k], index=False)
     hc = rd(P("c")["hold_path"])
     FO = "Now: Friday only"                                               # no decision on Tue Oct 6 (Mon-Thu checks would)
     L = (hc["Strategy"] == FO) & (hc["Date"] == "2026-10-05") & (hc["Shares"] > 0)
     alien = next(s for s in sorted(SIG["Symbol"].unique()) if s not in set(hc.loc[hc["Strategy"] == FO, "Symbol"]))
     gone = hc.loc[L, "Symbol"].iloc[0]
     hc.loc[L & (hc["Symbol"] == gone), "Symbol"] = alien
-    hc.to_csv(P("c")["hold_path"], index=False)
+    hc.pipe(db.to_csv, P("c")["hold_path"], index=False)
     ft.update_strategies(SIG[SIG["Date"] <= "2026-10-06"], FACTS, NO_EARN, BENCH, BARS, **P("c"))
     h6 = rd(P("c")["hold_path"]); h6 = h6[(h6["Strategy"] == FO) & (h6["Shares"] > 0)]
     s5, s6 = (h6[h6["Date"] == x].set_index("Symbol")["Shares"].sort_index() for x in ("2026-10-05", "2026-10-06"))
@@ -399,7 +400,7 @@ with tempfile.TemporaryDirectory() as tmp:
         ft.update_strategies(hs, None, NO_EARN, **P("h"))
     finally:
         ft.strategy_inputs, ft.strategy_targets, ft.STRATEGIES = real_inputs, real_targets, real_list
-    hy = pd.read_csv(P("h")["path"], parse_dates=["Date"])
+    hy = db.read_csv(P("h")["path"], parse_dates=["Date"])
     ht = hy[hy["Strategy"] == "T"].set_index("Date")
     hv, hy, hz, hw = (hy[hy["Strategy"] == x].set_index("Date")["Value"] for x in "XYZV")
     a5 = 0.01 + 0.99 * 1.1
@@ -410,7 +411,7 @@ with tempfile.TemporaryDirectory() as tmp:
     at_open = (0.01 + 0.0099 * 95 * (1 - be.COST)) / (1 + 0.99 * be.COST)   # AAA sold at the open, then 99% BBB at the close
     check("accounting: a stop sale at the open gets the open price (0.1% cost), the refill buys at the close",
           abs(hy["2026-10-05"] - a5) < 1e-12 and abs(hy["2026-10-06"] - at_open) < 1e-12, hy.round(6).to_dict())
-    zh = pd.read_csv(P("h")["hold_path"], parse_dates=["Date"]).query("Strategy == 'Z' and Symbol == 'AAA'").set_index("Date")
+    zh = db.read_csv(P("h")["hold_path"], parse_dates=["Date"]).query("Strategy == 'Z' and Symbol == 'AAA'").set_index("Date")
     z6 = 1.0495 - be.COST * (0.495 - 0.3 * 1.0495) / (1 - 0.3 * be.COST)  # Oct 5: .01 + .00495 x 110 + .0099 x 50; Oct 6: only BBB sold down to 30%
     check("accounting: only names whose target changed trade (AAA keeps its shares); a target within 1 point is left alone",
           abs(hz["2026-10-05"] - 1.0495) < 1e-12 and abs(hz["2026-10-06"] - z6) < 1e-12 and abs(hz["2026-10-07"] - z6) < 1e-12
@@ -529,13 +530,13 @@ LIVE_FILES = [os.path.join(ROOT, "Reports", f) for f in ("signal_analysis.csv", 
 
 def digest():
     import hashlib
-    return {f: hashlib.sha256(open(f, "rb").read()).hexdigest() for f in LIVE_FILES if os.path.exists(f)}
+    return {f: hashlib.sha256((db.table_text(db.table_name(f)) or open(f, "rb").read().decode()).encode()).hexdigest() for f in LIVE_FILES if db.exists(f)}
 
-if os.path.exists(ft.SIGNAL_CSV):
+if db.exists(ft.SIGNAL_CSV):
     before = digest()
-    real_inp = ft.strategy_inputs(pd.read_csv(ft.SIGNAL_CSV, usecols=ft.SIG_COLS, parse_dates=["Date"]),
+    real_inp = ft.strategy_inputs(db.read_csv(ft.SIGNAL_CSV, usecols=ft.SIG_COLS, parse_dates=["Date"]),
                                   ft._read(ft.FACTOR_CSV), None, ft._read(ft.BENCH_CSV), bars=[])   # no bar download
-    real = pd.read_csv(ft.SIGNAL_CSV, usecols=["Date", "Symbol", "Strategy_Weight"], parse_dates=["Date"])
+    real = db.read_csv(ft.SIGNAL_CSV, usecols=["Date", "Symbol", "Strategy_Weight"], parse_dates=["Date"])
     d0 = pd.Timestamp(be.FORWARD_START)
     live = real[(real["Date"] == d0) & (real["Strategy_Weight"] > 0)].set_index("Symbol")["Strategy_Weight"].sort_index()
     real_live, _ = be.winner_targets(real_inp["scores"]["live"], real_inp["eligible"], real_inp["vol"], real_inp["regime"],
@@ -554,7 +555,7 @@ if os.path.exists(ft.SIGNAL_CSV):
                    .reindex(index=pipe.index, columns=pipe.columns).fillna(0.0) - pipe).abs().max().max())
             for dd in (be.WINNER["midweek_swap"]["days"], ["Mon", "Wed"])]
     mw = os.path.join(os.path.dirname(ft.SIGNAL_CSV), "strategy_midweek_check.csv")
-    file_tag = str(pd.read_csv(mw)["Rules"].iloc[0]) if os.path.exists(mw) else ""
+    file_tag = str(db.read_csv(mw)["Rules"].iloc[0]) if db.exists(mw) else ""
     if file_tag.startswith("LV-"):   # reports written by the live monthly low-vol rules (from Oct 16): checked in test_low_vol_monthly / test_rank_audit
         print(f"skip  live strategy = the pipeline's Strategy_Weight (reports carry {file_tag}, not the pinned Oct 15 rules)")
     else:
@@ -568,7 +569,7 @@ with tempfile.TemporaryDirectory() as pt:
                        "Value": [1.0, 1.02, 1.0, 0.99], "Cash": [0.01, 0.01, 0.5, 0.5]})
     ph = pd.DataFrame({"Date": ["2026-10-05"] * 3, "Strategy": [PN, PN, "Q"], "Symbol": ["AAA", "BBB", "AAA"],
                        "Weight": [0.5, 0.49, 0.49], "Shares": [0.005, 0.01, 0.004], "Price": [102.0, 50.0, 122.5]})
-    ph.to_csv(os.path.join(pt, "h.csv"), index=False)
+    ph.pipe(db.to_csv, os.path.join(pt, "h.csv"), index=False)
     pb = pd.DataFrame([{"Date": pd.Timestamp(d), "Symbol": s, "Open": px, "High": px, "Low": px, "Close": px, "Volume": 1e6}
                        for d, s, px in (("2026-10-05", "AAA", 102.0), ("2026-10-06", "AAA", 110.0),
                                         ("2026-10-05", "QQQ", 600.0), ("2026-10-06", "QQQ", 606.0))])   # no BBB bar Oct 6

@@ -9,6 +9,7 @@ ranks the decision used next to today's. Display only: nothing here feeds orders
 import os
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 RANKS_CSV = os.environ.get("STOCK_ANALYSIS_DECISION_RANKS") or os.path.join(ROOT, "Reports", "decision_ranks.csv")
@@ -18,7 +19,7 @@ COLS = ["Date", "Symbol", "Rank_Vol", "Rank_Sector"]
 def ranks_on(day=None, signal_csv=SIGNAL_CSV, inp=None):
     """(date, DataFrame Symbol, Rank_Vol, Rank_Sector) for session `day` (default: the latest in signal_analysis.csv)."""
     import sleeves
-    sig = pd.read_csv(signal_csv, usecols=["Date", "Symbol", "Strategy_Rank"], parse_dates=["Date"])
+    sig = db.read_csv(signal_csv, usecols=["Date", "Symbol", "Strategy_Rank"], parse_dates=["Date"])
     d = sig["Date"].max() if day is None else pd.Timestamp(day).normalize()
     vol = sig[sig["Date"] == d].drop_duplicates("Symbol").set_index("Symbol")["Strategy_Rank"]
     inp = inp or sleeves.sector_inputs()
@@ -37,20 +38,18 @@ def save(day=None, path=None, **kw):
     path = path or RANKS_CSV
     d, r = ranks_on(day, **kw)
     r.insert(0, "Date", d.date().isoformat())
-    old = pd.read_csv(path, dtype={"Date": str}) if os.path.exists(path) else None
+    old = db.read_csv(path, dtype={"Date": str}) if db.exists(path) else None
     keep = old[old["Date"] != d.date().isoformat()] if old is not None else None
     out = pd.concat([keep, r], ignore_index=True) if keep is not None and len(keep) else r
-    tmp = path + ".tmp"
-    out[COLS].to_csv(tmp, index=False)
-    os.replace(tmp, path)
+    out[COLS].pipe(db.to_csv, path, index=False)        # one SQLite transaction (all or nothing)
     return path
 
 def load(day, path=None):
     """DataFrame Symbol, Rank_Vol, Rank_Sector saved for decision day `day`, or None when that day was not saved."""
     path = path or RANKS_CSV
-    if not os.path.exists(path):
+    if not db.exists(path):
         return None
-    r = pd.read_csv(path, dtype={"Date": str})
+    r = db.read_csv(path, dtype={"Date": str})
     r = r[r["Date"] == pd.Timestamp(day).date().isoformat()]
     if not len(r):
         return None

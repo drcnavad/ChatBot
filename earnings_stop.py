@@ -42,6 +42,7 @@ import time
 from datetime import datetime, timedelta
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import backtest_engine as be
 import sector_mapping
@@ -410,9 +411,7 @@ def run_check(now=None, dry_run=False, pending_path=None):
     if dry_run:
         _print_dry(now, session, table, held)
         return rows
-    tmp = STATUS_CSV + ".tmp"
-    table.to_csv(tmp, index=False)
-    os.replace(tmp, STATUS_CSV)
+    table.pipe(db.to_csv, STATUS_CSV, index=False)
     _save_state(state)
     print(f"{stamp} CT ({session}): {len(cands)} held stock(s) on an earnings day" +
           "".join(f"\n  {r['Symbol']}: prev close {r['Prev_Close']} trigger {r['Trigger']} price {r['Price']} -> {r['Status']}"

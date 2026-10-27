@@ -3,6 +3,7 @@ Date (created) fills itself in; a note is deleted at midnight when its End Date 
 from datetime import datetime
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 import streamlit as st
 
 from dashboard.settings import CT, NOTES_CSV
@@ -18,11 +19,11 @@ def tidy(n):
 
 def read_notes(today=None):
     """Reports/my_notes.csv without expired notes (End Date before today); expired rows are removed from the file."""
-    n = tidy(pd.read_csv(NOTES_CSV, dtype={"Stock": str, "Note": str, "Action": str}))
+    n = tidy(db.read_csv(NOTES_CSV, dtype={"Stock": str, "Note": str, "Action": str}))
     today = today or datetime.now(CT).date()
     keep = n[~(pd.to_datetime(n["End Date"]) < pd.Timestamp(today))].reset_index(drop=True)
-    if len(keep) != len(n) or "Time" in pd.read_csv(NOTES_CSV, nrows=0).columns:
-        keep.to_csv(NOTES_CSV, index=False)
+    if len(keep) != len(n) or "Time" in db.read_csv(NOTES_CSV, nrows=0).columns:
+        keep.pipe(db.to_csv, NOTES_CSV, index=False)
     return keep
 
 @st.fragment
@@ -43,6 +44,6 @@ def render_notes():
         }))
     edited["Date"] = edited["Date"].where(edited["Date"].notna(), datetime.now(CT).date())
     if edited.to_csv(index=False) != notes.to_csv(index=False):
-        edited.to_csv(NOTES_CSV, index=False)
+        edited.pipe(db.to_csv, NOTES_CSV, index=False)
         del st.session_state["notes_editor"]
         st.rerun(scope="fragment")

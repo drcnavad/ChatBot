@@ -50,6 +50,7 @@ mods["dotenv"].load_dotenv = lambda *a, **k: None
 sys.modules.update(mods)
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 import paper_trade as pt
 import run_all
 
@@ -89,7 +90,7 @@ check("earnings: owned underweight pick not topped up", plan(0.10, 3, blocked=bl
 check("earnings: owned overweight pick can still be trimmed", plan(0.05, 10, blocked=bl) == ("SELL", 5.0))
 be_days = pt.earnings_blocked(["AAA", "BBB"], "2026-09-28",
                               earnings_csv=(lambda p: (pd.DataFrame({"Symbol": ["AAA", "BBB"], "Earnings Date":
-                                            ["2026-10-02", "2026-10-09"]}).to_csv(p, index=False), p)[1])(
+                                            ["2026-10-02", "2026-10-09"]}).pipe(db.to_csv, p, index=False), p)[1])(
                                   os.path.join(tempfile.mkdtemp(), "e.csv")))
 check("earnings_blocked: within 5 days blocked, 11 days out not", be_days == {"AAA": "earnings Fri Oct 02, in 4 days"},
       be_days)
@@ -194,7 +195,7 @@ check("superseded: a Monday-morning catch-up (Friday's decision) expires at Mon 
       [o["symbol"] for o in pt.superseded_orders(datetime(2026, 10, 5, 14, 30, tzinfo=CT), p2)] == ["AAA"])
 pt.log_event = lambda *a, **k: None
 dropped = pt.drop_superseded_orders(datetime(2026, 10, 5, 15, 16, tzinfo=CT), p2)
-check("drop_superseded_orders: removes the rows (file gone when empty)", len(dropped) == 1 and not os.path.exists(p2))
+check("drop_superseded_orders: removes the rows (file gone when empty)", len(dropped) == 1 and not db.exists(p2))
 
 # no duplicates on retry: Monday's completion reached the broker but the Mac died before recording it
 cid = pt._client_order_id("AAA", "BUY", 20, 100.0, "20261002", kind="fill")

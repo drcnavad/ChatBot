@@ -23,6 +23,7 @@ tmp = tempfile.mkdtemp()
 os.environ["STOCK_ANALYSIS_RUN_LOG"] = os.path.join(tmp, "run_log.csv")
 import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import fake_quotes
 import paper_trade as pt
@@ -72,7 +73,7 @@ for src in ("auto", "provisional", "current"):
 
 # ------------------------------------------------------------------ order cap inside auto_trade (staged path, no broker)
 pend, picks = os.path.join(tmp, "pending.json"), os.path.join(tmp, "picks.csv")
-pd.DataFrame({"Symbol": ["AAA", "BIG"]}).to_csv(picks, index=False)
+pd.DataFrame({"Symbol": ["AAA", "BIG"]}).pipe(db.to_csv, picks, index=False)
 names = ("check_signal_freshness", "get_live_positions_and_equity", "plan_orders", "current_prices", "paper_trading_client",
          "PENDING_ORDERS_JSON", "PICKS_CSV", "log_event", "_today_ct")
 saved, seen = {k: getattr(pt, k) for k in names}, []
@@ -110,7 +111,7 @@ try:
     json.dump({"last_decision": "2026-09-30"}, open(state_path, "w"))          # Fri Oct 2 never ran
     with redirect_stdout(io.StringIO()):
         ra.main(["--trade", "--scheduled", "--dry-run", "--now", "2026-10-02 20:00"])
-    check("missed decision: a --dry-run writes nothing", not os.path.exists(ra.RUN_LOG) and "last_missed_notice" not in json.load(open(state_path)))
+    check("missed decision: a --dry-run writes nothing", not db.exists(ra.RUN_LOG) and "last_missed_notice" not in json.load(open(state_path)))
     outs = []
     for when in ("2026-10-02 20:00", "2026-10-03 11:00", "2026-10-04 09:30"):             # Fri night, Sat, Sun: waiting
         with redirect_stdout(io.StringIO()) as out:
@@ -128,7 +129,7 @@ try:
     os.remove(ra.RUN_LOG)
     with redirect_stdout(io.StringIO()):
         ra.main(["--trade", "--scheduled", "--now", "2026-10-03 11:00"])
-    check("decision that ran: no warning row", not os.path.exists(ra.RUN_LOG))
+    check("decision that ran: no warning row", not db.exists(ra.RUN_LOG))
 finally:
     for k, v in saved_ra.items():
         setattr(ra, k, v)

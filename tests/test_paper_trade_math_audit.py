@@ -82,6 +82,7 @@ sys.modules["alpaca.trading.enums"] = _enums
 sys.modules["alpaca.trading.requests"] = _requests
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import paper_trade
 import fake_quotes
@@ -274,14 +275,14 @@ def test_check_signal_freshness_rejects_stale_changes():
         ch = os.path.join(td, "changes.csv")
         today = date.today().isoformat()
         yesterday = (date.today() - timedelta(days=1)).isoformat()
-        pd.DataFrame([{"As_Of": today}]).to_csv(pk, index=False)
-        pd.DataFrame([{"Date": yesterday, "Symbol": "AAA", "Status": "add"}]).to_csv(ch, index=False)
+        pd.DataFrame([{"As_Of": today}]).pipe(db.to_csv, pk, index=False)
+        pd.DataFrame([{"Date": yesterday, "Symbol": "AAA", "Status": "add"}]).pipe(db.to_csv, ch, index=False)
         try:
             paper_trade.check_signal_freshness(pk, ch)
             check(False, "stale strategy_changes.csv should raise ValueError")
         except ValueError:
             check(True, "stale strategy_changes.csv raises ValueError (fail closed)")
-        pd.DataFrame([{"Date": today, "Symbol": "AAA", "Status": "add"}]).to_csv(ch, index=False)
+        pd.DataFrame([{"Date": today, "Symbol": "AAA", "Status": "add"}]).pipe(db.to_csv, ch, index=False)
         check(paper_trade.check_signal_freshness(pk, ch) == today,
               "fresh picks + fresh changes pass the freshness check")
 
@@ -300,7 +301,7 @@ def test_morning_buy_no_price_dropped_not_retried():
         check(fake.submitted == [], "morning: BUY with no price is never submitted")
         check(not res.empty and "FAILED: no usable price" in res["Status"].iloc[0],
               "morning: BUY with no price is FAILED/dropped loudly")
-        check(not os.path.exists(pp), "morning: unpriceable row dropped, not kept for retry")
+        check(not db.exists(pp), "morning: unpriceable row dropped, not kept for retry")
 
 def test_morning_sells_complete_before_buys():
     # The BUY is listed first in the pending file: SELLs must still complete first,
@@ -349,7 +350,7 @@ def test_morning_buy_cumulative_cash_reserved():
         check(got == [("AAA", 60), ("BBB", 39.0)],
               f"morning: first BUY in full ($6,060 with cushion), second cut to what is left: 3,940 / 101 = 39 (got {got})")
         check(sum(q * 100.0 * 1.01 for _, q in got) <= 10000.0, "morning: both BUYs together stay within buying power")
-        left = json.load(open(pp))["orders"] if os.path.exists(pp) else []
+        left = json.load(open(pp))["orders"] if db.exists(pp) else []
         check([(o["symbol"], o["qty"], o["order_id"]) for o in left] == [("BBB", 21.0, None)],
               f"morning: the part that did not fit (21) waits for the next fill check (got {left})")
 
@@ -373,7 +374,7 @@ def test_morning_malformed_row_dropped():
               "morning: valid SELL row still completes alongside the bad row")
         check(len(fake.submitted) == 1 and fake.submitted[0].symbol == "BBB",
               "morning: only the valid row is submitted")
-        check(not os.path.exists(pp), "morning: malformed row dropped, pending file cleaned up")
+        check(not db.exists(pp), "morning: malformed row dropped, pending file cleaned up")
 
 def test_reconcile_hold_returns_ok_empty():
     # On a hold day nothing was ordered: reconciliation must return OK with an empty

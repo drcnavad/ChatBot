@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
@@ -355,7 +356,7 @@ def forward_bars(fetch=True):
             os.replace(FWD_BARS + ".tmp", FWD_BARS)
         except Exception as e:
             print(f"bars not refreshed ({type(e).__name__}: {e}); using the saved copy")
-    return [be.apply_history_start(pd.read_pickle(p)) for p in (FWD_BARS, be.CACHE_DIR / be.LONG_CACHE) if os.path.exists(p)]
+    return [be.apply_history_start(pd.read_pickle(p)) for p in (FWD_BARS, be.CACHE_DIR / be.LONG_CACHE) if db.exists(p)]
 
 def bar_features(sources, dates, cols):
     """Close / 20-day VWAP (the copy's daily-bar VWAP: typical price x volume), the volume jump (5-day / 50-day average
@@ -831,7 +832,7 @@ def migrate_names(*paths):
         df = _read(p)
         if df is not None and len(df) and df["Strategy"].isin(list(OLD_NAMES) + list(REMOVED)).any():
             df = df[~df["Strategy"].isin(REMOVED)]
-            df.assign(Strategy=df["Strategy"].replace(OLD_NAMES)).to_csv(p, index=False)
+            df.assign(Strategy=df["Strategy"].replace(OLD_NAMES)).pipe(db.to_csv, p, index=False)
 
 def rebalance_days(cfg, inp):
     """Days on which every holding is brought back to its target (unless within 1 point of it), like the live Friday
@@ -939,7 +940,7 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
         for p, new, prior in ((path, rows, old), (hold_path, hold, old_h)):
             out = pd.concat([prior, pd.DataFrame(new)], ignore_index=True) if prior is not None else pd.DataFrame(new)
             out = out.assign(Date=pd.to_datetime(out["Date"])).sort_values("Date", kind="stable")   # by day, registry order
-            out.assign(Date=out["Date"].dt.strftime("%Y-%m-%d")).to_csv(p, index=False)
+            out.assign(Date=out["Date"].dt.strftime("%Y-%m-%d")).pipe(db.to_csv, p, index=False)
     return len(rows)
 
 # ---------------------------------------------------------------------------------------------------- the live account
@@ -992,7 +993,7 @@ def trade_cost(fills, orders, closes, start=be.FORWARD_START):
 def _read(path, **kw):
     """A saved CSV (None if missing). round_trip parsing: a rewrite keeps every saved number exactly (the default parser
     can change the last digit, so re-saving would alter old rows)."""
-    return pd.read_csv(path, float_precision="round_trip", **kw) if os.path.exists(path) else None
+    return db.read_csv(path, float_precision="round_trip", **kw) if db.exists(path) else None
 
 def record(account=None, now=None, path=DAILY_CSV):
     """Save today's row (only on an NYSE session; replaces a row already saved today). Returns the row, or None."""
@@ -1022,7 +1023,7 @@ def record(account=None, now=None, path=DAILY_CSV):
     new = pd.DataFrame([row])
     if old is not None and (old["Date"] != row["Date"]).any():
         new = pd.concat([old[old["Date"] != row["Date"]], new], ignore_index=True)
-    new[DAILY_COLS].to_csv(path, index=False)
+    new[DAILY_COLS].pipe(db.to_csv, path, index=False)
     return row
 
 # ---------------------------------------------------------------------------------------------------- leaderboard
@@ -1099,7 +1100,7 @@ def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
     holdings (shares + cash of its last saved day, no trades) to the close of every later day the saved daily bars cover
     (complete days only: a bar is taken from 3:05 PM CT), and QQQ / SPY to
     the same closes. Returns (values, bench) with those rows added; values rows carry Provisional = True."""
-    if values is None or values.empty or not os.path.exists(bars_path):
+    if values is None or values.empty or not db.exists(bars_path):
         return values, bench
     v = values.assign(Date=pd.to_datetime(values["Date"]))
     last = v["Date"].max()

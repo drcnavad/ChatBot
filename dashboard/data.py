@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 import streamlit as st
 
 from dashboard.alpaca_data import refresh_every, refresh_slot  # noqa: F401  (re-exported)
@@ -25,22 +26,22 @@ OHLCV = ["Open", "High", "Low", "Close", "Volume"]
 # ---- files (mtime-keyed caches) ----
 
 def mtime(path):
-    return os.path.getmtime(path) if os.path.exists(path) else 0.0
+    return db.mtime(path) if db.exists(path) else 0.0
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _read(path, mtime, dates=None, excel_sheet=None):
     if excel_sheet:
         return pd.read_excel(path, sheet_name=excel_sheet, engine="openpyxl")
-    return pd.read_csv(path, parse_dates=list(dates) if dates else None)
+    return db.read_csv(path, parse_dates=list(dates) if dates else None)
 
 def read_report_csv(path, dates=None):
     """Cached CSV read (re-read when the file changes); None when the file is missing. Treat the result as read-only."""
-    return _read(path, mtime(path), dates) if os.path.exists(path) else None
+    return _read(path, mtime(path), dates) if db.exists(path) else None
 
 @st.cache_data(ttl=3600)
 def load_signals(mtime: float):
     """Reports/signal_analysis.csv: one row per symbol and day (prices, indicators, strategy columns)."""
-    return pd.read_csv(SIGNAL_CSV, parse_dates=['Date'])
+    return db.read_csv(SIGNAL_CSV, parse_dates=['Date'])
 
 def signals():
     """The current signals frame (cached per file version)."""
@@ -71,11 +72,11 @@ def data_freshness(latest_bar):
     rows = []
     for name, (what, max_days) in FRESHNESS.items():
         path = os.path.join(REPORTS, name)
-        if not os.path.exists(path):
+        if not db.exists(path):
             status = "⚠️ missing" if name in APP_FILES else "— not present (local pipeline file)"
             rows.append({"File": name, "Contents": what, "Last update (CT)": "—", "Latest data": "—", "Age": "—", "Status": status})
             continue
-        ts = datetime.fromtimestamp(os.path.getmtime(path), tz=CT)
+        ts = datetime.fromtimestamp(db.mtime(path), tz=CT)
         age_d = (now - ts).total_seconds() / 86400
         latest = "—"
         if name == "signal_analysis.csv":  # judge by the newest price bar, not the file time (a git checkout resets mtimes)
@@ -108,7 +109,7 @@ def last_next_earnings(symbols):
 
 def load_company():
     """Latest-quarter fundamentals workbook; empty frame when missing."""
-    if not os.path.exists(COMPANY_XLSX):
+    if not db.exists(COMPANY_XLSX):
         return pd.DataFrame(columns=["Symbol"])
     return _read(COMPANY_XLSX, mtime(COMPANY_XLSX), excel_sheet="2_Latest_Quarter_Complete")
 
@@ -130,7 +131,7 @@ def load_news():
 @st.cache_data(ttl=3600, show_spinner=False)
 def _bars(mtimes: tuple):
     """Daily OHLCV of every stock: the long bar cache with the forward-test bars (fresher, from May 2026) on top."""
-    parts = [pd.read_pickle(p) for p in BAR_CACHES if os.path.exists(p)]
+    parts = [pd.read_pickle(p) for p in BAR_CACHES if db.exists(p)]
     b = pd.concat(parts) if parts else pd.DataFrame(columns=["Symbol", "Date"] + OHLCV)
     b["Date"] = pd.to_datetime(b["Date"])
     return b.drop_duplicates(["Symbol", "Date"], keep="last")

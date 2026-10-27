@@ -59,6 +59,7 @@ mods["dotenv"].load_dotenv = lambda *a, **k: None
 sys.modules.update(mods)
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 import paper_trade as pt
 import backtest_engine as be  # noqa: E402
 be.WINNER.pop("sleeves", None)   # the single-portfolio plan logic (the two halves: tests/test_sleeves.py)
@@ -167,8 +168,8 @@ def picks_csv(as_of, last_reb):
              "Symbol": f"S{i}", "Strategy_Weight": 0.1, "Provisional_Weight": 0.1, "Close": 100.0}
             for i in range(10)]
     d = tempfile.mkdtemp()
-    pd.DataFrame(rows).to_csv(os.path.join(d, "picks.csv"), index=False)
-    pd.DataFrame([{"Date": as_of, "Symbol": "OWN", "Close": 50.0}]).to_csv(os.path.join(d, "sig.csv"), index=False)
+    pd.DataFrame(rows).pipe(db.to_csv, os.path.join(d, "picks.csv"), index=False)
+    pd.DataFrame([{"Date": as_of, "Symbol": "OWN", "Close": 50.0}]).pipe(db.to_csv, os.path.join(d, "sig.csv"), index=False)
     return d
 
 pt.latest_signal_status = lambda *a, **k: {f"S{i}": "hold" for i in range(10)}  # every pick 'hold'
@@ -229,7 +230,7 @@ check("partial fill: only the unfilled 1.58 sent, as a DAY limit at the ask + 0.
       [(x.symbol, x.qty, getattr(x, "limit_price", None)) for x in b.submitted])
 check("partial fill: deterministic id uses the evening date",
       b.submitted[0].client_order_id.startswith("live-fill-20261002-BUY-ANET-1-"), b.submitted[0].client_order_id)
-check("partial fill: pending file removed when done", not os.path.exists(p))
+check("partial fill: pending file removed when done", not db.exists(p))
 
 # full fill (whole plan)
 o, r = eve("MRK", "BUY", 6, 6, "filled", 6)
@@ -261,7 +262,7 @@ check("open order: canceled + confirmed before replacing, only 2.58 sent",
 o, r = eve("ANET", "BUY", 3.58, 3, "partially_filled", 1)
 b = Broker(orders=[o], cancel_works=False); p = write_pending([r]); res = run(b, p)
 check("open order: cancel NOT confirmed -> nothing sent, kept for retry",
-      not b.submitted and os.path.exists(p) and "FAILED" in status_of(res, "ANET"), status_of(res, "ANET"))
+      not b.submitted and db.exists(p) and "FAILED" in status_of(res, "ANET"), status_of(res, "ANET"))
 
 # crash between cancel and replace, then rerun
 o, r = eve("ANET", "BUY", 3.58, 3, "partially_filled", 1)
@@ -317,19 +318,19 @@ b = Rejecting(orders=[o]); p = write_pending([r])
 NOTES.clear()
 res1 = run(b, p)
 check("rejected market order: kept for retry (try 1), alert says it retries - don't place by hand",
-      os.path.exists(p) and "retrying" in status_of(res1, "ANET")
+      db.exists(p) and "retrying" in status_of(res1, "ANET")
       and any(t == "warning" and "don't place" in m for t, m in NOTES), (status_of(res1, "ANET"), NOTES))
 run(b, p)
 NOTES.clear()
 res3 = run(b, p)
 check(f"rejected market order: dropped after {pt.MAX_FILL_TRIES} tries, alert says place by hand",
-      not os.path.exists(p) and "gave up" in status_of(res3, "ANET")
+      not db.exists(p) and "gave up" in status_of(res3, "ANET")
       and any(t == "failed" and "by hand" in m and "No money" in m for t, m in NOTES), (status_of(res3, "ANET"), NOTES))
 
 # market closed (holiday / Mac woke after the close)
 o, r = eve("ANET", "BUY", 3.58, 3, "expired", 0)
 b = Broker(orders=[o], is_open=False); p = write_pending([r]); res = run(b, p)
-check("market closed: nothing sent, pending kept", not b.submitted and os.path.exists(p)
+check("market closed: nothing sent, pending kept", not b.submitted and db.exists(p)
       and status_of(res, "ANET").startswith("WAITING"), status_of(res, "ANET"))
 
 # an open order for the symbol already on the broker
@@ -337,7 +338,7 @@ o, r = eve("ANET", "BUY", 3.58, 3, "expired", 0)
 manual = Order("x1", "ANET", "BUY", 2, "new", 0, "manual")
 b = Broker(orders=[o, manual]); p = write_pending([r]); res = run(b, p)
 check("open order on broker: nothing sent, kept for retry",
-      not b.submitted and os.path.exists(p) and "open ANET order" in status_of(res, "ANET"), status_of(res, "ANET"))
+      not b.submitted and db.exists(p) and "open ANET order" in status_of(res, "ANET"), status_of(res, "ANET"))
 
 # broker orders unreadable -> abort (cannot rule out duplicates)
 o, r = eve("ANET", "BUY", 3.58, 3, "expired", 0)
@@ -346,7 +347,7 @@ try:
     run(b, p)
     check("unreadable broker orders: abort", False)
 except RuntimeError:
-    check("unreadable broker orders: abort, nothing sent, pending kept", not b.submitted and os.path.exists(p))
+    check("unreadable broker orders: abort, nothing sent, pending kept", not b.submitted and db.exists(p))
 
 # buying power: Alpaca lowers it for each submitted BUY - earlier BUYs must not be counted twice
 o1, r1 = eve("AAA", "BUY", 4, 4, "expired", 0)
@@ -361,7 +362,7 @@ o, r = eve("ANET", "BUY", 3.01, 3, "filled", 3)
 r["limit_price"] = 50.0
 QUOTES.quotes["ANET"] = (49.99, 50.01)     # 0.01 share x $50.04 limit = $0.50
 b = Broker(orders=[o]); p = write_pending([r]); res = run(b, p)
-check("rest under $1: not ordered, not retried", not b.submitted and not os.path.exists(p)
+check("rest under $1: not ordered, not retried", not b.submitted and not db.exists(p)
       and "under $1" in status_of(res, "ANET"), status_of(res, "ANET"))
 
 # ------------------------------------------------------------------ earnings-day stop: no buy back until after its last earnings-day session

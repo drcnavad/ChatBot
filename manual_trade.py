@@ -21,6 +21,7 @@ after-close step removes the block once the close is at or below block_until_pri
 Buy: the position belongs to no half of the ledger, so the next pipeline trade run sells it (sleeves.plan) - a manual
 buy is for between rebalances; say so in the log."""
 import argparse
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 import json
 import math
 import os
@@ -40,7 +41,7 @@ def _now():
     return datetime.now(CT)
 
 def _read(path, default):
-    if not os.path.exists(path):
+    if not db.exists(path):
         return default
     with open(path) as f:
         return json.load(f)
@@ -176,7 +177,7 @@ def queue_leftover_cash(dry_run=False, rankings=None, prices=None, positions=Non
         if h == "sector":                                # no overlap: the low-volatility half's picks stay its own
             try:
                 import pandas as pd
-                p = pd.read_csv(pt.PICKS_CSV)
+                p = db.read_csv(pt.PICKS_CSV)
                 lv_picks = set(p.loc[pd.to_numeric(p["Provisional_Weight"], errors="coerce").fillna(0) > 0, "Symbol"].str.upper())
             except (OSError, KeyError, ValueError):
                 pass

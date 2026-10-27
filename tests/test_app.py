@@ -22,6 +22,7 @@ sys.path.insert(0, ROOT)
 import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 import numpy as np
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 from markdown_it import MarkdownIt
 from streamlit.testing.v1 import AppTest
 
@@ -37,10 +38,10 @@ _FIRST_PER_SECTOR = {}
 for _s in sm.tradable_symbols:                 # from the stock list: the first stock of each sector (up to 7) + the benchmark
     _FIRST_PER_SECTOR.setdefault(sm.symbol_sector.get(_s), _s)
 TICKERS = list(_FIRST_PER_SECTOR.values())[:7] + ["QQQ"]
-SIG = pd.read_csv("Reports/signal_analysis.csv", parse_dates=["Date"])
+SIG = db.read_csv("Reports/signal_analysis.csv", parse_dates=["Date"])
 _SH = "Reports/short_history_reference.csv"     # stocks in the list with < 200 days (reference only, never ranked)
-SHORT = pd.read_csv(_SH) if os.path.exists(_SH) else pd.DataFrame(columns=["Symbol", "As_Of"])
-DEC = pd.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
+SHORT = db.read_csv(_SH) if db.exists(_SH) else pd.DataFrame(columns=["Symbol", "As_Of"])
+DEC = db.read_csv("Reports/strategy_decisions.csv", parse_dates=["Date"])
 
 def expect(ok, what):
     if not ok:
@@ -154,10 +155,10 @@ for sym in TICKERS:
 
 # ---------------------------------------------------------------- decision badge / rank label / plan chip / Details tables agree
 # decision in force = strategy_changes.csv (what the app reads); today's rank = latest signal_analysis; plan = strategy_picks
-CH = pd.read_csv("Reports/strategy_changes.csv", parse_dates=["Date"])
+CH = db.read_csv("Reports/strategy_changes.csv", parse_dates=["Date"])
 CH = CH[CH.Symbol.notna()]
 dec_day = CH.Date.iloc[0]
-PK = pd.read_csv("Reports/strategy_picks.csv", parse_dates=["As_Of", "Last_Rebalance"])
+PK = db.read_csv("Reports/strategy_picks.csv", parse_dates=["As_Of", "Last_Rebalance"])
 as_of = PK.As_Of.iloc[0]
 plan_day = as_of if as_of == PK.Last_Rebalance.iloc[0] else None
 if plan_day is None:
@@ -271,7 +272,7 @@ expect(not any(e.label in ("Holdings risk", "Order preview (nothing is sent)") f
 expect(not any(s.key == "bt_segment" for s in at.selectbox), "stale bt_segment selectbox still present")
 expect(not any(m.label == "Last mid-week check" for m in at.metric), "stale 'Last mid-week check' metric")
 blob = "\n".join(str(t.value) for t in list(at.markdown) + list(at.caption))
-mwc = pd.read_csv("Reports/strategy_midweek_check.csv")
+mwc = db.read_csv("Reports/strategy_midweek_check.csv")
 expect("run_pipeline" not in blob, "old command 'run_pipeline' still shown in the app")
 # the Rank history expander was removed
 expect(not any(e.label.startswith("Rank history") for e in at.expander), "stale Rank history expander still present")

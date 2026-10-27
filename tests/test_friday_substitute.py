@@ -10,6 +10,7 @@ import sys
 import tempfile
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -101,15 +102,15 @@ tmp = tempfile.mkdtemp()
 picks, sig, mid, stop = (os.path.join(tmp, n) for n in ("picks.csv", "sig.csv", "mid.csv", "stop.json"))
 pd.DataFrame([{"As_Of": "2026-10-09", "Last_Rebalance": "2026-10-09", "Last_Decision": "2026-10-09", "Strategy": "C6",
                "Symbol": s, "Strategy_Weight": 0.099, "Provisional_Weight": 0.099, "Close": 100.0} for s in SYMS[:10]]
-             ).to_csv(picks, index=False)
+             ).pipe(db.to_csv, picks, index=False)
 rows = []
 for i, s in enumerate(SYMS + ["NEG"], start=1):
     rk = 11 if s == "NEG" else (i if i <= 10 else i + 1)              # NEG: rank 11 but score below 0 (not eligible)
     rows.append({"Date": "2026-10-09", "Symbol": s, "Close": 100.0, "Strategy_Score": -2 if s == "NEG" else 70 - rk,
                  "Strategy_Rank": rk, "Strategy_Weight": 0.099 if i <= 10 else 0, "Provisional_Weight": 0.099 if i <= 10 else 0,
                  "Regime_On": 1, "Midweek_Check": 0})
-pd.DataFrame(rows).to_csv(sig, index=False)
-pd.DataFrame(columns=["As_Of", "Event", "Event_Date", "Action", "Sell", "Buy", "Message", "Weight_%"]).to_csv(mid, index=False)
+pd.DataFrame(rows).pipe(db.to_csv, sig, index=False)
+pd.DataFrame(columns=["As_Of", "Event", "Event_Date", "Action", "Sell", "Buy", "Message", "Weight_%"]).pipe(db.to_csv, mid, index=False)
 json.dump({"sold": {"S12|2026-10-13": {"react": "2026-10-14"}}}, open(stop, "w"))       # S12: stop sale, no buy back
 real = (pt.earnings_blocked, pt.latest_signal_status, pt.EARNINGS_STOP_STATE)
 pt.earnings_blocked = lambda syms, as_of, earnings_csv=None: {s: "earnings Tue Oct 13, in 4 days" for s in ("S09", "S11") if s in syms}
@@ -129,8 +130,8 @@ try:
     check("reconcile_positions('provisional+subs') -> empty, ok (holdings differ from Provisional_Weight on purpose)",
           rep.empty and ok is True, (rep, ok))
     # mid-week: no Friday replacement step
-    pd.DataFrame([{**r_, "As_Of": "2026-10-09", "Last_Rebalance": "2026-10-02"} for r_ in pd.read_csv(picks).to_dict("records")]
-                 ).to_csv(picks, index=False)
+    pd.DataFrame([{**r_, "As_Of": "2026-10-09", "Last_Rebalance": "2026-10-02"} for r_ in db.read_csv(picks).to_dict("records")]
+                 ).pipe(db.to_csv, picks, index=False)
     o, meta, _ = pt.plan_orders("auto", EQ, HELD8, picks_csv=picks, signal_csv=sig, fractional=True)
     check("not a rebalance day (hold): no Friday replacement step", "substitutions" not in meta and meta["source"] == "hold",
           meta["source"])

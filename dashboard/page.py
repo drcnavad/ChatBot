@@ -7,13 +7,14 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.data import data_freshness, latest_rows, load_signals
+import db  # noqa: E402  tables live in SQLite (db.py)
 from dashboard.settings import CT, SIGNAL_CSV
 from dashboard.short_stock import load_short_history
 from dashboard.signals import rebalance_plan, signal_board
 from dashboard.style import esc, show_html
 
 def build_page():
-    mtime = os.path.getmtime(SIGNAL_CSV)
+    mtime = db.mtime(SIGNAL_CSV)
     df = load_signals(mtime)
     latest = latest_rows(df, mtime)
     import sector_mapping as sm                   # a stock commented out of the list leaves the page at once (Oct 19)
@@ -39,7 +40,7 @@ def fresh(p):
     """`p`, or the page data rebuilt when a scheduled job rewrote the signals file since `p` was built. The 30 s
     fragments call this, so new end-of-day data shows up in place, without a page reload."""
     try:
-        return p if os.path.getmtime(SIGNAL_CSV) == p.mtime else build_page()
+        return p if db.mtime(SIGNAL_CSV) == p.mtime else build_page()
     except OSError:
         return p
 

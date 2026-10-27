@@ -16,6 +16,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import forward_combos as fc
 import forward_test as ft
@@ -27,9 +28,9 @@ def check(ok, what, detail=""):
     if not ok:
         FAIL.append(what)
 
-if not (os.path.exists(ft.SIGNAL_CSV) and os.path.exists(ft.STRATEGIES_CSV) and os.path.exists(ft.FWD_BARS)):
+if not (db.exists(ft.SIGNAL_CSV) and db.exists(ft.STRATEGIES_CSV) and db.exists(ft.FWD_BARS)):
     print("SKIP no saved data"); sys.exit(0)
-sig = pd.read_csv(ft.SIGNAL_CSV, usecols=ft.SIG_COLS, parse_dates=["Date"])
+sig = db.read_csv(ft.SIGNAL_CSV, usecols=ft.SIG_COLS, parse_dates=["Date"])
 bars = ft.forward_bars(fetch=False)
 inp = ft.strategy_inputs(sig, ft._read(ft.FACTOR_CSV), None, ft._read(ft.BENCH_CSV), bars)
 x = fc.Ctx(inp)
@@ -68,17 +69,17 @@ for legs, label in combos:
 # update_strategies on temp copies: new lines appended, the old live name migrated, saved days kept
 tmp = tempfile.mkdtemp()
 vp, hp = os.path.join(tmp, "v.csv"), os.path.join(tmp, "h.csv")
-v0 = pd.read_csv(ft.STRATEGIES_CSV)
-h0 = pd.read_csv(ft.HOLDINGS_CSV)
+v0 = db.read_csv(ft.STRATEGIES_CSV)
+h0 = db.read_csv(ft.HOLDINGS_CSV)
 removed = sorted(ft.REMOVED)[0]
 extra = v0[v0["Strategy"] == ft.MON].assign(Strategy=removed)     # a removed line still in a saved file
 v0 = pd.concat([v0, extra], ignore_index=True)
 names = [c["name"] for c in ft.STRATEGIES if c.get("combo")]
 v0, h0 = v0[~v0["Strategy"].isin(names)], h0[~h0["Strategy"].isin(names)]
-v0.to_csv(vp, index=False); h0.to_csv(hp, index=False)
+v0.pipe(db.to_csv, vp, index=False); h0.pipe(db.to_csv, hp, index=False)
 fc._CACHE.clear()
 ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)
-v1, h1 = pd.read_csv(vp), pd.read_csv(hp)
+v1, h1 = db.read_csv(vp), db.read_csv(hp)
 check(not set(v1["Strategy"]) & ft.REMOVED and not set(h1["Strategy"]) & ft.REMOVED, "removed lines purged from both files")
 check(ft.LIVE == ft.TOP5 and {ft.TOP5, ft.MON} <= set(v1["Strategy"]), "the live comparison line is the top-5 50/50 (top-10 kept)")
 new = v1[v1["Strategy"].isin(names)]

@@ -25,6 +25,7 @@ os.chdir(ROOT)
 sys.modules["dotenv"] = types.SimpleNamespace(load_dotenv=lambda *a, **k: None)   # .env is never read
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import LimitOrderRequest
 
@@ -104,7 +105,7 @@ def status_of(res, sym):
     return " | ".join(res.loc[res["Symbol"] == sym, "Status"].astype(str))
 
 def left(p):
-    return json.load(open(p))["orders"] if os.path.exists(p) else []
+    return json.load(open(p))["orders"] if db.exists(p) else []
 
 GOOD = (99.90, 100.00)            # spread 0.10%: buy limit 100.00 + 0.05% = 100.05, sell 99.90 - 0.05% = 99.85
 WIDE = (99.00, 100.00)            # spread 1.0% > 0.5%
@@ -131,7 +132,7 @@ check("wide, then normal on the retry: priced from the good quote", q["skip"] is
 # ------------------------------------------------------------------ the 2:30 PM run: sells first, DAY limits, fractional
 log = os.path.join(tempfile.mkdtemp(), "live_orders_log.csv")
 pd.DataFrame([{"Symbol": "OLD", "Side": "BUY", "Shares": 1, "Status": "submitted", "Submitted_At_CT": "x",
-               "Target_Source": "provisional", "As_Of": "2026-10-01", "Equity": 1.0}]).to_csv(log, index=False)
+               "Target_Source": "provisional", "As_Of": "2026-10-01", "Equity": 1.0}]).pipe(db.to_csv, log, index=False)
 b = Broker(positions={"SSS": 4.0})
 p = pending([{"symbol": "BBB", "side": "BUY", "qty": 3.58}, {"symbol": "SSS", "side": "SELL", "qty": 4.0, "exit": True}])
 ROWS.clear()
@@ -142,11 +143,11 @@ check("2:30 run: SELL sent before the BUY", [(x.symbol, x.side) for x in s] == [
 check("2:30 run: DAY limit orders, no extended hours, 2-decimal shares",
       all(x.time_in_force == TimeInForce.DAY and not x.extended_hours for x in s) and s[1].qty == 3.58, [x.qty for x in s])
 check("2:30 run: sell at 99.85, buy at 100.05", (s[0].limit_price, s[1].limit_price) == (99.85, 100.05))
-check("2:30 run: done, nothing kept", not os.path.exists(p) and "COMPLETED via limit" in status_of(res, "BBB"))
+check("2:30 run: done, nothing kept", not db.exists(p) and "COMPLETED via limit" in status_of(res, "BBB"))
 check("2:30 run: a never-sent row reads 'sent now', not 'staged, filled 0/x'",
       status_of(res, "BBB").endswith("(sent now, nothing was sent before)") and "staged" not in status_of(res, "BBB"),
       status_of(res, "BBB"))
-lg = pd.read_csv(log)
+lg = db.read_csv(log)
 need = ["Bid", "Ask", "Spread_%", "Limit", "Fill_Price", "Slippage_%"]
 check("order log: price columns added, the old row kept", all(c in lg.columns for c in need) and lg.Symbol.iloc[0] == "OLD",
       list(lg.columns))
@@ -175,7 +176,7 @@ check("a second check the same afternoon: still nothing sent (waits for 9 AM)", 
 NOW[0] = datetime(2026, 10, 5, 9, 0, tzinfo=CT)
 res = run(b, p)
 check("Mon 9 AM: sent once with a fresh quote", [(x.symbol, x.qty, x.limit_price) for x in b.submitted] == [("WID", 5, 100.05)]
-      and not os.path.exists(p), [(x.symbol, x.qty) for x in b.submitted])
+      and not db.exists(p), [(x.symbol, x.qty) for x in b.submitted])
 NOW[0] = datetime(2026, 10, 5, 9, 30, tzinfo=CT)
 check("Mon 9:30: nothing left, never sent twice", run(b, p).empty and len(b.submitted) == 1)
 
@@ -195,7 +196,7 @@ check("... and a plain run-log row says it tries again (don't place by hand)",
 for t in (9 * 60 + 30, 10 * 60):
     NOW[0] = datetime(2026, 10, 5, t // 60, t % 60, tzinfo=CT)
     res = run(b, p)
-check("still stale at the 3rd check: dropped (gave up), never sent", not b.submitted and not os.path.exists(p)
+check("still stale at the 3rd check: dropped (gave up), never sent", not b.submitted and not db.exists(p)
       and "gave up" in status_of(res, "STL"), status_of(res, "STL"))
 
 # a Friday-evening row that meets a bad quote at Mon 9 AM: Tuesday 9 AM is after the Mon 2:30 decision -> normal retries
@@ -219,7 +220,7 @@ check("partial: first limit 5 @ 100.05 filled 2, canceled, the rest 3 replaced @
       [(x.qty, x.limit_price) for x in s])
 check("partial: replacement id = first id + '-c' (deterministic, never a duplicate id)",
       s[1].client_order_id == s[0].client_order_id[:46] + "-c", (s[0].client_order_id, s[1].client_order_id))
-check("partial: done after the replacement filled (nothing kept)", not os.path.exists(p) and "REPLACED" in status_of(res, "PRT"))
+check("partial: done after the replacement filled (nothing kept)", not db.exists(p) and "REPLACED" in status_of(res, "PRT"))
 check("partial: shares bought = exactly 5", b.positions["PRT"] == 5, b.positions)
 
 # replacement not filled either -> left working, looked at again Mon 9 AM; nothing sent before then
@@ -239,7 +240,7 @@ b.orders["o2"].status, b.orders["o2"].filled_qty = "expired", 1          # the D
 b.behave["WRK"] = ["fill"]
 NOW[0] = datetime(2026, 10, 5, 9, 0, tzinfo=CT)
 res = run(b, p)
-check("Mon 9 AM: only the unfilled 3 sent once", [x.qty for x in b.submitted[2:]] == [3] and not os.path.exists(p),
+check("Mon 9 AM: only the unfilled 3 sent once", [x.qty for x in b.submitted[2:]] == [3] and not db.exists(p),
       [x.qty for x in b.submitted])
 
 # cancel not confirmed -> no replacement (never two working orders)
@@ -346,8 +347,8 @@ check("Friday rows, Mon 9 AM: AMD 0.59 rest @ 630.3 + 0.05% = 630.62; RBRK 6.45 
 check("Friday rows: completion ids keep Friday's date + planned price (old scheme, crash-safe)",
       got["AMD"][2] == "live-fill-20261002-BUY-AMD-0-63391" and got["RBRK"][2] == "live-fill-20261002-BUY-RBRK-6-11858",
       (got["AMD"][2], got["RBRK"][2]))
-check("Friday rows: ENPH (fully filled Friday) not touched; file cleared", "ENPH" not in got and not os.path.exists(p))
-lg = pd.read_csv(log)
+check("Friday rows: ENPH (fully filled Friday) not touched; file cleared", "ENPH" not in got and not db.exists(p))
+lg = db.read_csv(log)
 check("Friday rows: the evening fill price is logged (ENPH 33.40)", lg.loc[lg.Symbol == "ENPH", "Fill_Price"].iloc[0] == 33.4)
 
 # ------------------------------------------------------------------ SIP when it works, else IEX; neither -> skip (no keys read)

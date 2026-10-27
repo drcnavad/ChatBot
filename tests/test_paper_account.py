@@ -16,6 +16,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 sys.path.insert(0, ROOT)
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import alpaca_paper as ap
 
@@ -78,7 +79,7 @@ tmp = tempfile.mkdtemp(prefix="live_test_")
 
 def real_positions_state():
     p = os.path.join(ROOT, "my_positions.csv")
-    return os.path.getmtime(p) if os.path.exists(p) else None
+    return db.mtime(p) if db.exists(p) else None
 
 REAL_BEFORE = real_positions_state()
 try:
@@ -135,10 +136,10 @@ try:
     r = ap.sync_paper_account(acct, snapshot_csv=snap, history_csv=hist)
     ap.sync_paper_account(acct, snapshot_csv=snap, history_csv=hist)
     expect(not hasattr(ap, "POSITIONS_CSV") and not hasattr(ap, "write_positions_csv"), "no my_positions.csv (holdings.py is the only source)")
-    sn = pd.read_csv(snap)
+    sn = db.read_csv(snap)
     expect({"CASH", "TOTAL EQUITY", "NVDA", "MRK"} <= set(sn.Symbol), "snapshot has positions + cash/equity rows")
-    expect(len(pd.read_csv(hist)) == 2 and r["Positions"] == 2, "history appends one row per sync")
-    expect((pd.read_csv(hist)["Net_Deposits"] == 98000).all(), "history records net deposits (canceled transfer excluded)")
+    expect(len(db.read_csv(hist)) == 2 and r["Positions"] == 2, "history appends one row per sync")
+    expect((db.read_csv(hist)["Net_Deposits"] == 98000).all(), "history records net deposits (canceled transfer excluded)")
 
     # ------------------------------------------------------------ run_all --sync-live hook (mocked, temp paths)
     import run_all
@@ -147,7 +148,7 @@ try:
         ap.PaperAccount = functools.partial(real[0], KEY, SECRET, base_url=MOCK, _allow_local_test=True)
         ap.SNAPSHOT_CSV, ap.HISTORY_CSV = (os.path.join(tmp, n) for n in ("rs.csv", "rh.csv"))
         run_all.sync_live()
-        expect(os.path.exists(ap.SNAPSHOT_CSV), "run_all.sync_live writes the snapshot file")
+        expect(db.exists(ap.SNAPSHOT_CSV), "run_all.sync_live writes the snapshot file")
     finally:
         ap.PaperAccount, ap.SNAPSHOT_CSV, ap.HISTORY_CSV = real
     expect(run_all.main(["--dry-run", "--quick", "--sync-live"]) == 0, "run_all --dry-run --sync-live plans without calling")

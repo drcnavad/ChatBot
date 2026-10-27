@@ -23,6 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import paper_trade as pt
 import fake_quotes
@@ -119,9 +120,9 @@ picks, mid, chg = (os.path.join(tmp, f) for f in ("picks.csv", "mid.csv", "chg.c
 
 def write(as_of, last_reb, mid_rows=(), chg_date=None):
     pd.DataFrame([{"As_Of": as_of, "Last_Rebalance": last_reb, "Last_Decision": last_reb, "Strategy": "x", "Symbol": s,
-                   "Strategy_Weight": 0.1, "Provisional_Weight": 0.1, "Close": 100.0} for s in ("AAA", "BBB")]).to_csv(picks, index=False)
-    pd.DataFrame(list(mid_rows), columns=["Event", "Event_Date", "Action", "Sell", "Buy", "Weight_%"]).to_csv(mid, index=False)
-    pd.DataFrame([{"Date": chg_date or as_of, "Symbol": "AAA", "Status": "hold"}]).to_csv(chg, index=False)
+                   "Strategy_Weight": 0.1, "Provisional_Weight": 0.1, "Close": 100.0} for s in ("AAA", "BBB")]).pipe(db.to_csv, picks, index=False)
+    pd.DataFrame(list(mid_rows), columns=["Event", "Event_Date", "Action", "Sell", "Buy", "Weight_%"]).pipe(db.to_csv, mid, index=False)
+    pd.DataFrame([{"Date": chg_date or as_of, "Symbol": "AAA", "Status": "hold"}]).pipe(db.to_csv, chg, index=False)
 
 write("2026-10-02", "2026-10-02")
 check("Mon morning catch-up of Friday: its rebalance weights", pt.load_targets("auto", picks, decision="2026-10-02")[1]["source"] == "provisional")
@@ -210,7 +211,7 @@ try:
     with redirect_stdout(io.StringIO()) as out:
         rc = ra.main(["--trade", "--scheduled", "--now", "2026-10-03 11:00"])
     check("idle launchd run (Saturday): ends with one 'idle:' line, no run log file of its own, no lock, nothing runs",
-          rc == 0 and out.getvalue().strip().splitlines()[-1].startswith("idle:") and not os.path.exists(ra.LOG_DIR)
+          rc == 0 and out.getvalue().strip().splitlines()[-1].startswith("idle:") and not db.exists(ra.LOG_DIR)
           and not calls, out.getvalue())
     real_load = saved_ra["load_state"]
     seq = [{"last_decision": "2026-09-30"}, {"last_decision": "2026-10-02"}]   # another run finishes Friday meanwhile
@@ -218,7 +219,7 @@ try:
     with redirect_stdout(io.StringIO()):
         rc = ra.main(["--trade", "--now", "2026-10-02 16:00"])
     check("no double run: the decision is re-checked under the lock (lock released)",
-          rc == 0 and not calls and not os.path.exists(ra.TRADE_LOCK))
+          rc == 0 and not calls and not db.exists(ra.TRADE_LOCK))
     ra.load_state = real_load
     with redirect_stdout(io.StringIO()):
         ra.main(["--trade", "--scheduled", "--now", "2026-10-05 09:30"])

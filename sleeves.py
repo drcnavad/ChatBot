@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
@@ -75,9 +76,9 @@ def sector_inputs(signal_csv=None, bench_csv=None):
     """forward_test.strategy_inputs on the saved data (cached per file modification time)."""
     import forward_test as ft
     signal_csv, bench_csv = signal_csv or ft.SIGNAL_CSV, bench_csv or ft.BENCH_CSV
-    key = (signal_csv, os.path.getmtime(signal_csv), bench_csv, os.path.getmtime(bench_csv))
+    key = (signal_csv, db.mtime(signal_csv), bench_csv, db.mtime(bench_csv))
     if key not in _INPUTS:
-        sig = pd.read_csv(signal_csv, usecols=ft.SIG_COLS, parse_dates=["Date"])
+        sig = db.read_csv(signal_csv, usecols=ft.SIG_COLS, parse_dates=["Date"])
         _INPUTS.clear()
         _INPUTS[key] = ft.strategy_inputs(sig, None, None, ft._read(bench_csv), bars=[])   # no bar download
     return _INPUTS[key]
@@ -127,7 +128,7 @@ def sector_weights(day, exclude=(), held=None, inp=None):
 # ----------------------------------------------------------------------------- ledger
 def load_ledger(path=None):
     path = path or LEDGER_JSON
-    if not os.path.exists(path):
+    if not db.exists(path):
         return None
     with open(path) as f:
         led = json.load(f)

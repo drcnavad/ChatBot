@@ -57,6 +57,7 @@ _mods["dotenv"].load_dotenv = lambda *a, **k: None
 sys.modules.update(_mods)
 
 import pandas as pd  # noqa: E402
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import paper_trade as pt  # noqa: E402
 
@@ -296,16 +297,16 @@ EARNINGS_CSV = os.path.join(tmp, "earnings_date.csv")     # no earnings within 5
 pd.concat([picks.assign(Date="2026-10-01")[["Date", "Symbol", "Close"]],
            picks.assign(Date="2026-10-05", Regime_On=1, Midweek_Check=1)[
                ["Date", "Symbol", "Close", "Strategy_Score", "Strategy_Rank", "Provisional_Weight", "Regime_On", "Midweek_Check"]]]
-          ).to_csv(SIGNAL_CSV, index=False)
-pd.DataFrame({"Symbol": picks.Symbol, "Earnings Date": "2026-11-20", "Time": "PM"}).to_csv(EARNINGS_CSV, index=False)
+          ).pipe(db.to_csv, SIGNAL_CSV, index=False)
+pd.DataFrame({"Symbol": picks.Symbol, "Earnings Date": "2026-11-20", "Time": "PM"}).pipe(db.to_csv, EARNINGS_CSV, index=False)
 
 def run_day(day, last_reb, positions, cash, changes_rows=None):
     """auto_trade() on a fake broker with the pipeline files as they would be after `day`'s 2:30 PM run."""
     pk = picks.copy()
     pk["As_Of"], pk["Last_Rebalance"], pk["Last_Decision"] = day, last_reb, day
     paths = {k: os.path.join(tmp, f"{k}_{day}.csv") for k in ("picks", "changes")}
-    pk.to_csv(paths["picks"], index=False)
-    pd.DataFrame(changes_rows or [], columns=["Date", "Symbol", "Status", "Reason"]).to_csv(paths["changes"], index=False)
+    pk.pipe(db.to_csv, paths["picks"], index=False)
+    pd.DataFrame(changes_rows or [], columns=["Date", "Symbol", "Status", "Reason"]).pipe(db.to_csv, paths["changes"], index=False)
     broker = FakeBroker(positions, cash)
     plan0, status0, prices0, earn0 = pt.plan_orders, pt.latest_signal_status, pt.latest_prices, pt.earnings_blocked
     saved = {k: getattr(pt, k) for k in ("check_signal_freshness", "get_live_positions_and_equity", "_past_evening_cutoff",

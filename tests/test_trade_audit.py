@@ -25,6 +25,7 @@ TMP = tempfile.mkdtemp(prefix="trade_audit_test_")
 os.environ["STOCK_ANALYSIS_RUN_LOG"] = os.path.join(TMP, "run_log.csv")          # never the real run log
 os.environ["STOCK_ANALYSIS_AUDIT_STATE"] = os.path.join(TMP, "audit_state.json")
 import pandas as pd  # noqa: E402
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import trade_audit as ta  # noqa: E402
 
@@ -176,7 +177,7 @@ first = ta.log_alerts(items, NOW)
 again = ta.log_alerts(items, NOW)
 nxt = ta.log_alerts(ta.alerts({"account": {"equity": "940", "last_equity": "1000"}, "errors": []}, recent,
                               datetime(2026, 10, 4, 12, 0, tzinfo=CT)), datetime(2026, 10, 4, 12, 0, tzinfo=CT))
-log = pd.read_csv(os.environ["STOCK_ANALYSIS_RUN_LOG"])
+log = db.read_csv(os.environ["STOCK_ANALYSIS_RUN_LOG"])
 check("run log: 3 rows the first time (loss, slippage, reject), none on a rerun, only the daily loss again the next day",
       len(first) == 3 and again == [] and [x["Key"].split("|")[0] for x in nxt] == ["day-loss-5"] and len(log) == 4
       and set(log["run"]) == {"Trade audit"} and log["money_moved"].eq("no").all() and log["message"].str.contains("alert only").all(),
@@ -186,7 +187,7 @@ rep = ta.report({"account": {"status": "ACTIVE", "equity": "1000", "last_equity"
                  "fills": fills, "clock": None, "errors": [], "as_of": NOW}, NOW, pend, {}, picks)
 lp, tp = os.path.join(TMP, "ledger.csv"), os.path.join(TMP, "trips.csv")
 ta.write_files(rep, lp, tp)
-check("report + CSVs: ledger 4 rows, round trips 4 rows, no .tmp left", len(pd.read_csv(lp)) == 4 and len(pd.read_csv(tp)) == 4
+check("report + CSVs: ledger 4 rows, round trips 4 rows, no .tmp left", len(db.read_csv(lp)) == 4 and len(db.read_csv(tp)) == 4
       and not any(n.endswith(".tmp") for n in os.listdir(TMP)))
 
 # ---------------------------------------------------------------- 7. fetch: GET paths only, parts fail on their own

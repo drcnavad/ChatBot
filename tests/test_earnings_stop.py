@@ -29,6 +29,7 @@ sys.modules["dotenv"] = NS(load_dotenv=lambda *a, **k: None)                  # 
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import backtest_engine as be  # noqa: E402
 import earnings_stop as es  # noqa: E402
@@ -135,7 +136,7 @@ def setup(held=None, client=None, quote=(96.0, 96.04), age=0, earnings=E, quote_
 
 def runlog():
     p = os.environ["STOCK_ANALYSIS_RUN_LOG"]
-    return list(csv.DictReader(open(p))) if os.path.exists(p) else []
+    return list(csv.DictReader(open(p))) if db.exists(p) else []
 
 def run(now, **kw):
     CLOCK[0] = now
@@ -148,7 +149,7 @@ d, acct, made = setup(client=c)
 n0 = len(runlog())
 run(REG)
 run(REG + timedelta(seconds=30))
-st = pd.read_csv(es.STATUS_CSV)
+st = db.read_csv(es.STATUS_CSV)
 check("4% down (96 vs 100): no order and no trading client", c.sent == [] and made == [])
 check("status: XYZ watched (QQQ has no report), reference 100, trigger 95", list(st.Symbol) == ["XYZ"] and st.Prev_Close[0] == 100
       and st.Trigger[0] == 95 and st.Status[0] == "watching", st.to_dict("records"))
@@ -172,7 +173,7 @@ check("pending row: qty 10.4 (the 0.4 fraction for the 9 AM check), order_qty 10
 log = [x for x in runlog()[n0:] if "Earnings-day stop: XYZ" in x["message"]]
 check("one run-log row for the sale (money moved unknown until filled)", len(log) == 1 and log[0]["run"] == "Earnings stop"
       and log[0]["money_moved"] == "unknown" and "fractional" in log[0]["message"], log)
-check("the fill-check lock is released", not os.path.exists(run_all.FILL_LOCK))
+check("the fill-check lock is released", not db.exists(run_all.FILL_LOCK))
 check("no buy back through the last watched day (PM: Fri Oct 30), allowed after",
       set(pt.earnings_stop_blocked("2026-10-30", es.STATE_JSON)) == {"XYZ"} and pt.earnings_stop_blocked("2026-10-31", es.STATE_JSON) == {})
 run(REG + timedelta(seconds=30))
@@ -243,7 +244,7 @@ c = Client({"XYZ": 10.4})
 setup(client=c, quote=(bid, bid + 0.04))
 open(run_all.TRADE_LOCK, "w").write(json.dumps({"pid": os.getpid(), "at": datetime.now(run_all.CT).isoformat()}))
 run(REG)
-check("the 2:30 PM trade job is running: the stop waits (no order)", c.sent == [] and "waiting" in pd.read_csv(es.STATUS_CSV).Status[0])
+check("the 2:30 PM trade job is running: the stop waits (no order)", c.sent == [] and "waiting" in db.read_csv(es.STATUS_CSV).Status[0])
 c = Client({"XYZ": 0.4})
 setup(held={"XYZ": 0.4}, client=c, quote=(bid, bid + 0.04))
 run(REG)
@@ -272,7 +273,7 @@ n0 = len(runlog())
 run(REG)
 run(REG + timedelta(seconds=30))
 check("no trading client (e.g. keys missing): no crash, one failed row a day, retried later",
-      c.sent == [] and sum("stop check failed" in x["message"] for x in runlog()[n0:]) == 1 and "error" in pd.read_csv(es.STATUS_CSV).Status[0])
+      c.sent == [] and sum("stop check failed" in x["message"] for x in runlog()[n0:]) == 1 and "error" in db.read_csv(es.STATUS_CSV).Status[0])
 
 c = Client({"XYZ": 10.4})
 setup(client=c, quote=(80.0, 80.04))
@@ -281,7 +282,7 @@ es.daily_bars = lambda syms, now: full(syms, now)[lambda b: b["Date"] != D("2026
 n0 = len(runlog())
 run(REG)
 run(REG + timedelta(seconds=30))
-st = pd.read_csv(es.STATUS_CSV)
+st = db.read_csv(es.STATUS_CSV)
 check("the previous day's bar missing: no stop on an older close (20% down, nothing sent), warned once",
       c.sent == [] and "not available yet" in st.Status[0] and sum("has no earnings-day stop" in x["message"] for x in runlog()[n0:]) == 1,
       (st.to_dict("records"), runlog()[n0:]))
@@ -305,7 +306,7 @@ def now_fn():
 
 n = es.loop(now_fn=now_fn, sleep_fn=nap, max_checks=10)
 check("loop: a check every 30 s while watched; stops after the sale (4 checks: 96, 96, 95.5, 94 -> sold)",
-      n == 4 and naps == [30, 30, 30] and len(c.sent) == 1 and not os.path.exists(es.LOOP_LOCK), (n, naps, len(c.sent)))
+      n == 4 and naps == [30, 30, 30] and len(c.sent) == 1 and not db.exists(es.LOOP_LOCK), (n, naps, len(c.sent)))
 setup(client=Client({"XYZ": 10.4}), earnings=E.assign(**{"Earnings Date": E["Earnings Date"] + pd.Timedelta(days=60)}))
 naps = []
 check("loop on a quiet day: one check, no sleep, exits", es.loop(now_fn=lambda: REG, sleep_fn=naps.append) == 1 and naps == [])
@@ -329,11 +330,11 @@ os.remove(es.LOOP_LOCK)
 c = Client({"XYZ": 10.4})
 d, acct, made = setup(client=c, quote=(bid, bid + 0.04))
 run(at("2026-10-24 11:00"))
-check("weekend: idle, no account read", acct.calls == 0 and not os.path.exists(es.STATUS_CSV))
+check("weekend: idle, no account read", acct.calls == 0 and not db.exists(es.STATUS_CSV))
 far = E.assign(**{"Earnings Date": E["Earnings Date"] + pd.Timedelta(days=60)})
 d, acct, made = setup(client=c, quote=(bid, bid + 0.04), earnings=far)
 run(REG)
-check("no report near: no account read, an empty status file", acct.calls == 0 and pd.read_csv(es.STATUS_CSV).empty)
+check("no report near: no account read, an empty status file", acct.calls == 0 and db.read_csv(es.STATUS_CSV).empty)
 d, acct, made = setup(client=c, quote=(bid, bid + 0.04))
 n0 = len(runlog())
 buf = io.StringIO()
@@ -342,7 +343,7 @@ with redirect_stdout(buf):
 out = buf.getvalue()
 check("dry run: shows the stock at its trigger, no trading client, no order, no files, no run-log row",
       "AT TRIGGER - would sell 10 whole shares" in out and "XYZ" in out and made == [] and c.sent == [] and len(runlog()) == n0
-      and not any(os.path.exists(x) for x in (es.STATE_JSON, es.STATUS_CSV, pt.PENDING_ORDERS_JSON)), out)
+      and not any(db.exists(x) for x in (es.STATE_JSON, es.STATUS_CSV, pt.PENDING_ORDERS_JSON)), out)
 
 src = open(os.path.join(ROOT, "earnings_stop.py")).read()
 check("the only order call is the one stop SELL (no cancel, replace, close or buy)",

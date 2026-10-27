@@ -25,6 +25,7 @@ import re
 import sys
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 PICKS_CSV = os.path.join(PROJECT_ROOT, "Reports", "strategy_picks.csv")
@@ -141,9 +142,9 @@ def check_signal_freshness(picks_csv=PICKS_CSV, changes_csv=CHANGES_CSV, decisio
         if today < pd.Timestamp(decision).date().isoformat():
             raise ValueError(f"STALE DATA: the {pd.Timestamp(decision):%Y-%m-%d} decision's close is not final yet")
     for path, label in [(picks_csv, "strategy_picks.csv"), (changes_csv, "strategy_changes.csv")]:
-        if not os.path.exists(path):
+        if not db.exists(path):
             raise ValueError(f"STALE DATA: {label} not found - run the pipeline before trading")
-    picks = pd.read_csv(picks_csv)
+    picks = db.read_csv(picks_csv)
     if picks.empty or "As_Of" not in picks.columns:
         raise ValueError("STALE DATA: strategy_picks.csv has no usable As_Of - run the pipeline before trading")
     as_of = str(picks["As_Of"].iloc[0])[:10]
@@ -155,7 +156,7 @@ def check_signal_freshness(picks_csv=PICKS_CSV, changes_csv=CHANGES_CSV, decisio
     # strategy_changes.csv. A stale changes file would silently turn every target
     # into HOLD (fail closed but no trading) or, worse, let a manual run trade on
     # yesterday's statuses - so its decision date is verified too.
-    changes = pd.read_csv(changes_csv)
+    changes = db.read_csv(changes_csv)
     if changes.empty or "Date" not in changes.columns:
         raise ValueError("STALE DATA: strategy_changes.csv has no usable Date column - run the pipeline before trading")
     changes_date = str(changes["Date"].astype(str).str[:10].max())
@@ -170,7 +171,7 @@ def load_targets(source="auto", picks_csv=PICKS_CSV, decision=None):
     """(targets DataFrame[Symbol, Weight, Price], meta dict). Weights are fractions of the account (rest = cash).
     auto = provisional on the rebalance day, else hold (no Mon-Thu trading). decision (a date): trade that decision - a
     missed one caught up later - instead of the latest bar's (its rebalance weights, only while the data is as of it)."""
-    picks = pd.read_csv(picks_csv)
+    picks = db.read_csv(picks_csv)
     if picks.empty:
         raise ValueError(f"{picks_csv} is empty - run main_signal_analysis.ipynb first")
     as_of, last_reb = str(picks["As_Of"].iloc[0]), str(picks["Last_Rebalance"].iloc[0])
@@ -194,7 +195,7 @@ def latest_prices(symbols, signal_csv=SIGNAL_CSV):
     """Latest close per symbol from signal_analysis.csv (used to price positions that are not in the targets)."""
     if not symbols:
         return {}
-    df = pd.read_csv(signal_csv, usecols=["Date", "Symbol", "Close"], parse_dates=["Date"])
+    df = db.read_csv(signal_csv, usecols=["Date", "Symbol", "Close"], parse_dates=["Date"])
     df = df[df["Symbol"].isin(symbols)].sort_values("Date").drop_duplicates("Symbol", keep="last")
     return dict(zip(df["Symbol"], df["Close"]))
 
@@ -218,7 +219,7 @@ def latest_signal_status(changes_csv=CHANGES_CSV, as_of=None):
     any other/unknown status is left as is. Returns {} when the file is missing/unreadable -
     callers then treat every target as HOLD (fail closed: no buys without a confirmed signal)."""
     try:
-        ch = pd.read_csv(changes_csv)
+        ch = db.read_csv(changes_csv)
     except (FileNotFoundError, pd.errors.EmptyDataError, ValueError):
         return {}
     if ch.empty or "Symbol" not in ch.columns or "Status" not in ch.columns:
@@ -513,7 +514,7 @@ def latest_ranking(as_of, signal_csv=SIGNAL_CSV):
     """The ranking of session `as_of` from signal_analysis.csv: Symbol, Rank, Score, Provisional_Weight, Close, Regime_On,
     Midweek_Check - only stocks with a rank and a score above WINNER['min_score'] (default 0), best first. Empty if none."""
     cols = ["Date", "Symbol", "Strategy_Rank", "Strategy_Score", "Provisional_Weight", "Close", "Regime_On", "Midweek_Check"]
-    df = pd.read_csv(signal_csv, usecols=lambda c: c in cols)
+    df = db.read_csv(signal_csv, usecols=lambda c: c in cols)
     day = df[df["Date"].astype(str).str[:10] == str(as_of)[:10]].copy()
     try:
         import backtest_engine as be
@@ -601,7 +602,7 @@ def plan_sleeve_orders(source, account_size, positions=None, picks_csv=PICKS_CSV
     targets = the account-level weights of both halves after the plan (display)."""
     import backtest_engine as be
     import sleeves
-    picks = pd.read_csv(picks_csv)
+    picks = db.read_csv(picks_csv)
     if picks.empty:
         raise ValueError(f"{picks_csv} is empty - run main_signal_analysis.ipynb first")
     as_of, last_reb = str(picks["As_Of"].iloc[0])[:10], str(picks["Last_Rebalance"].iloc[0])[:10]
@@ -921,17 +922,17 @@ def _append_order_log(log, log_csv):
     """Append rows to live_orders_log.csv. The first time new columns appear (the price columns) the file is
     rewritten once with the wider header, so old rows keep their values and the columns stay aligned."""
     os.makedirs(os.path.dirname(log_csv), exist_ok=True)
-    if os.path.exists(log_csv):
+    if db.exists(log_csv):
         try:
-            old = pd.read_csv(log_csv)
+            old = db.read_csv(log_csv)
         except Exception:
             old = None
         if old is not None and set(log.columns) - set(old.columns):
-            pd.concat([old, log], ignore_index=True).to_csv(log_csv, index=False)
+            pd.concat([old, log], ignore_index=True).pipe(db.to_csv, log_csv, index=False)
             return
         if old is not None:
             log = log.reindex(columns=old.columns)
-    log.to_csv(log_csv, mode="a", header=not os.path.exists(log_csv), index=False)
+    log.pipe(db.to_csv, log_csv, mode="a", header=not db.exists(log_csv), index=False)
 
 def _log_cost(run, log):
     """One plain run-log row: what the bid/ask spread cost on this run's orders (fill price vs the mid price)."""
@@ -1654,7 +1655,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             todo = replaced
 
     _print_header("MORNING FILL CHECK - Alpaca LIVE (REAL MONEY)")
-    if not os.path.exists(pending_path):
+    if not db.exists(pending_path):
         print("  No pending extended-hours orders - nothing to do.")
         return pd.DataFrame(columns=cols)
     with open(pending_path) as f:
@@ -2231,7 +2232,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
     _print_section("Planning orders")
     live = {}
     if session:
-        _picks = pd.read_csv(PICKS_CSV)
+        _picks = db.read_csv(PICKS_CSV)
         _syms = set(positions) | set(_picks["Symbol"].astype(str))
         try:                                        # the possible Friday replacements (ranks up to 20) are priced live too
             _rk = latest_ranking(str(_picks["As_Of"].iloc[0]))
@@ -2349,7 +2350,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         import sleeves
         try:
             sleeves.save_ledger(meta["sleeve_ledger"])
-            sleeves.plan_table(meta["sleeves"]).to_csv(sleeves.PLAN_CSV, index=False)
+            sleeves.plan_table(meta["sleeves"]).pipe(db.to_csv, sleeves.PLAN_CSV, index=False)
             print(f"  Sleeve ledger saved: {os.path.relpath(sleeves.LEDGER_JSON, PROJECT_ROOT)}")
         except Exception as e:   # never hides the trade: logged, the next run reconciles from the account
             log_event("Trade", "warning", "yes" if n_submitted else "no",
@@ -2441,7 +2442,7 @@ def main(argv=None):
     held_after = invested_after(orders)
     print(f"\nBuys ${buys:,.2f} · Sells ${sells:,.2f} · invested after ≈ ${held_after:,.2f} · cash after ≈ ${account_size - held_after:,.2f}")
     if a.out:
-        orders.to_csv(a.out, index=False)
+        orders.pipe(db.to_csv, a.out, index=False)
     if not a.submit:
         print("\nDRY RUN - nothing was sent. Use --submit to send these orders to the Alpaca LIVE account (REAL MONEY).")
         return orders

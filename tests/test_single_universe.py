@@ -11,6 +11,7 @@ news/earnings call counts).
 Docstrings and comments are documentation and are not scanned. No network calls.
 Run: PYTHONPATH=. python tests/test_single_universe.py"""
 import ast
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 import json
 import os
 import re
@@ -148,7 +149,7 @@ with tempfile.TemporaryDirectory() as _d:
     be.pd.DataFrame({"Symbol": _syms, "FiscalDateEnding": "2026-06-30", "Date": "2026-07-01", "DateAdded": "2026-07-01",
                      **{c: 1.0 for c in ["TotalAssets", "TotalLiabilities", "TotalShareholderEquity",
                                          "CommonStockSharesOutstanding", "TotalDebt", "CashAndEquivalents"]}}
-                    ).to_csv(os.path.join(_d, "balance_sheet.csv"), index=False)
+                    ).pipe(db.to_csv, os.path.join(_d, "balance_sheet.csv"), index=False)
     sm.REPORTS_DIR = _d
     try:
         _ns = {}

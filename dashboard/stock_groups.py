@@ -2,6 +2,7 @@
 Display only: nothing here feeds the strategy or orders."""
 
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 from dashboard.settings import PICKS_CSV
 
@@ -9,7 +10,7 @@ def _rankings():
     """(lv targets, sector targets, lv ranking, sector ranking) at the latest close; the rankings = each half's buy zone."""
     import sleeves
     inp = sleeves.sector_inputs()
-    picks = pd.read_csv(PICKS_CSV)
+    picks = db.read_csv(PICKS_CSV)
     day = pd.Timestamp(str(picks["As_Of"].iloc[0])[:10])
     if day not in inp["close"].index:
         day = inp["close"].index[-1]

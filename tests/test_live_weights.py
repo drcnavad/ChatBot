@@ -13,6 +13,7 @@ sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 import numpy as np
 import pandas as pd
+import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import backtest_engine as be
 import paper_trade as pt
@@ -76,8 +77,8 @@ except ValueError as e:
     check("build_orders still rejects weights summing to 1.0001", ">100%" in str(e), str(e))
 
 picks_csv = os.path.join(ROOT, "Reports", "strategy_picks.csv")
-if os.path.exists(picks_csv):
-    p = pd.read_csv(picks_csv)
+if db.exists(picks_csv):
+    p = db.read_csv(picks_csv)
     for col in ("Strategy_Weight", "Provisional_Weight"):
         s = p[col].fillna(0)
         check(f"saved strategy_picks {col}: total {s.sum():.4f} <= 99%, 2-decimal percents",
