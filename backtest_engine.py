@@ -60,7 +60,7 @@ BAR_FINAL_ENV = "STOCK_ANALYSIS_BAR_FINAL_MIN"
 COST = 0.001                 # per side
 MIN_BARS = 200               # a stock is eligible once it has a full ma_200 (handles late IPOs consistently)
 DATA_START = "2023-06-01"    # warm-up for ma_200 and 252-bar rescaling windows (live pipeline)
-LONG_CACHE, LONG_START = "bars_daily_long.pkl", "2020-06-01"   # long bar history for the tests and the forward test
+LONG_CACHE, LONG_START = "bars_daily_long.pkl", "2016-01-01"   # long bar history for the tests and the forward test (Alpaca SIP daily from ~2016)
 RS_WINDOWS = (21, 63, 126)
 RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 
