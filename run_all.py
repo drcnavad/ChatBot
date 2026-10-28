@@ -52,12 +52,6 @@ STATE_FILE = os.path.join(REPORTS, "run_state.json")
 CHECKPOINT_FILE = os.path.join(REPORTS, ".pipeline_checkpoint.json")   # watchdog resume point (see pipeline_watchdog.py)
 CT, ET = ZoneInfo("America/Chicago"), ZoneInfo("America/New_York")
 FULL_AFTER = (14, 30)                  # normal-day decision time (== backtest_engine.DECISION_TIME_CT); early-close = 11:00 AM
-SLOT_TEXT = "2:30 PM CT"               # normal-day wording; prefer slot_text(day) when the session is known
-
-def slot_text(d=None):
-    """Plain decision-slot clock for session d (2:30 PM CT normally, 11:00 AM CT on early-close days)."""
-    import backtest_engine as be
-    return be.slot_text(d)
 
 NEWS_MIN_GAP_H = 24                    # NewsAPI free tier: 100 requests/day, one run = len(stock_symbols) (N_CALLS)
 BAR_FINAL_ET = (16, 30)                # the pipeline treats the daily bar as final after 4:30 PM ET (3:30 PM CT)
@@ -321,7 +315,8 @@ def support_idle(now_ct, real=True):
         return f"{now_ct:%a %b %d} is not a trading day"
     lo, hi = SUPPORT_WINDOW
     if not lo <= (now_ct.hour, now_ct.minute) < hi:
-        return f"outside the support window ({lo[0] - 12}:{lo[1]:02d}-{hi[0] - 12}:{hi[1]:02d} PM CT) - next scheduled slot"
+        fmt = lambda h, m: f"{(h - 1) % 12 + 1}:{m:02d}"   # 24 h -> 12 h (noon is 12, not 0)
+        return f"outside the support window ({fmt(*lo)}-{fmt(*hi)} PM CT) - next scheduled slot"
     if real:
         free, held_by = acquire_trade_lock()
         if not free:
@@ -334,7 +329,10 @@ def news_allowed(now_ct, state, force_news=False):
     last = state.get("last_news_at")
     if force_news or not last:
         return True, "--force-news" if (force_news and last) else "ok"
-    gap_h = (now_ct - datetime.fromisoformat(last)).total_seconds() / 3600
+    last_dt = _parse_ct(last)
+    if last_dt is None:            # corrupt stamp: allow (a bad clock must not wedge the pipeline)
+        return True, "ok"
+    gap_h = (now_ct - last_dt).total_seconds() / 3600
     if gap_h < NEWS_MIN_GAP_H:
         return False, (f"NewsAPI already ran {gap_h:.1f} h ago ({last[:16]}); the free limit is 100 calls/day and one run "
                        f"uses {N_CALLS} - skipped (use --force-news to override)")
@@ -498,9 +496,17 @@ def acquire_trade_lock(path=None):
     return acquire_trade_lock(path)
 
 def release_trade_lock(path=None):
-    """Release the --trade lock (best effort)."""
+    """Release the --trade lock (best effort), but only when this process owns it: an owner finishing after a stale
+    takeover must not delete its successor's live lock."""
+    path = path or TRADE_LOCK
     try:
-        os.remove(path or TRADE_LOCK)
+        with open(path) as f:
+            if int(json.load(f).get("pid", 0)) != os.getpid():
+                return                                # another run's lock (or a takeover's): leave it alone
+    except (OSError, ValueError):
+        return                                        # missing or unreadable: nothing verifiable to release
+    try:
+        os.remove(path)
     except OSError:
         pass
 
@@ -572,7 +578,8 @@ def refresh_idle(now_ct):
     if not is_trading_day(now_ct.date()):
         return "market closed today (weekend or holiday) - nothing to refresh"
     if decision_day(now_ct.date()):
-        return f"decision day - the {slot_text(now_ct.date())} decision run refreshes the dashboard"
+        import backtest_engine as be
+        return f"decision day - the {be.slot_text(now_ct.date())} decision run refreshes the dashboard"
     if (now_ct.astimezone(ET).hour, now_ct.astimezone(ET).minute) < REFRESH_BAR_ET:
         return "today's daily bar is not final yet (after 4:05 PM ET = 3:05 PM CT)"
     return None
@@ -734,7 +741,9 @@ def validate():
     return problems
 
 def wait_for_final_bar(mode):
-    """Full mode on a decision day: the decision needs today's completed daily bar (final after 4:30 PM ET)."""
+    """Full mode on a decision day: wait for today's completed daily bar (final after 4:30 PM ET) when it is under
+    20 min away. Longer waits are skipped on purpose: the scheduled 2:30 PM CT run trades off the 2:30 PM decision
+    bar (Reports/decision_bars.csv), so only late full runs sit out the last minutes."""
     now = datetime.now(ET)
     ready = now.replace(hour=BAR_FINAL_ET[0], minute=BAR_FINAL_ET[1] + 1, second=0, microsecond=0)
     if mode != "full" or now >= ready or not is_trading_day(now.date()):

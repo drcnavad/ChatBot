@@ -88,6 +88,8 @@ def long_term_on(acquired):
     return one_year_after(acquired) + timedelta(days=1)
 
 def _num(x):
+    """float(x), or nan when x is missing, non-numeric or non-finite. The one float parser every account view
+    adapts (trade_audit, holdings, sleeves, paper_trade._safe_number)."""
     try:
         v = float(x)
         return v if math.isfinite(v) else math.nan

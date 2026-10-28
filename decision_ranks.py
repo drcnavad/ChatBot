@@ -42,7 +42,7 @@ def save(day=None, path=None, **kw):
     return path
 
 def load(day, path=None):
-    """DataFrame Symbol, Rank_Vol, Rank_Sector saved for decision day `day`, or None when that day was not saved."""
+    """DataFrame Symbol, Rank_RS_Short saved for decision day `day`, or None when that day was not saved."""
     path = path or RANKS_CSV
     if not db.exists(path):
         return None

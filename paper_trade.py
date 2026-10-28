@@ -25,6 +25,7 @@ import sys
 
 import pandas as pd
 import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
+from tax_lots import _num as _float_or_nan   # one float parser for every account view (_safe_number adapts it)
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 PICKS_CSV = os.path.join(PROJECT_ROOT, "Reports", "strategy_picks.csv")
@@ -252,11 +253,8 @@ def _safe_number(x, default=0.0):
     NaN is truthy in Python so `x or 0` does NOT catch it - math.floor(nan) raises
     ValueError, and NaN silently poisons downstream arithmetic. Use this everywhere a
     broker- or CSV-supplied number feeds quantity math."""
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return default
-    return v if math.isfinite(v) else default
+    v = _float_or_nan(x)
+    return default if v != v else v
 
 def _floor2(x):
     """Round DOWN to 2 decimals (500 / 139.66 = 3.580... -> 3.58; 3.5799 -> 3.57).
@@ -1091,8 +1089,9 @@ def _id_symbol(symbol):
 def _client_order_id(symbol, side, qty, price, date_str, kind=""):
     """Deterministic client order id, stable across retries of the same plan.
 
-    Format: live-[fill-]YYYYMMDD-SIDE-SYMBOL-qty-pricecents (<=48 chars, Alpaca-safe).
-    `kind="fill"` marks morning fill-check completion orders. Because the id is
+    Format: live-[kind-]YYYYMMDD-SIDE-SYMBOL-qty-pricecents (<=48 chars, Alpaca-safe).
+    `kind="fill"` marks morning fill-check completion orders, `kind="rest<order id>"` a BUY rest that did not fit
+    in an earlier check's cash (trade_audit.py recognizes both). Because the id is
     deterministic, a crash between the broker submit and the local pending-file record
     cannot duplicate the order: the retry finds it on the broker by id.
     """
@@ -2091,9 +2090,11 @@ def reconcile_positions(target_source="auto", tolerance_pct=1.0, symbols=None):
     "couldn't check" is never reported as drift). Never raises.
     """
     cols = ["Symbol", "Target_Weight_%", "Actual_Weight_%", "Diff_pp", "Shares_Held", "Status"]
-    if str(target_source).endswith(("+subs", "+kept", "+sleeves")):
-        # Two halves (+sleeves), a Friday with replacements (+subs) or do-not-sell stocks kept outside the scaled-down picks
-        # (+kept): the account holds stocks outside Provisional_Weight on purpose, so there is nothing to reconcile against.
+    ts = str(target_source)
+    if ts in ("sleeve", "sleeves") or ts.endswith(("+subs", "+kept", "+sleeves")):
+        # The sleeve ledger (source "sleeve", reconciled by sleeves.py itself), two halves (+sleeves), a Friday with
+        # replacements (+subs) or do-not-sell stocks kept outside the scaled-down picks (+kept): the account holds
+        # stocks outside Provisional_Weight on purpose, so there is nothing to reconcile against.
         return pd.DataFrame(columns=cols), True
     try:
         targets, meta = load_targets(target_source)

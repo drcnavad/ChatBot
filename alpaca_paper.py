@@ -248,7 +248,8 @@ def first_buy_dates(fills):
 
 def holdings_table(positions, fills, equity):
     """One row per held stock and a Total row. positions: GET /positions dicts; fills: GET /account/activities FILL dicts;
-    equity: account equity (Weight % = market value / equity). The ETF comparison is benchmark_table."""
+    equity: account equity (Weight % = market value / equity). The ETF comparison is
+    dashboard/details/live_holdings.py:render_benchmarks."""
     num = lambda d, k: float(d.get(k)) if d.get(k) not in (None, "") else float("nan")
     first = first_buy_dates(fills)
     rows = [{"Stock": p["symbol"], "Shares": num(p, "qty"), "Avg price": num(p, "avg_entry_price"),

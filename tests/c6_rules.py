@@ -1,6 +1,6 @@
 """Test fixture: pins backtest_engine.WINNER to the live rules of Oct 15, 2026 (weekly C6 rebalance, relative strength,
 defensive sleeve, Mon-Thu checks, E5, 15% cap) for the tests of that machinery, which stays in the code (forward-test
-strategies, a switch back). The live rules from Oct 16, 2026 (monthly low volatility) are checked in test_low_vol_monthly.py.
+strategies, a switch back). The live rules from Oct 27, 2026 (RS short-term) are checked in test_live_rs_short.py.
 Import it before paper_trade / run_all / dashboard."""
 import os
 import sys

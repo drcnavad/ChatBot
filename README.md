@@ -106,4 +106,4 @@ python tests/run_tests.py          # every test file (~90 s); --fast skips the a
 bash setup_mac_mini.sh             # packages, notebook git filter, launchd jobs (paths from this folder)
 ```
 Tests that pin the Oct 15 weekly C6 rules import `tests/c6_rules.py`; the live rules are covered by
-`test_low_vol_monthly.py`, `test_sleeves.py`, `test_manual_trade.py`, `test_strategy_tab.py`.
+`test_live_rs_short.py`, `test_manual_trade.py`, `test_strategy_tab.py`.

@@ -14,7 +14,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 sys.path.insert(0, ROOT)
-import pandas as pd
 import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 
 import alpaca_paper as ap

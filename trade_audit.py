@@ -60,7 +60,7 @@ LEDGER_COLS = ["Submitted_CT", "Filled_CT", "Symbol", "Side", "Source", "Type", 
                "Client_Order_ID"]
 TRIP_COLS = ["Symbol", "Shares", "Bought_CT", "Buy_Price", "Sold_CT", "Sell_Price", "P/L $", "P/L %", "Days_Held",
              "Buy_Source", "Sell_Source", "Note"]
-_CID = re.compile(r"^live-(?:(fill|rest)-)?(\d{8})-(BUY|SELL)-([A-Z0-9]+)-(\d+)-(\d+)(?:-r\d+)?(-c)?$")
+_CID = re.compile(r"^live-(?:(fill|rest[a-z0-9]*)-)?(\d{8})-(BUY|SELL)-([A-Z0-9]+)-(\d+)-(\d+)(?:-r\d+)?(-c)?$")
 
 def _ct(ts):
     """ISO / Timestamp -> naive CT Timestamp (NaT when missing)."""
@@ -81,8 +81,8 @@ def order_source(cid):
         return "bot: replacement at a fresh quote"
     if cid.startswith("live-fill-"):
         return "bot: fill check"
-    if cid.startswith("live-rest-"):
-        return "bot: rest that did not fit"
+    if cid.startswith("live-rest-") or re.match(r"^live-rest[a-z0-9]+-", cid):
+        return "bot: rest that did not fit"   # live-rest-... and live-rest<parent>-... (paper_trade._client_order_id)
     return "bot: decision"
 
 def plan_price(cid):

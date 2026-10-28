@@ -107,6 +107,10 @@ def build_fundamentals(income, balance):
         for d in (income, balance)
     )
     df = income.merge(balance, on=["Symbol", "FiscalDateEnding"], how="outer")
+    bad_dates = int(df["FiscalDateEnding"].isna().sum())
+    if bad_dates:
+        print(f"  [!] {bad_dates} row(s) dropped: missing or unparseable FiscalDateEnding "
+              f"({sorted(df.loc[df['FiscalDateEnding'].isna(), 'Symbol'].unique())})")
     df = df[df["FiscalDateEnding"] >= pd.Timestamp.today() - pd.DateOffset(years=YEARS_TO_KEEP)].copy()
     df[MILLIONS_COLS] = df[MILLIONS_COLS].apply(pd.to_numeric, errors="coerce")
     df["OperatingMargin"] = (df["OperatingIncome"] / df["TotalRevenue"].replace(0, np.nan) * 100).round(2)
@@ -121,7 +125,8 @@ def build_fundamentals(income, balance):
 
 def save_fundamentals(new_df):
     """Replace these symbols' rows in balance_sheet.csv; other symbols stay untouched."""
-    existing = db.read_csv(BALANCE_CSV, parse_dates=["FiscalDateEnding"])
+    existing = (db.read_csv(BALANCE_CSV, parse_dates=["FiscalDateEnding"]) if db.exists(BALANCE_CSV)
+                else pd.DataFrame(columns=["Symbol"]))   # first run: no table and no file yet
     result = pd.concat([existing[~existing["Symbol"].isin(new_df["Symbol"])], new_df], ignore_index=True)
     result = result.sort_values(["Symbol", "FiscalDateEnding"], ascending=[True, False])
     result[OUTPUT_COLUMNS].pipe(db.to_csv, BALANCE_CSV, index=False)

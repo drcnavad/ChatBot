@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
+from tax_lots import _num as _float_or_nan   # one float parser for every account view (sleeves._num adapts it)
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
@@ -83,8 +84,6 @@ def inputs(signal_csv=None, bench_csv=None):
         _TARGETS.clear()
         _INPUTS[key] = ft.strategy_inputs(sig, None, None, ft._read(bench_csv), bars=[])   # no bar download
     return _INPUTS[key]
-
-sector_inputs = inputs          # old name (dashboard / decision_ranks)
 
 def targets(h, inp=None):
     """Date x Symbol live weights (fractions of the half, 99% invested) of half h = forward_test.strategy_targets."""
@@ -166,11 +165,9 @@ def owners(led):
     return {s: (hs[0] if len(hs) == 1 else "both") for s, hs in holders(led).items()}
 
 def _num(x):
-    try:
-        f = float(x)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) and f > 0 else None
+    """float(x) when it is finite and above zero, else None."""
+    v = _float_or_nan(x)
+    return v if v == v and v > 0 else None
 
 def reconcile(led, positions, prices, equity, shares=None, fills=None, pending=()):
     """(state, unowned, info): state = {half: {'shares': {sym: qty}, 'cash': $}}; unowned = {sym: qty} no half claims.

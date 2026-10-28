@@ -74,15 +74,16 @@ UPSTREAM_STEP = {
     "strategy_holdings.csv": "main",
 }
 
-_TRANSIENT_RES = [
+_TRANSIENT_RES = [   # matched against the LOWERCASED tail: keep every pattern lowercase
     r"\b429\b", r"rate[\s_-]?limit", r"too many requests",
     r"timeout", r"timed out", r"connection (reset|aborted|refused)", r"temporary failure",
     r"name resolution", r"\bssl\b", r"eof occurred", r"urlerror",
-    r"HTTP (500|502|503|504)", r"internal server error", r"service unavailable", r"bad gateway",
+    r"http (500|502|503|504)", r"internal server error", r"service unavailable", r"bad gateway",
 ]
 _MISSING_FILE_RES = [
     r"FileNotFoundError.*?([\w\-]+\.csv)",
     r"No such file[^\n]*?([\w\-]+\.csv)",
+    r"no table '([\w\-/]+)'",   # db.py era: FileNotFoundError("no table 'signal_analysis' in ...")
 ]
 
 def log(msg, *args):
@@ -97,7 +98,8 @@ def classify_failure(text):
     for rx in _MISSING_FILE_RES:
         m = re.search(rx, text, re.IGNORECASE)
         if m:
-            step = UPSTREAM_STEP.get(m.group(1))
+            hit = m.group(1)
+            step = UPSTREAM_STEP.get(hit) or UPSTREAM_STEP.get(f"{hit}.csv")   # table name or file name
             if step:
                 return "missing_upstream", step
     low = text.lower()
@@ -207,7 +209,7 @@ def diagnose_with_llm(step, phase, log_tail, snapshot):
         "stocks on the Alpaca LIVE account (real money). DIAGNOSE ONLY - do not apply anything.\n\n"
         f"Failed step: {step} (phase: {phase})\n"
         f"Alpaca snapshot (read-only): {json.dumps(snapshot)[:1500]}\n\n"
-        "Log tail (most recent lines first are the most relevant):\n"
+        "Log tail in chronological order (oldest first; the failure is usually at the end):\n"
         f"{log_tail[-6000:]}\n\n"
         "Reply with JSON ONLY, no markdown fences, with these keys:\n"
         '{"diagnosis": "one-paragraph plain-English explanation of what broke",\n'
@@ -298,9 +300,19 @@ def handle_failure(tail, checkpoint):
                       + (f" - report: {os.path.basename(report)}" if report else ""))
     return 1
 
+def _keep_awake():
+    """Best-effort caffeinate so the Mac stays awake until this run ends (lid closed / sleeping). macOS only and
+    never raises: without it the run simply loses its stay-awake guard."""
+    if sys.platform != "darwin":
+        return
+    try:
+        os.spawnlp(os.P_NOWAIT, "caffeinate", "caffeinate", "-i", "-w", str(os.getpid()))
+    except OSError:
+        pass                                            # no caffeinate on this Mac: run unguarded
+
 def main(argv=None):
     """Entry point: run the pipeline, heal what is safe to heal, diagnose the rest."""
-    os.spawnlp(os.P_NOWAIT, "caffeinate", "caffeinate", "-i", "-w", str(os.getpid()))  # keep the Mac awake until this run ends (lid closed / sleeping)
+    _keep_awake()
     args = list(argv) if argv is not None else list(sys.argv[1:])
     if "--help" in args or "-h" in args:
         print(__doc__)

@@ -155,9 +155,11 @@ def table_text(name):
 
 def save_table(name, df, mode="w", header=True, **to_csv_kwargs):
     """Store a DataFrame as table `name` (same options as DataFrame.to_csv; mode='a' appends rows)."""
+    append = mode.startswith("a") and has_table(name)
+    if not append and (header is False or header is None):
+        raise ValueError(f"header=False on new table {name!r} would store its first data row as the header")
     text = df.to_csv(header=header, **to_csv_kwargs)
     lines = list(csv.reader(io.StringIO(text)))
-    append = mode.startswith("a") and has_table(name)
     if append and header is not False and header is not None and lines:
         pass                                         # a header written in append mode is a data row in a file too
     _write_lines(name, lines, append=append)
@@ -245,24 +247,3 @@ def append_rows(path, rows, columns):
             w.writerows(rows)
         return
     to_csv(pd.DataFrame(rows, columns=columns), path, mode="a", header=not exists(path), index=False)
-
-def migrate_all(paths, verbose=True):
-    """Import CSV files into their tables and check each one reads back identically. Returns [(path, table, ok, info)]."""
-    out = []
-    for p in paths:
-        name = import_csv_file(p)
-        try:
-            a = pd.read_csv(p, dtype=str, keep_default_na=False)
-            b = load_table(name, dtype=str, keep_default_na=False)
-            ok = a.shape == b.shape and list(a.columns) == list(b.columns) and a.equals(b)
-            info = f"{a.shape[0]} rows x {a.shape[1]} cols"
-            if ok:
-                t1, t2 = pd.read_csv(p), load_table(name)
-                ok = t1.shape == t2.shape and t1.equals(t2) and (t1.dtypes == t2.dtypes).all()
-                info += "" if ok else " (typed read differs)"
-        except pd.errors.EmptyDataError:
-            ok, info = table_text(name).strip() == open(p).read().strip(), "empty file"
-        out.append((p, name, ok, info))
-        if verbose:
-            print(("OK   " if ok else "FAIL ") + f"{name:45s} {info}")
-    return out
