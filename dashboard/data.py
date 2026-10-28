@@ -11,7 +11,7 @@ import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 import streamlit as st
 
 from dashboard.alpaca_data import refresh_every, refresh_slot  # noqa: F401  (re-exported)
-from dashboard.settings import (APP_FILES, BAR_CACHES, BENCH_CSV, COMPANY_XLSX, CT, DECISIONS_CSV, EARNINGS_CSV, FRESHNESS,
+from dashboard.settings import (APP_FILES, BAR_CACHES, BARS_TABLE, BENCH_CSV, COMPANY_XLSX, CT, DECISIONS_CSV, EARNINGS_CSV, FRESHNESS,
     NEWS_CSV, REPORTS, SIGNAL_CSV)
 
 try:
@@ -129,16 +129,17 @@ def load_news():
     return news if news is not None else pd.DataFrame(columns=["symbol", "date", "headline", "summary", "source", "sentiment_label"])
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _bars(mtimes: tuple):
-    """Daily OHLCV of every stock: the long bar cache with the forward-test bars (fresher, from May 2026) on top."""
-    parts = [pd.read_pickle(p) for p in BAR_CACHES if db.exists(p)]
-    b = pd.concat(parts) if parts else pd.DataFrame(columns=["Symbol", "Date"] + OHLCV)
+def _bars(mtime_key: float):
+    """Daily OHLCV of every stock from SQLite bars_daily (single source of truth)."""
+    b = db.load_bars()
+    if not len(b):
+        return pd.DataFrame(columns=["Symbol", "Date"] + OHLCV)
     b["Date"] = pd.to_datetime(b["Date"])
-    return b.drop_duplicates(["Symbol", "Date"], keep="last")
+    return b
 
 def ohlcv(symbol):
     """Display only (the stock chart): one stock's daily Open/High/Low/Close/Volume by Date."""
-    b = _bars(tuple(mtime(p) for p in BAR_CACHES))
+    b = _bars(db.bars_mtime())
     return b[b["Symbol"] == symbol].set_index("Date").sort_index()[OHLCV]
 
 # ---- live (Alpaca) ----

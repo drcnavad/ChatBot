@@ -60,7 +60,9 @@ BAR_FINAL_ENV = "STOCK_ANALYSIS_BAR_FINAL_MIN"
 COST = 0.001                 # per side
 MIN_BARS = 200               # a stock is eligible once it has a full ma_200 (handles late IPOs consistently)
 DATA_START = "2023-06-01"    # warm-up for ma_200 and 252-bar rescaling windows (live pipeline)
-LONG_CACHE, LONG_START = "bars_daily_long.pkl", "2016-01-01"   # long bar history for the tests and the forward test (Alpaca SIP daily from ~2016)
+LONG_START = "2016-01-01"          # Alpaca SIP daily history floor (~2016)
+LONG_CACHE = "bars_daily"           # legacy name: daily bars now live in SQLite table db.BARS_DAILY (not a pickle)
+BARS_REFRESH_OVERLAP_DAYS = 5       # re-fetch this many calendar days before each symbol's max date (corrections + gaps)
 RS_WINDOWS = (21, 63, 126)
 RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
 
@@ -380,36 +382,78 @@ def keep_decision_bars(bars, now=None, path=DECISION_BARS_CSV, state_path=REPORT
         log.warning("decision bars (Reports/decision_bars.csv) not used: %s", e)
         return bars
 
-def ensure_long_cache(cache_name=LONG_CACHE, start=LONG_START, data_client=None):
-    """A stock added to sector_mapping.py gets its backtest history automatically: the bars of every missing symbol
-    are fetched from Alpaca's free market data, `start` -> the cache's last date, and appended; the
-    other symbols are untouched. Returns the symbols added. Raises a clear error naming the missing stocks when the fetch
-    fails (no keys / network); a symbol Alpaca has no bars for is reported (warning) and skipped."""
-    path = CACHE_DIR / cache_name
-    if not path.exists():
-        return []                                   # no cache yet: nothing to append
-    cached = pd.read_pickle(path)
-    missing = sorted(set(TRADABLE + BENCHMARKS + SECTOR_ETFS) - set(cached["Symbol"].unique()))
+def load_long_bars(symbols=None, start=None, end=None):
+    """Daily OHLCV from the SQLite bars_daily table (single source of truth). Same columns as fetch_daily_bars."""
+    return db.load_bars(symbols=symbols, start=start, end=end)
+
+def refresh_daily_bars(symbols=None, start=LONG_START, data_client=None, overlap_days=None, close_buffer_min=None):
+    """Incremental append-only refresh of bars_daily.
+
+    For each symbol, fetches only from max(stored_max - overlap, start) forward (new symbols: from `start`).
+    Writes via db.append_bars: INSERT OR IGNORE for history, INSERT OR REPLACE only for the newest session in the
+    batch (today's possibly-partial bar). Never rebuilds the table. Returns the list of symbols that were fetched.
+    close_buffer_min is passed to drop_partial_last_bar (forward_test uses AFTER_CLOSE_BAR_MIN = 3:05 PM CT).
+    """
+    symbols = list(dict.fromkeys(symbols if symbols is not None else (TRADABLE + BENCHMARKS + SECTOR_ETFS)))
+    if not symbols:
+        return []
+    overlap_days = BARS_REFRESH_OVERLAP_DAYS if overlap_days is None else int(overlap_days)
+    max_by = db.bars_symbol_max_dates(symbols)
+    # One fetch start for the batch = earliest needed (missing symbols use `start`; others use max - overlap)
+    floor = pd.Timestamp(start)
+    starts = []
+    for s in symbols:
+        if s in max_by:
+            starts.append(max(floor, pd.Timestamp(max_by[s]) - pd.Timedelta(days=overlap_days)))
+        else:
+            starts.append(floor)
+    fetch_start = min(starts)
+    try:
+        new = fetch_daily_bars(symbols, start=fetch_start, data_client=data_client)
+    except Exception as e:
+        raise RuntimeError(f"bars_daily refresh failed for {symbols[:5]}{'...' if len(symbols) > 5 else ''}: {e}") from e
+    new, _ = drop_partial_last_bar(new, close_buffer_min=close_buffer_min)
+    if not len(new):
+        return []
+    # Per-symbol: drop rows on or before (stored_max - overlap) so we only present the overlap+new window;
+    # settled history before that is never sent to append_bars (defense in depth with INSERT OR IGNORE).
+    keep = []
+    for s, g in new.groupby("Symbol", sort=False):
+        if s in max_by:
+            cut = pd.Timestamp(max_by[s]) - pd.Timedelta(days=overlap_days)
+            g = g[g["Date"] >= cut]
+        keep.append(g)
+    new = pd.concat(keep, ignore_index=True) if keep else new.iloc[0:0]
+    if not len(new):
+        return []
+    # REPLACE only the newest session (partial -> final); everything older in the batch is IGNORE
+    db.append_bars(new, replace_from=new["Date"].max())
+    return sorted(set(new["Symbol"]))
+
+def ensure_long_cache(cache_name=None, start=LONG_START, data_client=None):
+    """Make sure bars_daily has every TRADABLE + BENCHMARKS + SECTOR_ETFS symbol (append-only).
+
+    New symbols are fetched from `start`; existing symbols are left alone here (daily freshness is
+    refresh_daily_bars / forward_bars). Returns the symbols that were newly added. Raises when a brand-new
+    symbol cannot be fetched. `cache_name` is accepted for call-site compatibility and ignored.
+    """
+    db.ensure_bars_daily()
+    want = list(dict.fromkeys(TRADABLE + BENCHMARKS + SECTOR_ETFS))
+    have = set(db.bars_symbol_max_dates(want))
+    missing = sorted(set(want) - have)
     if not missing:
         return []
-    last = cached["Date"].max()
     try:
-        new = fetch_daily_bars(missing, start=start, end=last + pd.Timedelta(days=1), data_client=data_client)
+        got = refresh_daily_bars(missing, start=start, data_client=data_client, overlap_days=0)
     except Exception as e:
-        raise RuntimeError(f"backtest bar cache {path.name} has no bars for {missing} (new in sector_mapping.py) and fetching "
+        raise RuntimeError(f"bars_daily has no bars for {missing} (new in sector_mapping.py) and fetching "
                            f"them failed: {e}. Fix: run with network + Alpaca keys: python -c \"import backtest_engine as be; "
                            f"print(be.ensure_long_cache())\"") from e
-    new = new[new["Date"] <= last]
-    got = sorted(set(new["Symbol"]))
-    if got:
-        out = pd.concat([cached, new[cached.columns]], ignore_index=True).sort_values(["Symbol", "Date"]).reset_index(drop=True)
-        tmp = path.with_suffix(".tmp")
-        out.to_pickle(tmp)
-        tmp.replace(path)
-        log.warning("backtest bar cache: added %s (%s -> %s)", got, new["Date"].min().date(), last.date())
     still = sorted(set(missing) - set(got))
+    if got:
+        log.warning("bars_daily: added %s", got)
     if still:
-        log.warning("backtest bar cache: Alpaca has no bars for %s - check the ticker in sector_mapping.py", still)
+        log.warning("bars_daily: Alpaca has no bars for %s - check the ticker in sector_mapping.py", still)
     return got
 
 # ----------------------------------------------------------------------------- technical indicators

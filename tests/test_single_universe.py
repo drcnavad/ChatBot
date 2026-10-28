@@ -158,9 +158,9 @@ with tempfile.TemporaryDirectory() as _d:
         sm.REPORTS_DIR = _old_dir
 check("company reports score only sector_mapping.py stocks (removed / unknown symbols in balance_sheet.csv dropped)",
       sorted(_ns["df"]["Symbol"]) == sorted(_keep), sorted(_ns["df"]["Symbol"]))
-_cache = be.CACHE_DIR / be.LONG_CACHE
-miss = sorted(set(be.TRADABLE + be.BENCHMARKS + be.SECTOR_ETFS) - set(be.pd.read_pickle(_cache)["Symbol"])) if _cache.exists() else []
-check("backtest bar cache has every stock of the list (a new stock is fetched by be.ensure_long_cache on the next run)",
+_have = set(be.db.bars_symbol_max_dates(be.TRADABLE + be.BENCHMARKS + be.SECTOR_ETFS))
+miss = sorted(set(be.TRADABLE + be.BENCHMARKS + be.SECTOR_ETFS) - _have)
+check("bars_daily has every stock of the list (a new stock is fetched by be.ensure_long_cache on the next run)",
       not miss, f"missing {miss}: run the pipeline or python -c \"import backtest_engine as be; be.ensure_long_cache()\"")
 
 print("\nSINGLE UNIVERSE OK" if not FAIL else f"\nSINGLE UNIVERSE FAILURES ({len(FAIL)}): {FAIL}")

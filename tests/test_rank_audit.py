@@ -49,7 +49,7 @@ def held_before(D):
 print("RS benchmark:", MODE)
 
 sa = db.read_csv("Reports/signal_analysis.csv", parse_dates=["Date"])
-bars = pd.read_pickle("Reports/cache/bars_daily_long.pkl")
+bars = be.load_long_bars()
 close = bars.pivot(index="Date", columns="Symbol", values="Close").sort_index()
 _missing = sorted(set(sm.tradable_symbols) - set(bars["Symbol"]))
 # the universe the saved file was computed on: a stock added to the list joins on the next pipeline run
@@ -60,7 +60,7 @@ if PENDING:
     print(f"NOTE: {PENDING} are in the stock list but not in signal_analysis.csv yet (added after the last pipeline run)")
     tradable = [s for s in tradable if s not in PENDING]
 if _missing:   # stop here with a clear message (the audit below needs every stock's bars)
-    sys.exit(f"FAIL backtest bar cache has no bars for {_missing} (new in sector_mapping.py): the next pipeline run fetches "
+    sys.exit(f"FAIL bars_daily has no bars for {_missing} (new in sector_mapping.py): the next pipeline run fetches "
              f"them (be.ensure_long_cache in main_signal_analysis.ipynb), or run python -c \"import backtest_engine as be; "
              f"print(be.ensure_long_cache())\"")
 _WT = be.WINNER.get("w_tech", 0.5)
@@ -80,15 +80,15 @@ if uncovered:
 SKIPPED = []
 
 def auditable(D, label):
-    """False (with a loud SKIP) when D is newer than the bar cache.
+    """False (with a loud SKIP) when D is newer than bars_daily.
 
     The pipeline computes each row from live bars fetched at run time; this audit
-    recomputes from the cached bars. A row newer than the cache is unauditable -
-    it is skipped, not failed. Refresh the cache to audit it (Alpaca market data,
-    no quota): python -c "import backtest_engine as be; be.fetch_daily_bars(be.TRADABLE + be.BENCHMARKS + be.SECTOR_ETFS, start=be.LONG_START).to_pickle(be.CACHE_DIR / be.LONG_CACHE)"
+    recomputes from bars_daily. A row newer than the cache is unauditable -
+    it is skipped, not failed. Refresh bars_daily to audit it (Alpaca market data,
+    no quota): python -c "import backtest_engine as be; be.refresh_daily_bars(be.TRADABLE + be.BENCHMARKS + be.SECTOR_ETFS, start=be.LONG_START)"
     """
     if pd.Timestamp(D).date() > CACHE_MAX:
-        msg = f"SKIP {label} {pd.Timestamp(D).date()}: bar cache ends {CACHE_MAX} (pipeline used live bars)"
+        msg = f"SKIP {label} {pd.Timestamp(D).date()}: bars_daily ends {CACHE_MAX} (pipeline used live bars)"
         print("   !! " + msg)
         SKIPPED.append(msg)
         return False
@@ -266,9 +266,9 @@ for D, col in dates:
 if auditable(latest, "provisional"):
     audit(latest, "Provisional_Weight")
 if n_reb_audited == 0:
-    FAIL.append("no rebalance row could be audited: the bar cache ends "
+    FAIL.append("no rebalance row could be audited: the bars_daily ends "
                 f"{CACHE_MAX}, older than every checked rebalance date - refresh it: "
-                "python -c \"import backtest_engine as be; be.fetch_daily_bars(be.TRADABLE + be.BENCHMARKS + be.SECTOR_ETFS, start=be.LONG_START).to_pickle(be.CACHE_DIR / be.LONG_CACHE)\"")
+                "python -c \"import backtest_engine as be; be.refresh_daily_bars(be.TRADABLE + be.BENCHMARKS + be.SECTOR_ETFS, start=be.LONG_START)\"")
 
 # --- Mid-week checks (live rule: worse than rank 20 sold, refilled from the top 10): the last 3 historical rank-exit days
 #     and this week's Mon/Wed checks. Only when the CSV was written by the current rules (else the next run rewrites it).
@@ -301,9 +301,9 @@ if MW_RULES:
         expect(n_exit >= 2, "fewer than 2 rank-exit sells audited")
 
 if SKIPPED:
-    print("\nNOTE: some audit dates were skipped - they are newer than the bar cache "
+    print("\nNOTE: some audit dates were skipped - they are newer than bars_daily "
           f"(cache ends {CACHE_MAX}); the pipeline computed those rows from live bars.")
     print("To audit them, refresh the cache (Alpaca market data, no quota):")
-    print("  python -c \"import backtest_engine as be; be.fetch_daily_bars(be.TRADABLE + be.BENCHMARKS + be.SECTOR_ETFS, start=be.LONG_START).to_pickle(be.CACHE_DIR / be.LONG_CACHE)\"")
+    print("  python -c \"import backtest_engine as be; be.refresh_daily_bars(be.TRADABLE + be.BENCHMARKS + be.SECTOR_ETFS, start=be.LONG_START)\"")
 print("\nRANK AUDIT OK" if not FAIL else f"\nRANK AUDIT FAILURES: {FAIL}")
 sys.exit(1 if FAIL else 0)

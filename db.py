@@ -15,7 +15,11 @@ Two ways in:
 Values are stored exactly as the CSV text had them (one TEXT column per CSV column, header kept in _tables) and are
 read back through pandas' own CSV parser, so every read_csv option (parse_dates, dtype, usecols, index_col, nrows,
 float_precision ...) behaves as before and numbers / dates / index round-trip exactly. mode="a" appends rows like a
-file append did. A .csv file still on disk with no table yet is read (and then imported on the next write)."""
+file append did. A .csv file still on disk with no table yet is read (and then imported on the next write).
+
+Daily OHLCV lives in the typed table bars_daily (PRIMARY KEY Symbol, Date): load_bars / append_bars.
+Refreshes are append-only (INSERT OR IGNORE for history; INSERT OR REPLACE for the newest session).
+benchmark_prices stays wide (unique Date) and is written with append_benchmark_prices."""
 import csv
 import fnmatch
 import io
@@ -30,6 +34,11 @@ import pandas as pd
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
 BUSY_MS = 30_000
+# Typed daily OHLCV table (see append_bars / load_bars at bottom). Name checked early in save_table/load_table.
+BARS_DAILY = "bars_daily"
+BARS_COLS = ("Symbol", "Date", "Open", "High", "Low", "Close", "Volume")
+BARS_OVERLAP_DAYS = 5
+_BARS_META = "_bars_meta"
 _lock = threading.Lock()
 
 def db_path():
@@ -155,6 +164,8 @@ def table_text(name):
 
 def save_table(name, df, mode="w", header=True, **to_csv_kwargs):
     """Store a DataFrame as table `name` (same options as DataFrame.to_csv; mode='a' appends rows)."""
+    if name == BARS_DAILY:
+        raise ValueError("bars_daily is append-only: use db.append_bars(df), never save_table/replace")
     append = mode.startswith("a") and has_table(name)
     if not append and (header is False or header is None):
         raise ValueError(f"header=False on new table {name!r} would store its first data row as the header")
@@ -166,6 +177,8 @@ def save_table(name, df, mode="w", header=True, **to_csv_kwargs):
 
 def load_table(name, **read_csv_kwargs):
     """Table `name` as a DataFrame (same options as pd.read_csv). FileNotFoundError if there is no such table."""
+    if name == BARS_DAILY:                                 # typed OHLCV table: never through the CSV text path
+        return load_bars()
     text = table_text(name)
     if text is None:
         raise FileNotFoundError(f"no table {name!r} in {db_path()}")
@@ -247,3 +260,210 @@ def append_rows(path, rows, columns):
             w.writerows(rows)
         return
     to_csv(pd.DataFrame(rows, columns=columns), path, mode="a", header=not exists(path), index=False)
+
+
+# ---- daily OHLCV bars (typed table; append-only) --------------------------------------------------------------
+# Single source of truth for every stock / ETF daily bar. Not a CSV-emulation table: REAL columns + PRIMARY KEY
+# (Symbol, Date) so refreshes can INSERT OR IGNORE / INSERT OR REPLACE without rebuilding. Intraday bars are never
+# stored here (dashboard fetches 5-/15-minute bars live for display only).
+# (BARS_DAILY / BARS_COLS / BARS_OVERLAP_DAYS / _BARS_META defined near top)
+
+def ensure_bars_daily():
+    """Create bars_daily + its Date index + the mtime stamp table if they are missing. Never drops existing rows."""
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            con.execute(
+                f"CREATE TABLE IF NOT EXISTS {_q(BARS_DAILY)} ("
+                "Symbol TEXT NOT NULL, Date TEXT NOT NULL, "
+                "Open REAL, High REAL, Low REAL, Close REAL, Volume REAL, "
+                "PRIMARY KEY (Symbol, Date))"
+            )
+            con.execute(f"CREATE INDEX IF NOT EXISTS bars_daily_date ON {_q(BARS_DAILY)}(Date)")
+            con.execute(f"CREATE TABLE IF NOT EXISTS {_q(_BARS_META)} "
+                        "(key TEXT PRIMARY KEY, value REAL NOT NULL)")
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+
+def bars_mtime():
+    """When bars_daily was last appended to (0.0 if the table is empty / missing)."""
+    ensure_bars_daily()
+    with connect() as con:
+        r = con.execute(f"SELECT value FROM {_q(_BARS_META)} WHERE key='updated_at'").fetchone()
+    return float(r[0]) if r else 0.0
+
+def has_bars():
+    ensure_bars_daily()
+    with connect() as con:
+        return con.execute(f"SELECT 1 FROM {_q(BARS_DAILY)} LIMIT 1").fetchone() is not None
+
+def bars_symbol_max_dates(symbols=None):
+    """{Symbol: 'YYYY-MM-DD'} of the latest stored date per symbol (empty dict when none)."""
+    ensure_bars_daily()
+    with connect() as con:
+        if symbols is None:
+            rows = con.execute(f"SELECT Symbol, MAX(Date) FROM {_q(BARS_DAILY)} GROUP BY Symbol").fetchall()
+        else:
+            syms = list(dict.fromkeys(symbols))
+            if not syms:
+                return {}
+            ph = ",".join("?" * len(syms))
+            rows = con.execute(
+                f"SELECT Symbol, MAX(Date) FROM {_q(BARS_DAILY)} WHERE Symbol IN ({ph}) GROUP BY Symbol",
+                syms).fetchall()
+    return {s: d for s, d in rows if d}
+
+def load_bars(symbols=None, start=None, end=None):
+    """Daily OHLCV as a DataFrame (Date = datetime64, sorted by Symbol, Date). Empty frame when nothing matches."""
+    ensure_bars_daily()
+    where, args = [], []
+    if symbols is not None:
+        syms = list(dict.fromkeys(symbols))
+        if not syms:
+            return pd.DataFrame(columns=list(BARS_COLS))
+        where.append(f"Symbol IN ({','.join('?' * len(syms))})")
+        args.extend(syms)
+    if start is not None:
+        where.append("Date >= ?")
+        args.append(pd.Timestamp(start).strftime("%Y-%m-%d"))
+    if end is not None:
+        where.append("Date <= ?")
+        args.append(pd.Timestamp(end).strftime("%Y-%m-%d"))
+    sql = f"SELECT {', '.join(BARS_COLS)} FROM {_q(BARS_DAILY)}"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY Symbol, Date"
+    with connect() as con:
+        df = pd.read_sql_query(sql, con, params=args)
+    if len(df):
+        df["Date"] = pd.to_datetime(df["Date"])
+    else:
+        df = pd.DataFrame(columns=list(BARS_COLS))
+        df["Date"] = pd.to_datetime(df["Date"])
+    return df
+
+def append_bars(df, replace_from=None):
+    """Append-only write into bars_daily. Never drops or rebuilds the table.
+
+    Choice: INSERT OR IGNORE for settled history; INSERT OR REPLACE for dates on/after `replace_from`
+    (default = the max Date in `df`, i.e. only the newest session). That lets today's possibly-partial
+    bar become the final close without rewriting older days, and blocks accidental history rewrites.
+    Pass replace_from=min_date_of_overlap to also refresh a short correction window after an incremental fetch.
+    Returns the number of rows presented for write (not the number newly inserted)."""
+    ensure_bars_daily()
+    if df is None or not len(df):
+        return 0
+    out = df.loc[:, list(BARS_COLS)].copy()
+    out["Symbol"] = out["Symbol"].astype(str)
+    out["Date"] = pd.to_datetime(out["Date"]).dt.strftime("%Y-%m-%d")
+    for c in ("Open", "High", "Low", "Close", "Volume"):
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+    out = out.dropna(subset=["Symbol", "Date"]).drop_duplicates(["Symbol", "Date"], keep="last")
+    if not len(out):
+        return 0
+    if replace_from is None:
+        replace_from = out["Date"].max()
+    else:
+        replace_from = pd.Timestamp(replace_from).strftime("%Y-%m-%d")
+    settle = out[out["Date"] < replace_from]
+    refresh = out[out["Date"] >= replace_from]
+    rows_settle = [tuple(r) for r in settle.itertuples(index=False, name=None)]
+    rows_refresh = [tuple(r) for r in refresh.itertuples(index=False, name=None)]
+    cols_sql = ", ".join(_q(c) for c in BARS_COLS)
+    ph = ",".join("?" * len(BARS_COLS))
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            if rows_settle:
+                con.executemany(
+                    f"INSERT OR IGNORE INTO {_q(BARS_DAILY)} ({cols_sql}) VALUES ({ph})", rows_settle)
+            if rows_refresh:
+                con.executemany(
+                    f"INSERT OR REPLACE INTO {_q(BARS_DAILY)} ({cols_sql}) VALUES ({ph})", rows_refresh)
+            n = con.execute(f"SELECT COUNT(*) FROM {_q(BARS_DAILY)}").fetchone()[0]
+            now = time.time()
+            con.execute(f"INSERT OR REPLACE INTO {_q(_BARS_META)} VALUES ('updated_at', ?)", (now,))
+            # discoverable in tables() without going through the CSV text path
+            con.execute("INSERT OR REPLACE INTO _tables VALUES (?,?,?,?)",
+                        (BARS_DAILY, json.dumps(list(BARS_COLS)), n, now))
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+    return len(out)
+
+def append_benchmark_prices(df, path=None):
+    """Append-only write of the wide benchmark_prices table (one row per Date; columns = ETF closes).
+
+    Unique key is Date (wide layout kept so dashboard / forward_test / the notebook keep working). New dates
+    are INSERT OR IGNORE; the newest date in `df` is INSERT OR REPLACE so a same-day refresh can fill blanks.
+    Never drops older history. `path` defaults to Reports/benchmark_prices.csv (the table address)."""
+    path = path or os.path.join(REPORTS, "benchmark_prices.csv")
+    name = table_name(path) if is_csv_path(path) else "benchmark_prices"
+    if df is None or not len(df):
+        return 0
+    out = df.copy()
+    if "Date" not in out.columns:
+        raise ValueError("benchmark_prices frame needs a Date column")
+    out["Date"] = pd.to_datetime(out["Date"]).dt.strftime("%Y-%m-%d")
+    out = out.drop_duplicates("Date", keep="last").sort_values("Date")
+    # first write ever: create the table from this frame
+    if not has_table(name):
+        save_table(name, out, index=False)
+        with connect() as con:
+            con.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{name.replace('/', '_')}_date "
+                        f"ON {_q(name)}({_q('Date')})")
+        return len(out)
+    # ensure unique index (safe if it already exists)
+    with connect() as con:
+        con.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{name.replace('/', '_')}_date "
+                    f"ON {_q(name)}({_q('Date')})")
+        header, _, _ = _meta(con, name)
+    # align columns to the existing header (extra cols in df get added; missing become "")
+    for h in header:
+        if h not in out.columns:
+            out[h] = ""
+    # widen table if df brings new ETF columns
+    extra = [c for c in out.columns if c not in header]
+    if extra:
+        new_header = header + extra
+        with connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                for c in extra:
+                    con.execute(f"ALTER TABLE {_q(name)} ADD COLUMN {_q(c)} TEXT")
+                n = con.execute(f"SELECT COUNT(*) FROM {_q(name)}").fetchone()[0]
+                con.execute("INSERT OR REPLACE INTO _tables VALUES (?,?,?,?)",
+                            (name, json.dumps(new_header), n, time.time()))
+                con.execute("COMMIT")
+                header = new_header
+            except BaseException:
+                con.execute("ROLLBACK")
+                raise
+    latest = out["Date"].max()
+    cols_sql = ", ".join(_q(c) for c in header)
+    ph = ",".join("?" * len(header))
+    def row_tuple(r):
+        return tuple("" if (v is None or (isinstance(v, float) and pd.isna(v))) else
+                     (f"{v:.4f}" if isinstance(v, float) else str(v)) for v in (r[c] for c in header))
+    settle = [row_tuple(r) for _, r in out[out["Date"] < latest].iterrows()]
+    refresh = [row_tuple(r) for _, r in out[out["Date"] >= latest].iterrows()]
+    with connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            if settle:
+                con.executemany(
+                    f"INSERT OR IGNORE INTO {_q(name)} ({cols_sql}) VALUES ({ph})", settle)
+            if refresh:
+                con.executemany(
+                    f"INSERT OR REPLACE INTO {_q(name)} ({cols_sql}) VALUES ({ph})", refresh)
+            n = con.execute(f"SELECT COUNT(*) FROM {_q(name)}").fetchone()[0]
+            con.execute("INSERT OR REPLACE INTO _tables VALUES (?,?,?,?)",
+                        (name, json.dumps(header), n, time.time()))
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+    return len(out)

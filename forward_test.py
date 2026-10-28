@@ -346,7 +346,7 @@ def strategy_color(name):
     """CSS color of a strategy's family, or '' for the account and the benchmarks."""
     return GROUPS.get(GROUP_OF.get(str(name).replace(LIVE_MARK, ""), ""), "")
 STOPS = {"pre": dict(k=3.5, arm_days=7, gap_open=True), "post": dict(k=3.0, after=10)}   # atr_stop_targets settings
-FWD_BARS = os.path.join(REPORTS, "cache", "forward_bars.pkl")
+FWD_BARS = os.path.join(REPORTS, "cache", "forward_bars.pkl")  # legacy path; daily bars now live in db.bars_daily
 FWD_BARS_START = "2026-05-01"      # ~100 sessions before the start: the 50-day volume average is full by Oct 2
 _NO_SAVE = datetime(2000, 1, 1, tzinfo=be.EASTERN)   # be.keep_decision_bars(now=this) only reads Reports/decision_bars.csv
 
@@ -361,19 +361,26 @@ def _carry(w, days):
     return w[days.to_numpy(bool)].reindex(w.index).ffill().fillna(0.0)
 
 def forward_bars(fetch=True):
-    """Daily bars with volume for the VWAP / volume rules: a fresh download from FWD_BARS_START (Alpaca free market data
-    through be.fetch_daily_bars, the pipeline's own client; saved to Reports/cache/forward_bars.pkl and reused when a
-    download fails) + the backtest bar cache (Reports/cache/bars_daily_long.pkl, read only) for the older days."""
+    """Daily bars with volume for the VWAP / volume rules from the SQLite bars_daily table (single source of truth).
+
+    When fetch=True, incrementally refreshes tradable + SPY/QQQ into bars_daily (append-only: only dates after each
+    symbol's latest stored day, with a short overlap; never rebuilds). On a download failure the existing DB rows are
+    used. Returns a one-element list for bar_features (same shape as the old pickle-pair API)."""
+    syms = list(be.TRADABLE) + [s for s in be.BENCHMARKS if s not in be.TRADABLE]   # + QQQ / SPY (provisional)
     if fetch:
         try:
-            syms = list(be.TRADABLE) + [s for s in be.BENCHMARKS if s not in be.TRADABLE]   # + QQQ / SPY (provisional)
-            new, _ = be.drop_partial_last_bar(be.fetch_daily_bars(syms, start=FWD_BARS_START),
-                                              close_buffer_min=be.AFTER_CLOSE_BAR_MIN)   # today's bar from 3:05 PM CT
-            new.to_pickle(FWD_BARS + ".tmp")
-            os.replace(FWD_BARS + ".tmp", FWD_BARS)
+            # today's bar from 3:05 PM CT (same as the old forward_bars.pkl refresh)
+            be.refresh_daily_bars(syms, start=FWD_BARS_START, close_buffer_min=be.AFTER_CLOSE_BAR_MIN)
         except Exception as e:
-            print(f"bars not refreshed ({type(e).__name__}: {e}); using the saved copy")
-    return [be.apply_history_start(pd.read_pickle(p)) for p in (FWD_BARS, be.CACHE_DIR / be.LONG_CACHE) if db.exists(p)]
+            print(f"bars not refreshed ({type(e).__name__}: {e}); using bars_daily as stored")
+    bars = be.apply_history_start(db.load_bars(symbols=syms))
+    if not len(bars):
+        return []
+    # Two views of the same table, matching the old [forward_bars.pkl, bars_daily_long.pkl] pair:
+    # bar_features computes rolling VWAP/ATR on each source then combine_first (recent wins on overlap).
+    # A single merged frame would recompute those windows over the full history and shift backtests.
+    recent = bars[bars["Date"] >= pd.Timestamp(FWD_BARS_START)].reset_index(drop=True)
+    return [recent, bars]
 
 def bar_features(sources, dates, cols):
     """Close / 20-day VWAP (the copy's daily-bar VWAP: typical price x volume), the volume jump (5-day / 50-day average
@@ -1148,18 +1155,27 @@ def verdict(board):
 
 LIVE_HALVES = ("Live half: Low vol monthly", "Live half: Sector rotation Mondays (63d)")
 
-def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=FWD_BARS):
+def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=None):
     """Display only, never saved. A trading day is saved by the daily run's after-close step (from 3:05 PM CT) once it
     has signal rows (the 2:30 PM decision run Mon-Fri, or the step's own refresh on a non-decision day, which runs first); until
     then, or when a run failed, the board would show the previous day's numbers again. This marks each strategy's saved
     holdings (shares + cash of its last saved day, no trades) to the close of every later day the saved daily bars cover
     (complete days only: a bar is taken from 3:05 PM CT), and QQQ / SPY to
-    the same closes. Returns (values, bench) with those rows added; values rows carry Provisional = True."""
-    if values is None or values.empty or not db.exists(bars_path):
+    the same closes. Returns (values, bench) with those rows added; values rows carry Provisional = True.
+
+    bars_path: None (default) reads db.bars_daily; a pickle path is still accepted for tests / fixtures."""
+    if values is None or values.empty:
         return values, bench
+    if bars_path is None:
+        if not db.has_bars():
+            return values, bench
+        b = be.apply_history_start(db.load_bars())
+    else:
+        if not db.exists(bars_path):
+            return values, bench
+        b = be.apply_history_start(pd.read_pickle(bars_path))
     v = values.assign(Date=pd.to_datetime(values["Date"]))
     last = v["Date"].max()
-    b = be.apply_history_start(pd.read_pickle(bars_path))
     b = be.keep_decision_bars(b.sort_values(["Symbol", "Date"]).reset_index(drop=True), now=_NO_SAVE)
     close = b.pivot_table(index="Date", columns="Symbol", values="Close")
     close = close[close.index > last]
