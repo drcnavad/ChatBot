@@ -25,7 +25,7 @@ def _fallback_reason(kind, row, n=10):
 def strategy_events(ticker_df, decisions, symbol):
     """Entries/exits and held periods of the live strategy for one ticker.
 
-    Strategy_Weight on day d is the target decided at d's close (orders go out that day at 2:30 PM CT), so an entry/exit is the
+    Strategy_Weight on day d is the target decided at d's close (orders go out that day at the decision slot: 2:30 PM CT, or 11:00 AM CT on early-close days), so an entry/exit is the
     first day the weight turns >0 / back to 0; its marker sits on the following session ("Fill"). Reasons, rank and score come from
     Reports/strategy_decisions.csv. Returns (events, periods) with periods = [(first held session, last held session)]."""
     t = ticker_df.sort_values("Date")[["Date", "Close", "Strategy_Weight", "Strategy_Rank", "Strategy_Score", "Regime_On"]]

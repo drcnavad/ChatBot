@@ -87,7 +87,7 @@ def render_stock_section(p, ticker, tdata):
         action, day = entry[0], (entry[2] if len(entry) > 2 and entry[2] is not None else p.plan_day)
         when = f"{day:%a %b %-d}" if day is not None else "Next rebalance"
         tip = (f"Next rebalance preview at the {p.plan_asof:%a %b %-d} close (the bot's own selection code; % of "
-               f"account). Final at the {when} close; orders go out that day at 2:30 PM CT." if p.plan_asof is not None else "")
+               f"account). Final at the {when} close; orders go out that day at the decision slot (2:30 PM CT, or 11:00 AM CT on early-close days)." if p.plan_asof is not None else "")
         plan_html = (f'<span class="sa-badge {PLAN_BADGE.get(action, "sa-badge-grey")}" title="{esc(tip)}">'
                      f'{esc(when + " plan: " + plan_text(p.plan, ticker))}</span>')
     stats = [

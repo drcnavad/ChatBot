@@ -101,11 +101,20 @@ check("... Tue 9/8 10 AM caught up", gate("2026-09-08 10:00", "2026-09-02") == (
 check("... Tue 9/8 2:40 PM superseded by the Tuesday check",
       gate("2026-09-08 14:40", "2026-09-02") == ("2026-09-08", "session") and superseded("2026-09-08 14:40", "2026-09-02") == "2026-09-04")
 check("missed Wed 11/25, Thanksgiving Thu: waits for Fri 11/27", gate("2026-11-26 10:00", "2026-11-23") == ("2026-11-25", "wait"))
-check("Fri 11/27 (1 PM ET close) 11:30 AM: caught up", gate("2026-11-27 11:30", "2026-11-23") == ("2026-11-25", "session"))
-check("Fri 11/27 11:50 AM (within 15 min of the close): nothing", gate("2026-11-27 11:50", "2026-11-23")[1] is None)
+check("Fri 11/27 early-close 10:55 AM: Wed still caught up (before 11:00 AM CT decision slot)",
+      gate("2026-11-27 10:55", "2026-11-23") == ("2026-11-25", "session"))
+check("Fri 11/27 early-close 11:05 AM: Friday's own full rebalance (11:00 AM CT slot), regular hours",
+      gate("2026-11-27 11:05", "2026-11-23") == ("2026-11-27", "session")
+      and superseded("2026-11-27 11:05", "2026-11-23") == "2026-11-25")
+check("Fri 11/27 11:50 AM (DECISION_STOP_MIN=5: still regular hours until 11:55)",
+      gate("2026-11-27 11:50", "2026-11-25") == ("2026-11-27", "session"))
+check("Fri 11/27 11:56 AM (5 min before noon close): extended-hours orders",
+      gate("2026-11-27 11:56", "2026-11-25") == ("2026-11-27", "evening"))
 check("Fri 11/27 rebalance 3:40 PM: evening (extended hours to 4 PM CT)", gate("2026-11-27 15:40", "2026-11-25") == ("2026-11-27", "evening"))
 check("Fri 11/27 rebalance 2:31 PM (market closed at noon CT): extended-hours orders", gate("2026-11-27 14:31", "2026-11-25") == ("2026-11-27", "evening"))
 check("Fri 11/27 rebalance 4:10 PM: waits for Mon 11/30", gate("2026-11-27 16:10", "2026-11-25") == ("2026-11-27", "wait"))
+check("Thu 12/24 early-close 11:05 AM: full rebalance (Christmas Friday holiday), regular hours",
+      gate("2026-12-24 11:05", "2026-12-23") == ("2026-12-24", "session"))
 
 # ------------------------------------------------------------------ mode of a catch-up run
 D = pd.Timestamp("2026-10-02")

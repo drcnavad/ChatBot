@@ -1674,7 +1674,8 @@ def next_decision(latest, days=None):
 
 # ----------------------------------------------------------------------------- decision calendar (live schedule)
 DECISION_SEARCH_DAYS = 50                      # calendar days searched for a decision (monthly rebalances: up to ~45 apart)
-DECISION_TIME_CT = (14, 30)                    # each decision is made and traded at 2:30 PM CT (30 min before the close)
+DECISION_TIME_CT = (14, 30)                    # normal sessions: decision + trade at 2:30 PM CT (30 min before the 3 PM CT close)
+EARLY_CLOSE_DECISION_TIME_CT = (11, 0)         # early-close sessions (noon CT close): 11:00 AM CT (Chirag, Oct 27, 2026)
 CENTRAL = ZoneInfo("America/Chicago")
 
 def is_session(d):
@@ -1691,13 +1692,27 @@ def decision_kind(d):
     nxt, kind, _ = next_decision(d - NYSE_SESSION)
     return kind if nxt == d else None
 
+def decision_time_ct(d):
+    """(hour, minute) CT for the live decision slot on session d: 11:00 on early-close days, else 14:30."""
+    return EARLY_CLOSE_DECISION_TIME_CT if is_early_close(d) else DECISION_TIME_CT
+
+def slot_text(d=None):
+    """Plain 'H:MM AM/PM CT' for session d (normal 2:30 PM CT when d is None)."""
+    h, m = decision_time_ct(d) if d is not None else DECISION_TIME_CT
+    suffix = "AM" if h < 12 else "PM"
+    h12 = h if h <= 12 else h - 12
+    if h12 == 0:
+        h12 = 12
+    return f"{h12}:{m:02d} {suffix} CT"
+
 def decision_slot(d):
-    """The decision's scheduled time: 2:30 PM CT on session d (tz-aware)."""
+    """The decision's scheduled time on session d (tz-aware CT): 2:30 PM normally, 11:00 AM on early-close days."""
     d = pd.Timestamp(d)
-    return datetime(d.year, d.month, d.day, *DECISION_TIME_CT, tzinfo=CENTRAL)
+    h, m = decision_time_ct(d)
+    return datetime(d.year, d.month, d.day, h, m, tzinfo=CENTRAL)
 
 def last_decision_date(t):
-    """The latest decision session whose 2:30 PM CT slot is at or before t (tz-aware), as a Timestamp."""
+    """The latest decision session whose decision slot is at or before t (tz-aware), as a Timestamp."""
     d = pd.Timestamp(t.astimezone(CENTRAL).date())
     for _ in range(DECISION_SEARCH_DAYS):
         if decision_kind(d) and decision_slot(d) <= t:
@@ -1706,7 +1721,7 @@ def last_decision_date(t):
     return None
 
 def next_decision_slot(t):
-    """The first decision slot (2:30 PM CT) strictly after t (tz-aware). A missed decision can be caught up until then."""
+    """The first decision slot strictly after t (tz-aware; 2:30 PM or 11:00 AM CT). A missed decision can be caught up until then."""
     d = pd.Timestamp(t.astimezone(CENTRAL).date())
     for _ in range(DECISION_SEARCH_DAYS):
         if decision_kind(d) and decision_slot(d) > t:
@@ -1723,7 +1738,7 @@ def decision_bar_ready(t):
 
 def last_complete_session(t):
     """The latest session whose daily bar the pipeline uses at t (the drop_partial_last_bar rule): today after 4:30 PM ET
-    (final bar), or on a decision day from its 2:30 PM CT slot (the bar as of then); else the previous session."""
+    (final bar), or on a decision day from its decision slot (2:30 PM CT, or 11:00 AM CT on early-close days); else the previous session."""
     et = t.astimezone(EASTERN)
     d = pd.Timestamp(et.date())
     if is_session(d) and ((et.hour, et.minute) >= (16, 30) or decision_bar_ready(t)):

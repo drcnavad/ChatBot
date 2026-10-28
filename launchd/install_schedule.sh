@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install (or refresh after editing) the launchd jobs:  bash launchd/install_schedule.sh   [--check = render + lint only]
-#   com.stockanalysis.evening         the ONE daily run, Mon-Fri 2:30 PM + 3:05 PM CT, at login, on wake, every 30 min:
+#   com.stockanalysis.evening         the ONE daily run, Mon-Fri 11:00 AM + 2:30 PM + 3:05 PM CT, at login, on wake, every 30 min:
 #                                     pipeline_watchdog.py --trade --scheduled. The decision on Mon-Fri at 2:30 PM
 #                                     (holiday-shifted), then from 3:05 PM CT once per trading day the after-close step:
 #                                     main_signal_analysis.ipynb with the day's final bar on non-decision days (none while Mon-Fri all decide)

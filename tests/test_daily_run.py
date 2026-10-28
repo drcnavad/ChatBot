@@ -1,4 +1,4 @@
-"""The ONE daily run (launchd com.stockanalysis.evening: pipeline_watchdog.py --trade --scheduled, Mon-Fri 2:30 PM + 3:05 PM CT).
+"""The ONE daily run (launchd com.stockanalysis.evening: pipeline_watchdog.py --trade --scheduled, Mon-Fri 11:00 AM + 2:30 PM + 3:05 PM CT).
   - the decision part is unchanged (Mon/Wed/Fri 2:30 PM; test_catch_up / test_runner cover it)
   - from 3:05 PM CT, once per trading day, the after-close step (run_all.daily_step): the signal refresh
     (run_all.py --quick --scheduled, main_signal_analysis.ipynb with today's final bar) then forward_test.py --record;
@@ -142,9 +142,10 @@ job = plistlib.load(open(os.path.join(ROOT, "launchd", "com.stockanalysis.evenin
 args = job["ProgramArguments"]
 check("evening plist: pipeline_watchdog.py --trade --scheduled (unchanged command)",
       args[1].endswith("/pipeline_watchdog.py") and args[2:] == ["--trade", "--scheduled"], args)
-check("evening plist: Mon-Fri 9:00 AM (missed-decision catch-up) + 2:30 PM (decision) + 3:05 PM CT (after-close step), RunAtLoad, every 30 min",
+check("evening plist: Mon-Fri 9:00 AM (catch-up) + 11:00 AM (early-close decision) + 2:30 PM (decision) + 3:05 PM CT (after-close), RunAtLoad, every 30 min",
       sorted((d["Weekday"], d["Hour"], d["Minute"]) for d in job["StartCalendarInterval"])
-      == sorted([(w, 9, 0) for w in range(1, 6)] + [(w, 14, 30) for w in range(1, 6)] + [(w, 15, 5) for w in range(1, 6)])
+      == sorted([(w, 9, 0) for w in range(1, 6)] + [(w, 11, 0) for w in range(1, 6)]
+                + [(w, 14, 30) for w in range(1, 6)] + [(w, 15, 5) for w in range(1, 6)])
       and job.get("RunAtLoad") is True and job.get("StartInterval") == 1800, job)
 names = sorted(os.listdir(os.path.join(ROOT, "launchd")))
 check("retired jobs removed: no refresh / forwardtest plist",
