@@ -210,18 +210,22 @@ div.addEventListener("mousemove", crosshair);
 div.addEventListener("mouseleave", () => { ["chh", "chv", "chy"].forEach(i => document.getElementById(i).style.display = "none"); if (idx) show(idx.days[idx.days.length - 1]); });
 // Range buttons: the last N months, filling the width (data to the right edge but for a small margin)
 const INTRA = ["1D", "5D"];
-const RANGES = [["1M", 1], ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24]], AHEAD = 0.015;   // a small margin after the last bar (share of the span); drawings can still reach the edge
+const RANGES = [["1M", 1], ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36], ["5Y", 60], ["10Y", 120]], AHEAD = 0.015;   // a small margin after the last bar (share of the span); drawings can still reach the edge
 const rng = document.getElementById("rng");
 function setRange(label, m) {
   if (!idx || !idx.days.length) return;
   const last = new Date(idx.days[idx.days.length - 1] + "T00:00:00Z"), a = new Date(last), b = new Date(last);
   const first = new Date(idx.days[0] + "T00:00:00Z");
   if (m) a.setUTCMonth(a.getUTCMonth() - m); else a.setTime(first.getTime());
-  if (plain && a < first) a.setTime(first.getTime());          // no empty space before the first point
+  if (a < first) a.setTime(first.getTime());                   // no empty space before the first bar (later IPOs on 5Y/10Y)
   b.setTime(b.getTime() + (b - a) * AHEAD);
   curView = label; paintButtons();
+  // short ranges: day+month+year; longer (6M+): month+year so 3Y/5Y/10Y ticks stay readable
+  const tick = (m && m <= 3) ? "%b %-d, %Y" : "%b %Y";
   const r = [a.toISOString().slice(0, 10), b.toISOString().slice(0, 16).replace("T", " ")], upd = {};
-  Object.keys(div._fullLayout).filter(k => /^xaxis\d*$/.test(k)).forEach(k => upd[k + ".range"] = r);   // shared axes: all
+  Object.keys(div._fullLayout).filter(k => /^xaxis\d*$/.test(k)).forEach(k => {
+    upd[k + ".range"] = r; upd[k + ".tickformat"] = tick;   // shared axes: all
+  });
   Plotly.relayout(div, upd).then(() => { busy = false; rescale(); buildIndex(); });
 }
 function ask(view) { send("streamlit:setComponentValue", {value: {view, mode, t: Date.now()}, dataType: "json"}); }

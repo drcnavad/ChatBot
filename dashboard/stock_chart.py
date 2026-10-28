@@ -12,9 +12,9 @@ from dashboard.history import (RS_COLORS, daily_status, event_hover,
 from dashboard.settings import CT
 from dashboard.style import (BAD, CHART_FONT, EARN_LINE, GOOD, MA_COLORS, MA_COLS, TEAL)
 
-WINDOW = pd.Timedelta(days=740)          # chart data: 2 years (buttons up to 2Y); MAs / RSI / MACD use the full history
+WINDOW = pd.Timedelta(days=3700)         # chart data: ~10 years (buttons up to 10Y; shorter for later IPOs); MAs / RSI / MACD use the full history
 FUTURE = 0.015                           # a small blank margin after the last bar (share of the shown span)
-# range buttons 1D..2Y: drawn by the chart component (chart_component/index.html), each with the FUTURE margin
+# range buttons 1D..10Y: drawn by the chart component (chart_component/index.html), each with the FUTURE margin
 
 GRID = dict(showgrid=True, gridcolor='#f1f5f9', showline=False, tickfont=dict(size=10, color='#64748b'), zeroline=False)
 VOL_UP, VOL_DOWN = "rgba(21,128,61,.45)", "rgba(185,28,28,.45)"
@@ -78,7 +78,7 @@ def _with_bar_history(tdata, bars):
 
 def build_price_chart(ticker, tdata, bars=None):
     """Candlesticks + moving averages + buy/sell markers, volume, RSI, MACD and performance panels on one shared,
-    zoomable x-axis (range buttons 1M..All, unified hover). bars = daily OHLCV (data.ohlcv); missing days are drawn
+    zoomable x-axis (range buttons 1M..10Y, unified hover). bars = daily OHLCV (data.ohlcv from bars_daily); missing days are drawn
     from the close alone."""
     chart = _with_bar_history(tdata, bars)
     chart = chart[chart.index >= chart.index.max() - WINDOW]
@@ -140,7 +140,7 @@ def build_price_chart(ticker, tdata, bars=None):
         color = GOOD if kind == "Entry" else BAD
         fig.add_trace(go.Scatter(x=[max(pd.Timestamp(day), x_start), x_end], y=[price, price], mode="lines",
                                  line=dict(color=color, width=1.2, dash="dash"), name=f"${price:,.2f}",
-                                 hovertemplate=f"${price:,.2f} ({day:%b %-d})<extra></extra>", showlegend=False),
+                                 hovertemplate=f"${price:,.2f} ({day:%b %-d, %Y})<extra></extra>", showlegend=False),
                       row=1, col=1)
         fig.add_annotation(x=max(pd.Timestamp(day), x_start), y=price, xref="x", yref="y", showarrow=False,
                            text=f"${price:,.2f}", xanchor="left", yanchor="bottom",
@@ -195,7 +195,7 @@ def build_price_chart(ticker, tdata, bars=None):
     view = chart.index[chart.index >= x_end - pd.Timedelta(days=365)]          # opens on 1 year
     x_right = max(x_right, x_end) + (x_end - view[0]) * FUTURE
     _style(fig, int(620 + 120 * (len(panels) - 2)), [view[0], x_right], bars.loc[view, "Low"].min(),
-           bars.loc[view, "High"].max(), '%b %d', [dict(bounds=["sat", "mon"])])
+           bars.loc[view, "High"].max(), '%b %Y', [dict(bounds=["sat", "mon"])])  # 1Y default; JS setRange switches to %b %d, %Y for 1M/3M
     axis = {"rsi": dict(title_text="RSI", tickvals=[30, 50, 70]), "macd": dict(title_text="MACD", tickformat=".2f", nticks=4),
             "rs": dict(title_text="Perf. %", ticksuffix="%", tickformat="+.0f", nticks=5)}
     for name, kw in axis.items():
@@ -249,7 +249,7 @@ def build_intraday_chart(ticker, bars, view):
     _add_price(fig, bars.index, bars, 2)
     span = bars.index[-1] - bars.index[0] if len(bars) > 1 else pd.Timedelta(minutes=30)
     _style(fig, 620, [bars.index[0] - span * 0.02, bars.index[-1] + span * 0.03], bars["Low"].min(), bars["High"].max(),
-           "%b %d %H:%M" if view != "1D" else "%H:%M", [dict(bounds=["sat", "mon"]), dict(bounds=[16, 9.5], pattern="hour")])
+           "%b %d, %Y %H:%M" if view != "1D" else "%H:%M", [dict(bounds=["sat", "mon"]), dict(bounds=[16, 9.5], pattern="hour")])
     return fig
 
 @st.cache_data(ttl=3600, max_entries=8, show_spinner=False)
@@ -262,7 +262,7 @@ def _daily_chart(ticker, mtime, _tdata):
 
 @st.fragment(run_every=5)
 def render_stock_chart(ticker, tdata):
-    """The stock chart with its range buttons (1D / 5D intraday, 1M..2Y daily) and Candles / Line, all in this one
+    """The stock chart with its range buttons (1D / 5D intraday, 1M..10Y daily) and Candles / Line, all in this one
     fragment: a click reruns only the chart, and 1D / 5D refresh live every 5 s (1D: Alpaca REST bars + the SIP
     stream). Range and type are kept in the session; your drawings (dashboard/drawings.py) on the daily views."""
     import copy

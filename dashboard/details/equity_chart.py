@@ -124,7 +124,7 @@ def equity_figure(d, bench, shown=("QQQ",), intraday=False):
                       font=dict(family=CHART_FONT, size=11, color="#334155"),
                       legend=dict(orientation="h", x=1, xanchor="right", y=1.0, yanchor="bottom", font=dict(size=10),
                                   bgcolor="rgba(0,0,0,0)"))
-    fig.update_xaxes(showgrid=False, fixedrange=True, tickformat="%-I:%M %p" if intraday else "%b %-d",
+    fig.update_xaxes(showgrid=False, fixedrange=True, tickformat="%-I:%M %p" if intraday else "%b %Y",
                      rangebreaks=[dict(bounds=["sat", "mon"])] + ([dict(bounds=[16, 9.4], pattern="hour")] if intraday else []))
     fig.update_yaxes(side="right", gridcolor="#f1f5f9", zeroline=False, fixedrange=True, tickfont=dict(size=10, color="#64748b"))
     fig.update_yaxes(tickformat="$,.0f", row=1, col=1)
