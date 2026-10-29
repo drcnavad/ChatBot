@@ -638,7 +638,7 @@ def atr_stop_targets(inp, k=3.0, after=None, arm_days=None, gap_open=False, exit
             skip = {j for j in order[:mw["enter_top"]] if cur[j] == 0 and not np.isnan(BB[t, j])}
             be.midweek_swap_pairs(cur, order, rank, sectors, mw["enter_top"], mw["exit_below"],
                                   10 ** 6 if args["cap_soft"] else per_sector, skip=skip)
-            skip_exit = {j for j in order[:exit_to_top] if cur[j] == 0 and not np.isnan(BB[t, j])} if exit_to_top else set()
+            skip_exit = {j for j in order[:max(exit_to_top, EXIT_BELOW)] if cur[j] == 0 and not np.isnan(BB[t, j])} if exit_to_top else set()
             be.midweek_exit_replacements(cur, order, rank, EXIT_BELOW, exit_to_top, skip=skip_exit)
             be.midweek_exit_sells(cur, rank, EXIT_BELOW)
         peak, armed = np.where(cur > 0, peak, np.nan), np.where(cur > 0, armed, -1)   # sold by the live rules: reset

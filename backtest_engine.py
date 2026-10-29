@@ -1415,7 +1415,10 @@ def midweek_exit_replacements(cur, order, rank, exit_all_below, exit_to_top, ski
     reps = []
     for h in sorted((j for j in np.where(cur > 0)[0] if rank.get(j, 1e6) > exit_all_below),
                     key=lambda j: -rank.get(j, 1e6)):
-        e = next((j for j in order[:exit_to_top] if cur[j] == 0 and j not in skip), None)
+        # Chirag, Oct 29, 2026: an earnings-blocked (skip) name no longer leaves the slot in cash - the refill walks on
+        # past the top exit_to_top to the next eligible name, never worse than exit_all_below (it would be sold at once).
+        e = next((j for j in order[:max(exit_to_top, exit_all_below)] if cur[j] == 0 and j not in skip
+                  and rank.get(j, 1e6) <= exit_all_below), None)
         if e is None:
             break
         reps.append((e, h, cur[h]))
@@ -1495,7 +1498,7 @@ def apply_midweek_swaps(base, score_w, eligible_w, vol_w, rebalance_days, check_
                     if BB is not None and enter_top else set())
             swaps = midweek_swap_pairs(cur, order, rank, sectors, enter_top, exit_below, cap, skip=skip) if enter_top else []
             # Exit replacements use the full top-N earnings skip (not only enter_top), matching forward_test.
-            skip_exit = ({j for j in order[:exit_to_top] if cur[j] == 0 and not np.isnan(BB[t, j])}
+            skip_exit = ({j for j in order[:max(exit_to_top, exit_all_below or 0)] if cur[j] == 0 and not np.isnan(BB[t, j])}
                          if BB is not None and exit_to_top else set())
             xrank = {**rank, **{cols.index(s): 0 for s in keep if s in cols}}   # keep (defensive sleeve): never exited
             reps = midweek_exit_replacements(cur, order, xrank, exit_all_below, exit_to_top, skip=skip_exit)
