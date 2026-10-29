@@ -49,27 +49,27 @@ def render_forward_test(p=None):
     board = board.drop(columns="Rule")                   # family: filter only; rule + holdings show on hover
     live = live_returns(values)
     board = apply_live_totals(board, live)
-    board.insert(list(board.columns).index("Last EOD"), "Live", [live.get(x, float("nan")) for x in board["Strategy"]])
     pct = [c for c in board.columns if c not in ("Rank", "Strategy", "Rule")]
-    sty = toned(toned(board, [c for c in pct if c != "Max drawdown"]), ["Max drawdown"], fn=drawdown_tone)
+    dd = "Max drawdown %" if "Max drawdown %" in board.columns else "Max drawdown"
+    sty = toned(toned(board, [c for c in pct if c != dd]), [dd], fn=drawdown_tone)
     board_html(highlight_rows(sty), board, pct)
 
 def live_returns(values):
-    """Display only: {leaderboard display name: live % vs its last EOD value}. A strategy = the cash + shares of its last
-    saved day (forward_strategies*.csv, no trades) at live Alpaca prices vs its latest value (provisional close
-    included); QQQ / SPY = live price vs their close that day; the account = Alpaca equity now vs its last saved equity."""
+    """Display only: {leaderboard display name: Today %}. Paper = (shares×live + cash) / last EOD Value − 1; QQQ/SPY =
+    live vs that day's close; account (and CURRENT) = Alpaca equity now vs last saved equity. Used for Today % and to
+    live-compound This week (so far) % and Total since Oct 29 %."""
     import forward_test as ft
     from dashboard.data import index_quotes, load_benchmarks, read_report_csv
     hold, saved = read_report_csv(ft.HOLDINGS_CSV), read_report_csv(ft.STRATEGIES_CSV)
     if hold is None or saved is None or values is None or values.empty:
         return {}
-    v = values.assign(Date=pd.to_datetime(values["Date"]), Strategy=values["Strategy"].replace(ft.OLD_NAMES))
+    v = values.assign(Date=pd.to_datetime(values["Date"]))
     day = v["Date"].max()
     base = v.sort_values("Date").groupby("Strategy")["Value"].last()
-    saved = saved.assign(Date=pd.to_datetime(saved["Date"]), Strategy=saved["Strategy"].replace(ft.OLD_NAMES))
+    saved = saved.assign(Date=pd.to_datetime(saved["Date"]))
     cash = saved.sort_values("Date").groupby("Strategy")["Cash"].last()
     last = saved.groupby("Strategy")["Date"].max()
-    h = hold.assign(Date=pd.to_datetime(hold["Date"]), Strategy=hold["Strategy"].replace(ft.OLD_NAMES))
+    h = hold.assign(Date=pd.to_datetime(hold["Date"]))
     h = h[h["Date"] == h["Strategy"].map(last)]          # holdings of the last saved day only (none = all cash that day)
     try:
         q = index_quotes(tuple(sorted(set(h["Symbol"]) | {"QQQ", "SPY"})))
@@ -98,31 +98,46 @@ def live_returns(values):
     return out
 
 def render_live_push():
-    """The leaderboard's in-place Live updater, outside the 5-minute leaderboard fragment (nested timed fragments
+    """The leaderboard's in-place Today % / live totals updater, outside the 5-minute leaderboard fragment (nested timed fragments
     re-register their keys when both rerun together: StreamlitDuplicateElementKey, Oct 22)."""
     with st.container(key="ft_live_js"):
         _live_push()
 
 @st.fragment(run_every=30)
 def _live_push():
-    """Every 30 s: write the Live column's new values into the leaderboard table in place (same-origin component
-    iframe), so its sort order and hover stay; a hidden component (.st-key-ft_live_js)."""
+    """Every 30 s: write Today % (and live-compounded This week / Total) into the leaderboard table in place."""
     import json
     import streamlit.components.v1 as components
+    from backtest_engine import FORWARD_START
     built = _forward_files()[2]
     try:
-        live = {k: round(v, 2) for k, v in live_returns(built[1]).items() if v == v} if built else {}
+        if not built:
+            return
+        raw, values = built
+        start = f"{pd.Timestamp(FORWARD_START):%b %-d}"
+        board = apply_live_totals(tidy_board(raw, start).drop(columns="Rule", errors="ignore"), live_returns(values))
+        cols = [c for c in ("Today %", "This week (so far) %") if c in board.columns]
+        total_col = next((c for c in board.columns if c.startswith("Total since")), None)
+        if total_col:
+            cols.append(total_col)
+        payload = {}
+        for _, r in board.iterrows():
+            payload[str(r["Strategy"])] = {c: (None if pd.isna(r[c]) else round(float(r[c]), 2)) for c in cols}
     except Exception:
-        live = {}
-    if not live:
+        return
+    if not payload:
         return
     components.html("""<script>
-const L=%s;for(const f of window.parent.document.querySelectorAll('iframe')){let d;try{d=f.contentDocument}catch(e){continue}
- if(!d)continue;const T=d.querySelector('table');if(!T)continue;const hs=[...T.querySelectorAll('thead th')].map(h=>h.innerText.trim());
- const i=hs.indexOf('Live'),n=hs.indexOf('Strategy');if(i<0||n<0)continue;
+const L=%s,G='%s',B='%s',I='%s';
+for(const f of window.parent.document.querySelectorAll('iframe')){let d;try{d=f.contentDocument}catch(e){continue}
+ if(!d)continue;const T=d.querySelector('table');if(!T)continue;
+ const hs=[...T.querySelectorAll('thead th')].map(h=>h.innerText.trim());
+ const n=hs.indexOf('Strategy');if(n<0)continue;
+ const ix={};for(const [k,v] of Object.entries(L)){for(const c of Object.keys(v)){if(!(c in ix))ix[c]=hs.indexOf(c)}}
  for(const r of T.tBodies[0].rows){const c=r.cells[n].firstChild;const k=c&&c.nodeType==3?c.data:'';if(!(k in L))continue;
-  const v=L[k];r.cells[i].textContent=(v>0?'+':'')+v.toFixed(2)+'%%';r.cells[i].style.color=v>0?'%s':v<0?'%s':'%s'}}
-</script>""" % (json.dumps(live), GOOD, BAD, INK), height=0)
+  for(const [col,val] of Object.entries(L[k])){const i=ix[col];if(i<0||val===null)continue;
+   r.cells[i].textContent=(val>0?'+':'')+val.toFixed(2)+'%%';r.cells[i].style.color=val>0?G:val<0?B:I}}}
+</script>""" % (json.dumps(payload), GOOD, BAD, INK), height=0)
 
 TIP_CSS = ("visibility:hidden; position:absolute; z-index:9; left:6px; top:100%; width:520px; "
            "background:#0f172a; color:#f8fafc; font-weight:400; font-size:12.5px; line-height:1.45; padding:9px 11px; "
@@ -172,7 +187,7 @@ def render_curve(board, values):
     from backtest_engine import FORWARD_START
     from dashboard.style import CHART_FONT
     start = pd.Timestamp(FORWARD_START)
-    v = values.assign(Date=pd.to_datetime(values["Date"]), Strategy=values["Strategy"].replace(ft.OLD_NAMES))
+    v = values.assign(Date=pd.to_datetime(values["Date"]))
     v = v[v["Date"] >= start]
     series = {n: g.set_index("Date")["Value"].sort_index() for n, g in v.groupby("Strategy")}
     bench = load_benchmarks()
@@ -208,18 +223,27 @@ HIGHLIGHT_BG = "background-color: #e2e8f0; font-weight: 700"   # subtle slate on
 CURRENT = "Live: RS short-term"   # display name of the live strategy's row (forward_test.LIVE stays its id)
 
 def tidy_board(board, start):
-    """Leaderboard for display: short column names (Total since <start>, Last EOD, Max drawdown, Wk 1..), integer Rank
-    (blank = not ranked), weeks that have not started dropped."""
+    """Leaderboard for display, Chirag Oct 29 column order:
+    Rank, Strategy, Today %, This week (so far) %, Week 1 %, Week 2 %, …, Total since <start> %, Max drawdown %.
+    Completed weeks only (no empty Week 1–12). Today % is filled by apply_live_totals from live quotes."""
     import forward_test as ft
-    weeks = [c for c in board.columns if c.startswith("Week ") and board[c].notna().any()]
-    b = board[["Rank", "Strategy", "Total return %", "Daily return %", *weeks[::-1], "Max drawdown %"]].copy()   # newest week first
+    so_far = [c for c in board.columns if c == "This week (so far) %"]
+    weeks = [c for c in board.columns if c.startswith("Week ") and "so far" not in c and board[c].notna().any()]
+    total_name = f"Total since {start} %"
+    keep = ["Rank", "Strategy", *so_far, *weeks, "Total return %", "Max drawdown %"]
+    b = board[[c for c in keep if c in board.columns]].copy()
+    for c in ("Total return %", "Max drawdown %", "This week (so far) %"):
+        if c in b.columns:
+            b[c] = b[c].fillna(0.0)
+    b.insert(2, "Today %", float("nan"))                 # live-filled next
     b["Rank"] = pd.array(pd.to_numeric(b["Rank"], errors="coerce"), dtype="Int64")
-    names = {"Total return %": f"Total since {start}", "Daily return %": "Last EOD", "Max drawdown %": "Max drawdown",
-             **{w: w.replace("Week ", "Wk ").replace(" %", "") for w in weeks}}
+    b = b.rename(columns={"Total return %": total_name})
+    # Order: Rank, Strategy, Today %, This week (so far) %, Week 1.., Total since, Max drawdown %
+    ordered = ["Rank", "Strategy", "Today %", *so_far, *weeks, total_name, "Max drawdown %"]
+    b = b[[c for c in ordered if c in b.columns]]
     b.insert(2, "Rule", [rule_of(x) for x in b["Strategy"]])
-    # Only the account-backed marked row (… LIVE_MARK) is shown as CURRENT; the paper RS short-term line keeps its name.
     b["Strategy"] = [CURRENT if ft.LIVE_MARK in str(x) else x for x in b["Strategy"]]
-    return b.rename(columns=names)
+    return b
 
 def hover_tips(board):
     """Hover text per leaderboard row, on the Strategy cell only: the strategy's rule (forward_test.STRATEGIES) and the
@@ -273,20 +297,14 @@ TILE_CSS = (
 
 
 def apply_live_totals(board, live=None):
-    """Compound Total since FORWARD_START (and the current week-so-far column) with today's live return; re-rank by the live
-    total (smaller max drawdown breaks ties). Once today's close is saved, live ≈ after-hours only so this does not
-    double-count. live keys are display names (CURRENT, strategy names, QQQ/SPY, My Alpaca account)."""
-    import forward_test as ft
+    """Fill Today % from live quotes; compound This week (so far) % and Total since … % with Today %; re-rank by the
+    live total (smaller max drawdown breaks ties). Once today's close is saved, Today ≈ after-hours only."""
     live = live or {}
     b = board.copy()
     total_col = next((c for c in b.columns if c.startswith("Total since")), None)
-    if total_col is None and "Total return %" in b.columns:
-        total_col = "Total return %"
-    wk_col = next((c for c in b.columns if ("so far" in c) and (c.startswith("Wk ") or c.startswith("Week "))), None)
+    wk_col = "This week (so far) %" if "This week (so far) %" in b.columns else None
     if total_col is None:
         return b
-    lv = b["Strategy"].map(lambda n: live.get(n, float("nan")))
-    # Also accept unmarked LIVE paper name / LIVE+mark raw forms
     def _lv(n):
         if n in live and live[n] == live[n]:
             return live[n]
@@ -294,13 +312,14 @@ def apply_live_totals(board, live=None):
             return live.get(CURRENT, live.get("My Alpaca account", float("nan")))
         return live.get(n, float("nan"))
     lv = b["Strategy"].map(_lv)
+    if "Today %" in b.columns:
+        b["Today %"] = lv
     factor = (1 + lv.fillna(0) / 100)
-    b[total_col] = ((1 + b[total_col] / 100) * factor - 1) * 100
+    b[total_col] = ((1 + b[total_col].fillna(0) / 100) * factor - 1) * 100
     if wk_col is not None:
-        b[wk_col] = ((1 + b[wk_col] / 100) * factor - 1) * 100
-    # Re-rank strategies only
+        b[wk_col] = ((1 + b[wk_col].fillna(0) / 100) * factor - 1) * 100
     ranked = pd.to_numeric(b["Rank"], errors="coerce").notna()
-    dd = next((c for c in ("Max drawdown", "Max drawdown %") if c in b.columns), None)   # a column name, not a Series
+    dd = "Max drawdown %" if "Max drawdown %" in b.columns else None
     order = b.loc[ranked].sort_values([total_col] + ([dd] if dd else []), ascending=[False] + ([False] if dd else []),
                                       na_position="last", kind="stable")
     new_rank = pd.Series(range(1, len(order) + 1), index=order.index, dtype="Int64")
@@ -308,21 +327,23 @@ def apply_live_totals(board, live=None):
     return b.sort_values(["Rank", total_col], ascending=[True, False], na_position="last", kind="stable").reset_index(drop=True)
 
 def by_this_week(board, live=None):
-    """Display only (Chirag, Oct 22): the leaderboard re-ranked by the current week's return so far ("Week N (so far) %"),
-    compounded with today's live return (live_returns) where there is one, ranked strategies only, so consensus()
-    takes this week's top 5. forward_test's own Rank is untouched. Returns (board, week label like "Wk 3")."""
+    """Re-rank by This week (so far) % (live-compounded when live is passed) for Top 5 consensus. Returns (board, label)."""
     import forward_test as ft
-    cur = [c for c in board.columns if c.startswith("Week ") and "so far" in c and board[c].notna().any()]
-    if not cur:
-        return board, None
-    wk, live = cur[0], live or {}
+    wk = "This week (so far) %" if "This week (so far) %" in board.columns else None
+    if wk is None or not board[wk].notna().any():
+        # fall back to raw board week-so-far before tidy
+        cur = [c for c in board.columns if "so far" in c and board[c].notna().any()]
+        if not cur:
+            return board, None
+        wk = cur[0]
+    live = live or {}
     def shown(n):
-        return CURRENT if str(n).startswith(ft.LIVE) else str(n).replace(ft.LIVE_MARK, "")
-    lv = board["Strategy"].map(lambda n: live.get(shown(n), float("nan")))
-    ret = ((1 + board[wk] / 100) * (1 + lv.fillna(0) / 100) - 1) * 100
+        return CURRENT if str(n).startswith(ft.LIVE) or n == CURRENT else str(n).replace(ft.LIVE_MARK, "")
+    lv = board["Strategy"].map(lambda n: live.get(shown(n), live.get(n, float("nan"))))
+    ret = ((1 + board[wk].fillna(0) / 100) * (1 + lv.fillna(0) / 100) - 1) * 100
     ranked = pd.to_numeric(board["Rank"], errors="coerce").notna()
     r = ret.where(ranked).rank(ascending=False, method="first")
-    return board.assign(Rank=r, _wk=ret), "Wk " + wk.split()[1]
+    return board.assign(Rank=r, _wk=ret), "This week"
 
 def _cs_open(sym):
     st.session_state["_cs_open"] = sym
@@ -354,7 +375,7 @@ def render_top10(p=None):
     if c is None or c["stocks"].empty:
         show_html('<div class="sa-card"><div class="sa-card-title">Top 5 consensus<span>no saved strategy holdings yet</span></div></div>')
         return
-    h = hold.assign(Date=pd.to_datetime(hold["Date"]), Strategy=hold["Strategy"].replace(ft.OLD_NAMES))
+    h = hold.assign(Date=pd.to_datetime(hold["Date"]))
     h = h[(h["Date"] == h.groupby("Strategy")["Date"].transform("max")) & (h["Weight"] > 0)]
     top = [nm for nm, _ in c["strategies"]]
     by = {s: [CURRENT if nm == ft.LIVE else nm for nm in top if nm in set(g["Strategy"])] for s, g in h.groupby("Symbol")}

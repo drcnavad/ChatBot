@@ -2,19 +2,15 @@
   1. the real Alpaca account (read-only GETs through alpaca_paper, never orders) -> Reports/forward_test_daily.csv, one
      row per trading day: equity, cash, net deposits (a deposit booked after the close, ~4:15 PM CT, counts from the next
      row), positions, closed / winning picks, $ traded and its cost vs the decision price;
-  2. STRATEGIES: the paper-only strategies (the current live rules, the pinned Oct 2 rules and variants, the Oct 15 50/50
-     and low-volatility lines of forward_combos; never traded), built from the saved
-     Reports files (signal_analysis, factor_history, earnings_date, benchmark_prices) + Alpaca daily volume
-     (forward_bars) -> Reports/forward_strategies.csv (Value = shares×close+cash, START_CASH at the start; Cash) + forward_strategies_holdings.csv.
-leaderboard(): every strategy + the account + QQQ / SPY, ranked by total return, with one column per week.
+  2. STRATEGIES: the paper-only strategies (the current live rules, the pinned Oct 2 rules name as a paper variant, the
+     Oct 15 50/50 and low-volatility lines of forward_combos; never traded), built from the saved Reports files
+     (signal_analysis, factor_history, earnings_date, benchmark_prices) + Alpaca daily volume (forward_bars) ->
+     Reports/forward_strategies.csv (Value = shares×close+cash, START_CASH at the start; Cash) + holdings.
+leaderboard(): every strategy + the account + QQQ / SPY, ranked by total return; This week (so far) % plus one column per completed week.
 Same accounting for all: decide at the day's close (the 2:30 PM bar on decision days), trade only names whose target
-changed (all back to target on the strategy's rebalance day, 1-point band, earnings rule), be.COST per side, equal weight per
-stock (1/n), 99% invested, buys never exceed the cash (no margin), cash earns 0. Saved days are never redone; missed days are
-caught up from the saved bars. On Oct 15, 2026 all but the live one were recomputed from Oct 2 (Mon-Thu checks, 11 new);
-later on Oct 15, 19 more (forward_combos: two independent halves, swap-only halves, the low-volatility keep / Friday
-falling rules) - the two live halves start at the Oct 16 close, the rest are computed from Oct 2 like the others. The
-old live line "Live 50/50 combined (no overlap)" (was "Live rules (C6)") was removed Oct 20, 2026 (near-duplicate of the
-Monday 50/50, which is now LIVE).
+changed (all back to target on the strategy's rebalance day, 1-point band, earnings rule), be.COST per side, equal weight
+per stock (1/n), 99% invested, buys never exceed the cash (no margin), cash earns 0. Saved days are never redone; missed
+days are caught up from the saved bars. Archive tables keep the Oct 2–28 run; the active board is Oct 29 onward only.
 
     python forward_test.py --record   # run_all.daily_step (Mon-Fri from 3:05 PM CT): strategies + today's account row
     python forward_test.py            # strategies only (no account request) + the leaderboard
@@ -55,7 +51,6 @@ WEEKS_TO_WIN = 12
 START_CASH = 185_000.0   # each paper strategy starts with this cash on FORWARD_START (Chirag Oct 29 restart; ~account size)
 MON5 = "Live 50/50, top 5, sector on Mondays"   # Oct 21: the top-5 rules with the sector half on Mondays (live Oct 21 morning)
 MON = "Live 50/50, top 10 each half"    # the live rules Oct 19-25 (sector half on Mondays, 10 stocks per half)
-TOP5 = "Old live: Low vol + Sector rotation (Oct 16-26)"   # retired Oct 29 restart (archived Oct 2 run); kept for OLD_NAMES / REMOVED
 # (Chirag, Oct 27, 2026, final) the live rules from the 2:30 PM CT run of Tue Oct 27: 100% "RS short-term (weekly + Mon–Thu
 # sells)" (sleeves.py, one sleeve = the whole account). That line itself is the live line (shown as "Live: RS short-term").
 NOW_HALVES = ("RS short-term (weekly + Mon–Thu sells)", "RS standard (Fridays only)")   # the 50/50 paper line's two halves
@@ -63,42 +58,17 @@ BLEND = "50/50: RS short-term + RS Fridays"      # paper line (was the live line
 LIVE_NOW = NOW_HALVES[0]
 MARKED = LIVE_NOW
 LIVE = LIVE_NOW     # the line the verdict and the dashboard compare against
-# Removed Oct 20, 2026 (Chirag): "Live 50/50 combined (no overlap)" (was "Live rules (C6)"), a near-duplicate of MON;
-# its saved rows are dropped (REMOVED, purge_removed).
-# Removed Oct 21, 2026 (Chirag): near-duplicates (MACD cross + TP20 = MACD cross so far; breakouts cut to 2 and 4 days;
-# Friday only ~ Oct 2 rules without Mon-Thu checks, RS standard (Fridays only) covers that).
+# Names dropped from the active board (purge_removed). Archives keep their own history; do not reintroduce these.
 REMOVED = {"Short-term reversal", "12-1 month momentum", "RSI pullback in uptrend", "Worst 3 sectors 3M, +10%/-3%",
            "Breakout with volume", "Relative strength only", "MACD cross, weekly", "MA10 & MA30 x MA50",
            "Live 50/50 combined (no overlap)", "Live rules (C6)", "MACD cross + TP20", "Friday only",
-           "Live 50/50, sector rotation on Fridays", "50/50: Low vol + SR weekly 63d (live combo from Oct 2)",   # old top-10 Friday rows
+           "Live 50/50, sector rotation on Fridays", "50/50: Low vol + SR weekly 63d (live combo from Oct 2)",
            "200-day breakout, 1 day above, exit 2% below", "200-day breakout, 3 days above, exit 2% below",
            "200-day breakout, 5 days above, exit 2% below",
-           "Top 20 rank-weighted (70/30)",  # Oct 21, 2026: no rank / volatility weights any more
-           TOP5}   # Oct 29, 2026 restart (Chirag): Old live archived with the Oct 2 forward run
-# Renamed lines: saved rows take the new name (migrate_names, and the dashboard reads through this map).
-# A rule that changed (ATR dip buy, top 30 -> top 10) is a new name on purpose, so the old results are not relabeled.
-OLD_NAMES = {
-    "Worst sector 14d, +10%/-3%": "Worst 3 sectors 14d, +10%/-3%",   # Oct 21: 3 worst sectors, top 10 (rebuilt from Oct 2)
-    "Worst sector 1M, +10%/-3%": "Worst 3 sectors 1M, +10%/-3%",
-    "Worst 2 sectors 14d, +10%/-3%": "Worst 3 sectors 14d, +10%/-3%",
-    "Worst 2 sectors 1M, +10%/-3%": "Worst 3 sectors 1M, +10%/-3%",
-    "Quant Score": "Quant Score top 10",
-    "Now: calmer half": "Now: RS, calmer half of the list",
-    "Now: RS 10/21/63 days": "RS short-term (weekly + Mon–Thu sells)",
-    "Now: RS 63/126/252 days": "Now: longer RS (63/126/252 days)",
-    "Now: 30% technical": "Now: 30% technical + 70% RS",
-    "Now: exit below 15": "Now: Mon-Thu sell below rank 15",
-    "Restored RS + sleeve, Mon-Thu checks (Oct 15 rules)": "Oct 15 rules (RS + sleeve, Mon-Thu)",
-    "Live 50/50, sector rotation on Mondays": MON,   # Oct 21: the top-10 live line, kept as the previous rules
-    "Live 50/50, top 5 each half": MON5,             # Oct 21: the top-5 Monday line
-    "Live 50/50, top 5, sector on Fridays": TOP5,    # Oct 21 (Chirag): the live rules = top 5, sector half on Fridays
-    "Now: shorter RS (10/21/63 days)": "RS short-term (weekly + Mon–Thu sells)",   # Oct 26 (Chirag): the live halves' names
-    "Now: Friday only": "RS standard (Fridays only)",
-    "Current Strategy (Live: Shorter RS + Friday only)": BLEND,
-    "Live: RS short-term + RS Fridays": BLEND,       # Oct 27 (Chirag): live = RS short-term only; the 50/50 kept as a paper line
-    "Current Strategy (Live from Oct End)": TOP5,    # Oct 26 (Chirag): replaced by LIVE_NOW, kept under its old-rules name
-    "Live half: Sector rotation weekly (63d)": "Live half: Sector rotation Mondays (63d)",   # Oct 21: it rebalances Mondays
-}
+           "Top 20 rank-weighted (70/30)",
+           "Old live: Low vol + Sector rotation (Oct 16-26)"}
+# Active forward files are Oct 29 names only (archives hold older labels). Kept empty so hot paths do no rename work.
+OLD_NAMES = {}
 # the live 50/50 (be.WINNER "sleeves", from the Oct 16, 2026 switch): forward_combos legs, low-volatility half first
 # "+mb" = the live manual buy blocks too (Reports/manual_block.json, e.g. KO; Oct 21, 2026) on the live lines only
 PREV_LEGS = (("lowvol+mb", "full", "month", 0.5), ("sr63+mb", "full", "weekstart", 0.5))   # top 10 per half (Oct 19-25)
@@ -319,7 +289,7 @@ STRATEGIES = [
 def _common_rules(c):
     """The limits a line inherits from strategy_targets / be.winner_targets, said once (appended to its rule)."""
     if c.get("combo"):
-        return "" if c["name"].startswith("Live") or c["name"] in (LIVE, TOP5) else " do_not_buy stocks are never held."
+        return "" if c["name"].startswith("Live") or c["name"] == LIVE else " do_not_buy stocks are never held."
     if c.get("blend"):
         return ""
     if c.get("event") or c.get("b200") or c.get("weights"):
@@ -808,7 +778,7 @@ def strategy_targets(cfg, inp):
         return 0.5 * a.reindex(columns=cols, fill_value=0.0) + 0.5 * b.reindex(columns=cols, fill_value=0.0)
     if cfg.get("combo"):                               # forward_combos line: the simulated end-of-day weights
         w = combo_weights(cfg, inp)
-        if cfg["name"].startswith("Live") or cfg["name"] in (LIVE, TOP5):      # the live account's rules: as they are
+        if cfg["name"].startswith("Live") or cfg["name"] == LIVE:      # the live account's rules: as they are
             return w
         return w.mask(_dnb(inp).reindex(index=w.index, columns=w.columns, fill_value=False), 0.0)
     if cfg.get("event"):                             # event lines (Oct 19): only their entries / exits trade
@@ -852,12 +822,12 @@ def combo_weights(cfg, inp, through=None):
     return w
 
 def migrate_names(*paths):
-    """Saved rows of a renamed line (OLD_NAMES) take its new name; a file is rewritten only when it has old names."""
+    """Drop REMOVED strategy rows from active forward files (archives keep history). OLD_NAMES is empty after the Oct 29 restart."""
     for p in paths:
         df = _read(p)
-        if df is not None and len(df) and df["Strategy"].isin(list(OLD_NAMES) + list(REMOVED)).any():
+        if df is not None and len(df) and df["Strategy"].isin(REMOVED).any():
             df = df[~df["Strategy"].isin(REMOVED)]
-            df.assign(Strategy=df["Strategy"].replace(OLD_NAMES)).pipe(db.to_csv, p, index=False)
+            df.pipe(db.to_csv, p, index=False)
 
 def rebalance_days(cfg, inp):
     """Days on which every holding is brought back to its target (unless within 1 point of it), like the live Friday
@@ -1118,17 +1088,23 @@ def record(account=None, now=None, path=DAILY_CSV):
 
 # ---------------------------------------------------------------------------------------------------- leaderboard
 def _stats(v):
-    """Total return %, daily return % (last day vs the day before), max drawdown %, finished weeks and each week's
-    return % (week end to week end: the last session of each week, from the start close; list, week 1 first; the last
-    one is the unfinished week so far when the latest day is not a week end)."""
+    """Total return %, max drawdown %, finished week returns % (Friday-to-Friday from the start close; week 1 first),
+    and this-week-so-far % (vs the last Friday close, or vs the start close in week 1). so_far is None on a week-ending
+    Friday once that week is complete. No daily/Last-EOD column — the dashboard uses live Today % instead."""
     v = v.dropna().sort_index()
     if len(v) < 1:
-        return np.nan, np.nan, np.nan, 0, []
-    ends = v[be.weekly_rebalance_days(v.index, live=True).to_numpy() | (v.index == v.index[0])]
-    weekly, now = ends.pct_change().dropna(), [] if ends.index[-1] == v.index[-1] else [v.iloc[-1] / ends.iloc[-1] - 1]
-    daily = (v.iloc[-1] / v.iloc[-2] - 1) * 100 if len(v) >= 2 else np.nan
-    return ((v.iloc[-1] / v.iloc[0] - 1) * 100, daily, (v / v.cummax() - 1).min() * 100, len(weekly),
-            [x * 100 for x in list(weekly) + now])
+        return np.nan, np.nan, [], None
+    fri = be.weekly_rebalance_days(v.index, live=True).to_numpy()
+    ends = v[fri | (v.index == v.index[0])]
+    finished = [float(x) * 100 for x in ends.pct_change().dropna()]
+    if bool(fri[-1]) and finished:
+        so_far = None                                    # just closed a week; Week N holds it
+    else:
+        base = ends.iloc[-1] if ends.index[-1] < v.index[-1] else v.iloc[0]
+        so_far = float(v.iloc[-1] / base - 1) * 100
+    total = float(v.iloc[-1] / v.iloc[0] - 1) * 100
+    dd = float((v / v.cummax() - 1).min() * 100)
+    return total, dd, finished, so_far
 
 def leaderboard(daily=None, bench=None, values=None, start=None):
     """One row per strategy (STRATEGIES order) + the real account (time-weighted, alpaca_paper.account_twr_index:
@@ -1138,8 +1114,6 @@ def leaderboard(daily=None, bench=None, values=None, start=None):
     daily = _read(DAILY_CSV, parse_dates=["Date"]) if daily is None else daily
     bench = _read(BENCH_CSV, parse_dates=["Date"]) if bench is None else bench
     values = _read(STRATEGIES_CSV, parse_dates=["Date"]) if values is None else values
-    if values is not None and len(values):
-        values = values.assign(Strategy=values["Strategy"].replace(OLD_NAMES))
     start, series = pd.Timestamp(start), []
 
     def since(df):
@@ -1147,7 +1121,7 @@ def leaderboard(daily=None, bench=None, values=None, start=None):
     for cfg in STRATEGIES:
         v = since(values[values["Strategy"] == cfg["name"]])["Value"] if values is not None else pd.Series(dtype=float)
         # Paper lines keep their simulated Value. The live mark is reserved for the real account path below
-        # (Chirag, Oct 29: Total since Oct 2 for the live row = what the account actually did, not the paper RS line).
+        # (Chirag, Oct 29: Total for the live row = what the account actually did, not the paper RS line).
         series.append((cfg["name"], cfg.get("ranked", True), v))
     if daily is not None and len(daily):
         d = since(daily)
@@ -1160,17 +1134,25 @@ def leaderboard(daily=None, bench=None, values=None, start=None):
     if bench is not None:
         b = since(bench)
         series += [(f"{s} (comparison)", False, b[s]) for s in ("QQQ", "SPY") if s in b]
-    cols = ["Total return %", "Daily return %", "Max drawdown %"]
-    stats = [(n, r, _stats(v)) for n, r, v in series]
-    done = max((x[3] for *_, x in stats), default=0)                    # finished weeks; the next one is in progress
-    so_far = any(len(x[4]) > x[3] for *_, x in stats)
-    weeks = [f"Week {k}" + (" (so far)" if so_far and k == done + 1 else "") + " %" for k in range(1, WEEKS_TO_WIN + 1)]
-    t = pd.DataFrame([{"Strategy": n, "ranked": r, **dict(zip(cols, x)), **dict(zip(weeks, x[4]))} for n, r, x in stats],
-                     columns=["Strategy", "ranked"] + cols + weeks)        # Week k % = the k-th Friday-to-Friday week
+    stats = [(n, r, _stats(v)) for n, r, v in series]   # (total, dd, finished_weeks, so_far|None)
+    n_done = max((len(s[2]) for *_, s in stats), default=0)
+    week_cols = [f"Week {k} %" for k in range(1, n_done + 1)]           # completed weeks only (no empty Week 1..12)
+    show_so_far = any(s[3] is not None for *_, s in stats)
+    so_far_col = ["This week (so far) %"] if show_so_far else []
+    rows = []
+    for n, r, (total, dd, finished, so_far) in stats:
+        row = {"Strategy": n, "ranked": r, "Total return %": total, "Max drawdown %": dd}
+        for i, w in enumerate(finished):
+            row[f"Week {i + 1} %"] = w
+        if show_so_far:
+            row["This week (so far) %"] = so_far if so_far is not None else np.nan
+        rows.append(row)
+    cols = so_far_col + week_cols + ["Total return %", "Max drawdown %"]
+    t = pd.DataFrame(rows, columns=["Strategy", "ranked"] + cols)
     t = t.sort_values(["Total return %", "Max drawdown %"], ascending=False, na_position="last", kind="stable")
     ok = t["ranked"] & t["Total return %"].notna()
     t["Rank"] = ok.cumsum().where(ok).astype("Int64")
-    return t[["Rank", "Strategy"] + cols[:2] + weeks + cols[2:]].reset_index(drop=True)
+    return t[["Rank", "Strategy"] + cols].reset_index(drop=True)
 
 def verdict(board):
     """One plain line: too early / the winner / no winner. """
@@ -1218,28 +1200,30 @@ def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=None):
     v = values.assign(Date=pd.to_datetime(values["Date"]))
     last = v["Date"].max()
     b = be.keep_decision_bars(b.sort_values(["Symbol", "Date"]).reset_index(drop=True), now=_NO_SAVE)
-    close = b.pivot_table(index="Date", columns="Symbol", values="Close")
-    close = close[close.index > last]
+    close_all = b.pivot_table(index="Date", columns="Symbol", values="Close")
     # Complete days only (docstring): today's bar is in bars_daily from the 2:30 PM decision on, but it is not the
     # final close until 3:05 PM CT. Leave today to live_returns until then so Total/Week are not a partial bar.
     now_et = datetime.now(be.EASTERN)
     today = pd.Timestamp(now_et.date())
-    if (now_et.hour * 60 + now_et.minute) < (16 * 60 + be.AFTER_CLOSE_BAR_MIN) and today in close.index:
-        close = close.drop(index=today)
+    close_all = close_all.copy()
+    if (now_et.hour * 60 + now_et.minute) < (16 * 60 + be.AFTER_CLOSE_BAR_MIN) and today in close_all.index:
+        close_all = close_all.drop(index=today)
+    close = close_all[close_all.index > last]   # strategy gap fills only
     h = _read(hold_path, parse_dates=["Date"])
-    if close.empty or h is None:
-        return values, bench
-    h, rows = h[h["Date"] == last], []
-    for name, g in v[v["Date"] == last].groupby("Strategy", sort=False):
-        mine, cash = h[h["Strategy"] == name].set_index("Symbol"), float(g["Cash"].iloc[0])
-        for d, px in close.iterrows():
-            p = px.reindex(mine.index).fillna(mine["Price"])     # no bar that day: its last saved price
-            rows.append({"Date": d, "Strategy": name, "Value": cash + float((mine["Shares"] * p).sum()), "Cash": cash,
-                         "Provisional": True})
+    rows = []
+    if h is not None and not close.empty:
+        h = h[h["Date"] == last]
+        for name, g in v[v["Date"] == last].groupby("Strategy", sort=False):
+            mine, cash = h[h["Strategy"] == name].set_index("Symbol"), float(g["Cash"].iloc[0])
+            for d, px in close.iterrows():
+                p = px.reindex(mine.index).fillna(mine["Price"])     # no bar that day: its last saved price
+                rows.append({"Date": d, "Strategy": name, "Value": cash + float((mine["Shares"] * p).sum()), "Cash": cash,
+                             "Provisional": True})
     out = pd.concat([v.assign(Provisional=False), pd.DataFrame(rows)], ignore_index=True) if rows else v
+    # Catch QQQ/SPY up from bars even when strategy values are already on the latest close (bench CSV often lags).
     if bench is not None and len(bench):
         bb = bench.assign(Date=pd.to_datetime(bench["Date"]))
-        extra = close[[s for s in ("QQQ", "SPY") if s in close]]
+        extra = close_all[[s for s in ("QQQ", "SPY") if s in close_all.columns]]
         extra = extra[extra.index > bb["Date"].max()]
         if len(extra.columns) and len(extra):
             bench = pd.concat([bb, extra.rename_axis("Date").reset_index()], ignore_index=True)
@@ -1250,7 +1234,6 @@ def holdings(path=HOLDINGS_CSV):
     h = _read(path, parse_dates=["Date"])
     if h is None or h.empty:
         return {}
-    h = h.assign(Strategy=h["Strategy"].replace(OLD_NAMES))
     h = h[h["Date"] == h.groupby("Strategy")["Date"].transform("max")]
     h = h[h["Weight"] > 0].sort_values(["Strategy", "Weight"], ascending=[True, False])
     return {s: ", ".join(r.Symbol for r in g.itertuples()) for s, g in h.groupby("Strategy")}
@@ -1275,7 +1258,7 @@ def consensus(board, hold, ranks=None, n_strategies=5, n_stocks=10):
     rk = pd.to_numeric(b["Rank"], errors="coerce").astype(float) if "Rank" in b else pd.Series(np.nan, index=b.index)
     b = b.assign(_rk=rk.fillna(np.inf)).sort_values(["_rk", by, "Max drawdown %"], ascending=[True, False, False],
                                                    na_position="last", kind="stable")
-    h = hold.assign(Date=pd.to_datetime(hold["Date"]), Strategy=hold["Strategy"].replace(OLD_NAMES))
+    h = hold.assign(Date=pd.to_datetime(hold["Date"]))
     h = h[h["Strategy"].isin(names)]
     if h.empty:
         return None

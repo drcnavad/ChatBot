@@ -95,21 +95,21 @@ st_ = sm.loc[ft.ACCOUNT]
 # time-weighted: the deposit day is flat (105k on 100k + 5k), then 105k -> 108k -> 105k -> 111k
 check("leaderboard: deposits are not returns, time-weighted (total 111/105 = +5.71%)",
       abs(st_["Total return %"] - (111 / 105 - 1) * 100) < 1e-9, st_.to_dict())
-check("leaderboard: one column per week Friday to Friday after the daily return (Week 1 % = Oct 2-9 = 108/105, Week 2 % = "
-      "Oct 9-16 = 111/108), every row; no median column",
-      [c for c in sm.columns if c.startswith("Week ")] == [f"Week {k} %" for k in range(1, 13)]
-      and list(sm.columns).index("Week 1 %") == list(sm.columns).index("Daily return %") + 1
-      and sm.filter(like="Week ").iloc[:, 2:].isna().all().all() and not any(c in sm for c in ("Weeks", "Median weekly return %"))
+check("leaderboard: completed weeks only (Week 1 % = Oct 2-9 = 108/105, Week 2 % = Oct 9-16 = 111/108); no Daily; no empty Week 3..12",
+      [c for c in sm.columns if c.startswith("Week ")] == ["Week 1 %", "Week 2 %"]
+      and "Daily return %" not in sm.columns and "This week (so far) %" not in sm.columns  # Fri end = weeks complete
+      and list(sm.columns)[:3] == ["Rank", "Week 1 %", "Week 2 %"]  # Strategy is the index
       and abs(st_["Week 1 %"] - (108 / 105 - 1) * 100) < 1e-9 and abs(st_["Week 2 %"] - (111 / 108 - 1) * 100) < 1e-9
       and abs(sm.at["QQQ (comparison)", "Week 1 %"] - 10) < 1e-9
       and sm.loc[[ft.ACCOUNT, "QQQ (comparison)", "SPY (comparison)"], ["Week 1 %", "Week 2 %"]].notna().all().all(),
-      sm.filter(like="Week ").to_dict())
+      list(sm.columns))
 _wk = ft.leaderboard(daily.iloc[:5], bench.iloc[:5], pd.DataFrame(columns=["Date", "Strategy", "Value"])).set_index("Strategy")
-check("leaderboard: the unfinished week is its own 'so far' column (Fri Oct 2 close -> Thu Oct 8), not a finished week",
-      [c for c in _wk.columns if c.startswith("Week ")][:2] == ["Week 1 (so far) %", "Week 2 %"]
-      and abs(_wk.at[ft.ACCOUNT, "Week 1 (so far) %"] - 0.0) < 1e-9
-      and "Week 1 %" in ft.leaderboard(daily.iloc[:1], bench.iloc[:1], pd.DataFrame(columns=["Date", "Strategy", "Value"])).columns,
-      _wk.filter(like="Week").to_dict())
+_day0 = ft.leaderboard(daily.iloc[:1], bench.iloc[:1], pd.DataFrame(columns=["Date", "Strategy", "Value"]))
+check("leaderboard: unfinished week is 'This week (so far) %' (vs start/last Friday); day-0 has so-far=0 and no Week 1..12",
+      list(_wk.columns) == ["Rank", "This week (so far) %", "Total return %", "Max drawdown %"]  # Strategy is the index
+      and abs(_wk.at[ft.ACCOUNT, "This week (so far) %"] - 0.0) < 1e-9
+      and "This week (so far) %" in _day0.columns and not any(c.startswith("Week ") for c in _day0.columns),
+      {"wk": list(_wk.columns), "day0": list(_day0.columns), "so_far": float(_wk.at[ft.ACCOUNT, "This week (so far) %"])})
 check("leaderboard: max drawdown (108k -> 105k on Oct 12)", abs(st_["Max drawdown %"] - (105 / 108 - 1) * 100) < 1e-9,
       st_["Max drawdown %"])
 q = sm.loc["QQQ (comparison)"]
@@ -635,7 +635,7 @@ with tempfile.TemporaryDirectory() as pt:
           and list(pbench["QQQ"]) == [590.0, 600.0, 606.0], (p6.to_dict(), pbench.to_dict()))
     lbp = ft.leaderboard(pd.DataFrame(), pbench, pvals).set_index("Strategy")
     check("provisional: the board moves with the marked day (P +2% -> +6%, QQQ to Oct 6)",
-          abs(lbp.at[PN, "Total return %"] - 6.0) < 1e-9 and abs(lbp.at[PN, "Daily return %"] - (106 / 102 - 1) * 100) < 1e-9
+          abs(lbp.at[PN, "Total return %"] - 6.0) < 1e-9 and abs(lbp.at[PN, "This week (so far) %"] - 6.0) < 1e-9
           and abs(lbp.at["QQQ (comparison)", "Total return %"] - (606 / 590 - 1) * 100) < 1e-9, lbp.head(3).to_dict())
     check("provisional: nothing after the last saved day -> unchanged",
           ft.provisional(pv[pv["Date"] <= "2026-10-05"], None, hold_path=os.path.join(pt, "h.csv"),
