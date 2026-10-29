@@ -53,7 +53,7 @@ CHECKPOINT_FILE = os.path.join(REPORTS, ".pipeline_checkpoint.json")   # watchdo
 CT, ET = ZoneInfo("America/Chicago"), ZoneInfo("America/New_York")
 FULL_AFTER = (14, 30)                  # normal-day decision time (== backtest_engine.DECISION_TIME_CT); early-close = 11:00 AM
 
-NEWS_MIN_GAP_H = 24                    # NewsAPI free tier: 100 requests/day, one run = len(stock_symbols) (N_CALLS)
+NEWS_MIN_GAP_H = 24                    # NewsAPI free tier: 100 requests/day, one run = len(news_symbols()) (N_CALLS)
 BAR_FINAL_ET = (16, 30)                # the pipeline treats the daily bar as final after 4:30 PM ET (3:30 PM CT)
 REFRESH_BAR_ET = (16, 5)               # the after-close step takes today's bar from 4:05 PM ET (3:05 PM CT), see
                                        # backtest_engine.AFTER_CLOSE_BAR_MIN
@@ -76,12 +76,30 @@ STEPS = [
     ("validate", "check", None, "always"),
 ]
 import sector_mapping  # noqa: E402  the stock list (single source of truth) -> the per-run API call counts
-N_CALLS = len(sector_mapping.stock_symbols)   # one news call per stock + QQQ
+
+def news_symbols(held=None):
+    """Symbols the sentiment step queries (NewsAPI + Finnhub).
+
+    Tradable list minus do_not_buy (they cannot be bought, so no news needed), plus QQQ when it is in
+    stock_symbols, plus any do_not_buy name that is currently held (still needs news). `held` = iterable of
+    symbols currently in the account; None = none held (the support job does not read the brokerage).
+    """
+    held = {str(s).upper() for s in (held or [])}
+    dnb = {str(s).upper() for s in sector_mapping.do_not_buy}
+    out = []
+    for s in sector_mapping.stock_symbols:
+        u = str(s).upper()
+        if u in dnb and u not in held:
+            continue
+        out.append(s)
+    return out
+
+N_CALLS = len(news_symbols())                 # NewsAPI + Finnhub per news_symbols() (skips do_not_buy)
 NEWS_DAILY_LIMIT = 100                        # NewsAPI free tier
 EXPECTED_CALLS = {"fundamentals": "Alpha Vantage <= 24", "sentiment": f"NewsAPI {N_CALLS} + Finnhub {N_CALLS}",
                   "earnings": f"Finnhub {len(sector_mapping.tradable_symbols)}"}   # earnings: tradable stocks (no QQQ)
 if N_CALLS > NEWS_DAILY_LIMIT:
-    print(f"WARNING: sector_mapping.stock_symbols has {N_CALLS} symbols - one news run needs {N_CALLS} NewsAPI calls, "
+    print(f"WARNING: news_symbols() has {N_CALLS} symbols - one news run needs {N_CALLS} NewsAPI calls, "
           f"over the free limit of {NEWS_DAILY_LIMIT}/day; the last ones will fail")
 
 # Steps whose failure must NOT stop the pipeline or block the 2:30 PM trade. Their

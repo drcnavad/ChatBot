@@ -31,6 +31,8 @@ stock_symbols = [
     # 'AVAV', 'COIN', 'CRWV', 'FIG', 'GTLB', 'HIMS', 'IREN', 'SNOW', 'TEAM', 'ZS', 'UMAC', 'U',
     # 'ACHR', 'ASTS', 'CIFR', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RKLB', 'SOUN', 'TEM', 'TTWO', 'SPCX',
     # 'LYB', 'NBIS', 'LITE', 'RBRK', 'CORZ', 'LUNR', 'APLD',
+    # Oct 28, 2026 (Chirag): strong momentum, reasonable valuation
+    'CRL', 'RVTY', 'HAS', 'COP', 'LH', 'EL', 'ACN', 'PTC', 'ULTA', 'IT', 'MPC', 'PPG', 'FDS', 'EXPD', 'ALLE',
     'QQQ'
 ]
 
@@ -142,6 +144,7 @@ symbol_sector = {
     'URI': 'Industrials', 'PH': 'Industrials', 'TDG': 'Industrials',
     'LYB': 'Materials', 'MOS': 'Materials', 'SW': 'Materials',
     'WULF': 'Technology', 'CORZ': 'Technology', 'HIMX': 'Technology', 'LUNR': 'Industrials',
+    'CRL': 'Health Care', 'RVTY': 'Health Care', 'HAS': 'Consumer Discretionary', 'LH': 'Health Care', 'EL': 'Consumer Staples', 'ACN': 'Technology', 'PTC': 'Technology', 'ULTA': 'Consumer Discretionary', 'PPG': 'Materials', 'FDS': 'Financials', 'EXPD': 'Industrials', 'ALLE': 'Industrials',
 }
 
 # Company names (dashboard and news search).
@@ -272,6 +275,7 @@ symbol_name = {
     'TDG': 'TransDigm Group Incorporated', 'LYB': 'LyondellBasell Industries N.V.',
     'MOS': 'The Mosaic Company', 'SW': 'Smurfit Westrock plc',
     'WULF': 'TeraWulf Inc.', 'CORZ': 'Core Scientific, Inc.', 'HIMX': 'Himax Technologies, Inc.', 'LUNR': 'Intuitive Machines, Inc.',
+    'CRL': "Charles River Laboratories International, Inc.", 'RVTY': "Revvity, Inc.", 'HAS': "Hasbro, Inc.", 'LH': "Labcorp Holdings Inc.", 'EL': "The Est\u00e9e Lauder Companies Inc.", 'ACN': "Accenture plc", 'PTC': "PTC Inc.", 'ULTA': "Ulta Beauty, Inc.", 'PPG': "PPG Industries, Inc.", 'FDS': "FactSet Research Systems Inc.", 'EXPD': "Expeditors International of Washington, Inc.", 'ALLE': "Allegion plc",
 }
 
 # First usable bar date per symbol (earlier vendor bars belong to a different business or a trading halt).
@@ -287,7 +291,7 @@ tradable_symbols = [s for s in stock_symbols if s not in BENCHMARK_SYMBOLS]
 # tradable stocks plus these.
 fundamentals_extra = [
     'ABNB', 'ASML', 'AXON', 'BAC', 'BBAI', 'CDW', 'CELH', 'CRSP', 'CRWD', 'CVX', 'DDOG', 'DUOL',
-    'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'IT', 'KLAC', 'KVYO', 'LLY',
+    'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'KLAC', 'KVYO', 'LLY',
     'MELI', 'MNDY', 'NEE', 'NEM', 'NET', 'NKE', 'NVO', 'PATH', 'PAYX', 'PCTY',
     'PLTR', 'POOL', 'RTX', 'SYM', 'TMO', 'TOST', 'TTD', 'WDAY', 'XOM', 'ZBRA', 'ZENA',
 ]

@@ -132,8 +132,11 @@ check("removed stocks are gone from the stock list and the fundamentals list",
       REMOVED_2026_10_01 & set(sm.fundamentals_symbols))
 check("fundamentals extras are only names outside the stock list", not (set(sm.fundamentals_extra) & set(sm.stock_symbols)),
       set(sm.fundamentals_extra) & set(sm.stock_symbols))
-check("news / earnings call counts come from the list", run_all.N_CALLS == len(sm.stock_symbols)
-      and f"NewsAPI {len(sm.stock_symbols)}" in run_all.EXPECTED_CALLS["sentiment"], run_all.EXPECTED_CALLS)
+check("news call counts come from news_symbols() (skip do_not_buy)", run_all.N_CALLS == len(run_all.news_symbols())
+      and run_all.N_CALLS <= run_all.NEWS_DAILY_LIMIT
+      and f"NewsAPI {run_all.N_CALLS}" in run_all.EXPECTED_CALLS["sentiment"], run_all.EXPECTED_CALLS)
+check("earnings call counts come from the tradable list",
+      f"Finnhub {len(sm.tradable_symbols)}" in run_all.EXPECTED_CALLS["earnings"], run_all.EXPECTED_CALLS)
 check("every tradable stock has a sector and a name in sector_mapping",
       all(sm.symbol_sector.get(s) and sm.symbol_name.get(s) for s in sm.tradable_symbols),
       [s for s in sm.tradable_symbols if not (sm.symbol_sector.get(s) and sm.symbol_name.get(s))])
