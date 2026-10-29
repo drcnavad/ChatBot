@@ -47,15 +47,16 @@ new_run()
 
 @st.cache_resource(show_spinner=False)
 def prewarm():
-    """Once per server process: fill the slow caches (news feeds, live account, portfolio history) in a background
-    thread, so the first visit of each page does not wait for them in turn."""
+    """Once per server process: fill the slow caches in background threads so the first visit of each page does not
+    wait for them in turn. Order: market news + light Alpaca core (plan chips) first; full holdings (fills + history)
+    and portfolio chart after — fills are disk-cached after the first day so they stay cheap across restarts."""
     import threading
     from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
     ctx = get_script_run_ctx()
 
     from dashboard.data import refresh_slot
     from dashboard.details import equity_chart as ec
-    from dashboard.details.live_holdings import live_holdings
+    from dashboard.details.live_holdings import account_core, live_holdings
     from dashboard.news import headlines
 
     def quiet(fn):
@@ -63,7 +64,7 @@ def prewarm():
             fn()
         except Exception:               # the page shows its own errors when it reads again
             pass
-    for fn in (headlines, live_holdings, lambda: ec.equity_series("1D", refresh_slot())):    # each in its own thread
+    for fn in (headlines, account_core, live_holdings, lambda: ec.equity_series("1D", refresh_slot())):
         t = threading.Thread(target=quiet, args=(fn,), name="sa-prewarm", daemon=True)
         add_script_run_ctx(t, ctx)
         t.start()

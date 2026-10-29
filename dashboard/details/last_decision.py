@@ -141,13 +141,14 @@ def _preview_targets(day):
 
 def next_plan():
     """{"asof", "days": {half: next decision}, "targets", "plan": {sym: (action, % of account, day)}} or None.
-    Action: Keep / Buy / Sell / Blocked. Display only."""
+    Action: Keep / Buy / Sell / Blocked. Display only. Uses account_core (positions + equity) — not the full
+    holdings read — so build_page / plan chips never wait on fill history."""
     import paper_trade as pt
     sl = _sleeves()
-    from dashboard.details.live_holdings import holdings_this_run
+    from dashboard.details.live_holdings import account_core
     try:
         led = sl.load_ledger()
-        data, _ = holdings_this_run()
+        data, _ = account_core()
         if data is None:
             return None
         positions, equity = data["positions"], data["equity"]

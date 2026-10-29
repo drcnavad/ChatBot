@@ -44,4 +44,8 @@ dashboard/news_voice/audio/
 # SQLite database (all former Reports/*.csv tables; see db.py). Account data: kept local, never committed
 data/stock_analysis.db
 data/stock_analysis.db-*
+data/fill_history_cache.json
+data/fill_history_cache.json.tmp
+data/headlines_cache.json
+data/headlines_cache.json.tmp
 backups/

@@ -111,7 +111,7 @@ check("no positions: empty table", ap.holdings_table([], [], 1000.0).empty)
 # ---------------------------------------------------------------- fill history kept between reads (request count stays flat)
 from datetime import datetime  # noqa: E402
 day1, day2 = (datetime(2026, 10, 6, h, tzinfo=ap.CT) for h in (10, 23))
-h, FakeAccount.calls = ap.FillHistory(), []
+h, FakeAccount.calls = ap.FillHistory(persist=False), []
 first_read = h.update(acct, now=day1)
 full_pages = len(FakeAccount.calls)
 check("first read of the day pages the whole history", len(first_read) == len(FILLS) and full_pages == 2, full_pages)

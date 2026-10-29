@@ -17,18 +17,47 @@ def _fill_history():
     import alpaca_paper as ap
     return ap.FillHistory()
 
+@st.cache_data(ttl=60, max_entries=8, show_spinner=False)
+def _read_core(refresh_key):
+    """Positions + account snapshot only (no fills, no portfolio history). Used by next_plan / plan chips so every tab's
+    build_page does not wait on ~2000 fill pages. Parallel GETs."""
+    import alpaca_paper as ap
+    import holdings
+    from concurrent.futures import ThreadPoolExecutor
+    acct = ap.PaperAccount()
+    with ThreadPoolExecutor(2) as ex:
+        f_pos, f_snap = ex.submit(holdings.position_rows, True), ex.submit(acct.snapshot)
+        positions, snap = f_pos.result(), f_snap.result()
+    return {"positions": positions, "equity": snap["equity"], "snapshot": snap, "as_of": datetime.now(CT)}
+
+
+def account_core():
+    """(data, None) or (None, message): light Alpaca read for plan chips / last-decision preview."""
+    if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") == "off":
+        return None, "Live holdings are turned off here (STOCK_ANALYSIS_LIVE_HOLDINGS=off)."
+    try:
+        from dashboard.data import refresh_slot
+        return _read_core(refresh_slot()), None
+    except Exception as e:
+        return None, f"Live holdings unavailable right now ({type(e).__name__}: {str(e)[:200]}). It tries again in a minute."
+
+
 @st.cache_data(ttl=600, max_entries=4, show_spinner=False)
 def _read_holdings(refresh_key):
-    """One read of the Alpaca LIVE account (GET only: positions, fills, account + deposits/withdrawals as one snapshot,
-    daily account history) per refresh_key (alpaca_paper.holdings_refresh_key: a new key each minute in market hours,
-    each hour otherwise). A failure raises, and Streamlit never caches a raise, so the next minute tries again."""
+    """Full Alpaca LIVE read: reuses _read_core (same refresh_key → one /positions + snapshot), then fills + daily
+    history in parallel. Fills use FillHistory (disk-backed) so a process restart is incremental. A failure raises,
+    and Streamlit never caches a raise, so the next minute tries again."""
     import alpaca_paper as ap
     import backtest_engine as be
+    from concurrent.futures import ThreadPoolExecutor
+    core = _read_core(refresh_key)  # cache hit when plan chips already warmed this slot
     acct = ap.PaperAccount()
-    import holdings
-    positions, fills, snap = holdings.position_rows(fresh=True), _fill_history().update(acct), acct.snapshot()
-    return {"positions": positions, "fills": fills, "equity": snap["equity"], "snapshot": snap,
-            "history": acct.daily_history(be.FORWARD_START), "as_of": datetime.now(CT)}
+    with ThreadPoolExecutor(2) as ex:
+        f_fills = ex.submit(_fill_history().update, acct)
+        f_hist = ex.submit(acct.daily_history, be.FORWARD_START)
+        fills, history = f_fills.result(), f_hist.result()
+    return {"positions": core["positions"], "fills": fills, "equity": core["equity"], "snapshot": core["snapshot"],
+            "history": history, "as_of": core["as_of"]}
 
 def live_holdings():
     """(data, None) or (None, plain message). Keys come from .env via alpaca_paper; error messages never hold them."""

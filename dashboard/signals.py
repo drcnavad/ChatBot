@@ -2,6 +2,7 @@
 import re
 
 import pandas as pd
+import streamlit as st
 
 from dashboard.data import read_report_csv
 from dashboard.settings import CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, N_PICKS, PICKS_CSV
@@ -104,12 +105,21 @@ def next_full_rebalance(day):
         pass
     return None
 
+@st.cache_data(ttl=60, max_entries=8, show_spinner=False)
+def _live_rebalance_plan(slot, signal_mtime):
+    """Cached next_plan for build_page: one Alpaca-light + sleeve compute per refresh slot, shared across tabs."""
+    from dashboard.details.last_decision import next_plan
+    return next_plan()
+
+
 def rebalance_plan(df):
     """The Next rebalance preview (live RS short-term, Oct 27, 2026): (next rebalance, as-of, {SYMBOL: (action, % of account,
     day)}); falls back to strategy_picks.csv below when Alpaca cannot be read."""
     try:
-        from dashboard.details.last_decision import next_plan
-        np_ = next_plan()
+        import db
+        from dashboard.data import refresh_slot
+        from dashboard.settings import SIGNAL_CSV
+        np_ = _live_rebalance_plan(refresh_slot(), db.mtime(SIGNAL_CSV))
         if np_ is not None:
             return min(d for d in np_["days"].values() if d is not None), np_["asof"], np_["plan"]
     except Exception:

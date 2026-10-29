@@ -124,7 +124,7 @@ def _off():
 
 def _read(source, url, ticker=""):
     req = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA if "nasdaq.com" in url else "Mozilla/5.0 (StockAnalysis dashboard)"})
-    with urllib.request.urlopen(req, timeout=6) as r:
+    with urllib.request.urlopen(req, timeout=4) as r:
         root = ET.fromstring(r.read())
     out = []
     for it in root.iter("item"):
@@ -150,24 +150,60 @@ def _safe(args):
     except Exception:
         return []                                              # a feed that is down is skipped silently
 
+_HEADLINES_CACHE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "data", "headlines_cache.json")
+_HEADLINES_TTL = 300  # seconds; matches st.cache_data ttl — disk survives a Streamlit restart
+
+
+def _headlines_from_disk():
+    try:
+        import json, time as _t
+        with open(_HEADLINES_CACHE) as f:
+            blob = json.load(f)
+        if _t.time() - float(blob.get("saved_at", 0)) > _HEADLINES_TTL:
+            return None
+        items = blob.get("items") or []
+        for i in items:
+            i["time"] = datetime.fromisoformat(i["time"])
+        return items
+    except Exception:
+        return None
+
+
+def _headlines_to_disk(items):
+    try:
+        import json, time as _t
+        os.makedirs(os.path.dirname(_HEADLINES_CACHE), exist_ok=True)
+        payload = []
+        for i in items:
+            d = dict(i)
+            d["time"] = i["time"].isoformat()
+            payload.append(d)
+        tmp = _HEADLINES_CACHE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"saved_at": _t.time(), "items": payload}, f)
+        os.replace(tmp, _HEADLINES_CACHE)
+    except Exception:
+        pass
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def headlines():
-    """The market feeds plus Yahoo Finance headlines for every stock in sector_mapping.py (tagged with the ticker,
-    newest PER_STOCK each), read in parallel. Newest first, a headline once; today's (New York) when there are any,
-    else the last 24 h."""
+    """Market RSS feeds only (CNBC, Yahoo, Google News, Nasdaq, MarketWatch), read in parallel. Stock names in a
+    title are tagged via _named (sector_mapping). Per-stock Yahoo/Nasdaq feeds live in stock_news() for the Stock
+    Analysis tab — fetching them here for every symbol was ~200 HTTP calls and ~11 s on a cold page. Newest first,
+    a headline once; today's (New York) when there are any, else the last 24 h. Disk-cached 5 min so a Streamlit
+    restart does not wait on the feeds again."""
+    cached = _headlines_from_disk()
+    if cached is not None:
+        return cached
     from concurrent.futures import ThreadPoolExecutor
-    try:
-        import sector_mapping as sm
-        syms = list(dict.fromkeys(sm.stock_symbols))
-    except Exception:
-        syms = []
-    jobs = ([(src, url) for src, url in FEEDS] + [("Yahoo Finance", STOCK_FEED.format(sym=s), s) for s in syms]
-            + [("Nasdaq", NASDAQ_STOCK_FEED.format(sym=s), s) for s in syms])
-    items = []
-    with ThreadPoolExecutor(max_workers=32) as pool:
-        for job, got in zip(jobs, pool.map(_safe, jobs)):
-            items += [i for i in got if is_news(i["title"], i["source"])][:PER_STOCK] if len(job) == 3 else got
-    return _recent(items, 24)[0][:MAX_ITEMS]
+    jobs = [(src, url) for src, url in FEEDS]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        items = [i for got in pool.map(_safe, jobs) for i in got]
+    out = _recent(items, 24)[0][:MAX_ITEMS]
+    _headlines_to_disk(out)
+    return out
 
 def _recent(items, fallback_hours):
     """(news headlines newest first, each once; today's in New York, else the last fallback_hours, label)."""

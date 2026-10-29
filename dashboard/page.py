@@ -168,11 +168,15 @@ YF = ("CL=F", "BTC-USD")                     # not on Alpaca stock data: yfinanc
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _card_data(syms, slot):
-    """Quotes and intraday lines of the cards, fetched once per `slot` (30 s in market hours, 5 min outside)."""
+    """Quotes and intraday lines of the cards, fetched once per `slot` (30 s in market hours, 5 min outside).
+    Alpaca quotes, Alpaca intraday, and yfinance (CL=F / BTC-USD) run in parallel."""
+    from concurrent.futures import ThreadPoolExecutor
     from dashboard.data import index_quotes, intraday, yf_intraday
     alp = tuple(s for s in syms if s not in YF)
-    q, spark = dict(index_quotes(alp)), dict(intraday(alp))
-    for s, (quote, series) in yf_intraday(YF).items():
+    with ThreadPoolExecutor(3) as ex:
+        f_q, f_spark, f_yf = ex.submit(index_quotes, alp), ex.submit(intraday, alp), ex.submit(yf_intraday, YF)
+        q, spark, yf = dict(f_q.result()), dict(f_spark.result()), f_yf.result()
+    for s, (quote, series) in yf.items():
         q[s], spark[s] = quote, series
     return q, spark
 

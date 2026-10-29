@@ -194,25 +194,63 @@ class PaperAccount:
             params = {**params, "page_token": page[-1]["id"]}
         return out[::-1]
 
+FILL_CACHE = os.path.join(ROOT, "data", "fill_history_cache.json")  # survives Streamlit restarts; incremental after load
+
+
 class FillHistory:
     """The fill history kept between the dashboard's reads, so the request count does not grow with the history: the
     first read of each day (CT) pages through every fill; later reads ask only for fills after the newest one kept (one
-    minute of overlap, de-duplicated by id). On any problem it re-reads everything."""
+    minute of overlap, de-duplicated by id). On any problem it re-reads everything. Also loads/saves data/fill_history_cache.json
+    so a Streamlit restart does not re-page ~2000 fills (~3–4 s) on the first Trading Account visit."""
 
-    def __init__(self):
+    def __init__(self, persist=None):
+        """persist=True writes data/fill_history_cache.json; False never touches disk. Default: on when live
+        holdings are enabled (dashboard), off when STOCK_ANALYSIS_LIVE_HOLDINGS=off (tests)."""
         self.fills, self.day, self._lock = [], None, threading.Lock()
+        if persist is None:
+            persist = os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") != "off"
+        self.persist = bool(persist)
+
+    def _load_disk(self):
+        if not self.persist:
+            return
+        try:
+            with open(FILL_CACHE) as f:
+                blob = json.load(f)
+            day = blob.get("day")
+            fills = blob.get("fills") or []
+            if day and fills:
+                self.day = datetime.strptime(day, "%Y-%m-%d").date()
+                self.fills = fills
+        except Exception:
+            pass
+
+    def _save_disk(self):
+        if not self.persist:
+            return
+        try:
+            os.makedirs(os.path.dirname(FILL_CACHE), exist_ok=True)
+            tmp = FILL_CACHE + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({"day": self.day.isoformat() if self.day else None, "fills": self.fills}, f)
+            os.replace(tmp, FILL_CACHE)
+        except Exception:
+            pass
 
     def update(self, account, now=None):
         today = (now or datetime.now(CT)).astimezone(CT).date()
         with self._lock:
+            if not self.fills:
+                self._load_disk()  # same-day restart: skip the multi-page full read
             try:
                 if self.day != today or not self.fills:
-                    raise LookupError("full read")
+                    raise LookupError("full read")  # new CT day (or empty): safety-net full re-read
                 last = max(pd.to_datetime(f["transaction_time"], utc=True) for f in self.fills) - pd.Timedelta(minutes=1)
                 seen = {f["id"] for f in self.fills}
                 self.fills += [f for f in account.fills(after=last.strftime("%Y-%m-%dT%H:%M:%SZ")) if f["id"] not in seen]
             except Exception:
                 self.fills, self.day = account.fills(), today
+            self._save_disk()
             return list(self.fills)
 
 # --- the dashboard's live holdings table (pure: no requests here) -------------------------------------------------------

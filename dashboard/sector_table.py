@@ -66,29 +66,34 @@ def _daily_closes(syms):
 FUTURES = {"CL=F": "Crude oil WTI (US)", "BZ=F": "Crude oil Brent (global)", "GC=F": "Gold futures",
            "SI=F": "Silver futures"}
 
+def _one_future(sym_name, today):
+    """One futures row from yfinance, or None."""
+    import yfinance as yf
+    sym, name = sym_name
+    try:
+        t = yf.Ticker(sym)
+        c = t.history(period="3y", interval="1d", auto_adjust=False)["Close"].dropna()
+        c.index = c.index.tz_localize(None).normalize()
+        # Futures stay 24-hour (Chirag Oct 29: same exception as CL=F / BTC-USD header cards).
+        live = float(t.fast_info["last_price"])
+        prev = c[c.index < today]
+        row = {"Group": "Futures", "Name": name, "Symbol": sym, "Live price": live,
+               "Today %": (live / prev.iloc[-1] - 1) * 100 if len(prev) else None}
+        for col, off in LIVE_WINDOWS.items():
+            past = c[c.index <= today - off]
+            row[col] = (live / past.iloc[-1] - 1) * 100 if len(past) else None
+        return row
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def futures_rows(today):
     """Front-month futures from yfinance ($ per barrel / ounce): live = latest price, % vs the daily close that far back.
-    A failed symbol is left out."""
-    import yfinance as yf
-    rows = []
-    for sym, name in FUTURES.items():
-        try:
-            t = yf.Ticker(sym)
-            c = t.history(period="3y", interval="1d", auto_adjust=False)["Close"].dropna()
-            c.index = c.index.tz_localize(None).normalize()
-            # Futures stay 24-hour (Chirag Oct 29: same exception as CL=F / BTC-USD header cards).
-            live = float(t.fast_info["last_price"])
-            prev = c[c.index < today]
-            row = {"Group": "Futures", "Name": name, "Symbol": sym, "Live price": live,
-                   "Today %": (live / prev.iloc[-1] - 1) * 100 if len(prev) else None}
-            for col, off in LIVE_WINDOWS.items():
-                past = c[c.index <= today - off]
-                row[col] = (live / past.iloc[-1] - 1) * 100 if len(past) else None
-            rows.append(row)
-        except Exception:
-            pass
-    return rows
+    A failed symbol is left out. Fetched in parallel (4 symbols)."""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(4) as ex:
+        return [r for r in ex.map(lambda sn: _one_future(sn, today), list(FUTURES.items())) if r]
 
 @st.cache_data(ttl=30, show_spinner=False)
 def live_table():
