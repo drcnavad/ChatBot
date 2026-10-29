@@ -300,8 +300,9 @@ def apply_live_totals(board, live=None):
         b[wk_col] = ((1 + b[wk_col] / 100) * factor - 1) * 100
     # Re-rank strategies only
     ranked = pd.to_numeric(b["Rank"], errors="coerce").notna()
-    dd = b["Max drawdown"] if "Max drawdown" in b.columns else b.get("Max drawdown %")
-    order = b.loc[ranked].sort_values([total_col, dd], ascending=[False, False], na_position="last", kind="stable")
+    dd = next((c for c in ("Max drawdown", "Max drawdown %") if c in b.columns), None)   # a column name, not a Series
+    order = b.loc[ranked].sort_values([total_col] + ([dd] if dd else []), ascending=[False] + ([False] if dd else []),
+                                      na_position="last", kind="stable")
     new_rank = pd.Series(range(1, len(order) + 1), index=order.index, dtype="Int64")
     b["Rank"] = new_rank.reindex(b.index)
     return b.sort_values(["Rank", total_col], ascending=[True, False], na_position="last", kind="stable").reset_index(drop=True)
