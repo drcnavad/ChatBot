@@ -17,7 +17,8 @@ from html.parser import HTMLParser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
-os.environ["STOCK_ANALYSIS_LIVE_HOLDINGS"] = "off"   # never call Alpaca here (tests/test_live_holdings.py fakes it)
+os.environ["STOCK_ANALYSIS_LIVE_HOLDINGS"] = "off"
+os.environ["STOCK_ANALYSIS_LAZY_EXPANDERS"] = "off"  # AppTest needs tax/audit/rules content rendered   # never call Alpaca here (tests/test_live_holdings.py fakes it)
 sys.path.insert(0, ROOT)
 import c6_rules  # noqa: E402,F401  the Oct 15 weekly rules this test checks (live: monthly low volatility)
 import numpy as np
@@ -126,6 +127,7 @@ sel = DEC[(DEC.Date == off_day) & DEC.Status.isin(["add", "hold"])].sort_values(
 exp_slot = {s: i + 1 for i, s in enumerate(sel.Symbol)}
 at = AppTest.from_file("app.py", default_timeout=180).run()
 page_ok(at, "initial")
+at.radio(key="nav").set_value("Stock Analysis").run()
 opts = [o.split("  ·  ")[0] for o in at.selectbox(key="ticker_dropdown").options]  # labels are "SYM · rank · score"; compare raw symbols
 _short_now = set(SHORT["Symbol"]) & set(sm.tradable_symbols)
 _pending = [s for s in sm.tradable_symbols if s not in set(SIG.Symbol) | set(SHORT["Symbol"])]   # added after the last pipeline run
@@ -198,16 +200,17 @@ for sym in dict.fromkeys(cases):
     print(f"   {sym}: {badges} · rank {rk} OK")
 import forward_test as ft  # noqa: E402
 # order: Last decision, Forward test first (rules/holdings now hover on the leaderboard); live holdings and latest signals further down
-exp_titles = ["Last decision · portfolio and both strategies' ranks",   # Oct 21: no date (each half shows its own)
-              f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 2, 2026",
-              "Live holdings (Alpaca account)"]
+exp_titles = ["Last decision · portfolio and RS short-term ranks",
+              f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 29, 2026",
+              "Data freshness and settings"]
+at.radio(key="nav").set_value("Strategy").run()
 labels = [e.label for e in at.expander if e.label != "My notes"]   # the notes table sits on top (daf6f89)
 expect(len(labels) >= 3 and labels[0] == exp_titles[0] and labels[1:2] == exp_titles[1:2]
        and set(exp_titles[2:]) <= set(labels), f"Details expanders {labels[:6]} should hold {exp_titles}")
 expect(sum("forward test" in l.lower() for l in labels) == 1, f"the forward test is in one place only: {labels}")
 from dashboard.details import forward_test as _fd  # noqa: E402
 _built = _fd._forward_files()[2]   # the leaderboard is an HTML table now (hover tips), so test its data directly
-_ft = [_fd.tidy_board(_built[0], "Oct 2")] if _built else []
+_ft = [_fd.tidy_board(_built[0], "Oct 29")] if _built else []
 expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Strategy"]} if _ft else
        any("Forward test started Oct 2, 2026" in i.value for i in at.info), "forward test leaderboard (QQQ + SPY rows) or empty state")
 _wk = [c for c in _ft[0].columns if c.startswith("Wk ")] if _ft else []
@@ -215,9 +218,9 @@ def _ranked_ok(b):
     """Ranked rows = the ranked strategies (cfg "ranked" not False) that have a total return; the rest show '–'."""
     rk = {c["name"] for c in ft.STRATEGIES if c.get("ranked", True)}
     names = b["Strategy"].replace({"Current Strategy (Live from Oct End)": ft.MARKED}).str.replace(ft.LIVE_MARK, "", regex=False)
-    want = names.isin(rk) & b["Total since Oct 2"].notna()
+    want = names.isin(rk) & b["Total since Oct 299"].notna()
     return bool((b["Rank"].notna() == want).all()) or not b["Rank"].notna().any()
-expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Rule", "Total since Oct 2", "Last EOD", *_wk, "Max drawdown"] and [w.replace(" (so far)", "") for w in _wk] == [f"Wk {k}" for k in range(len(_wk), 0, -1)]
+expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Rule", "Total since Oct 299", "Last EOD", *_wk, "Max drawdown"] and [w.replace(" (so far)", "") for w in _wk] == [f"Wk {k}" for k in range(len(_wk), 0, -1)]
                    and (_ft[0]["Strategy"] == "Current Strategy (Live from Oct End)").sum() == 1 and _ranked_ok(_ft[0])),
        f"leaderboard: columns, one marked live row, every ranked strategy with data ranked (the Oct 16 live halves not): {_ft[0].to_dict('list') if _ft else None}")
 _tips = _fd.hover_tips(_ft[0]) if _ft else None
@@ -229,7 +232,7 @@ _cnt = [int(re.search(r" (\d)/\d", x.label).group(1)) for x in _cs]
 expect(len(_cs) >= 10 and _cnt == sorted(_cnt, reverse=True), f"Top 5 consensus tiles: held-by count first: {[x.label for x in _cs[:5]]}")
 expect(any("flex-wrap: wrap" in m.value and "sa-tier-syms" in m.value for m in at.markdown),
        "stock-list rows (sa-tier-syms) must wrap onto more lines, not scroll")
-_rule = "Don't change the strategy until 12+ weeks of forward results (from Oct 2, 2026) compare against QQQ."
+_rule = "Don't change the strategy until 12+ weeks of forward results (from Oct 29, 2026) compare against QQQ."
 for _rule in (_rule,):
     expect(sum(_rule in m.value for m in at.markdown) + sum(_rule in c.value for c in at.caption) == 1, f"shown once: {_rule}")
 # short history: no Details section any more; the stocks sit in the clickable stock list (see the rank tiers test)
@@ -261,6 +264,7 @@ old_cols = {"Weight before %", "Next rebalance plan", "Rank change"}
 expect(not any(old_cols & set(d.value.columns) for d in at.dataframe), "stale Last decision columns still shown")
 dec_labels = [e.label for e in at.expander if "decision" in e.label.lower()]
 expect(dec_labels == [exp_titles[0]], f"decision expanders: {dec_labels}")
+at.radio(key="nav").set_value("Trading Account").run()
 expect([e.label for e in at.expander][-1] == "Strategy rules", f"the rules must be the last Details section: {[e.label for e in at.expander]}")
 # the Holdings risk and Order preview expanders were removed from the Details tab
 expect(not any(t.key == "order_positions" for t in at.text_area), "stale order preview positions box still present")
@@ -293,8 +297,9 @@ expect("next open" not in blob, "outdated 'next open' wording (orders go out the
 # ---------------------------------------------------------------- removed: alert banner, Summary section, Strategy Health tab
 box = [m.value for m in at.markdown if "sa-alert " in m.value]
 expect(len(box) == 0, f"the alert banner was removed from the dashboard, found {len(box)}")
-expect([t.label for t in at.tabs][:4] == ["Home", "Stock Analysis", "Strategy", "Trading Account"],
-       f"tabs: {[t.label for t in at.tabs]} (Oct 21: Home / Stock Analysis / Strategy / Trading Account)")
+nav = next((r for r in at.radio if r.key == "nav"), None)
+expect(nav is not None and list(nav.options)[:4] == ["Home", "Stock Analysis", "Strategy", "Trading Account"],
+       f"nav radio: {None if nav is None else list(nav.options)} (page selector)")
 expect(not [m for m in at.markdown if '<div class="sa-section">Summary</div>' in m.value], "the Summary section was removed")
 expect(any("Live holdings are turned off here" in i.value for i in at.info), "holdings expander: off message in tests")
 

@@ -308,6 +308,12 @@ check("fetch_inputs(start=None) reads the whole history (4 pages, 300 activities
 
 # ---------------------------------------------------------------- 16. the app renders it (fake account, GET only)
 from streamlit.testing.v1 import AppTest  # noqa: E402
+
+def _goto_trading(at):
+    """Select Trading Account via the top nav radio (only the selected page is drawn)."""
+    at.radio(key="nav").set_value("Trading Account").run()
+    return at
+
 import streamlit as st  # noqa: E402
 import alpaca_paper as ap  # noqa: E402
 
@@ -342,10 +348,12 @@ class FakeAccount(ap.PaperAccount):
 real, real_key = ap.PaperAccount, ap.holdings_refresh_key
 ap.PaperAccount, ap.holdings_refresh_key = FakeAccount, (lambda now=None: "k1")
 os.environ.pop("STOCK_ANALYSIS_LIVE_HOLDINGS", None)
+os.environ["STOCK_ANALYSIS_LAZY_EXPANDERS"] = "off"
 try:
     st.cache_data.clear()
     st.cache_resource.clear()
     at = AppTest.from_file("app.py", default_timeout=180).run()
+    at = _goto_trading(at)
     labels = [e.label for e in at.expander]
     check("app: no exceptions", not at.exception, [str(e) for e in at.exception])
     # Earnings planner expander was removed in the Oct 4 dashboard cleanup (3-tab layout); tax view + rules stay.

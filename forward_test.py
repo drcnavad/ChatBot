@@ -940,8 +940,18 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
             # showed as "changed" and were never bought; their cash sat idle). Applies to the rules that decide
             # names day by day (no calendar: dip / event / breakout lines; "mwf" ranked lines with Mon-Thu checks).
             # Weekly- and monthly-only lines keep their holdings until their own rebalance day, as their rule says.
+            # Catch-up: a fresh all-cash account whose target already has names (carried from the last
+            # calendar day, or a combo/event line) must buy on the next session — not sit in cash until
+            # the next Friday / month-end (Chirag Oct 29 $185k restart). Held names still follow the
+            # calendar: weekly/monthly only sell or rotate on their own rebalance day.
             daily = full is None or (cfg.get("calendar", "mwf") == "mwf" and not cfg.get("weights"))
-            missed = ((shares > 0) != (w.loc[last] > 0)) if daily else pd.Series(False, index=cols)
+            if daily:
+                missed = ((shares > 0) != (w.loc[last] > 0))
+            else:
+                # Calendar lines (weekly / monthly): catch up only when the whole book is cash (fresh $185k
+                # seed / restart). Partial books wait for Friday / month-end; do not trade mid-period gaps.
+                all_cash = bool((shares <= 0).all())
+                missed = ((shares <= 0) & (w.loc[last] > 0)) if all_cash else pd.Series(False, index=cols)
             prev = w.loc[last].where(~missed, np.nan)
         full = pd.Series(False, index=todo) if full is None else full.reindex(todo).fillna(False).astype(bool)
         soon = inp.get("soon") if not cfg.get("weights") and cfg.get("earnings", "winner") is not None else None

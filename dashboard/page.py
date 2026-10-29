@@ -12,6 +12,14 @@ from dashboard.short_stock import load_short_history
 from dashboard.signals import rebalance_plan, signal_board
 from dashboard.style import esc, show_html
 
+
+@st.cache_data(ttl=600, max_entries=4, show_spinner=False)
+def _live_ranks_cached(signal_mtime):
+    """Home board ranks from sleeves; keyed on signal table mtime so we do not rebuild strategy_targets every rerun."""
+    import sleeves
+    return sleeves.live_ranks()
+
+
 def build_page():
     mtime = db.mtime(SIGNAL_CSV)
     df = load_signals(mtime)
@@ -19,8 +27,7 @@ def build_page():
     import sector_mapping as sm                   # a stock commented out of the list leaves the page at once (Oct 19)
     latest = latest[latest['Symbol'].isin(set(sm.stock_symbols))]
     try:                                          # live RS short-term rank / score (not the pipeline's old columns)
-        import sleeves
-        lr = sleeves.live_ranks()
+        lr = _live_ranks_cached(mtime)
         latest = latest.assign(Strategy_Rank=latest["Symbol"].map(lambda s: lr.get(s, (float("nan"),))[0]),
                                Strategy_Score=latest["Symbol"].map(lambda s: lr.get(s, (None, float("nan")))[1]))
         latest = latest.assign(combined_signal=latest["Strategy_Score"])

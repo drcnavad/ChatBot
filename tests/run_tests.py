@@ -13,6 +13,7 @@ TESTS = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswi
 def main():
     fast = "--fast" in sys.argv
     env = dict(os.environ, PYTHONPATH=ROOT + os.pathsep + os.environ.get("PYTHONPATH", ""), PYTHONDONTWRITEBYTECODE="1", STOCK_ANALYSIS_LIVE_HOLDINGS="off",
+               STOCK_ANALYSIS_LAZY_EXPANDERS="off",
                PYTHONWARNINGS="ignore",   # tests never write the real Reports/run_log.csv
                STOCK_ANALYSIS_RUN_LOG=os.path.join(tempfile.mkdtemp(), "run_log.csv"),
                STOCK_ANALYSIS_EARNINGS_STOP_STATE=os.path.join(tempfile.mkdtemp(), "earnings_stop_state.json"),   # never the real stop sales

@@ -12,6 +12,20 @@ from dashboard.details.tax_view import render_tax_view
 from dashboard.details.trade_audit import render_trade_audit
 from dashboard.settings import rules_text
 
+
+def _lazy(title, key, render_fn, expanded=False, always=False):
+    """Expander that skips heavy work until opened (collapsed panels cost a button click, not a cold Alpaca/tax load).
+    STOCK_ANALYSIS_LAZY_EXPANDERS=off (tests) renders every panel immediately so AppTest can read markdown/tables."""
+    if os.getenv("STOCK_ANALYSIS_LAZY_EXPANDERS", "on") == "off":
+        always = True
+    with st.expander(title, expanded=expanded):
+        if always or expanded or st.session_state.get(f"_lazy_{key}"):
+            render_fn()
+        elif st.button(f"Load · {title.split('·')[0].strip()}", key=f"_lazy_btn_{key}"):
+            st.session_state[f"_lazy_{key}"] = True
+            st.rerun()
+
+
 def render_strategy_tab(p):
     """Strategy tab: last decision, forward test (Top 5 consensus, chart, leaderboard with rule/holdings on hover), data freshness and settings."""
     with st.expander("Last decision · portfolio and RS short-term ranks", expanded=True):
@@ -24,20 +38,18 @@ def render_strategy_tab(p):
         render_current_holdings()
         render_forward_test(p)
         render_live_push()
-    with st.expander("Data freshness and settings", expanded=False):
-        render_data_and_settings(p)
+    _lazy("Data freshness and settings", "data_settings", lambda: render_data_and_settings(p), expanded=False)
+
 
 def _prefetch():
     """Read the tab's slow live-account data in parallel (portfolio history, then trade audit and tax inputs once the
-    fills are known) so each panel below finds it cached: the cold load costs the slowest read, not their sum."""
+    fills are known) so each panel below finds it cached: the cold load costs the slowest read, not their sum.
+    Skips audit/tax prefetch until those expanders are opened (lazy)."""
     import threading
     from concurrent.futures import ThreadPoolExecutor
-    from datetime import datetime
     from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
     from dashboard.data import refresh_slot
-    from dashboard.details import equity_chart as ec, tax_view as tv, trade_audit as ta
-    from dashboard.details.live_holdings import holdings_this_run
-    from dashboard.settings import CT
+    from dashboard.details import equity_chart as ec
     ctx = get_script_run_ctx()
 
     def quiet(fn, *a):
@@ -46,14 +58,14 @@ def _prefetch():
             fn(*a)
         except Exception:                   # the panel itself shows the error
             pass
-    with ThreadPoolExecutor(3) as ex:
+    with ThreadPoolExecutor(2) as ex:
         if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") != "off":
             ex.submit(quiet, ec.equity_series, ec.DATA.get(st.session_state.get("eq_view", "1D"), ec.SINCE), refresh_slot())
-        data, err = holdings_this_run()
-        if not err:
-            key = f"{datetime.now(CT):%Y-%m-%d %H}-{len(data['fills'])}"
-            ex.submit(quiet, ta._read_audit, key, tuple(data["positions"]), tuple(data["fills"]))
-            ex.submit(quiet, tv._read_tax_inputs, key)
+        # Warm the holdings cache used by Live holdings + Strategy live_returns (same refresh slot).
+        if os.getenv("STOCK_ANALYSIS_LIVE_HOLDINGS", "on") != "off":
+            from dashboard.details.live_holdings import holdings_this_run
+            ex.submit(quiet, holdings_this_run)
+
 
 def render_trading_tab(p):
     """Trading Account tab: live holdings, trade audit, tax view, strategy rules (the portfolio and the RS short-term
@@ -63,10 +75,30 @@ def render_trading_tab(p):
         render_equity_chart()
     with st.expander("Live holdings (Alpaca account)", expanded=True):
         render_live_holdings()
-    with st.expander("Trade audit · gain / loss per sale (read-only)", expanded=False):
+
+    def _audit():
+        from datetime import datetime
+        from dashboard.details.live_holdings import holdings_this_run
+        from dashboard.details import trade_audit as ta
+        from dashboard.settings import CT
+        data, err = holdings_this_run()
+        if not err:
+            key = f"{datetime.now(CT):%Y-%m-%d %H}-{len(data['fills'])}"
+            ta._read_audit(key, tuple(data["positions"]), tuple(data["fills"]))
         render_trade_audit()
-    import tax_lots as tl
-    with st.expander(f"Tax view · live account since {tl.TAX_START:%b %-d, %Y} (estimate, not tax advice)", expanded=False):
+
+    def _tax():
+        from datetime import datetime
+        from dashboard.details.live_holdings import holdings_this_run
+        from dashboard.details import tax_view as tv
+        from dashboard.settings import CT
+        data, err = holdings_this_run()
+        if not err:
+            key = f"{datetime.now(CT):%Y-%m-%d %H}-{len(data['fills'])}"
+            tv._read_tax_inputs(key)
         render_tax_view(p)
-    with st.expander("Strategy rules", expanded=False):
-        st.markdown(rules_text())
+
+    _lazy("Trade audit · gain / loss per sale (read-only)", "trade_audit", _audit)
+    import tax_lots as tl
+    _lazy(f"Tax view · live account since {tl.TAX_START:%b %-d, %Y} (estimate, not tax advice)", "tax_view", _tax)
+    _lazy("Strategy rules", "rules", lambda: st.markdown(rules_text()))

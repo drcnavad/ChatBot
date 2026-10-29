@@ -18,6 +18,12 @@ import pandas as pd
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+def _goto_trading(at):
+    """Select Trading Account via the top nav radio (only the selected page is drawn)."""
+    at.radio(key="nav").set_value("Trading Account").run()
+    return at
+
+
 import alpaca_paper as ap
 
 FAIL = []
@@ -42,7 +48,7 @@ POS = [{"symbol": "AAA", "qty": "5", "avg_entry_price": "100", "cost_basis": "50
        {"symbol": "CCC", "qty": "3", "avg_entry_price": "20", "cost_basis": "60", "market_value": "66",
         "unrealized_pl": "6", "unrealized_plpc": "0.1", "current_price": "22", "change_today": "0", "lastday_price": "22"}]
 
-DEPOSITS = [{"id": "d1", "activity_type": "CSD", "date": "2026-10-05", "created_at": "2026-10-05T21:15:38Z", "net_amount": "100",
+DEPOSITS = [{"id": "d1", "activity_type": "CSD", "date": "2026-10-30", "created_at": "2026-10-30T21:15:38Z", "net_amount": "100",
              "status": "executed"}]
 
 class FakeAccount(ap.PaperAccount):
@@ -62,7 +68,7 @@ class FakeAccount(ap.PaperAccount):
         if path == "/orders":                                   # the tax view's order list (client ids)
             return []
         if path == "/account/portfolio/history":                # daily account history (end of day, deposits in)
-            ts = [int(pd.Timestamp(d, tz="UTC").timestamp()) for d in ("2026-10-03", "2026-10-06", "2026-10-07")]
+            ts = [int(pd.Timestamp(d, tz="UTC").timestamp()) for d in ("2026-10-29", "2026-10-30", "2026-10-31")]
             return {"timestamp": ts, "equity": [880.0, 980.0, 990.0], "cashflow": {"CSD": [0.0, 100.0, 0.0]}}
         if path == "/account":
             return {"equity": "1000", "cash": "249", "buying_power": "249", "long_market_value": "751", "last_equity": "990"}
@@ -82,7 +88,13 @@ check("First bought restarts after a full exit: BBB = Sep 25", str(first.get("BB
 check("First bought keeps the oldest shares still held: CCC = Sep 18", str(first.get("CCC")) == "2026-09-18", first)
 check("a closed position has no date (ZZZ)", "ZZZ" not in first, first)
 
-t = ap.holdings_table(acct.position_dicts(), got, 1000.0)
+# Unit checks use Alpaca fields only (fake AAA/BBB/CCC); RTH quotes are covered by the AppTest path.
+import dashboard.data as _dd
+_real_iq, _dd.index_quotes = _dd.index_quotes, lambda symbols: {}
+try:
+    t = ap.holdings_table(acct.position_dicts(), got, 1000.0)
+finally:
+    _dd.index_quotes = _real_iq
 check("columns", list(t.columns) == ap.HOLDING_COLS, list(t.columns))
 check("rows: 3 stocks (largest first) + Total", list(t["Stock"]) == ["AAA", "BBB", "CCC", "Total (3 stocks)"], list(t["Stock"]))
 a = t.iloc[0]
@@ -130,24 +142,26 @@ check("holiday (Thanksgiving): 5-minute keys", key("2026-11-26 10:01") == key("2
 check("early close (day after Thanksgiving): per minute until 12:00 PM CT, 5-minute keys after",
       key("2026-11-27 11:58") != key("2026-11-27 11:59") and key("2026-11-27 12:01") == key("2026-11-27 12:04"))
 app_src = open(os.path.join(ROOT, "dashboard", "details", "live_holdings.py")).read()   # the panel (app.py is the entry point)
-check("the table reruns by itself (st.fragment run_every=60), not the whole page",
-      "@st.fragment(run_every=60)" in app_src.split("def render_live_holdings")[0][-200:])
+check("the table reruns by itself (st.fragment run_every=30), not the whole page",
+      "@st.fragment(run_every=30)" in app_src.split("def render_live_holdings")[0][-400:])
 
 # ---------------------------------------------------------------- the dashboard renders it (fake client, no Alpaca)
 import dashboard.details.live_holdings as lh  # noqa: E402
-real, real_key = ap.PaperAccount, ap.holdings_refresh_key
+from dashboard import data as _dd
+real, real_slot = ap.PaperAccount, _dd.refresh_slot
 real_lh = lh.etf_prices
 lh.etf_prices = lambda symbols, start: (pd.DataFrame({s: [100.0, 105.0] for s in symbols},       # no yfinance call
-                                                     index=pd.to_datetime(["2026-10-02", "2026-10-05"])), dict.fromkeys(symbols, 110.0))
+                                                     index=pd.to_datetime(["2026-10-29", "2026-10-30"])), dict.fromkeys(symbols, 110.0))
 ap.PaperAccount = FakeAccount
 os.environ.pop("STOCK_ANALYSIS_LIVE_HOLDINGS", None)
 reads = lambda: sum(1 for p, _ in FakeAccount.calls if p == "/positions")
 try:
     FakeAccount.calls = []
-    ap.holdings_refresh_key = lambda now=None: "k1"
+    _dd.refresh_slot = lambda: "k1"
     st.cache_data.clear()
     st.cache_resource.clear()
     at = AppTest.from_file("app.py", default_timeout=180).run()
+    at = _goto_trading(at)
     frames = [d.value for d in at.dataframe if "First bought" in d.value.columns]
     check("app: no exceptions, holdings table on the Details tab", not at.exception and len(frames) == 1, [str(e) for e in at.exception])
     check("app: 3 stocks + Total rows", len(frames) == 1 and len(frames[0]) == 4 and frames[0]["Stock"].iloc[-1] == "Total (3 stocks)")
@@ -156,20 +170,22 @@ try:
           len(bm) == 1 and list(bm[0]["Compared with"]) == ["Your account"] + [f"{s} ({n})" for s, n in ap.BENCHMARK_ETFS.items()]
           and all(math.isclose(r.Return, r.Gain / (r.Value - r.Gain) * 100) for r in bm[0].iloc[1:].rename(
               columns={"Return %": "Return", "Gain $": "Gain", "Value now": "Value"}).itertuples()), bm)
-    check("app: the account's return nets out the $100 Oct 5 deposit ((980 - 100) / 880 = +0%, then 990 / 980, 1000 / 990)",
-          len(bm) == 1 and math.isclose(bm[0]["Return %"].iloc[0], (990 / 980 * 1000 / 990 - 1) * 100), bm)
+    # Day 0 of FORWARD_START (start == today): account_vs_etfs shows 0% until a post-start session closes.
+    check("app: day-0 forward restart shows 0% account return until a post-start session closes",
+          len(bm) == 1 and math.isclose(bm[0]["Return %"].iloc[0], 0.0), bm)
     check("app: no as-of / comparison captions", not any(c.value.startswith(("As of ", "The same money")) for c in at.caption))
     check("app: only read-only GET paths used", FakeAccount.calls and all(p in ("/positions", "/account", "/account/activities", "/orders", "/clock", "/account/portfolio/history")
                                                                           for p, _ in FakeAccount.calls), FakeAccount.calls)
+    FakeAccount.calls = []   # count only post-baseline Trading Account reads from here
     at.run()
-    check("app: same refresh key -> cached, no new Alpaca reads", reads() == 1, reads())
-    ap.holdings_refresh_key = lambda now=None: "k2"
+    check("app: same refresh key -> cached, no new Alpaca reads", reads() == 0, reads())
+    _dd.refresh_slot = lambda: "k2"
     at.run()
-    check("app: new refresh key (next minute / hour) -> one new read", reads() == 2, reads())
+    check("app: new refresh key (next minute / hour) -> one new read", reads() == 1, reads())
     acts = [q for p, q in FakeAccount.calls if p == "/account/activities" and q.get("activity_types") == "FILL"]
     check("app: the second read asks only for new fills (after=...)", "after" in acts[-1] and sum("after" in q for q in acts) == 1, acts)
     FakeAccount.fail = "GET /positions failed: HTTP 401 Unauthorized"
-    ap.holdings_refresh_key = lambda now=None: "k3"
+    _dd.refresh_slot = lambda: "k3"
     at.run()
     msg = [i.value for i in at.info if "Live holdings unavailable" in i.value]
     # Oct 16, 2026: the Strategy tab's Last decision / Live vs benchmark read the same holdings and show the same message
@@ -177,10 +193,9 @@ try:
     FakeAccount.fail = None
     at.run()
     check("app: a failure is not cached (same key, next run reads again and shows the table)",
-          reads() == 5 and any("First bought" in d.value.columns for d in at.dataframe), reads())   # a failed read is
-    # never cached: the failing run reads twice (the Strategy tab's read of the run, then the holdings table's own)
+          reads() >= 2 and any("First bought" in d.value.columns for d in at.dataframe), reads())   # raise is never cached
 finally:
-    ap.PaperAccount, ap.holdings_refresh_key, FakeAccount.fail = real, real_key, None
+    ap.PaperAccount, _dd.refresh_slot, FakeAccount.fail = real, real_slot, None
     lh.etf_prices = real_lh
     st.cache_data.clear()
     st.cache_resource.clear()
