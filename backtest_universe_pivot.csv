@@ -1,0 +1,58 @@
+strategy,2025,2026YTD,Combined,MaxDD,Trades,Rank
+RS standard (Fridays only),36.8,25.27,73.16,-19.18,795,1
+50/50: RS short-term + RS Fridays,32.69,24.33,66.63,-17.02,1938,2
+Monthly,31.84,21.73,63.03,-20.93,265,3
+Now: top 15,34.75,19.35,62.55,-18.75,1387,4
+Live half: Sector rotation Mondays (63d),34.81,19.45,62.37,-25.66,837,5
+RS short-term (weekly + Mon–Thu sells),28.58,23.39,60.09,-14.72,1419,6
+Now: 30% technical + 70% RS,25.85,20.41,53.88,-18.13,1088,7
+Sector rotation,20.76,23.76,52.23,-20.32,802,8
+"Worst 3 sectors 14d, +10%/-3%",30.13,13.99,49.95,-12.86,652,9
+Oct 2 rules (pinned),24.28,18.0,49.4,-21.44,917,10
+Old live: Low vol + Sector rotation (Oct 16-26),18.68,18.87,45.99,-16.42,652,11
+Now: longer RS (63/126/252 days),17.25,21.97,45.71,-12.33,385,12
+50/50: Low vol + SR every 2 weeks 63d,12.8,26.01,44.8,-18.66,701,13
+"C6, 4 per sector, no earnings skip",26.56,11.99,44.43,-21.26,1003,14
+QQQ buy & hold,21.01,18.75,43.42,-22.77,1,15
+"Worst 3 sectors 1M, +10%/-3%",20.27,12.62,40.87,-20.06,697,16
+"Live 50/50, top 10 each half",16.59,19.21,39.68,-18.67,1004,17
+"50/50: Low vol + SR Friday swap, keep top 10",14.35,24.28,39.0,-18.99,937,18
+"Live 50/50, top 5, sector on Mondays",25.52,8.51,37.8,-19.34,640,19
+52-week high momentum,9.94,23.48,34.9,-11.44,367,20
+SPY buy & hold,18.01,13.94,34.7,-18.75,1,21
+Tech score 80/60 + TP20,15.69,6.37,32.28,-18.24,1154,22
+Trend following 50/200,14.98,12.06,31.63,-15.79,331,23
+"Worst 3 sectors 14d, +15%/-3%",14.38,10.63,31.16,-16.5,550,24
+Technical score only,12.24,11.45,27.83,-16.47,2019,25
+"Now: RS, calmer half of the list",10.49,14.11,27.17,-11.57,1017,26
+200-day high,13.92,9.26,26.37,-9.32,453,27
+50/50: Low vol + Vol-adjusted momentum weekly,3.09,21.21,26.35,-19.93,673,28
+Dual MA + RSI filter,10.82,13.24,25.95,-9.53,293,29
+"Worst 3 sectors 1M, +15%/-3%",12.79,19.85,25.44,-19.53,606,30
+"200-day breakout, 2 days above, exit 2% below",2.43,10.19,24.08,-19.64,461,31
+MA50 x MA200 (golden cross),8.56,12.33,23.24,-6.84,207,32
+Tech score 70/60/90,4.69,17.07,22.45,-22.75,2607,33
+Donchian 20-day breakout,6.36,16.13,20.94,-14.81,887,34
+Golden cross + MACD confirm,10.7,7.95,20.75,-17.0,966,35
+Quant + relative strength,14.29,3.71,20.56,-21.87,990,36
+"Worst 3 sectors 2M, +10%/-3%",13.09,0.02,17.8,-21.11,876,37
+50/50: Low vol + Calmer half weekly,1.42,14.62,17.17,-14.31,865,38
+Live half: Low vol monthly,-1.63,18.98,17.0,-12.46,182,39
+Low volatility in uptrend,-1.46,18.04,16.8,-12.31,190,40
+MA10 x MA30,0.69,22.83,15.39,-24.51,324,41
+Buy the dip,9.54,5.14,14.93,-20.32,294,42
+Minervini trend template,3.06,2.79,14.92,-11.73,515,43
+Volatility-adjusted momentum,-4.63,16.72,12.92,-25.68,417,44
+6-month momentum,0.39,10.89,12.58,-31.68,365,45
+Bollinger mean reversion,10.67,0.89,12.42,-10.18,453,46
+MACD cross,9.87,1.33,10.84,-19.71,1010,47
+Quant Score top 5,-3.64,7.81,7.58,-26.9,731,48
+"ATR dip buy, sell on signal",9.78,-3.52,6.05,-26.99,251,49
+ATR dip buy (top 10),4.86,-0.3,4.55,-6.62,42,50
+Quant Score top 10,0.26,2.06,3.8,-19.82,1295,51
+Company fundamentals,0.0,0.31,0.31,-2.42,10,52
+Quality + momentum,0.0,-0.12,-0.12,-5.37,8,53
+Earnings drift,10.13,-10.97,-1.0,-29.95,283,54
+"200-day breakout, 4 days above, exit 2% below",-14.8,14.15,-1.06,-25.12,329,55
+EMA 9/21 cross,6.55,-6.55,-3.51,-21.83,617,56
+EMA 9/21 + ADX>25,-1.03,-3.13,-4.28,-5.88,43,57
