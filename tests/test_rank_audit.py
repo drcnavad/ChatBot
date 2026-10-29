@@ -49,7 +49,9 @@ def held_before(D):
 print("RS benchmark:", MODE)
 
 sa = db.read_csv("Reports/signal_analysis.csv", parse_dates=["Date"])
-bars = be.load_long_bars()
+# Same path as the pipeline / forward_test: bars_daily (SoT) + keep_decision_bars (2:30 PM CT ratios on decision days).
+# now=2000-01-01 so this audit only reads Reports/decision_bars.csv and never rewrites it.
+bars = be.keep_decision_bars(be.load_long_bars(), now=be.datetime(2000, 1, 1, tzinfo=be.EASTERN))
 close = bars.pivot(index="Date", columns="Symbol", values="Close").sort_index()
 _missing = sorted(set(sm.tradable_symbols) - set(bars["Symbol"]))
 # the universe the saved file was computed on: a stock added to the list joins on the next pipeline run
@@ -66,19 +68,13 @@ if _missing:   # stop here with a clear message (the audit below needs every sto
 _WT = be.WINNER.get("w_tech", 0.5)
 etf_of = {s: dict((n, e) for e, n in sm.sector_etfs.items()).get(sm.symbol_sector.get(s)) for s in tradable}
 
-# raw closes agree with the pipeline's closes?
+# Pipeline closes must match bars_daily (+ decision-day 2:30 bars). Strict: >0.1% is a real data bug.
 m = sa.merge(bars[["Symbol", "Date", "Close"]], on=["Symbol", "Date"], suffixes=("", "_raw"))
-_rel = np.nanmax(np.abs(m.Close / m.Close_raw - 1))   # relative: a dividend / SIP revision shifts old closes
+_rel = np.nanmax(np.abs(m.Close / m.Close_raw - 1))
 print(f"Close check: {len(m)} rows, max relative diff {_rel:.4%}")
-# Pipeline writes signal_analysis from live bars at run time; bars_daily can be refreshed later (splits,
-# dividends, SIP corrections). Drift under ~5% is data lag, not a scoring bug — ranks below still audit the math.
-# Fail hard only when closes diverged enough that ranks would be meaningless (>5%).
-CLOSE_DRIFT = _rel >= 0.05
-CLOSE_SOFT = 0.01 <= _rel < 0.05   # post-pipeline bar refresh; ranks still auditable
-expect(_rel < 0.05, "closes differ from the bar cache by 5% or more (re-run the pipeline after refreshing bars_daily)")
-if CLOSE_SOFT:
-    print(f"NOTE: closes drifted {_rel:.4%} vs bars_daily (post-pipeline bar refresh). RS/Strategy_Score "
-          f"diffs below are expected until the next pipeline run; Strategy_Rank is the hard audit.")
+CLOSE_SOFT = False   # no soft-pass: closes must agree so RS/Strategy_Score audits stay hard
+expect(_rel < 0.001, "closes differ from bars_daily (+ decision bars) by 0.1% or more "
+       "(refresh/restate bars_daily, then re-run the pipeline)")
 
 CACHE_MAX = close.index.max().date()
 uncovered = sorted({pd.Timestamp(d).date() for d in sa.Date.unique()} - set(close.index.date))

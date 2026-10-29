@@ -386,12 +386,68 @@ def load_long_bars(symbols=None, start=None, end=None):
     """Daily OHLCV from the SQLite bars_daily table (single source of truth). Same columns as fetch_daily_bars."""
     return db.load_bars(symbols=symbols, start=start, end=end)
 
-def refresh_daily_bars(symbols=None, start=LONG_START, data_client=None, overlap_days=None, close_buffer_min=None):
-    """Incremental append-only refresh of bars_daily.
+# Relative Close drift on the overlap window that triggers a full-history restatement for that symbol.
+# Alpaca Adjustment.ALL restates every prior close after a split or dividend; append-only IGNORE would keep the
+# pre-event prices forever. 0.05% catches real corporate-action restatements and ignores SIP penny noise.
+ADJUSTMENT_DRIFT_TOL = 0.0005
 
-    For each symbol, fetches only from max(stored_max - overlap, start) forward (new symbols: from `start`).
-    Writes via db.append_bars: INSERT OR IGNORE for history, INSERT OR REPLACE only for the newest session in the
-    batch (today's possibly-partial bar). Never rebuilds the table. Returns the list of symbols that were fetched.
+def restate_daily_bars(symbols=None, start=LONG_START, data_client=None, close_buffer_min=None):
+    """Replace stored OHLCV for `symbols` with a fresh Alpaca Adjustment.ALL fetch from `start`.
+
+    Use after backup when corporate actions (or a one-shot repair) require restating history. Daily freshness
+    stays on refresh_daily_bars (append-only + short overlap REPLACE); this is the explicit full rewrite.
+    Returns the symbols that were rewritten.
+    """
+    symbols = list(dict.fromkeys(symbols if symbols is not None else (TRADABLE + BENCHMARKS + SECTOR_ETFS)))
+    if not symbols:
+        return []
+    try:
+        bars = fetch_daily_bars(symbols, start=start, data_client=data_client)
+    except Exception as e:
+        raise RuntimeError(f"bars_daily restate failed for {symbols[:5]}{'...' if len(symbols) > 5 else ''}: {e}") from e
+    bars, _ = drop_partial_last_bar(bars, close_buffer_min=close_buffer_min)
+    if not len(bars):
+        return []
+    # REPLACE every fetched date (history + newest session)
+    db.append_bars(bars, replace_from=pd.Timestamp(start))
+    log.warning("bars_daily: restated %d symbols from %s (%d rows)", bars["Symbol"].nunique(), start, len(bars))
+    return sorted(set(bars["Symbol"]))
+
+def _adjustment_drift_symbols(fetched, stored_max_by, overlap_days, tol=ADJUSTMENT_DRIFT_TOL):
+    """Symbols whose overlap closes disagree with bars_daily by more than `tol` (median relative |diff|).
+
+    Compares only settled overlap dates (not the newest session, which may still be partial). A near-constant
+    ratio across the overlap means Alpaca restated Adjustment.ALL after a split/dividend and bars_daily is stale.
+    """
+    if fetched is None or not len(fetched) or not stored_max_by:
+        return []
+    newest = fetched["Date"].max()
+    settled = fetched[fetched["Date"] < newest]
+    if not len(settled):
+        return []
+    # Load the overlapping stored rows once
+    syms = sorted(set(settled["Symbol"]) & set(stored_max_by))
+    if not syms:
+        return []
+    cut = min(pd.Timestamp(stored_max_by[s]) - pd.Timedelta(days=overlap_days) for s in syms)
+    old = db.load_bars(symbols=syms, start=cut)
+    if not len(old):
+        return []
+    m = settled.merge(old[["Symbol", "Date", "Close"]], on=["Symbol", "Date"], suffixes=("_new", "_old"))
+    if not len(m):
+        return []
+    m["rel"] = (m["Close_new"] / m["Close_old"] - 1).abs()
+    med = m.groupby("Symbol")["rel"].median()
+    return sorted(med[med >= tol].index)
+
+def refresh_daily_bars(symbols=None, start=LONG_START, data_client=None, overlap_days=None, close_buffer_min=None):
+    """Incremental refresh of bars_daily (single source of truth).
+
+    For each symbol, fetches from max(stored_max - overlap, start) forward (new symbols: from `start`).
+    Writes via db.append_bars with REPLACE for the whole overlap+new window (so SIP corrections in the last
+    few days land) and IGNORE only for anything older that slipped into the batch. When the overlap closes
+    disagree with stored history by ADJUSTMENT_DRIFT_TOL or more (split/dividend restatement), that symbol is
+    fully restated from `start` via restate_daily_bars. Returns the list of symbols that were fetched.
     close_buffer_min is passed to drop_partial_last_bar (forward_test uses AFTER_CLOSE_BAR_MIN = 3:05 PM CT).
     """
     symbols = list(dict.fromkeys(symbols if symbols is not None else (TRADABLE + BENCHMARKS + SECTOR_ETFS)))
@@ -399,7 +455,6 @@ def refresh_daily_bars(symbols=None, start=LONG_START, data_client=None, overlap
         return []
     overlap_days = BARS_REFRESH_OVERLAP_DAYS if overlap_days is None else int(overlap_days)
     max_by = db.bars_symbol_max_dates(symbols)
-    # One fetch start for the batch = earliest needed (missing symbols use `start`; others use max - overlap)
     floor = pd.Timestamp(start)
     starts = []
     for s in symbols:
@@ -415,20 +470,31 @@ def refresh_daily_bars(symbols=None, start=LONG_START, data_client=None, overlap
     new, _ = drop_partial_last_bar(new, close_buffer_min=close_buffer_min)
     if not len(new):
         return []
-    # Per-symbol: drop rows on or before (stored_max - overlap) so we only present the overlap+new window;
-    # settled history before that is never sent to append_bars (defense in depth with INSERT OR IGNORE).
-    keep = []
+    # Detect Adjustment.ALL restatements before we overwrite the overlap (compare against current DB).
+    drifted = _adjustment_drift_symbols(new, max_by, overlap_days) if overlap_days > 0 else []
+    # Per-symbol: keep only the overlap+new window for the normal path.
+    keep, cuts = [], []
     for s, g in new.groupby("Symbol", sort=False):
+        if s in drifted:
+            continue  # restated below from `start`
         if s in max_by:
             cut = pd.Timestamp(max_by[s]) - pd.Timedelta(days=overlap_days)
             g = g[g["Date"] >= cut]
+            cuts.append(cut)
         keep.append(g)
-    new = pd.concat(keep, ignore_index=True) if keep else new.iloc[0:0]
-    if not len(new):
-        return []
-    # REPLACE only the newest session (partial -> final); everything older in the batch is IGNORE
-    db.append_bars(new, replace_from=new["Date"].max())
-    return sorted(set(new["Symbol"]))
+    touched = set()
+    if keep:
+        batch = pd.concat(keep, ignore_index=True)
+        if len(batch):
+            # REPLACE the entire overlap+new window (not just the newest day) so corrections stick.
+            replace_from = min(cuts) if cuts else batch["Date"].min()
+            db.append_bars(batch, replace_from=replace_from)
+            touched |= set(batch["Symbol"])
+    if drifted:
+        log.warning("bars_daily: adjustment drift on %s — restating from %s", drifted, start)
+        touched |= set(restate_daily_bars(drifted, start=start, data_client=data_client,
+                                          close_buffer_min=close_buffer_min))
+    return sorted(touched)
 
 def ensure_long_cache(cache_name=None, start=LONG_START, data_client=None):
     """Make sure bars_daily has every TRADABLE + BENCHMARKS + SECTOR_ETFS symbol (append-only).

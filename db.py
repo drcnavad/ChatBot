@@ -18,8 +18,11 @@ float_precision ...) behaves as before and numbers / dates / index round-trip ex
 file append did. A .csv file still on disk with no table yet is read (and then imported on the next write).
 
 Daily OHLCV lives in the typed table bars_daily (PRIMARY KEY Symbol, Date): load_bars / append_bars.
-Refreshes are append-only (INSERT OR IGNORE for history; INSERT OR REPLACE for the newest session).
-benchmark_prices stays wide (unique Date) and is written with append_benchmark_prices."""
+Normal refreshes are append-only (INSERT OR IGNORE for settled history; INSERT OR REPLACE for the overlap
+window + newest session). When Alpaca Adjustment.ALL restates history after a split/dividend,
+backtest_engine.restate_daily_bars (after a DB backup) REPLACE-writes the affected symbols from LONG_START;
+refresh_daily_bars detects that drift on the overlap and triggers the restatement. benchmark_prices stays
+wide (unique Date) and is written with append_benchmark_prices."""
 import csv
 import fnmatch
 import io
@@ -345,13 +348,13 @@ def load_bars(symbols=None, start=None, end=None):
     return df
 
 def append_bars(df, replace_from=None):
-    """Append-only write into bars_daily. Never drops or rebuilds the table.
+    """Write OHLCV into bars_daily without dropping the table.
 
-    Choice: INSERT OR IGNORE for settled history; INSERT OR REPLACE for dates on/after `replace_from`
-    (default = the max Date in `df`, i.e. only the newest session). That lets today's possibly-partial
-    bar become the final close without rewriting older days, and blocks accidental history rewrites.
-    Pass replace_from=min_date_of_overlap to also refresh a short correction window after an incremental fetch.
-    Returns the number of rows presented for write (not the number newly inserted)."""
+    Choice: INSERT OR IGNORE for dates before `replace_from`; INSERT OR REPLACE for dates on/after it
+    (default = the max Date in `df`, i.e. only the newest session). Daily refresh passes the overlap
+    cut so SIP corrections in the last few days stick; restate_daily_bars passes LONG_START so a
+    split/dividend Adjustment.ALL rewrite can replace the whole history for those symbols (always
+    after a DB backup). Returns the number of rows presented for write."""
     ensure_bars_daily()
     if df is None or not len(df):
         return 0
