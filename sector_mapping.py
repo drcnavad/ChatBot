@@ -39,8 +39,9 @@ stock_symbols = [
 # do_not_sell: never sold or trimmed (at a rebalance too). The earnings-day stop skips it too.
 # SHOP kept (Chirag); Oct 28, 2026 (Chirag): AI names in net debt / bubble risk — WULF, SMCI, MRVL, VRT, ORCL (AVGO removed from block same day).
 # Oct 28, 2026 (Chirag): high valuation / AI bubble risk — ALAB, BE.
-# Oct 28, 2026 (Chirag): removed TSLA and AVGO from do_not_buy (still in universe).
-do_not_buy = ['AMD', 'ARM', 'PANW', 'SHOP', 'WULF', 'SMCI', 'MRVL', 'VRT', 'ORCL', 'ALAB', 'BE']
+# Oct 28, 2026 (Chirag): removed AVGO from do_not_buy (still in universe); TSLA re-blocked same day with LYV.
+# Oct 28, 2026 (Chirag): high valuation, LYV fwd P/E ~91, TSLA fwd P/E ~188.
+do_not_buy = ['AMD', 'ARM', 'PANW', 'SHOP', 'WULF', 'SMCI', 'MRVL', 'VRT', 'ORCL', 'ALAB', 'BE', 'LYV', 'TSLA']
 do_not_sell = []   # sleeve removed Oct 15 evening (Chirag): live = monthly low volatility from Fri Oct 16, 2026
 # Defensive sleeve of Oct 15, 2026: NOT live any more (backtest_engine.WINNER['sleeve'] False); kept only for the pinned
 # forward-test 'Now' strategies (forward_test NOW sleeve=True).
