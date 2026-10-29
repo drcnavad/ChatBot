@@ -2,9 +2,10 @@
 
 Live from the 2:30 PM CT run of Tue Oct 27, 2026 (Chirag, Oct 27, final: "keep it simple and do RS short-term (weekly +
 Mon–Thu sells)"): 100% forward_test.py's "RS short-term (weekly + Mon–Thu sells)" - relative strength over 10/21/63 days,
-top 10 + the defensive stocks (sector_mapping.defensive), Friday rebalance (the week's last session) and the Mon-Thu exit
-check (a stock worse than rank 20 is sold and replaced by the best top-10 stock not held), earnings within 5 days not
-newly bought, soft QQQ regime, do_not_buy never bought, do_not_sell never sold.
+top 10 equal weight (defensive sleeve removed Oct 29, 2026), Friday rebalance (the week's last session) and the Mon-Thu
+exit check (a stock worse than rank 20 is sold and replaced by the next eligible stock ranked 20 or better; earnings
+within 5 days skipped), earnings within 5 days not newly bought, soft QQQ regime, do_not_buy never bought, do_not_sell
+never sold.
 
 Targets = forward_test.strategy_targets of that line (the very code the backtest / forward test runs); trades like
 forward_test.update_strategies: names whose target changed (every name on the Friday rebalance) go to their target

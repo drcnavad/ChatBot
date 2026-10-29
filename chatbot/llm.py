@@ -167,7 +167,7 @@ def stock_info(sym, account=None):
                 lr = sleeves.live_ranks()
                 rk = lr.get(sym)
                 out.append(f"Live strategy (Live: RS short-term) rank: " + (f"{rk[0]} of {len(lr)} ranked (1 = best), RS score {rk[1]:.2f}"
-                           if rk else "not ranked (not eligible / score not above 0)") + "; the top 10 + defensive stocks are held.")
+                           if rk else "not ranked (not eligible / score not above 0)") + "; the top 10 are held (equal weight, no defensive sleeve).")
             except Exception:
                 out.append(f"(Strategy_Rank is out of {s['Symbol'].nunique()} watchlist stocks, 1 = best)")
             try:

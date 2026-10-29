@@ -13,9 +13,9 @@ Keys live in `.env` (`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY`, never prin
 ## Live strategy (`backtest_engine.WINNER`, from the 2:30 PM CT run of Tue Oct 27, 2026)
 "Live: RS short-term": one line with its own cash and share counts in `Reports/sleeve_ledger.json` (v4,
 `sleeves.py`), run exactly as its `forward_test.py` line:
-- **100% RS short-term (weekly + Mon–Thu sells):** relative strength over 10/21/63 days, top 10 + the defensive stocks,
-  equal weight, 99% invested; full rebalance every Friday 2:30 PM CT (Thursday on a holiday); Mon-Thu 2:30 PM a holding
-  worse than rank 20 is sold and refilled from the top 10.
+- **100% RS short-term (weekly + Mon–Thu sells):** relative strength over 10/21/63 days, top 10 equal weight (~9.9% each),
+  99% invested (defensive sleeve removed Oct 29, 2026); full rebalance every Friday 2:30 PM CT (Thursday on a holiday);
+  Mon-Thu 2:30 PM a holding worse than rank 20 is sold and refilled by the next eligible stock ranked 20 or better.
 - No new buy with earnings within 5 days; QQQ below its 200-day average: weights halved. No idle cash: the weight of a
   blocked or unpriced pick goes pro rata to the names that trade (1% cash reserve). RS standard (Fridays only) and the
   50/50 blend stay as paper lines on the leaderboard (live Oct 27, 2026 onward: RS short-term only).

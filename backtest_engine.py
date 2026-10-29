@@ -93,7 +93,7 @@ WINNER = {
     "max_pick_rank": None,      # no rank gate
     "cap_soft": False,          # strict sector cap
     "earnings_block_days": None,  # no earnings rule (the forward strategy has none)
-    "sleeve": False,            # no defensive sleeve (sector_mapping.defensive is kept only for the pinned forward strategies)
+    "sleeve": False,            # no defensive sleeve (live dropped it Oct 29, 2026; sector_mapping.defensive remains for other forward Now lines)
     "earnings_day_stop": False, # earnings_stop.py places no orders (not in the backtest; no Mon-Thu trading)
     "sleeves": {"rs_short": 1.0},
     "halves": True,
@@ -131,8 +131,8 @@ def winner_label(n_stocks):
     S, mw = WINNER, WINNER.get("midweek_swap")
     if S.get("halves"):
         return (f"RS-S-U{n_stocks}", "Live: RS short-term - RS short-term (weekly + Mon–Thu sells): 10/21/63-day relative "
-                "strength, top 10 + the defensive stocks, Friday rebalance + Mon-Thu exit below rank 20 refilled from the top 10, "
-                f"soft QQQ regime ({n_stocks} stocks)")
+                "strength, top 10 equal weight (no defensive sleeve), Friday rebalance + Mon-Thu exit below rank 20 "
+                f"refilled by the next eligible stock ranked 20 or better, soft QQQ regime ({n_stocks} stocks)")
     if S.get("score") == "low_vol" and S.get("calendar") == "monthly":
         tag = f"LV-M-U{n_stocks}"
         name = (f"Low volatility in uptrend (monthly): the {S['n']} calmest stocks above their 200-day average, equal weight, "

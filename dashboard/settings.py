@@ -50,13 +50,14 @@ except Exception:
     FRIDAY_SUB_MAX_RANK = 20
 
 def halves_rules_text():
-    """The live rules (from the first RS short-term rebalance, Fri Oct 30, 2026) in plain words."""
+    """The live rules (from the first RS short-term rebalance, Fri Oct 30, 2026; defensive sleeve off Oct 29) in plain words."""
     return (f"**Strategy rules: {STRATEGY_NAME} ({STRATEGY_TAG})**\n"
             "- **Whole account** runs forward_test's \"RS short-term (weekly + Mon–Thu sells)\" exactly (Reports/sleeve_ledger.json).\n"
             "- **Score:** relative strength over 10, 21 and 63 trading days (60% stock vs its sector ETF, 40% that ETF vs SPY); "
-            "the top 10 plus the defensive stocks, equal weights, 99% invested.\n"
+            "the top 10, equal weights (~9.9% each), 99% invested. No defensive sleeve (removed Oct 29, 2026).\n"
             "- **When:** full rebalance every Friday 2:30 PM CT (Thursday when Friday is a holiday); Mon-Thu 2:30 PM a holding "
-            "worse than rank 20 is sold and replaced by the best top-10 stock not held. On early-close days (market closes "
+            "worse than rank 20 is sold and replaced by the next eligible stock ranked 20 or better (earnings within 5 days "
+            "skipped). On early-close days (market closes "
             "12:00 PM CT: day after Thanksgiving, July 3 / Dec 24 when weekday) the decision runs at **11:00 AM CT** instead.\n"
             "- **Filters:** no new buy with earnings within 5 trading days (a held stock is not topped up); with "
             f"{REGIME_OFF} every weight is {HALVED}; do_not_buy never bought, do_not_sell never sold; a holding within 1 "

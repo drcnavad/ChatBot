@@ -1,4 +1,4 @@
-"""Strategy tab, Last decision (live from Oct 27, 2026: "RS short-term (weekly + Mon–Thu sells)", one sleeve = the account):
+"""Strategy tab, Last decision (live from Oct 27, 2026: "RS short-term (weekly + Mon–Thu sells)", one sleeve = the account; defensive sleeve off Oct 29):
 a summary line (stocks, value, next rebalance), the top-20 ranking at the latest decision (Reports/decision_ranks.csv,
 saved by the trade run) with held stocks marked, then the next decision preview from the latest close. Weights from the
 live Alpaca positions; the ledger is never written here."""
@@ -285,7 +285,7 @@ def render_preview(positions, led, equity):
                     "Today %": st.column_config.NumberColumn("Today %", format="%+.2f", width=58)})
         extra = [x for x in tgt if x not in set(tab["Stock"])]
         if extra:
-            st.caption("Also targeted (outside the top 20 / defensive stocks): "
+            st.caption("Also targeted (outside the top 20): "
                        + ", ".join(f"{x} ({symbol_sector.get(x, '—')}) {plan(x)}" for x in extra))
         sold = o[(o.Side == "Sell") & ~o.Symbol.isin(set(tgt))]
         st.markdown("Would sell: " + (", ".join(f"{r.Symbol} ({symbol_sector.get(r.Symbol, '—')}) \\${r[4]:,.0f}"

@@ -53,6 +53,7 @@ MON5 = "Live 50/50, top 5, sector on Mondays"   # Oct 21: the top-5 rules with t
 MON = "Live 50/50, top 10 each half"    # the live rules Oct 19-25 (sector half on Mondays, 10 stocks per half)
 # (Chirag, Oct 27, 2026, final) the live rules from the 2:30 PM CT run of Tue Oct 27: 100% "RS short-term (weekly + Mon–Thu
 # sells)" (sleeves.py, one sleeve = the whole account). That line itself is the live line (shown as "Live: RS short-term").
+# Oct 29, 2026 (Chirag): defensive sleeve removed from this live line — top 10 only (~9.9% each, 99% invested).
 NOW_HALVES = ("RS short-term (weekly + Mon–Thu sells)", "RS standard (Fridays only)")   # the 50/50 paper line's two halves
 BLEND = "50/50: RS short-term + RS Fridays"      # paper line (was the live line "Live: RS short-term + RS Fridays", Oct 26 only)
 LIVE_NOW = NOW_HALVES[0]
@@ -111,9 +112,10 @@ GROUP_LABEL = {
 # "midweek" = other Mon-Thu swap settings;
 # "replay" = the live rules replayed day by day with a changed Mon-Thu exit (atr_stop_targets).
 #
-# The "Now" strategies (**NOW) = one change each to the live rules of Oct 15 (pinned): relative strength only, top 10 +
-# the defensive sleeve (sector_mapping.defensive, 5% cap), Mon-Thu sell worse than rank 20 refilled from the top 10,
-# do_not_buy never bought; "exit" = (sell below, refill from top), "regime" = another market filter; no spare-cash buys.
+# The "Now" strategies (**NOW) = one change each to the Oct 15 pinned rules: relative strength only, top 10 +
+# the defensive sleeve (sector_mapping.defensive; paper lines only — live RS short-term dropped it Oct 29, 2026),
+# Mon-Thu sell worse than rank 20 refilled from the top 10 / next eligible rank <= 20, do_not_buy never bought;
+# "exit" = (sell below, refill from top), "regime" = another market filter; no spare-cash buys.
 PLAIN = {"max_pick_rank": None, "cap_soft": False, "sector_cap": 0.4}  # walk every rank, strict max 4/sector (pinned; live is now 1.0)
 # The mid-week rules every C6 "mwf" strategy started with on Oct 2, 2026 (live until 2026-10-07), pinned here so a later
 # live change (t187u: no top-3 swap, exit below 20) never alters a forward-test strategy: top-3 swap below rank 15,
@@ -196,10 +198,11 @@ STRATEGIES = [
     dict(name="Now: top 15", **NOW, select={"n": 15}, group="rs",
          rule="The Oct 15 rules (relative strength only, Friday rebalance, Mon-Thu sell below rank 20) with 15 ranked stocks "
               "plus the five defensive stocks."),
-    dict(name="RS short-term (weekly + Mon–Thu sells)", **{**NOW, "score": "rs_short"}, group="rs",
-         rule="The Oct 15 rules, with relative strength measured over 10, 21 and 63 trading days (about 2 weeks, 1 month and "
-              "3 months). The Oct 15 windows are 21, 63 and 126 days (about 1, 3 and 6 months). Same blend on each window: "
-              "60% the stock versus its sector ETF, 40% that ETF versus SPY."),
+    dict(name="RS short-term (weekly + Mon–Thu sells)", **{**NOW, "score": "rs_short", "sleeve": False}, group="rs",
+         rule="Live from Oct 29, 2026 (Chirag): relative strength over 10, 21 and 63 trading days (60% stock vs its sector "
+              "ETF, 40% that ETF vs SPY), top 10 equal weight (no defensive sleeve), Friday rebalance + Mon-Thu sell below "
+              "rank 20 refilled by the next eligible stock ranked 20 or better (earnings within 5 days skipped). "
+              "do_not_buy never bought. The Oct 15 windows were 21/63/126 days and included the five defensive stocks."),
     dict(name="Now: longer RS (63/126/252 days)", **{**NOW, "score": "rs_long"}, group="rs",
          rule="The Oct 15 rules, with relative strength measured over 63, 126 and 252 trading days (about 3 months, 6 months "
               "and 1 year). The Oct 15 windows are 21, 63 and 126 days (about 1, 3 and 6 months). Same blend on each window: "

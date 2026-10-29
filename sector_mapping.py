@@ -19,7 +19,7 @@ stock_symbols = [
     'CRDO', 'CLS', 'HIMX', 'NU',
     'PWR', 'GEV', 'CAT', 'CMI', 'ROK', 'MS', 'GS', 'HWM',   # high-beta industrials / financials (2026-10-13)
     'ANF', 'JCI', 'DAL', 'WSM', 'IBKR', 'GRMN',   # high-beta non-tech (2026-10-14)
-    'ABBV', 'KO',   # defensive sleeve (2026-10-15)
+    'ABBV', 'KO',   # added Oct 15, 2026 (were the defensive sleeve; still in the universe)
     'WULF',   # TeraWulf (Chirag, 2026-10-15)
     'LIN', 'STLD', 'MLM',   # Materials (2026-10-17)
     'COST', 'WMT', 'MNST',   # Consumer Staples (2026-10-17)
@@ -45,10 +45,10 @@ stock_symbols = [
 # Oct 28, 2026 (Chirag): high valuation, LYV fwd P/E ~91, TSLA fwd P/E ~188.
 # Oct 28, 2026 (Chirag): ALAB and MRVL unblocked (top RS short-term winners).
 do_not_buy = ['AMD', 'ARM', 'PANW', 'SHOP', 'WULF', 'SMCI', 'VRT', 'ORCL', 'BE', 'LYV', 'TSLA']
-do_not_sell = []   # sleeve removed Oct 15 evening (Chirag): live = monthly low volatility from Fri Oct 16, 2026
-# Defensive sleeve of Oct 15, 2026: NOT live any more (backtest_engine.WINNER['sleeve'] False); kept only for the pinned
-# forward-test 'Now' strategies (forward_test NOW sleeve=True).
-defensive = [s for s in ['LMT', 'NOC', 'ABBV', 'PFE', 'KO'] if s in stock_symbols]   # PFE removed Oct 19
+do_not_sell = []
+# Defensive sleeve of Oct 15, 2026 (LMT, NOC, ABBV, KO; PFE dropped Oct 19). Live RS short-term dropped it Oct 29, 2026
+# (Chirag: top 10 only). Kept only for the other pinned forward-test 'Now' paper lines (forward_test NOW sleeve=True).
+defensive = [s for s in ['LMT', 'NOC', 'ABBV', 'PFE', 'KO'] if s in stock_symbols]
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
 sector_etfs = {

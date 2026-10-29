@@ -43,6 +43,17 @@ px = {s: float(inp["close"].at[d, s]) for s in inp["close"].columns if pd.notna(
 orders, info = sleeves.plan(d, {}, 100000.0, px, ledger=None, inp=inp)
 check(abs(info["values"]["rs_short"] - 100000) < 1, "switch: the sleeve = the whole equity", info["values"])
 w = sleeves.half_weights("rs_short", d, inp)
+# Oct 29, 2026: live line has no defensive sleeve — top 10 only (~9.9% each after 99% scale)
+import sector_mapping as sm
+cfg = next(c for c in ft.STRATEGIES if c["name"] == ft.LIVE)
+check(cfg.get("sleeve") is False, "live RS short-term sleeve=False (no defensive)", cfg.get("sleeve"))
+forced = [s for s in sm.defensive if s in w.index and float(w[s]) > 0]
+# a defensive name may still appear if it ranks in the top 10 on its own
+r = sleeves.ranking("rs_short", d, inp)
+top10 = set(r.index[:10])
+check(all(s in top10 for s in forced), "defensive names in targets only if they rank top 10", forced)
+check(len(w[w > 0]) <= 10 and abs(float(w[w > 0].sum()) - 0.99) < 0.02,
+      "at most 10 targets, ~99% invested", (len(w[w > 0]), float(w[w > 0].sum())))
 buys = orders[orders["Side"] == "BUY"].set_index("Symbol")
 check(set(buys.index) == set(w[w > 0].index) and all(abs(buys.at[s, "Est_Value"] - 100000 * w[s]) < 0.02 * 100000 * 0.15
       for s in buys.index), "buys = the forward-test weights x equity", buys["Est_Value"].to_dict())
