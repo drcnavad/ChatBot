@@ -5,7 +5,7 @@ Read-only (no PIN): balance, positions, orders, P&L, quote SYM, news [SYM], help
 Money-moving (summary first, then the PIN every time, checked in code by chat_pin.verify before anything is sent):
   buy 5 AAPL | buy 5 AAPL limit 200 | buy $1000 AAPL | sell 3 AAPL | sell all AAPL | close AAPL
   cancel <order id start> | cancel all
-Symbols on sector_mapping.do_not_sell are never sold or closed from here. Withdrawals, transfers and account / security
+Symbols on sector_mapping.do_not_buy are never bought from here; symbols on sector_mapping.do_not_sell are never sold or closed from here. Withdrawals, transfers and account / security
 settings are refused (the trading API keys cannot do them; use the Alpaca app)."""
 import re
 
@@ -70,7 +70,14 @@ def parse(text):
             return {"kind": kind}
     return {"kind": "unknown"}
 
+def no_buy():
+    """SYMBOL -> note for Chirag's do-not-buy list (sector_mapping via paper_trade.manual_list)."""
+    import paper_trade as pt
+    return pt.manual_list("buy")
+
+
 def no_sell():
+    """SYMBOL -> note for Chirag's do-not-sell list (sector_mapping via paper_trade.manual_list)."""
     import paper_trade as pt
     return pt.manual_list("sell")
 
@@ -176,6 +183,8 @@ def plan(cmd, account=None, quote=latest_quote):
         side = "sell" if k == "close" else cmd["side"]
         if side == "sell" and sym in no_sell():
             return None, f"**{sym}** is on your do-not-sell list, so I won't sell it from the chat."
+        if side == "buy" and sym in no_buy():
+            return None, f"**{sym}** is on your do-not-buy list, so I won't buy it from the chat."
         held = {r.Symbol: r.Qty for r in acct.positions().itertuples()}
         p = {"kind": k, "side": side, "symbol": sym, "limit": cmd.get("limit"), "qty": cmd.get("qty"), "notional": cmd.get("notional")}
         if side == "sell":
@@ -228,6 +237,8 @@ def execute(p, pin, client=None, verify=None):
         return False, msg
     if p.get("side") == "sell" and p["symbol"] in no_sell():
         return False, f"{p['symbol']} is on your do-not-sell list; not sent."
+    if p.get("side") == "buy" and p["symbol"] in no_buy():
+        return False, f"{p['symbol']} is on your do-not-buy list; not sent."
     c = client or trading_client()
     try:
         if p["kind"] == "cancel":
