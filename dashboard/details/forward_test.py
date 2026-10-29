@@ -48,6 +48,7 @@ def render_forward_test(p=None):
         board = board[board["Rule"].isin(fams)]
     board = board.drop(columns="Rule")                   # family: filter only; rule + holdings show on hover
     live = live_returns(values)
+    board = apply_live_totals(board, live)
     board.insert(list(board.columns).index("Last EOD"), "Live", [live.get(x, float("nan")) for x in board["Strategy"]])
     pct = [c for c in board.columns if c not in ("Rank", "Strategy", "Rule")]
     sty = toned(toned(board, [c for c in pct if c != "Max drawdown"]), ["Max drawdown"], fn=drawdown_tone)
@@ -78,10 +79,10 @@ def live_returns(values):
     for name, g in h.groupby("Strategy"):
         px = g["Symbol"].map(lambda s: q.get(s, (float("nan"),))[0])
         if name in base and name in cash and px.notna().all() and base[name]:
-            out[CURRENT if name == ft.LIVE else name] = ((cash[name] + float((g["Shares"] * px).sum())) / base[name] - 1) * 100
+            out[name] = ((cash[name] + float((g["Shares"] * px).sum())) / base[name] - 1) * 100
     for name in base.index:                              # all cash on its last saved day: cash vs its latest value
         if name in cash and name not in set(h["Strategy"]) and base[name]:
-            out[CURRENT if name == ft.LIVE else name] = (cash[name] / base[name] - 1) * 100
+            out[name] = (cash[name] / base[name] - 1) * 100
     bench = load_benchmarks()
     for x in ("QQQ", "SPY"):
         px, chg = q.get(x, (float("nan"), float("nan")))
@@ -93,6 +94,7 @@ def live_returns(values):
     daily = read_report_csv(ft.DAILY_CSV)
     if data and daily is not None and len(daily):
         out["My Alpaca account"] = (float(data["equity"]) / float(daily["Equity"].iloc[-1]) - 1) * 100
+        out[CURRENT] = out["My Alpaca account"]   # live/Current row tracks the real account (Chirag, Oct 29)
     return out
 
 def render_live_push():
@@ -215,7 +217,8 @@ def tidy_board(board, start):
     names = {"Total return %": f"Total since {start}", "Daily return %": "Last EOD", "Max drawdown %": "Max drawdown",
              **{w: w.replace("Week ", "Wk ").replace(" %", "") for w in weeks}}
     b.insert(2, "Rule", [rule_of(x) for x in b["Strategy"]])
-    b["Strategy"] = [CURRENT if str(x).startswith(ft.LIVE) else x for x in b["Strategy"]]   # display name only
+    # Only the account-backed marked row (… LIVE_MARK) is shown as CURRENT; the paper RS short-term line keeps its name.
+    b["Strategy"] = [CURRENT if ft.LIVE_MARK in str(x) else x for x in b["Strategy"]]
     return b.rename(columns=names)
 
 def hover_tips(board):
@@ -253,7 +256,7 @@ def highlight_rows(sty):
     """Darker rows: your Alpaca account, the current (live) strategy and its component line (live_components)."""
     import forward_test as ft
     keys = ("My Alpaca account", CURRENT, *live_components())
-    on = lambda name: str(name).startswith(ft.LIVE) or str(name).replace(ft.LIVE_MARK, "") in keys
+    on = lambda name: name == CURRENT or ft.LIVE_MARK in str(name) or str(name).replace(ft.LIVE_MARK, "") in keys
     return sty.apply(lambda r: [HIGHLIGHT_BG if on(r["Strategy"]) else ""] * len(r), axis=1)
 
 
@@ -267,6 +270,41 @@ TILE_CSS = (
     '[class*="st-key-cs_t_"] [data-testid="stElementContainer"]:has(.sa-pop){position:absolute;top:0;left:0;height:0;margin:0;overflow:visible;pointer-events:none}'
     '[class*="st-key-cs_t_"] .sa-pop{top:52px}[class*="st-key-cs_t_"]:hover .sa-pop{display:block}'
     '[class*="st-key-cs_t_"]:hover{z-index:1000}</style>')
+
+
+def apply_live_totals(board, live=None):
+    """Compound Total since Oct 2 (and the current week-so-far column) with today's live return; re-rank by the live
+    total (smaller max drawdown breaks ties). Once today's close is saved, live ≈ after-hours only so this does not
+    double-count. live keys are display names (CURRENT, strategy names, QQQ/SPY, My Alpaca account)."""
+    import forward_test as ft
+    live = live or {}
+    b = board.copy()
+    total_col = next((c for c in b.columns if c.startswith("Total since")), None)
+    if total_col is None and "Total return %" in b.columns:
+        total_col = "Total return %"
+    wk_col = next((c for c in b.columns if ("so far" in c) and (c.startswith("Wk ") or c.startswith("Week "))), None)
+    if total_col is None:
+        return b
+    lv = b["Strategy"].map(lambda n: live.get(n, float("nan")))
+    # Also accept unmarked LIVE paper name / LIVE+mark raw forms
+    def _lv(n):
+        if n in live and live[n] == live[n]:
+            return live[n]
+        if n == CURRENT:
+            return live.get(CURRENT, live.get("My Alpaca account", float("nan")))
+        return live.get(n, float("nan"))
+    lv = b["Strategy"].map(_lv)
+    factor = (1 + lv.fillna(0) / 100)
+    b[total_col] = ((1 + b[total_col] / 100) * factor - 1) * 100
+    if wk_col is not None:
+        b[wk_col] = ((1 + b[wk_col] / 100) * factor - 1) * 100
+    # Re-rank strategies only
+    ranked = pd.to_numeric(b["Rank"], errors="coerce").notna()
+    dd = b["Max drawdown"] if "Max drawdown" in b.columns else b.get("Max drawdown %")
+    order = b.loc[ranked].sort_values([total_col, dd], ascending=[False, False], na_position="last", kind="stable")
+    new_rank = pd.Series(range(1, len(order) + 1), index=order.index, dtype="Int64")
+    b["Rank"] = new_rank.reindex(b.index)
+    return b.sort_values(["Rank", total_col], ascending=[True, False], na_position="last", kind="stable").reset_index(drop=True)
 
 def by_this_week(board, live=None):
     """Display only (Chirag, Oct 22): the leaderboard re-ranked by the current week's return so far ("Week N (so far) %"),

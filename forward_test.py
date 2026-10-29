@@ -5,7 +5,7 @@
   2. STRATEGIES: the paper-only strategies (the current live rules, the pinned Oct 2 rules and variants, the Oct 15 50/50
      and low-volatility lines of forward_combos; never traded), built from the saved
      Reports files (signal_analysis, factor_history, earnings_date, benchmark_prices) + Alpaca daily volume
-     (forward_bars) -> Reports/forward_strategies.csv (Value, 1.0 at the start; Cash) + forward_strategies_holdings.csv.
+     (forward_bars) -> Reports/forward_strategies.csv (Value = shares×close+cash, START_CASH at the start; Cash) + forward_strategies_holdings.csv.
 leaderboard(): every strategy + the account + QQQ / SPY, ranked by total return, with one column per week.
 Same accounting for all: decide at the day's close (the 2:30 PM bar on decision days), trade only names whose target
 changed (all back to target on the strategy's rebalance day, 1-point band, earnings rule), be.COST per side, equal weight per
@@ -52,6 +52,7 @@ PIN = {"n": 10, "sector_cap": 1.0, "max_pick_rank": None, "cap_soft": False, "sl
 EARN_DAYS = 5
 BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
+START_CASH = 100_000.0   # each paper strategy starts with this cash on FORWARD_START (dollar account)
 MON5 = "Live 50/50, top 5, sector on Mondays"   # Oct 21: the top-5 rules with the sector half on Mondays (live Oct 21 morning)
 MON = "Live 50/50, top 10 each half"    # the live rules Oct 19-25 (sector half on Mondays, 10 stocks per half)
 TOP5 = "Old live: Low vol + Sector rotation (Oct 16-26)"   # the live rules Oct 21-26, 2026 (was "Current Strategy (Live from Oct End)")
@@ -908,28 +909,40 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
                     hh = pd.concat([old_h[old_h["Strategy"] == n], hh], ignore_index=True)
                 hh = hh.assign(Date=pd.to_datetime(hh["Date"])).drop_duplicates(["Date", "Symbol"], keep="last")
                 parts.append((v.loc[v.index >= pd.Timestamp(start)], hh))
-            base = [float(v["Value"].iloc[0]) if len(v) else np.nan for v, _ in parts]
+            # Equal 50/50 of two dollar accounts (each already starts at START_CASH).
             for d in todo:
                 if not all(d in v.index for v, _ in parts):
                     continue
-                rows.append({"Date": d, "Strategy": name, "Value": sum(0.5 * v.at[d, "Value"] / b_ for (v, _), b_ in zip(parts, base)),
-                             "Cash": sum(0.5 * v.at[d, "Cash"] / b_ for (v, _), b_ in zip(parts, base))})
+                rows.append({"Date": d, "Strategy": name,
+                             "Value": sum(0.5 * float(v.at[d, "Value"]) for v, _ in parts),
+                             "Cash": sum(0.5 * float(v.at[d, "Cash"]) for v, _ in parts)})
                 hd = {}
-                for (_, hh), b_ in zip(parts, base):
+                for _, hh in parts:
                     for r in hh[hh["Date"] == d].itertuples():
-                        w0, s0, _p = hd.get(r.Symbol, (0.0, 0.0, r.Price))
-                        hd[r.Symbol] = (w0 + 0.5 * r.Weight, s0 + 0.5 * r.Shares / b_, r.Price)
-                hold += [{"Date": d, "Strategy": name, "Symbol": k, "Weight": w_, "Shares": s_, "Price": p_}
-                         for k, (w_, s_, p_) in hd.items()]
+                        w0, s0, c0, _p = hd.get(r.Symbol, (0.0, 0.0, 0.0, r.Price))
+                        cost = float(getattr(r, "Cost", r.Shares * r.Price))
+                        hd[r.Symbol] = (w0 + 0.5 * r.Weight, s0 + 0.5 * r.Shares, c0 + 0.5 * cost, r.Price)
+                hold += [{"Date": d, "Strategy": name, "Symbol": k, "Weight": w_, "Shares": s_, "Price": p_,
+                          "Cost": c_, "PnL_$": s_ * p_ - c_}
+                         for k, (w_, s_, c_, p_) in hd.items()]
             continue
         if cfg.get("combo"):                                  # forward_combos: replayed from its start, new days appended
             import forward_combos as fc
             c = cfg["combo"]
             sim = fc.simulate(inp, tuple(c["legs"]), c.get("start") or start, through=todo[-1])
-            r, h_ = fc.line_rows(name, sim, c.get("which", "total"))
+            r, h_ = fc.line_rows(name, sim, c.get("which", "total"), normalize=True)  # 1.0 after first buys
             keep = set(todo)
-            rows += [x for x in r if x["Date"] in keep]
-            hold += [x for x in h_ if x["Date"] in keep]
+            for x in r:
+                if x["Date"] not in keep:
+                    continue
+                x = {**x, "Value": float(x["Value"]) * START_CASH, "Cash": float(x["Cash"]) * START_CASH}
+                rows.append(x)
+            for x in h_:
+                if x["Date"] not in keep:
+                    continue
+                sh = float(x["Shares"]) * START_CASH
+                px = float(x["Price"])
+                hold.append({**x, "Shares": sh, "Cost": sh * px, "PnL_$": 0.0})
             continue
         h = pd.DataFrame(columns=["Symbol", "Weight", "Shares", "Price"])
         if last is not None and old_h is not None:
@@ -937,10 +950,15 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
         h = h.set_index("Symbol")
         cols = close.columns.union(h.index)
         zero = pd.Series(0.0, index=cols)
-        cash, shares, prev, last_px = 1.0, zero, None, h["Price"].reindex(cols).astype(float)
+        cash, shares, prev, last_px = START_CASH, zero, None, h["Price"].reindex(cols).astype(float)
+        basis = zero.copy()                                   # dollar cost of current shares (for per-stock P&L)
         if last is not None:                                  # resume from the last saved day (no rows = all cash)
             cash = float(mine.loc[mine["Date"] == last, "Cash"].iloc[0])
             shares, prev = zero.add(h["Shares"], fill_value=0.0), zero.add(h["Weight"], fill_value=0.0)
+            if "Cost" in h.columns:
+                basis = zero.add(h["Cost"], fill_value=0.0)
+            else:
+                basis = (shares * last_px).fillna(0.0)         # legacy unit-scale rows: approximate cost at last price
         w = strategy_targets(cfg, inp).reindex(columns=cols).fillna(0.0)
         opens = inp.get("open_sells", {}).get(name, pd.DataFrame()).reindex(index=todo, columns=cols)
         full = rebalance_days(cfg, inp)
@@ -966,6 +984,8 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
             px = close.loc[d].reindex(cols).fillna(last_px)  # a stock gone from the list keeps its last saved price
             at_open = opens.loc[d][(shares > 0) & opens.loc[d].notna()]
             cash += (shares[at_open.index] * at_open * (1 - be.COST)).sum()   # stop sales at the open (0.1% cost)
+            if len(at_open):
+                basis = basis.where(~basis.index.isin(at_open.index), 0.0)
             shares = shares.where(~shares.index.isin(at_open.index), 0.0)
             value = cash + (shares * px).sum()
             wd = w.loc[d]
@@ -987,18 +1007,27 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
                     up = (new - shares).clip(lower=0)
                     new = new - up * min(1.0, -gap / ((1 + be.COST) * float((up * px).sum())))
                     cost = be.COST * float(((new - shares) * px).abs().sum())
+                # Average-cost basis: buys add dollars; sells cut basis by the sold fraction.
+                delta = new - shares
+                buy = delta.clip(lower=0)
+                sold_frac = ((-delta).clip(lower=0) / shares.where(shares > 0)).fillna(0.0).clip(upper=1.0)
+                basis = basis * (1.0 - sold_frac) + buy * px
                 value, shares = value - cost, new
                 cash, prev = value - (shares * px).sum(), wd
-            if last is None and d == todo[0]:                 # 1.0 at the start close, after its buys
-                shares, cash, value = shares / value, cash / value, 1.0
+            if last is None and d == todo[0]:                 # START_CASH at the start close, after its buys
+                scale = START_CASH / value
+                shares, cash, basis, value = shares * scale, cash * scale, basis * scale, START_CASH
             last_px = px
             rows.append({"Date": d, "Strategy": name, "Value": value, "Cash": cash})
             on = (wd > 0) | (shares > 0)
-            hold += [{"Date": d, "Strategy": name, "Symbol": s, "Weight": wd[s], "Shares": shares[s], "Price": px[s]}
+            hold += [{"Date": d, "Strategy": name, "Symbol": s, "Weight": float(wd[s]), "Shares": float(shares[s]),
+                      "Price": float(px[s]), "Cost": float(basis[s]),
+                      "PnL_$": float(shares[s] * px[s] - basis[s])}
                      for s in cols[on.to_numpy()]]
     if rows:
         for p, new, prior, cols_ in ((path, rows, old, ["Date", "Strategy", "Value", "Cash"]),
-                                     (hold_path, hold, old_h, ["Date", "Strategy", "Symbol", "Weight", "Shares", "Price"])):
+                                     (hold_path, hold, old_h,
+                                      ["Date", "Strategy", "Symbol", "Weight", "Shares", "Price", "Cost", "PnL_$"])):
             new = pd.DataFrame(new, columns=cols_)    # all-cash days add no holdings rows: keep the columns (no KeyError)
             out = pd.concat([prior, new], ignore_index=True) if prior is not None else new
             out = out.assign(Date=pd.to_datetime(out["Date"])).sort_values("Date", kind="stable")   # by day, registry order
@@ -1117,12 +1146,17 @@ def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
         return df.assign(Date=pd.to_datetime(df["Date"])).set_index("Date").sort_index().loc[start:]
     for cfg in STRATEGIES:
         v = since(values[values["Strategy"] == cfg["name"]])["Value"] if values is not None else pd.Series(dtype=float)
-        series.append((cfg["name"] + (LIVE_MARK if cfg["name"] == MARKED else ""), cfg.get("ranked", True), v))
+        # Paper lines keep their simulated Value. The live mark is reserved for the real account path below
+        # (Chirag, Oct 29: Total since Oct 2 for the live row = what the account actually did, not the paper RS line).
+        series.append((cfg["name"], cfg.get("ranked", True), v))
     if daily is not None and len(daily):
         d = since(daily)
         if len(d):
             import alpaca_paper as ap
-            series.append((ACCOUNT, False, ap.account_twr_index(d.reset_index()) * float(d["Equity"].iloc[0])))
+            twr = ap.account_twr_index(d.reset_index())
+            # Marked live row = real Alpaca equity path (time-weighted). Paper RS short-term stays above without the mark.
+            series.append((LIVE + LIVE_MARK, True, twr))
+            series.append((ACCOUNT, False, twr * float(d["Equity"].iloc[0])))
     if bench is not None:
         b = since(bench)
         series += [(f"{s} (comparison)", False, b[s]) for s in ("QQQ", "SPY") if s in b]
@@ -1140,16 +1174,23 @@ def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
 
 def verdict(board):
     """One plain line: too early / the winner / no winner. """
-    by = board.set_index(board["Strategy"].str.replace(LIVE_MARK, "", regex=False))
-    weeks = int(by.loc[LIVE, [c for c in by.columns if c.startswith("Week ") and "so far" not in c]].notna().sum()) \
-        if LIVE in by.index else 0                                    # finished weeks of the live row
+    # Prefer the marked live row (real account path); fall back to the paper LIVE line.
+    names = board["Strategy"].astype(str)
+    live_row = board[names.str.endswith(LIVE_MARK)]
+    live_key = live_row["Strategy"].iloc[0] if len(live_row) else LIVE
+    by = board.assign(_k=names.str.replace(LIVE_MARK, "", regex=False)).drop_duplicates("_k", keep="first").set_index("_k")
+    live_stats = live_row.iloc[0] if len(live_row) else (by.loc[LIVE] if LIVE in by.index else None)
+    week_cols = [c for c in board.columns if c.startswith("Week ") and "so far" not in c]
+    weeks = int(live_stats[week_cols].notna().sum()) if live_stats is not None else 0
     if weeks < WEEKS_TO_WIN:
         return f"Week {weeks} of {WEEKS_TO_WIN}: too early to name a winner."
-    top = by[board["Rank"].notna().to_numpy()].index[0]
-    bar = max(by.at[LIVE, "Total return %"], by["Total return %"].get("QQQ (comparison)", -np.inf))
-    if top == LIVE:
+    ranked = board[board["Rank"].notna()].sort_values("Rank")
+    top = str(ranked["Strategy"].iloc[0]).replace(LIVE_MARK, "")
+    live_total = float(live_stats["Total return %"]) if live_stats is not None else -np.inf
+    bar = max(live_total, by["Total return %"].get("QQQ (comparison)", -np.inf))
+    if top == LIVE or LIVE_MARK in str(ranked["Strategy"].iloc[0]):
         return f"After {weeks} weeks the live rules rank first: keep them."
-    if by.at[top, "Total return %"] > bar:
+    if float(ranked["Total return %"].iloc[0]) > bar:
         return f"After {weeks} weeks the winner is {top}: it ranks first and beats {LIVE} and QQQ."
     return f"After {weeks} weeks no winner: {top} ranks first but does not beat both {LIVE} and QQQ. Keep the live rules."
 
@@ -1179,6 +1220,12 @@ def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=None):
     b = be.keep_decision_bars(b.sort_values(["Symbol", "Date"]).reset_index(drop=True), now=_NO_SAVE)
     close = b.pivot_table(index="Date", columns="Symbol", values="Close")
     close = close[close.index > last]
+    # Complete days only (docstring): today's bar is in bars_daily from the 2:30 PM decision on, but it is not the
+    # final close until 3:05 PM CT. Leave today to live_returns until then so Total/Week are not a partial bar.
+    now_et = datetime.now(be.EASTERN)
+    today = pd.Timestamp(now_et.date())
+    if (now_et.hour * 60 + now_et.minute) < (16 * 60 + be.AFTER_CLOSE_BAR_MIN) and today in close.index:
+        close = close.drop(index=today)
     h = _read(hold_path, parse_dates=["Date"])
     if close.empty or h is None:
         return values, bench

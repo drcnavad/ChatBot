@@ -64,7 +64,7 @@ for legs, label in combos:
     check(not any(set(e[2]) & never for leg in a["legs"] for e in leg), f"{label}: do_not_buy never held")
     rows, hold = fc.line_rows("t", a)
     check(abs(rows[0]["Value"] - 1.0) < 1e-12 and abs(sum(h["Shares"] * h["Price"] for h in hold if h["Date"] == rows[0]["Date"])
-                                                     + rows[0]["Cash"] - 1.0) < 1e-9, f"{label}: 1.0 at the start close after its buys")
+                                                     + rows[0]["Cash"] - 1.0) < 1e-9, f"{label}: 1.0 at the start close after its buys")  # line_rows still unit-normalized; update_strategies scales to START_CASH
 
 # update_strategies on temp copies: new lines appended, the old live name migrated, saved days kept
 tmp = tempfile.mkdtemp()
@@ -86,7 +86,7 @@ new = v1[v1["Strategy"].isin(names)]
 starts = new.groupby("Strategy")["Date"].min()
 halves = list(ft.LIVE_HALVES)
 check(set(starts.drop(halves, errors="ignore")) == {"2026-10-02"}, "the new lines (not the live halves) start on Oct 2", starts.to_dict())
-check(all(abs(v - 1.0) < 1e-12 for v in new[new["Date"] == "2026-10-02"]["Value"]), "each new line is 1.0 at the Oct 2 close")
+check(all(abs(v - ft.START_CASH) < 1e-6 for v in new[new["Date"] == "2026-10-02"]["Value"]), "each new line is START_CASH at the Oct 2 close")
 T5 = ft.TOP5
 h5 = h1[(h1["Strategy"] == T5) & (h1["Shares"] > 0)]
 check(T5 in starts and starts[T5] == "2026-10-02" and len(h5) and h5.groupby("Date")["Symbol"].nunique().max() <= 10,

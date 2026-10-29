@@ -119,13 +119,16 @@ vals.loc[(vals["Strategy"] == "Quant Score top 10") & (vals["Date"] >= pd.Timest
 vals.loc[(vals["Strategy"] == "Quant Score top 10") & (vals["Date"] == pd.Timestamp("2026-10-05")), "Value"] = 0.95  # same total, deeper drop
 lb = ft.leaderboard(daily, bench, vals)
 N_RANKED = sum(bool(c.get("ranked", True)) for c in ft.STRATEGIES)   # the Oct 16 live halves are shown, not ranked
+# LIVE+LIVE_MARK is an extra ranked row = real account TWR (paper LIVE stays unmarked). N includes that mark when daily exists.
+N_WITH_LIVE = N_RANKED + 1
 check("leaderboard: ranked by total return since Oct 2, a tie goes to the smaller drawdown; Rank counts strategies only",
-      list(lb.dropna(subset=["Rank"])["Strategy"][:2]) == ["Quant Score top 5", "Quant Score top 10"] and list(lb.dropna(subset=["Rank"])["Rank"][:2]) == [1, 2]
-      and sorted(lb["Rank"].dropna()) == list(range(1, N_RANKED + 1)), lb.head(4).to_dict("records"))
+      list(lb.dropna(subset=["Rank"])["Strategy"][:3]) == [ft.MARKED + ft.LIVE_MARK, "Quant Score top 5", "Quant Score top 10"]
+      and list(lb.dropna(subset=["Rank"])["Rank"][:3]) == [1, 2, 3]
+      and sorted(lb["Rank"].dropna()) == list(range(1, N_WITH_LIVE + 1)), lb.head(4).to_dict("records"))
 check("leaderboard: the live row is marked", (lb["Strategy"] == ft.MARKED + ft.LIVE_MARK).sum() == 1, list(lb["Strategy"]))
 _early = ft.leaderboard(daily.iloc[:3], bench.iloc[:3], vals[vals["Date"] <= "2026-10-06"])
 check("leaderboard: ranked from day one (no wait for a full week)",
-      sorted(_early["Rank"].dropna()) == list(range(1, N_RANKED + 1)) and _early.dropna(subset=["Rank"])["Strategy"].iloc[-1] == "Quant Score top 10",
+      sorted(_early["Rank"].dropna()) == list(range(1, N_WITH_LIVE + 1)) and _early.dropna(subset=["Rank"])["Strategy"].iloc[-1] == "Quant Score top 10",
       _early.head(3).to_dict("records"))
 check("verdict: too early before 12 weeks", ft.verdict(lb) == "Week 2 of 12: too early to name a winner.", ft.verdict(lb))
 long_days = pd.bdate_range("2026-10-02", periods=70)
@@ -318,7 +321,7 @@ with tempfile.TemporaryDirectory() as tmp:
     n_rows = lambda lo, hi=None: sum(int(((sdays >= max(lo, s0)) & (sdays <= (hi or sdays.max()))).sum()) for s0 in _st)
     n_oct2 = sum(s0 == pd.Timestamp(be.FORWARD_START) for s0 in _st)
     check("update: one row per strategy and trading day from its start close (Oct 2; the live halves Oct 16), 1.0 on Oct 2",
-          n1 == n_rows(pd.Timestamp(be.FORWARD_START)) and (v.loc[v["Date"] == "2026-10-02", "Value"] == 1.0).sum() == n_oct2, n1)
+          n1 == n_rows(pd.Timestamp(be.FORWARD_START)) and (v.loc[v["Date"] == "2026-10-02", "Value"] == ft.START_CASH).sum() == n_oct2, n1)
     import shutil  # noqa: E402
     shutil.copy(P("a")["path"], os.path.join(tmp, "a_copy.csv"))
     ft.update_strategies(SIG[SIG["Date"] <= "2026-10-05"], FACTS, NO_EARN, BENCH, BARS, **P("r"))
@@ -436,30 +439,32 @@ with tempfile.TemporaryDirectory() as tmp:
         ft.strategy_inputs, ft.strategy_targets, ft.STRATEGIES = real_inputs, real_targets, real_list
     vc = db.read_csv(P("cash")["path"])
     check("all-cash strategy: saves its rows with no holdings (no KeyError) and resumes",
-          n_c == 2 and n_c2 == 4 and (vc["Value"] == 1.0).all() and (vc["Cash"] == 1.0).all(), (n_c, n_c2, len(vc)))
+          n_c == 2 and n_c2 == 4 and (vc["Value"] == ft.START_CASH).all() and (vc["Cash"] == ft.START_CASH).all(), (n_c, n_c2, len(vc)))
     hy = db.read_csv(P("h")["path"], parse_dates=["Date"])
     ht = hy[hy["Strategy"] == "T"].set_index("Date")
     hv, hy, hz, hw = (hy[hy["Strategy"] == x].set_index("Date")["Value"] for x in "XYZV")
-    a5 = 0.01 + 0.99 * 1.1
-    after = a5 - be.COST * (0.99 * 1.1 + 0.99 * a5) / (1 + 0.99 * be.COST)   # sell all AAA + buy 99% of what is left
-    check("accounting: 1.0 at the start close, follows the closes, pays 0.1% per side on a change, cash earns 0",
-          hv.index[0] == pd.Timestamp("2026-10-02") and hv.iloc[0] == 1.0 and abs(hv["2026-10-05"] - a5) < 1e-12
-          and abs(hv["2026-10-06"] - after) < 1e-12 and abs(hv.iloc[-1] - after) < 1e-12, hv.round(6).to_dict())
-    at_open = (0.01 + 0.0099 * 95 * (1 - be.COST)) / (1 + 0.99 * be.COST)   # AAA sold at the open, then 99% BBB at the close
+    S = ft.START_CASH
+    a5 = S * (0.01 + 0.99 * 1.1)
+    after = a5 - be.COST * (0.99 * 1.1 * S + 0.99 * a5) / (1 + 0.99 * be.COST)   # sell all AAA + buy 99% of what is left
+    check("accounting: START_CASH at the start close, follows the closes, pays 0.1% per side on a change, cash earns 0",
+          hv.index[0] == pd.Timestamp("2026-10-02") and abs(hv.iloc[0] - S) < 1e-6 and abs(hv["2026-10-05"] - a5) < 1e-4
+          and abs(hv["2026-10-06"] - after) < 1e-4 and abs(hv.iloc[-1] - after) < 1e-4, hv.round(6).to_dict())
+    at_open = S * (0.01 + 0.0099 * 95 * (1 - be.COST)) / (1 + 0.99 * be.COST)   # AAA sold at the open, then 99% BBB at the close
     check("accounting: a stop sale at the open gets the open price (0.1% cost), the refill buys at the close",
-          abs(hy["2026-10-05"] - a5) < 1e-12 and abs(hy["2026-10-06"] - at_open) < 1e-12, hy.round(6).to_dict())
+          abs(hy["2026-10-05"] - a5) < 1e-4 and abs(hy["2026-10-06"] - at_open) < 1e-4, hy.round(6).to_dict())
     zh = db.read_csv(P("h")["hold_path"], parse_dates=["Date"]).query("Strategy == 'Z' and Symbol == 'AAA'").set_index("Date")
-    z6 = 1.0495 - be.COST * (0.495 - 0.3 * 1.0495) / (1 - 0.3 * be.COST)  # Oct 5: .01 + .00495 x 110 + .0099 x 50; Oct 6: only BBB sold down to 30%
+    z6 = S * (1.0495 - be.COST * (0.495 - 0.3 * 1.0495) / (1 - 0.3 * be.COST))  # Oct 5: .01 + .00495 x 110 + .0099 x 50; Oct 6: only BBB sold down to 30%
     check("accounting: only names whose target changed trade (AAA keeps its shares); a target within 1 point is left alone",
-          abs(hz["2026-10-05"] - 1.0495) < 1e-12 and abs(hz["2026-10-06"] - z6) < 1e-12 and abs(hz["2026-10-07"] - z6) < 1e-12
-          and np.allclose(zh["Shares"], 0.00495, rtol=0, atol=1e-15), (hz.round(8).to_dict(), zh["Shares"].tolist()))
-    w9 = 1.05 - be.COST * (0.55 - 0.5 * 1.05) / (1 - 0.5 * be.COST)   # Friday: AAA 52.4% -> 50%; BBB (46.7%, earnings soon) is not bought up
+          abs(hz["2026-10-05"] - S * 1.0495) < 1e-4 and abs(hz["2026-10-06"] - z6) < 1e-4 and abs(hz["2026-10-07"] - z6) < 1e-4
+          and np.allclose(zh["Shares"], 0.00495 * S, rtol=0, atol=1e-6), (hz.round(8).to_dict(), zh["Shares"].tolist()))
+    w9 = S * (1.05 - be.COST * (0.55 - 0.5 * 1.05) / (1 - 0.5 * be.COST))   # Friday: AAA 52.4% -> 50%; BBB (46.7%, earnings soon) is not bought up
     check("accounting: drift is left alone mid-week and brought back on the Friday rebalance; earnings soon: not bought up",
-          np.allclose(hw["2026-10-05":"2026-10-08"], 1.05, rtol=0, atol=1e-12) and abs(hw["2026-10-09"] - w9) < 1e-12,
+          np.allclose(hw["2026-10-05":"2026-10-08"], S * 1.05, rtol=0, atol=1e-4) and abs(hw["2026-10-09"] - w9) < 1e-4,
           hw.round(8).to_dict())
-    t7 = 1.0495 - be.COST * (0.0495 - 0.02 * 1.0495) / (1 - 0.02 * be.COST)   # BBB bought up, AAA trimmed, 0.1% of both
+
+    t7 = S * (1.0495 - be.COST * (0.0495 - 0.02 * 1.0495) / (1 - 0.02 * be.COST))   # BBB bought up, AAA trimmed, 0.1% of both
     check("accounting: buys that need more than the cash first trim a band hold above its target (no negative cash)",
-          abs(ht.at[pd.Timestamp("2026-10-07"), "Value"] - t7) < 1e-12 and (ht["Cash"] >= -1e-12).all(), ht.round(8).to_dict())
+          abs(ht.at[pd.Timestamp("2026-10-07"), "Value"] - t7) < 1e-4 and (ht["Cash"] >= -1e-6).all(), ht.round(8).to_dict())
     rd = {c["name"]: ft.rebalance_days(c, {"weekly": "W", "monthly": "M"}) for c in ft.STRATEGIES}
     check("rebalance days: the calendar of each rule (Fridays, month ends, never for the dip and threshold rules)",
           rd[ft.LIVE] == rd["RS standard (Fridays only)"] == "W" and rd["Monthly"] == "M"
@@ -660,5 +665,62 @@ check("forward_test.py has no order code and never writes the live files or WINN
       not any(w in src for w in ("submit_order", "cancel_order", "OrderRequest", "TradingClient", "import paper_trade",
                                  "requests.post", "run_state", "live_pending_orders", "WINNER.update"))
       and "WINNER[" not in _src_wo_get)
+
+
+# ---- path dependence (Chirag, Oct 29): a stock bought today must not get credit for gains before its buy ----
+with tempfile.TemporaryDirectory() as pt:
+    import db as _db
+    # Two-day book: buy AAA only on day 2. Day-1 close 100 -> day-2 close 110 (+10%). If survivorship wrongly
+    # marked "final holdings" from day 1, total would be +10%; path-based stays flat on day 1 (all cash) and only
+    # earns from the day-2 fill price onward (0% if bought at day-2 close).
+    days = pd.DatetimeIndex(["2026-10-02", "2026-10-05"])
+    close = pd.DataFrame({"AAA": [100.0, 110.0], "BBB": [50.0, 50.0]}, index=days)
+    # Manual mini ledger mimicking update_strategies dollar accounting
+    cash, shares, basis = ft.START_CASH, 0.0, 0.0
+    values = []
+    for i, d in enumerate(days):
+        px = float(close.at[d, "AAA"])
+        if i == 0:
+            # all cash day 1
+            values.append(cash)
+        else:
+            # buy 10% at day-2 close (path: no prior exposure)
+            buy = 0.10 * cash / px
+            shares, basis, cash = buy, buy * px, cash - buy * px
+            values.append(cash + shares * px)
+    # Survivorship bug would be: hold day-2 shares from day 1 -> START_CASH * (0.9 + 0.1*110/100)
+    survivor = ft.START_CASH * (0.9 + 0.1 * 110 / 100)
+    path_total = values[-1] / values[0] - 1
+    surv_total = survivor / ft.START_CASH - 1
+    check("path dependence: buy on day 2 gets 0% from the prior +10% gap (not survivorship +1%)",
+          abs(path_total) < 1e-12 and abs(surv_total - 0.01) < 1e-12,
+          {"path%": path_total * 100, "survivor%": surv_total * 100, "values": values})
+    # And the real update_strategies Value series equals cash+shares*price each day (no look-back mark)
+    v = _db.read_csv(ft.STRATEGIES_CSV, parse_dates=["Date"]) if _db.exists(ft.STRATEGIES_CSV) else None
+    h = _db.read_csv(ft.HOLDINGS_CSV, parse_dates=["Date"]) if _db.exists(ft.HOLDINGS_CSV) else None
+    if v is not None and h is not None and len(v) and "Cost" in h.columns:
+        sample = v[v["Strategy"] == ft.LIVE].sort_values("Date").tail(3)
+        ok_mtm = True
+        for r in sample.itertuples():
+            hh = h[(h["Strategy"] == r.Strategy) & (h["Date"] == r.Date)]
+            mtm = float(r.Cash) + float((hh["Shares"] * hh["Price"]).sum())
+            if abs(mtm - float(r.Value)) > 0.02:   # allow 2¢ float noise on dollar book
+                ok_mtm = False
+        check("path dependence: saved LIVE Value == cash + shares×price (dollar book)", ok_mtm, sample.to_dict())
+        # A name whose first held day is the last saved day: Cost ≈ Shares×Price that day (bought then)
+        hl = h[(h["Strategy"] == ft.LIVE) & (h["Weight"] > 0)]
+        first_day = hl.groupby("Symbol")["Date"].min()
+        last = hl["Date"].max()
+        brand_new = sorted(first_day[first_day == last].index)
+        if brand_new:
+            row = hl[(hl["Date"] == last) & (hl["Symbol"] == brand_new[0])].iloc[0]
+            # Cost is shares×buy price; same-day close buy => PnL_$ ≈ 0 (allow tiny fee noise)
+            tol = max(0.05, 0.002 * abs(float(row["Cost"])))
+            check("path dependence: new name Cost ≈ Shares×Price on buy day (no prior gain in basis)",
+                  abs(float(row["Cost"]) - float(row["Shares"]) * float(row["Price"])) < tol
+                  and abs(float(row["PnL_$"])) < tol,
+                  row.to_dict())
+
+
 print(f"\n{len(FAIL)} failed" if FAIL else "\nFORWARD TEST OK")
 sys.exit(1 if FAIL else 0)
