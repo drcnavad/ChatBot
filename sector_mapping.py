@@ -37,8 +37,10 @@ stock_symbols = [
 # Your manual overrides for the live Mon-Fri trades and the 9 AM fill check (paper_trade.py), e.g. ['TSLA', 'NVDA'].
 # do_not_buy: never bought or topped up (on Friday its slot goes to the next eligible stock, down to rank 20).
 # do_not_sell: never sold or trimmed (at a rebalance too). The earnings-day stop skips it too.
-# SHOP kept (Chirag); Oct 28, 2026 (Chirag): AI names in net debt / bubble risk — WULF, SMCI, AVGO, MRVL, VRT, ORCL.
-do_not_buy = ['AMD', 'TSLA', 'PANW', 'ARM', 'SHOP', 'WULF', 'SMCI', 'AVGO', 'MRVL', 'VRT', 'ORCL']
+# SHOP kept (Chirag); Oct 28, 2026 (Chirag): AI names in net debt / bubble risk — WULF, SMCI, MRVL, VRT, ORCL (AVGO removed from block same day).
+# Oct 28, 2026 (Chirag): high valuation / AI bubble risk — ALAB, BE.
+# Oct 28, 2026 (Chirag): removed TSLA and AVGO from do_not_buy (still in universe).
+do_not_buy = ['AMD', 'ARM', 'PANW', 'SHOP', 'WULF', 'SMCI', 'MRVL', 'VRT', 'ORCL', 'ALAB', 'BE']
 do_not_sell = []   # sleeve removed Oct 15 evening (Chirag): live = monthly low volatility from Fri Oct 16, 2026
 # Defensive sleeve of Oct 15, 2026: NOT live any more (backtest_engine.WINNER['sleeve'] False); kept only for the pinned
 # forward-test 'Now' strategies (forward_test NOW sleeve=True).
