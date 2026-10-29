@@ -248,16 +248,29 @@ def first_buy_dates(fills):
 
 def holdings_table(positions, fills, equity):
     """One row per held stock and a Total row. positions: GET /positions dicts; fills: GET /account/activities FILL dicts;
-    equity: account equity (Weight % = market value / equity). The ETF comparison is
-    dashboard/details/live_holdings.py:render_benchmarks."""
+    equity: account equity (Weight % = market value / equity). Price and Today % use regular-hours quotes only
+    (dashboard.data.index_quotes — never AH / pre-market). Market value / P/L stay Alpaca's account figures.
+    The ETF comparison is dashboard/details/live_holdings.py:render_benchmarks."""
     num = lambda d, k: float(d.get(k)) if d.get(k) not in (None, "") else float("nan")
     first = first_buy_dates(fills)
-    rows = [{"Stock": p["symbol"], "Shares": num(p, "qty"), "Avg price": num(p, "avg_entry_price"),
-             "First bought": first.get(p["symbol"]), "Cost basis": num(p, "cost_basis"),
+    # RTH price + day % (stocks/ETFs); fall back to Alpaca fields when quotes are down
+    try:
+        from dashboard.data import index_quotes
+        rth = index_quotes(tuple(sorted({p["symbol"] for p in positions}))) or {}
+    except Exception:
+        rth = {}
+    rows = []
+    for p in positions:
+        sym = p["symbol"]
+        px_rth, day_pct = rth.get(sym, (float("nan"), float("nan")))
+        price = px_rth if px_rth == px_rth else num(p, "current_price")
+        today = day_pct if day_pct == day_pct else num(p, "change_today") * 100
+        rows.append({"Stock": sym, "Shares": num(p, "qty"), "Avg price": num(p, "avg_entry_price"),
+             "First bought": first.get(sym), "Cost basis": num(p, "cost_basis"),
              "Market value": num(p, "market_value"), "P/L $": num(p, "unrealized_pl"),
-             "P/L %": num(p, "unrealized_plpc") * 100, "Price": num(p, "current_price"),
-             "Today %": num(p, "change_today") * 100, "Weight %": num(p, "market_value") / equity * 100 if equity else float("nan"),
-             "_prev": num(p, "qty") * num(p, "lastday_price")} for p in positions]
+             "P/L %": num(p, "unrealized_plpc") * 100, "Price": price,
+             "Today %": today, "Weight %": num(p, "market_value") / equity * 100 if equity else float("nan"),
+             "_prev": num(p, "qty") * num(p, "lastday_price")})
     if not rows:
         return pd.DataFrame(columns=HOLDING_COLS)
     t = pd.DataFrame(rows).sort_values("Market value", ascending=False)

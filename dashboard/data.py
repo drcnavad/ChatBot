@@ -168,39 +168,96 @@ def _alpaca_last_trade(ticker: str, slot: int):
     ts = pd.Timestamp(t.timestamp)
     return float(t.price), ts.tz_convert("UTC") if ts.tzinfo else ts.tz_localize("UTC")
 
+def _rth_quote(snap):
+    """Regular-hours only (Chirag Oct 29): ignore after-hours / pre-market prints.
+    Returns (price, day_pct, session_date) or None.
+      • Regular session open: latest trade only if its timestamp is in 9:30–16:00 NY today; else daily_bar.close.
+        Day % = that price vs previous_daily_bar.close.
+      • After the close (daily_bar is today's session): price = daily_bar.close, day % vs previous_daily_bar.close.
+      • Before the open (daily_bar is a prior session): price = daily_bar.close, day % = that close vs previous_daily_bar.close
+        (yesterday vs the day before)."""
+    if snap is None:
+        return None
+    from dashboard.alpaca_data import market_open
+    db, pb, lt = snap.daily_bar, snap.previous_daily_bar, snap.latest_trade
+    if db is None or pb is None:
+        return None
+    try:
+        daily_c = float(db.close)
+        prev_c = float(pb.close)
+        daily_day = pd.Timestamp(db.timestamp).tz_convert(NY).normalize()
+        today = pd.Timestamp.now(tz=NY).normalize()
+        if market_open():
+            px = daily_c
+            if lt is not None:
+                ts = pd.Timestamp(lt.timestamp).tz_convert(NY)
+                hm = ts.hour * 60 + ts.minute
+                if ts.normalize() == today and 570 <= hm < 960:   # 9:30–16:00 NY regular session
+                    px = float(lt.price)
+            day_pct = (px / prev_c - 1) * 100 if prev_c else float("nan")
+            return px, day_pct, daily_day.tz_localize(None)
+        # Outside regular hours: never use latest_trade (it is AH / pre-market).
+        # daily_bar.close is today's RTH close after the bell, or the last completed session before the open.
+        day_pct = (daily_c / prev_c - 1) * 100 if prev_c else float("nan")
+        return daily_c, day_pct, daily_day.tz_localize(None)
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=60, max_entries=64, show_spinner=False)
 def today_bar(ticker: str, slot: int):
-    """Today's daily bar so far from the Alpaca snapshot: (NY date, open, high, low, close, volume), close = the latest
-    trade; None before today's first trade or when Alpaca does not answer. New every `slot` (5 s)."""
+    """Today's regular-hours daily bar from the Alpaca snapshot: (NY date, open, high, low, close, volume).
+    Close = latest RTH trade while the session is open, else daily_bar.close (never an after-hours print).
+    None before today's first RTH trade or when Alpaca does not answer. New every `slot` (5 s)."""
     try:
+        from dashboard.alpaca_data import market_open
         snap = _snapshots((ticker,))[ticker]
         d = snap.daily_bar
         day = pd.Timestamp(d.timestamp).tz_convert(NY).tz_localize(None).normalize()
-        px = float(snap.latest_trade.price) if snap.latest_trade else float(d.close)
+        today = pd.Timestamp.now(tz=NY).normalize().tz_localize(None)
+        if day < today:                       # before the open: no today bar yet
+            return None
+        px = float(d.close)
+        if market_open() and snap.latest_trade is not None:
+            ts = pd.Timestamp(snap.latest_trade.timestamp).tz_convert(NY)
+            hm = ts.hour * 60 + ts.minute
+            if ts.normalize().tz_localize(None) == today and 570 <= hm < 960:
+                px = float(snap.latest_trade.price)
         return day, float(d.open), max(float(d.high), px), min(float(d.low), px), px, float(d.volume)
     except Exception:
         return None
 
 @st.cache_data(ttl=20, show_spinner=False)     # < the 30 s fragment timers, so every tick gets new prices
 def index_quotes(symbols: tuple):
-    """Display only: {symbol: (last price, day change %)} from one Alpaca snapshot request; change = last trade vs the
-    previous session's close. {} when neither feed answers."""
+    """Display only: {symbol: (regular-hours price, day change %)}. Never uses after-hours or pre-market prints.
+    Day % = RTH price vs previous session close while the market is open; after the close / before the open =
+    last completed session close vs the close before it. {} when neither feed answers."""
     out = {}
     for s, x in _snapshots(symbols).items():
-        try:
-            px = float(x.latest_trade.price) if x.latest_trade else float(x.daily_bar.close)
-            prev = float(x.previous_daily_bar.close) if x.previous_daily_bar else float("nan")
-            out[s] = (px, (px / prev - 1) * 100 if prev == prev and prev else float("nan"))
-        except Exception:
-            continue
+        q = _rth_quote(x)
+        if q is not None:
+            out[s] = (q[0], q[1])
     return out
 
 def live_quote(ticker: str):
-    """Display-only latest price -> (price, time) or None: Alpaca latest trade, new every refresh slot (30 s in market
-    hours, 5 min outside); yfinance only when Alpaca does not answer (e.g. non-US symbols)."""
+    """Display-only regular-hours price -> (price, time) or None. Uses RTH last trade while the session is open,
+    else the last completed session close (never AH / pre-market). yfinance only when Alpaca does not answer."""
     if not ticker:
         return None
-    return _alpaca_last_trade(ticker, refresh_slot()) or _yf_live_quote(ticker)
+    from dashboard.alpaca_data import market_open
+    snap = _snapshots((ticker,)).get(ticker)
+    q = _rth_quote(snap) if snap is not None else None
+    if q is not None:
+        # time = latest RTH trade time when open, else daily_bar timestamp
+        ts = None
+        if market_open() and snap.latest_trade is not None:
+            tlt = pd.Timestamp(snap.latest_trade.timestamp)
+            ts = tlt.tz_convert("UTC") if tlt.tzinfo else tlt.tz_localize("UTC")
+        elif snap.daily_bar is not None:
+            tdb = pd.Timestamp(snap.daily_bar.timestamp)
+            ts = tdb.tz_convert("UTC") if tdb.tzinfo else tdb.tz_localize("UTC")
+        return q[0], ts or pd.Timestamp.now(tz="UTC")
+    return _yf_live_quote(ticker)
 
 def _yf_last(df):
     """Close column(s) of a yfinance download, one column per ticker."""
@@ -209,7 +266,8 @@ def _yf_last(df):
 
 @st.cache_data(ttl=120, show_spinner=False)
 def _yf_live_quote(ticker: str):
-    """Latest yfinance 1-minute close -> (price, bar time) or None (missing yfinance, a failed fetch or no bar)."""
+    """Latest yfinance 1-minute close -> (price, bar time) or None. Used for non-Alpaca symbols (CL=F, BTC-USD):
+    24-hour prints are intentional for those. Stocks/ETFs use _rth_quote via live_quote instead."""
     if not _YF_OK:
         return None
     try:
@@ -234,8 +292,13 @@ def etf_prices(symbols: tuple, start: str):
         except Exception:
             closes = pd.DataFrame()
         try:
-            q = _yf_last(_yf.download(list(symbols), period="1d", interval="1m", prepost=True, progress=False, auto_adjust=False))
-            now = {s: float(q[s].dropna().iloc[-1]) for s in q.columns if s in symbols and len(q[s].dropna())}
+            # Regular-hours only: last daily close stands in outside the session (no 1m pre/post prints).
+            from dashboard.alpaca_data import market_open
+            if market_open():
+                q = _yf_last(_yf.download(list(symbols), period="1d", interval="1m", prepost=False, progress=False, auto_adjust=False))
+                now = {s: float(q[s].dropna().iloc[-1]) for s in q.columns if s in symbols and len(q[s].dropna())}
+            else:
+                now = {}
         except Exception:
             now = {}
     bench = load_benchmarks()
@@ -313,8 +376,9 @@ def intraday(symbols: tuple):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def yf_intraday(symbols: tuple):
-    """Display only (header cards Alpaca does not carry, e.g. CL=F, BTC-USD): {symbol: ((price, day %), (epoch times,
-    closes, previous close))} from yfinance 5-minute bars of the latest trading date. Cached 60 s; unreadable left out."""
+    """Display only (header cards Alpaca does not carry: CL=F crude, BTC-USD bitcoin): 24-hour pricing from yfinance
+    (Chirag Oct 29 exception — stocks/ETFs are regular-hours only via index_quotes; these keep around-the-clock
+    live price and day %). {symbol: ((price, day %), (epoch times, closes, previous close))}. Cached 60 s."""
     if _live_off() or not _YF_OK:
         return {}
     out = {}

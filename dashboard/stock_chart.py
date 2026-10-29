@@ -301,20 +301,23 @@ def _values(v):
     return list(v) if v is not None else []
 
 def with_today(ticker, fig, ohlc):
-    """Daily views: today's bar at the live price. Only the last bar is patched (the cached history is not rebuilt):
-    Alpaca snapshot open / high / low / volume, close = the streamed last trade when fresh, else the snapshot's."""
+    """Daily views: today's bar at the regular-hours live price. Only the last bar is patched (the cached history is
+    not rebuilt): Alpaca snapshot open / high / low / volume; close = RTH last trade while the session is open
+    (today_bar already ignores AH), else daily_bar.close. Streamed AH prints are never applied."""
     import time
     from dashboard.data import today_bar
+    from dashboard.alpaca_data import market_open
     from dashboard.live_stream import live_stream
     bar = today_bar(ticker, int(time.time() // 5))
     if not bar or not ohlc["x"]:
         return fig, ohlc
     day, o, h, lo, c, v = bar
-    ls = live_stream()
-    q = ls.latest(ticker) if ls is not None else None
-    if q:
-        c = q[0]
-        h, lo = max(h, c), min(lo, c)
+    if market_open():
+        ls = live_stream()
+        q = ls.latest(ticker) if ls is not None else None
+        if q:
+            c = q[0]
+            h, lo = max(h, c), min(lo, c)
     key = f"{day:%Y-%m-%d}"
     if key < ohlc["x"][-1]:
         return fig, ohlc

@@ -77,6 +77,7 @@ def futures_rows(today):
             t = yf.Ticker(sym)
             c = t.history(period="3y", interval="1d", auto_adjust=False)["Close"].dropna()
             c.index = c.index.tz_localize(None).normalize()
+            # Futures stay 24-hour (Chirag Oct 29: same exception as CL=F / BTC-USD header cards).
             live = float(t.fast_info["last_price"])
             prev = c[c.index < today]
             row = {"Group": "Futures", "Name": name, "Symbol": sym, "Live price": live,
@@ -97,12 +98,13 @@ def live_table():
     snaps, feed = _feeds(lambda f: _client().get_stock_snapshot(
         StockSnapshotRequest(symbol_or_symbols=list(names), feed=f)))
     closes, today, rows = _daily_closes(tuple(names)), pd.Timestamp.now().normalize(), []
+    from dashboard.data import _rth_quote
     for s, name in names.items():
         sn = snaps.get(s)
-        live = sn.latest_trade.price if sn and sn.latest_trade else None
-        prev = sn.previous_daily_bar.close if sn and sn.previous_daily_bar else None
+        q = _rth_quote(sn) if sn else None
+        live, day_pct = (q[0], q[1]) if q else (None, None)
         row = {"Group": "Market" if s in MARKETS else "Sector", "Name": name, "Symbol": s, "Live price": live,
-               "Today %": (live / prev - 1) * 100 if live and prev else None}
+               "Today %": day_pct}
         c = closes[s].dropna() if s in closes else pd.Series(dtype=float)
         for col, off in LIVE_WINDOWS.items():
             past = c[c.index <= today - off]
