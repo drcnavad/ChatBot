@@ -120,7 +120,6 @@ CHANGES_CSV = os.path.join(REPORTS, "strategy_changes.csv")
 HOLDINGS_CSV = os.path.join(REPORTS, "strategy_holdings.csv")
 DECISIONS_CSV = os.path.join(REPORTS, "strategy_decisions.csv")
 BENCH_CSV = os.path.join(REPORTS, "benchmark_prices.csv")
-BAR_CACHES = []  # legacy; daily OHLCV charts read db.bars_daily via dashboard.data._bars
 BARS_TABLE = "bars_daily"  # SQLite single source of truth for daily OHLCV
 DRAWINGS_DIR = os.path.join(ROOT, "data", "drawings")   # your chart lines, one JSON per stock
 NEWS_CSV = os.path.join(REPORTS, "news_cleaned_df.csv")

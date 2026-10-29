@@ -910,13 +910,6 @@ def short_history_reference(bars, symbols=None, min_bars=MIN_BARS):
                      "Rough_Signal": rough_signal(c.iloc[-1], ma(10), ma(30), ma(50), rsi)})
     return pd.DataFrame(rows, columns=SHORT_HISTORY_COLUMNS)
 
-def short_history_message(ref):
-    """One plain line for the logs, e.g. 'Skipped for short history (not tradable yet): X (77 of 200 days, first traded ...)'."""
-    if ref is None or not len(ref):
-        return "Short history: none (every stock in the list has the 200 days needed)"
-    return "Skipped for short history (not tradable yet): " + "; ".join(
-        f"{r.Symbol} ({r.Days_Of_History} of {r.Days_Needed} days, first traded {r.First_Trade}, est. eligible {r.Est_Eligible_Date})"
-        for r in ref.itertuples())
 
 def wide(df, col, index="Date", columns="Symbol"):
     """Long table -> wide Date x Symbol matrix of one column (last value per cell)."""
@@ -1791,28 +1784,6 @@ def last_complete_session(t):
     if is_session(d) and ((et.hour, et.minute) >= (16, 30) or decision_bar_ready(t)):
         return d
     return pd.Timestamp(pd.date_range(end=d - pd.Timedelta(days=1), periods=1, freq=NYSE_SESSION)[0])
-
-# ----------------------------------------------------------------------------- live helpers
-def holding_details(weights, open_w, close_w, vol_w):
-    """Per current holding: entry (fill) date, entry price (next open after the decision), days held,
-    P&L since entry and 63d annualized volatility (Reports/strategy_holdings.csv)."""
-    last = weights.index[-1]
-    rows = []
-    for sym in weights.columns[weights.loc[last] > 0]:
-        w = weights[sym]
-        off = w[w <= 0]
-        run_start = w.index[w.index > off.index[-1]][0] if len(off) else w.index[0]
-        fills = open_w.index[open_w.index > run_start]
-        fill = fills[0] if len(fills) else None
-        entry = float(open_w.at[fill, sym]) if fill is not None and pd.notna(open_w.at[fill, sym]) else np.nan
-        close = float(close_w.at[last, sym])
-        since = close_w.loc[fill:, sym] if fill is not None else pd.Series(dtype=float)
-        rows.append({"Symbol": sym, "Weight": float(w.loc[last]),
-                     "Entry_Date": fill.date() if fill is not None else None, "Entry_Price": entry,
-                     "Close": close, "PnL_%": (close / entry - 1) * 100 if entry == entry else np.nan,
-                     "Days_Held": int(len(since)) if len(since) else 0,
-                     "Vol_63d_%": float(vol_w.at[last, sym]) * np.sqrt(252) * 100 if sym in vol_w else np.nan})
-    return pd.DataFrame(rows)
 
 
 # ----------------------------------------------------------------------------- per-stock forward test (dashboard)

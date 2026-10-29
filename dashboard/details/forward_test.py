@@ -50,7 +50,7 @@ def render_forward_test(p=None):
     live = live_returns_cached(values)
     board = apply_live_totals(board, live)
     skip = {"Rank", "Strategy", "Rule", "Value $"}
-    pct = [c for c in board.columns if c not in skip]   # signed cols incl. Today $ (toned green/red)
+    pct = [c for c in board.columns if c not in skip]   # signed cols incl. Total $ (toned green/red)
     dd = "Max drawdown %" if "Max drawdown %" in board.columns else "Max drawdown"
     sty = toned(toned(board, [c for c in pct if c != dd]), [dd], fn=drawdown_tone)
     board_html(highlight_rows(sty), board, pct + (["Value $"] if "Value $" in board.columns else []))
@@ -70,8 +70,9 @@ def _live_returns_data(strat_m, hold_m, daily_m, slot):
     return live_returns(read_report_csv(ft.STRATEGIES_CSV))
 
 def live_returns(values):
-    """Display only: {name: {pct, value, base}}. Paper value = shares×live + cash; base = last EOD Value.
-    QQQ/SPY value is not dollar-account sized (pct only; value/base left NaN). Account + CURRENT use Alpaca equity."""
+    """Display only: {name: {pct, value, base, total}}. Paper value = shares×live + cash; base = last EOD Value;
+    total = Value − START_CASH (live $ P/L since FORWARD_START). QQQ/SPY: pct only. Account + CURRENT: Alpaca equity;
+    total = equity − put-in (start equity + deposits since FORWARD_START)."""
     import forward_test as ft
     from dashboard.data import index_quotes, load_benchmarks, read_report_csv
     hold, saved = read_report_csv(ft.HOLDINGS_CSV), read_report_csv(ft.STRATEGIES_CSV)
@@ -92,7 +93,8 @@ def live_returns(values):
     out = {}
     def _put(name, value, eod):
         if eod and eod == eod and value == value:
-            out[name] = dict(pct=(value / eod - 1) * 100, value=float(value), base=float(eod))
+            out[name] = dict(pct=(value / eod - 1) * 100, value=float(value), base=float(eod),
+                             total=float(value) - ft.START_CASH)
     for name, g in h.groupby("Strategy"):
         px = g["Symbol"].map(lambda s: q.get(s, (float("nan"),))[0])
         if name in base and name in cash and px.notna().all() and base[name]:
@@ -102,20 +104,33 @@ def live_returns(values):
             _put(name, cash[name], base[name])
     for name, eod in base.items():          # EOD fallback when live quotes missing
         if name not in out and eod == eod:
-            out[name] = dict(pct=float("nan"), value=float("nan"), base=float(eod))
+            out[name] = dict(pct=float("nan"), value=float("nan"), base=float(eod),
+                             total=float(eod) - ft.START_CASH)
     bench = load_benchmarks()
     for x in ("QQQ", "SPY"):
         px, chg = q.get(x, (float("nan"), float("nan")))
         b = bench[x].dropna() if bench is not None and x in bench else pd.Series(dtype=float)
         ref = float(b[b.index <= day].iloc[-1]) if len(b[b.index <= day]) and b.index.max() >= day else px / (1 + chg / 100)
         pct = (px / ref - 1) * 100 if ref and ref == ref and px == px else float("nan")
-        out[f"{x} (comparison)"] = out[x] = dict(pct=pct, value=float("nan"), base=float("nan"))
+        out[f"{x} (comparison)"] = out[x] = dict(pct=pct, value=float("nan"), base=float("nan"), total=float("nan"))
     from dashboard.details.live_holdings import live_holdings
     data, _ = live_holdings()
     daily = read_report_csv(ft.DAILY_CSV)
     if data and daily is not None and len(daily):
         eq, eod = float(data["equity"]), float(daily["Equity"].iloc[-1])
-        row = dict(pct=(eq / eod - 1) * 100, value=eq, base=eod)
+        total_d = float("nan")
+        try:
+            import alpaca_paper as ap
+            import backtest_engine as be
+            from dashboard.data import etf_prices
+            closes, now = etf_prices(tuple(ap.BENCHMARK_ETFS), str(be.FORWARD_START))
+            av = ap.account_vs_etfs(data["history"], data["snapshot"], closes, now, be.FORWARD_START)
+            if av is not None:
+                _tbl, _start, put_in = av
+                total_d = eq - float(put_in)
+        except Exception:
+            total_d = eq - ft.START_CASH
+        row = dict(pct=(eq / eod - 1) * 100, value=eq, base=eod, total=total_d)
         out["My Alpaca account"] = out[CURRENT] = row
     return out
 
@@ -138,7 +153,7 @@ def _live_push():
         raw, values = built
         start = f"{pd.Timestamp(FORWARD_START):%b %-d}"
         board = apply_live_totals(tidy_board(raw, start).drop(columns="Rule", errors="ignore"), live_returns_cached(values))
-        cols = [c for c in ("Value $", "Today $", "Today %", "This week (so far) %") if c in board.columns]
+        cols = [c for c in ("Value $", "Total $", "Today %", "This week (so far) %") if c in board.columns]
         total_col = next((c for c in board.columns if c.startswith("Total since")), None)
         if total_col:
             cols.append(total_col)
@@ -195,14 +210,14 @@ def board_html(sty, board, pct):
     import streamlit.components.v1 as components
     tips = dict(zip(board["Strategy"], hover_tips(board)["Strategy"]))
     name = lambda v: esc(v) + (f'<span class="pd-t">{esc(tips[v])}</span>' if tips.get(v) else "")   # noqa: E731
-    dollar = [c for c in ("Value $", "Today $") if c in board.columns]
+    dollar = [c for c in ("Value $", "Total $") if c in board.columns]
     pct = [c for c in pct if c not in dollar]
     fmt = {"Rank": lambda v: "" if pd.isna(v) else f"{v:.0f}", "Strategy": name,
            **{c: "{:+.2f}%" for c in pct},
            **{"Value $": (lambda v: "" if pd.isna(v) else f"${v:,.0f}"),
-              "Today $": (lambda v: "" if pd.isna(v) else f"${v:+,.0f}" if v else "$0")}}
-    # Today $: always show sign when non-zero; Value $: plain $185,000
-    fmt["Today $"] = lambda v: "" if pd.isna(v) else (f"+${v:,.0f}" if v > 0 else (f"-${abs(v):,.0f}" if v < 0 else "$0"))
+              "Total $": (lambda v: "" if pd.isna(v) else (
+                  f"+${v:,.0f}" if v > 0 else (f"-${abs(v):,.0f}" if v < 0 else "$0")))}}
+    # Total $: live $ change since Oct 29 start (Value − $185k; live row = equity − put-in). Value $: plain.
     sty = (sty.format({k: v for k, v in fmt.items() if k in board.columns}, na_rep="")
            .set_td_classes(pd.DataFrame([["num" if c in pct or c in dollar or c == "Rank" else "" for c in board.columns]] * len(board),
                                         index=board.index, columns=board.columns))
@@ -256,8 +271,9 @@ CURRENT = "Live: RS short-term"   # display name of the live strategy's row (for
 
 def tidy_board(board, start):
     """Leaderboard for display, Chirag Oct 29 column order:
-    Rank, Strategy, Value $, Today $, Today %, This week (so far) %, Week N %, Total since <start> %, Max drawdown %.
-    Completed weeks only. Value/Today $ and Today % are filled by apply_live_totals from live quotes."""
+    Rank, Strategy, Value $, Total $, Today %, This week (so far) %, Week N %, Total since <start> %, Max drawdown %.
+    Completed weeks only. Value/Total $ and Today % are filled by apply_live_totals from live quotes.
+    Total $ = live dollar change since FORWARD_START (Value − START_CASH; live row = equity change net of deposits)."""
     import forward_test as ft
     so_far = [c for c in board.columns if c == "This week (so far) %"]
     weeks = [c for c in board.columns if c.startswith("Week ") and "so far" not in c and board[c].notna().any()]
@@ -268,12 +284,12 @@ def tidy_board(board, start):
         if c in b.columns:
             b[c] = b[c].fillna(0.0)
     b.insert(2, "Today %", float("nan"))                 # live-filled next
-    b.insert(2, "Today $", float("nan"))
+    b.insert(2, "Total $", float("nan"))
     b.insert(2, "Value $", float("nan"))
     b["Rank"] = pd.array(pd.to_numeric(b["Rank"], errors="coerce"), dtype="Int64")
     b = b.rename(columns={"Total return %": total_name})
-    # Rank, Strategy, Value $, Today $, Today %, This week (so far) %, Week N %, Total since, Max drawdown %
-    ordered = ["Rank", "Strategy", "Value $", "Today $", "Today %", *so_far, *weeks, total_name, "Max drawdown %"]
+    # Rank, Strategy, Value $, Total $, Today %, This week (so far) %, Week N %, Total since, Max drawdown %
+    ordered = ["Rank", "Strategy", "Value $", "Total $", "Today %", *so_far, *weeks, total_name, "Max drawdown %"]
     b = b[[c for c in ordered if c in b.columns]]
     b.insert(2, "Rule", [rule_of(x) for x in b["Strategy"]])
     b["Strategy"] = [CURRENT if ft.LIVE_MARK in str(x) else x for x in b["Strategy"]]
@@ -331,7 +347,8 @@ TILE_CSS = (
 
 
 def apply_live_totals(board, live=None):
-    """Fill Value $, Today $, Today % from live quotes; compound This week / Total with Today %; re-rank by live total."""
+    """Fill Value $, Total $, Today % from live quotes; compound This week / Total with Today %; re-rank by live total.
+    Total $ = live['total'] (Value − START_CASH, or live account equity − put-in since FORWARD_START)."""
     live = live or {}
     b = board.copy()
     total_col = next((c for c in b.columns if c.startswith("Total since")), None)
@@ -354,9 +371,15 @@ def apply_live_totals(board, live=None):
         # fall back to EOD base when live value missing (QQQ/SPY, or quotes down)
         miss = b["Value $"].isna()
         b.loc[miss, "Value $"] = rows[miss].map(lambda r: r.get("base", float("nan")))
-    if "Today $" in b.columns:
-        b["Today $"] = rows.map(lambda r: (r["value"] - r["base"])
-                                if r.get("value") == r.get("value") and r.get("base") == r.get("base") else float("nan"))
+    if "Total $" in b.columns:
+        import forward_test as ft
+        def _total(r):
+            tot = r.get("total", float("nan"))
+            if tot == tot:                       # finite (NaN != NaN)
+                return tot
+            v = r.get("value", float("nan"))
+            return (v - ft.START_CASH) if v == v else float("nan")
+        b["Total $"] = rows.map(_total)
     factor = (1 + lv.fillna(0) / 100)
     b[total_col] = ((1 + b[total_col].fillna(0) / 100) * factor - 1) * 100
     if wk_col is not None:

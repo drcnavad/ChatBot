@@ -11,7 +11,7 @@ import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 import streamlit as st
 
 from dashboard.alpaca_data import refresh_every, refresh_slot  # noqa: F401  (re-exported)
-from dashboard.settings import (APP_FILES, BAR_CACHES, BARS_TABLE, BENCH_CSV, COMPANY_XLSX, CT, DECISIONS_CSV, EARNINGS_CSV, FRESHNESS,
+from dashboard.settings import (APP_FILES, BARS_TABLE, BENCH_CSV, COMPANY_XLSX, CT, DECISIONS_CSV, EARNINGS_CSV, FRESHNESS,
     NEWS_CSV, REPORTS, SIGNAL_CSV)
 
 try:

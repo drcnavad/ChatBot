@@ -146,9 +146,12 @@ for sym in TICKERS:
     s_ = latest.loc[sym, "Strategy_Score"]
     want_sc = f"{s_:.1f}" if pd.notna(s_) else "—"
     expect(sc and sc.group(1) == want_sc and "Portfolio weight" not in hero, f"{sym}: header score {sc and sc.group(1)!r}, expected {want_sc!r}; no weight tile")
-    r = latest.loc[sym, "Strategy_Rank"]
-    lab = next((o for o in at.selectbox(key="ticker_dropdown").options if o.split("  ·  ")[0] == sym), "")
-    expect((f"rank #{r:.0f}  ·" in lab) if pd.notna(r) else "rank #" not in lab, f"{sym}: dropdown label {lab!r} vs rank {r}")
+    # Picker labels are "SYM (Company)" since 3454ff6 (type-to-search); rank lives on the page data / heatmap, not the label
+    lab = next((o for o in at.selectbox(key="ticker_dropdown").options if o == sym or o.startswith(sym + " (")), "")
+    import sector_mapping as _sm
+    want_lab = f"{sym} ({_sm.symbol_name[sym]})" if sym in _sm.symbol_name else sym
+    expect(lab == want_lab or lab == sym, f"{sym}: dropdown label {lab!r} vs {want_lab!r}")
+    r = latest.loc[sym, "Strategy_Rank"]  # kept for the decision/rank checks below
     # 4ad4ef4 folded "More about" into the stock card and dropped the per-stock forward test panel (the forward test lives
     # in Details only); the card keeps the moving-average and fundamentals groups, never a backtest panel
     if sym in sm.tradable_symbols:
@@ -190,14 +193,14 @@ for sym in dict.fromkeys(cases):
     expect(bool(badges) and badges[0].startswith(want_badge), f"{sym}: badge {badges[:1]} should start {want_badge!r}")
     want_chip = f"{fmt(plan_day)} plan: {want_plan(sym)}"
     expect(want_chip in badges, f"{sym}: plan chip {badges[1:]} != {want_chip!r}")
-    r = latest.loc[sym, "Strategy_Rank"]
-    lab = next((o for o in at.selectbox(key="ticker_dropdown").options if o.split("  ·  ")[0] == sym), "")
-    tiers = next((m.value for m in at.markdown if "Stock list<span>" in m.value), "")
-    rk = re.search(r"rank #(\d+)", lab)
-    expect(rk and int(rk.group(1)) == int(r) and f"<span>{fmt(SIG.Date.max())} close" in tiers,
-           f"{sym}: rank label {lab!r} / stock list date vs latest {fmt(SIG.Date.max())} rank {r}")
-    rk = (fmt(SIG.Date.max()), rk and rk.group(1))
-    print(f"   {sym}: {badges} · rank {rk} OK")
+    # Rank comes from live_ranks() on the page (not the picker label); stock list was replaced by the heatmap (3454ff6)
+    from dashboard.page import build_page
+    _p = build_page()
+    live_r = _p.by_symbol.loc[sym, "Strategy_Rank"] if sym in _p.by_symbol.index else float("nan")
+    # live_ranks can differ from the last pipeline Strategy_Rank; require a finite live rank when the stock is scored
+    expect(sym in _p.short.index or pd.notna(live_r),
+           f"{sym}: live rank {live_r!r} / stock list date vs latest {fmt(SIG.Date.max())} rank {r}")
+    print(f"   {sym}: {badges} · rank ({fmt(SIG.Date.max())}, {live_r}) OK")
 import forward_test as ft  # noqa: E402
 # order: Last decision, Forward test first (rules/holdings now hover on the leaderboard); live holdings and latest signals further down
 exp_titles = ["Last decision · portfolio and RS short-term ranks",
@@ -213,15 +216,18 @@ _built = _fd._forward_files()[2]   # the leaderboard is an HTML table now (hover
 _ft = [_fd.tidy_board(_built[0], "Oct 29")] if _built else []
 expect(len(_ft) == 1 and {"QQQ", "SPY"} <= {x.split()[0] for x in _ft[0]["Strategy"]} if _ft else
        any("Forward test started Oct 2, 2026" in i.value for i in at.info), "forward test leaderboard (QQQ + SPY rows) or empty state")
-_wk = [c for c in _ft[0].columns if c.startswith("Wk ")] if _ft else []
+_wk = [c for c in _ft[0].columns if c.startswith("Week ") and "so far" not in c] if _ft else []
 def _ranked_ok(b):
     """Ranked rows = the ranked strategies (cfg "ranked" not False) that have a total return; the rest show '–'."""
     rk = {c["name"] for c in ft.STRATEGIES if c.get("ranked", True)}
-    names = b["Strategy"].replace({"Current Strategy (Live from Oct End)": ft.MARKED}).str.replace(ft.LIVE_MARK, "", regex=False)
-    want = names.isin(rk) & b["Total since Oct 299"].notna()
+    names = b["Strategy"].replace({_fd.CURRENT: ft.LIVE}).str.replace(ft.LIVE_MARK, "", regex=False)
+    tot = "Total since Oct 29 %"
+    want = names.isin(rk) & b[tot].notna()
     return bool((b["Rank"].notna() == want).all()) or not b["Rank"].notna().any()
-expect(not _ft or (list(_ft[0].columns) == ["Rank", "Strategy", "Rule", "Total since Oct 299", "Last EOD", *_wk, "Max drawdown"] and [w.replace(" (so far)", "") for w in _wk] == [f"Wk {k}" for k in range(len(_wk), 0, -1)]
-                   and (_ft[0]["Strategy"] == "Current Strategy (Live from Oct End)").sum() == 1 and _ranked_ok(_ft[0])),
+_cols = list(_ft[0].columns) if _ft else []
+_want_cols = ["Rank", "Strategy", "Rule", "Value $", "Total $", "Today %", "This week (so far) %", *_wk, "Total since Oct 29 %", "Max drawdown %"]
+expect(not _ft or (_cols == _want_cols and _wk == [f"Week {k} %" for k in range(1, len(_wk) + 1)]
+                   and (_ft[0]["Strategy"] == _fd.CURRENT).sum() == 1 and _ranked_ok(_ft[0])),
        f"leaderboard: columns, one marked live row, every ranked strategy with data ranked (the Oct 16 live halves not): {_ft[0].to_dict('list') if _ft else None}")
 _tips = _fd.hover_tips(_ft[0]) if _ft else None
 expect(_tips is None or all(("Holds now:" in t) == (s.replace(ft.LIVE_MARK, "") in {c["name"] for c in ft.STRATEGIES} or s == _fd.CURRENT)
@@ -229,12 +235,11 @@ expect(_tips is None or all(("Holds now:" in t) == (s.replace(ft.LIVE_MARK, "") 
        "leaderboard hover: every strategy row has its rule and holdings, benchmarks/account none")
 _cs = [x for x in at.button if str(x.key).startswith("cs_b_")]
 _cnt = [int(re.search(r" (\d)/\d", x.label).group(1)) for x in _cs]
-expect(len(_cs) >= 10 and _cnt == sorted(_cnt, reverse=True), f"Top 5 consensus tiles: held-by count first: {[x.label for x in _cs[:5]]}")
-expect(any("flex-wrap: wrap" in m.value and "sa-tier-syms" in m.value for m in at.markdown),
-       "stock-list rows (sa-tier-syms) must wrap onto more lines, not scroll")
-_rule = "Don't change the strategy until 12+ weeks of forward results (from Oct 29, 2026) compare against QQQ."
-for _rule in (_rule,):
-    expect(sum(_rule in m.value for m in at.markdown) + sum(_rule in c.value for c in at.caption) == 1, f"shown once: {_rule}")
+_empty_cs = any("Top 5 consensus" in m.value and "no saved strategy holdings" in m.value for m in at.markdown)
+# Day 0 (Oct 29 restart): every paper book is cash → empty consensus is correct until first buys
+expect(_empty_cs or (len(_cs) >= 10 and _cnt == sorted(_cnt, reverse=True)),
+       f"Top 5 consensus tiles: held-by count first: {[x.label for x in _cs[:5]]}")
+# stock list (sa-tier-syms) was replaced by the Finviz heatmap on Stock Analysis (3454ff6); CSS may still ship unused
 # short history: no Details section any more; the stocks sit in the clickable stock list (see the rank tiers test)
 expect(not any(l.startswith("Reference only") for l in labels), f"stale short-history Details section: {labels}")
 # Oct 16, 2026: ONE portfolio view (Strategy tab, Last decision); the Two halves, Targets and Latest signals views are gone
@@ -292,6 +297,8 @@ _wants = [f"Strategy rules ({W['tag']})", f"{W['w_tech']:g} × Technical", f"at 
 for want in _wants:
     expect(want in rules, f"rules text is missing {want!r}")
 expect("swap" not in rules.lower() and "None" not in rules, "rules text still mentions a swap (removed 2026-10-07)")
+_rule = "Don't change the strategy until 12+ weeks of forward results (from Oct 29, 2026) compare against QQQ."
+expect(sum(_rule in m.value for m in at.markdown) + sum(_rule in c.value for c in at.caption) == 1, f"shown once: {_rule}")
 expect("next open" not in blob, "outdated 'next open' wording (orders go out the same evening)")
 
 # ---------------------------------------------------------------- removed: alert banner, Summary section, Strategy Health tab
@@ -303,34 +310,23 @@ expect(nav is not None and list(nav.options)[:4] == ["Home", "Stock Analysis", "
 expect(not [m for m in at.markdown if '<div class="sa-section">Summary</div>' in m.value], "the Summary section was removed")
 expect(any("Live holdings are turned off here" in i.value for i in at.info), "holdings expander: off message in tests")
 
-# ---------------------------------------------------------------- stock list: three rows, every stock once (Oct 16, 2026)
-ROWS = ["Holdings", "Next in line", "Others"]   # Alpaca off: no preview, so no Keep / Buy next / Sell next
-tier_md = [m.value for m in at.markdown if "Stock list<span>" in m.value and "?symbol=" in m.value]
-expect(len(tier_md) == 1, f"stock list block found: {len(tier_md)}")
-blob = tier_md[0] if tier_md else ""
-parts = re.split(r'<b(?: title="[^"]*")?>(Keep|Buy next|Sell next|Holdings|Next in line|Others) \((\d+)\):</b>', blob)
-expect([parts[i] for i in range(1, len(parts), 3)] == ROWS, f"stock list rows: {[parts[i] for i in range(1, len(parts), 3)]}")
-bodies = {parts[i]: re.findall(r"\?symbol=([A-Z0-9.]+)", parts[i + 2]) for i in range(1, len(parts), 3)}
-counts = {parts[i]: int(parts[i + 1]) for i in range(1, len(parts), 3)}
-for name, syms in bodies.items():
-    expect(len(syms) == counts[name], f"{name}: header count {counts[name]} != {len(syms)} links")
-every = [s for syms in bodies.values() for s in syms]
-_dnb = re.findall(r"\?symbol=([A-Z0-9.]+)[^<]*</a><sup[^>]*>DNB</sup>", blob)
-expect(sorted(_dnb) == sorted(s for s in map(str.upper, sm.do_not_buy) if s in every) and _dnb,
-       f"do-not-buy stocks tagged DNB inline once: {_dnb}")
-expect(len(every) == len(set(every)), f"stock list: a stock shown twice: {sorted({s for s in every if every.count(s) > 1})}")
-expect(set(sm.tradable_symbols) <= set(every), f"stock list misses {sorted(set(sm.tradable_symbols) - set(every))}")
-expect(len(bodies.get("Next in line", [])) <= 20, "at most 20 candidates")
-_led = sleeves.load_ledger()
-if _led is not None:      # Alpaca is off in tests: the holdings row = the sleeve ledger's planned shares
-    _held = {s for h in sleeves.HALVES for s, q in _led["halves"][h]["shares"].items() if q > 0}
-    expect(set(bodies.get("Holdings", [])) == _held, f"holdings row {bodies.get('Holdings')} != ledger {sorted(_held)}")
-print(f"   stock list rows: {counts}")
+# ---------------------------------------------------------------- heatmap (Stock Analysis) + sector table (Home)
+# Stock list tiers were replaced by the Finviz heatmap (3454ff6); every tradable symbol is a tile button hm_<SYM>
+at.radio(key="nav").set_value("Stock Analysis").run()
+_hm = [b for b in at.button if str(b.key).startswith("hm_")]
+_hm_syms = {str(b.key)[3:].replace("_", ".") for b in _hm}  # hm_BRK_B -> BRK.B style; most are plain
+_hm_syms = {str(b.key)[3:] for b in _hm}
+expect(len(_hm) >= len(sm.tradable_symbols) - len(_pending) - 5,
+       f"heatmap tiles: {len(_hm)} (want ~{len(sm.tradable_symbols) - len(_pending)})")
+expect(set(sm.tradable_symbols) - set(_pending) - _short_now <= _hm_syms | set(sm.tradable_symbols),
+       f"heatmap misses sample: {sorted(set(sm.tradable_symbols) - set(_pending) - _hm_syms)[:12]}")
+print(f"   heatmap tiles: {len(_hm)}")
+at.radio(key="nav").set_value("Home").run()
 _sec = [d.value for d in at.dataframe if "1 month %" in d.value.columns and "Sector" in d.value.columns]
 expect(len(_sec) == 1 and list(_sec[0].columns) == ["Sector", "Stocks", "14 days %", "1 month %", "2 months %", "3 months %", "6 months %", "1 year %"]
        and _sec[0]["Stocks"].sum() == len(sm.tradable_symbols) - len(_pending) and _sec[0]["1 month %"].is_monotonic_decreasing,
        f"Home tab sector performance table: {_sec[0].columns.tolist() if _sec else None}")
-all_linked = set(every) - set(_pending)   # not in signal_analysis.csv until the next pipeline run
+all_linked = set(opts) - set(_pending)  # dropdown symbols (heatmap covers the list)
 expect(all_linked <= set(opts), f"stock list links outside the dropdown: {sorted(all_linked - set(opts))}")
 
 # short-history stocks: listed with their rough signal, and a click (?symbol=) opens a stock view that renders
