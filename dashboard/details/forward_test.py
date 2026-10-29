@@ -273,7 +273,7 @@ TILE_CSS = (
 
 
 def apply_live_totals(board, live=None):
-    """Compound Total since Oct 2 (and the current week-so-far column) with today's live return; re-rank by the live
+    """Compound Total since FORWARD_START (and the current week-so-far column) with today's live return; re-rank by the live
     total (smaller max drawdown breaks ties). Once today's close is saved, live ≈ after-hours only so this does not
     double-count. live keys are display names (CURRENT, strategy names, QQQ/SPY, My Alpaca account)."""
     import forward_test as ft

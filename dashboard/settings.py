@@ -109,7 +109,7 @@ def rules_text():
             "- **Signals** (the strategy's decision, dated): Buy = enters the portfolio · Hold = stays · Sold = leaves · "
             f"Watch = ranked but not picked · Score below {WINNER.get('min_score', 0):g} = not eligible. The plan chip = what "
             "the next Friday rebalance would do at the latest close.\n"
-            "- **Changes:** Don't change the strategy until 12+ weeks of forward results (from Oct 2, 2026) compare against QQQ.\n")
+            "- **Changes:** Don't change the strategy until 12+ weeks of forward results (from Oct 29, 2026) compare against QQQ.\n")
 
 # Report files (all written by run_all.py)
 REPORTS = os.path.join(ROOT, "Reports")

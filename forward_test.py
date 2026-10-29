@@ -1,4 +1,4 @@
-"""Forward test from backtest_engine.FORWARD_START (Fri Oct 2, 2026), counted only from that close on:
+"""Forward test from backtest_engine.FORWARD_START (Thu Oct 29, 2026 restart), counted only from that close on:
   1. the real Alpaca account (read-only GETs through alpaca_paper, never orders) -> Reports/forward_test_daily.csv, one
      row per trading day: equity, cash, net deposits (a deposit booked after the close, ~4:15 PM CT, counts from the next
      row), positions, closed / winning picks, $ traded and its cost vs the decision price;
@@ -52,10 +52,10 @@ PIN = {"n": 10, "sector_cap": 1.0, "max_pick_rank": None, "cap_soft": False, "sl
 EARN_DAYS = 5
 BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
-START_CASH = 100_000.0   # each paper strategy starts with this cash on FORWARD_START (dollar account)
+START_CASH = 185_000.0   # each paper strategy starts with this cash on FORWARD_START (Chirag Oct 29 restart; ~account size)
 MON5 = "Live 50/50, top 5, sector on Mondays"   # Oct 21: the top-5 rules with the sector half on Mondays (live Oct 21 morning)
 MON = "Live 50/50, top 10 each half"    # the live rules Oct 19-25 (sector half on Mondays, 10 stocks per half)
-TOP5 = "Old live: Low vol + Sector rotation (Oct 16-26)"   # the live rules Oct 21-26, 2026 (was "Current Strategy (Live from Oct End)")
+TOP5 = "Old live: Low vol + Sector rotation (Oct 16-26)"   # retired Oct 29 restart (archived Oct 2 run); kept for OLD_NAMES / REMOVED
 # (Chirag, Oct 27, 2026, final) the live rules from the 2:30 PM CT run of Tue Oct 27: 100% "RS short-term (weekly + Mon–Thu
 # sells)" (sleeves.py, one sleeve = the whole account). That line itself is the live line (shown as "Live: RS short-term").
 NOW_HALVES = ("RS short-term (weekly + Mon–Thu sells)", "RS standard (Fridays only)")   # the 50/50 paper line's two halves
@@ -73,7 +73,8 @@ REMOVED = {"Short-term reversal", "12-1 month momentum", "RSI pullback in uptren
            "Live 50/50, sector rotation on Fridays", "50/50: Low vol + SR weekly 63d (live combo from Oct 2)",   # old top-10 Friday rows
            "200-day breakout, 1 day above, exit 2% below", "200-day breakout, 3 days above, exit 2% below",
            "200-day breakout, 5 days above, exit 2% below",
-           "Top 20 rank-weighted (70/30)"}   # Oct 21, 2026: no rank / volatility weights any more
+           "Top 20 rank-weighted (70/30)",  # Oct 21, 2026: no rank / volatility weights any more
+           TOP5}   # Oct 29, 2026 restart (Chirag): Old live archived with the Oct 2 forward run
 # Renamed lines: saved rows take the new name (migrate_names, and the dashboard reads through this map).
 # A rule that changed (ATR dip buy, top 30 -> top 10) is a new name on purpose, so the old results are not relabeled.
 OLD_NAMES = {
@@ -104,7 +105,7 @@ PREV_LEGS = (("lowvol+mb", "full", "month", 0.5), ("sr63+mb", "full", "weekstart
 LIVE_LEGS = (("lowvol@5+mb", "full", "month", 0.5), ("sr63@5+mb", "full", "week", 0.5))  # top 5 per half, sector half Fridays (Oct 21)
 MON5_LEGS = (LIVE_LEGS[0], ("sr63@5+mb", "full", "weekstart", 0.5))   # the same with the sector half on Mondays
 LV = ("lowvol", "full", "month", 0.5)   # the low vol half of the other 50/50 lines (no manual blocks)
-LIVE_SWITCH = "2026-10-16"
+LIVE_SWITCH = be.FORWARD_START   # Oct 29 restart: live halves start with the rest (was 2026-10-16)
 C6 = "Oct 2 rules (pinned)" # the rules the forward test started with (pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, 50/50 score)
 # paper_trade's Mon-Thu spare-cash rule (forward_test never imports paper_trade; tests check these equal its constants)
 LIVE_MARK = " · Current strategy (live)"
@@ -243,11 +244,11 @@ STRATEGIES = [
               "the list that day. A holding that moves into the jumpier half is sold on Mon-Thu."),
     # ---- added Oct 15, 2026 (evening, Chirag): the live 50/50 halves (from the Oct 16 close) and every rule discussed
     # that day (from Oct 2), simulated by forward_combos (no_overlap: the low-volatility half has priority)
-    dict(name="Live half: Low vol monthly", combo=dict(legs=PREV_LEGS, start=LIVE_SWITCH, which=0), ranked=False, group="lowvol",
+    dict(name="Live half: Low vol monthly", combo=dict(legs=PREV_LEGS, which=0), ranked=False, group="lowvol",
          rule="The live account's low-volatility half on its own (from the Oct 16 close, 1.0 then): the 10 calmest stocks "
               "above their 200-day average, max 4 per sector, equal weight, rebalanced on Oct 16 and then the last trading "
               "day of each month; do_not_buy never bought. Not ranked (starts Oct 16)."),
-    dict(name="Live half: Sector rotation Mondays (63d)", combo=dict(legs=PREV_LEGS, start=LIVE_SWITCH, which=1), ranked=False,
+    dict(name="Live half: Sector rotation Mondays (63d)", combo=dict(legs=PREV_LEGS, which=1), ranked=False,
          group="sector",
          rule="The live account's sector-rotation half on its own (from the Oct 16 close, 1.0 then): the best C6-score "
               "stocks in the 3 sectors whose ETF has the best 63-day return, top 10, equal weights, rebalanced every Monday (the first session of the week); never buys a stock the low-volatility half holds. Not ranked (starts Oct 16)."),
@@ -259,11 +260,6 @@ STRATEGIES = [
          rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
               "half rebalanced every Monday (Tuesday after a Monday holiday), no overlap, 10 stocks per half. The live rules Oct 19 "
               "until the 5-per-half switch (sector half Fri Oct 23, low vol half Fri Oct 30)."),
-    dict(name=TOP5, combo=dict(legs=LIVE_LEGS), group="combo",
-         rule="The live rules (Chirag, Oct 21, 2026; live from the sector half's Fri Oct 23 and the low vol half's Fri Oct 30 "
-              "rebalance): the 50/50 (low vol half on the last trading day of the month + sector rotation 63-day half every "
-              "Friday (Thursday when Friday is a holiday), no overlap, do_not_buy and the live manual buy blocks such as KO never bought) computed from Oct 2, with each half holding its top 5 instead of "
-              "10: max 2 per sector (the 40% sector cap on 5 stocks), the same 20% max per stock (the extra stays cash)."),
     dict(name=BLEND, blend=NOW_HALVES, ranked=True, group="combo",
          rule="Paper line (was the planned live rules on Oct 26, 2026): two independent halves of 50% each, computed from Oct 2. Half 1 = "
               "\"RS short-term (weekly + Mon–Thu sells)\" (Friday rebalance + Mon-Thu sell below rank 20, refilled from the top 10); "
@@ -874,9 +870,10 @@ def rebalance_days(cfg, inp):
     return inp.get(key) if key else None
 
 def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None, path=STRATEGIES_CSV,
-                      hold_path=HOLDINGS_CSV, start=be.FORWARD_START):
+                      hold_path=HOLDINGS_CSV, start=None):
     """Add every trading day after each strategy's last saved day (the first one: the start close, value 1.0 after its
     buys), up to the last day the volume bars cover. Saved days are never redone. Returns the number of rows added."""
+    start = be.FORWARD_START if start is None else start
     sig = _read(SIGNAL_CSV, usecols=SIG_COLS, parse_dates=["Date"]) if sig is None else sig
     facts = _read(FACTOR_CSV) if facts is None else facts
     bench = _read(BENCH_CSV) if bench is None else bench
@@ -1043,10 +1040,11 @@ def _fill_rows(fills):
     f["Time"] = pd.to_datetime(f["Time"], utc=True).dt.tz_convert(CT).dt.tz_localize(None)
     return f.sort_values("Time", kind="stable").reset_index(drop=True)
 
-def picks(fills, start=be.FORWARD_START):
+def picks(fills, start=None):
     """Closed picks: a pick opens with a buy into a flat position on/after `start` and closes when the position is back to
     0; P/L = sell proceeds - buy cost. A position already held before `start` is not counted (its round trip began
     earlier)."""
+    start = be.FORWARD_START if start is None else start
     f, start, out, book = _fill_rows(fills), pd.Timestamp(start), [], {}
     for r in f.itertuples():
         b = book.setdefault(r.Symbol, {"qty": 0.0, "counted": False, "entry": None, "buy": 0.0, "sell": 0.0})
@@ -1061,10 +1059,11 @@ def picks(fills, start=be.FORWARD_START):
             b.update(qty=0.0, counted=False)
     return pd.DataFrame(out, columns=["Symbol", "Entry", "Exit", "P/L $", "Return %"])
 
-def trade_cost(fills, orders, closes, start=be.FORWARD_START):
+def trade_cost(fills, orders, closes, start=None):
     """($ traded, $ cost) of the fills on/after `start` vs the decision price: buys (fill - decision price) x qty, sells
     (decision price - fill) x qty, so + = it cost money. The decision price is the stock's close on the As_Of day of the
     latest live_orders_log row with the same symbol and side sent before the fill; fills with no such row are left out."""
+    start = be.FORWARD_START if start is None else start
     f = _fill_rows(fills)
     f = f[f["Time"] >= pd.Timestamp(start)]
     if f.empty or orders is None or orders.empty:
@@ -1131,10 +1130,11 @@ def _stats(v):
     return ((v.iloc[-1] / v.iloc[0] - 1) * 100, daily, (v / v.cummax() - 1).min() * 100, len(weekly),
             [x * 100 for x in list(weekly) + now])
 
-def leaderboard(daily=None, bench=None, values=None, start=be.FORWARD_START):
+def leaderboard(daily=None, bench=None, values=None, start=None):
     """One row per strategy (STRATEGIES order) + the real account (time-weighted, alpaca_paper.account_twr_index:
     deposits and withdrawals are not returns) + QQQ / SPY (closes, comparison only), sorted by total return. Rank counts
     strategies only; the account and QQQ / SPY show where they would sit."""
+    start = be.FORWARD_START if start is None else start
     daily = _read(DAILY_CSV, parse_dates=["Date"]) if daily is None else daily
     bench = _read(BENCH_CSV, parse_dates=["Date"]) if bench is None else bench
     values = _read(STRATEGIES_CSV, parse_dates=["Date"]) if values is None else values

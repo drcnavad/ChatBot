@@ -302,6 +302,24 @@ def account_vs_etfs(history, snap, closes, prices_now, start):
     today = pd.Timestamp(snap["at"]).tz_convert(CT).tz_localize(None).normalize()
     h = history.assign(Date=pd.to_datetime(history["Date"]).dt.normalize()).sort_values("Date")
     h = h[(h["Date"] >= start) & (h["Date"] < today)].reset_index(drop=True)
+    # Day 0 of a forward restart (start == today): no completed post-start session yet — baseline = snapshot equity, 0%.
+    if h.empty and start >= today:
+        put_in, equity_now = float(snap["equity"]), float(snap["equity"])
+        rows = [("Your account", equity_now)]
+        for sym, name in BENCHMARK_ETFS.items():
+            px_now = prices_now.get(sym)
+            if not px_now:
+                continue
+            rows.append((f"{sym} ({name})", float(px_now)))  # placeholder; overwritten below with same put_in units
+        # Same dollars in each ETF at today's live price → flat vs account on day 0
+        out = pd.DataFrame([("Your account", equity_now)] +
+                           [(f"{sym} ({name})", equity_now) for sym, name in BENCHMARK_ETFS.items()
+                            if prices_now.get(sym)],
+                           columns=["Compared with", "Value now"])
+        out["Return %"], out["Gain $"] = 0.0, 0.0
+        out["Account ahead by (pts)"] = pd.NA
+        out.loc[out.index > 0, "Account ahead by (pts)"] = 0.0
+        return out[["Compared with", "Return %", "Value now", "Gain $", "Account ahead by (pts)"]], start, put_in
     if h.empty or h["Date"].iloc[0] != start:
         return None
     eq, cash, last = h["Equity"].astype(float), h["Cashflow"].astype(float), h["Date"].iloc[-1]

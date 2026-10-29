@@ -1,4 +1,4 @@
-"""Forward testing from backtest_engine.FORWARD_START (2026-10-02). 1) The dashboard's per-stock forward test (forward_test): only sessions on/after FORWARD_START count (a trade
+"""Forward testing from backtest_engine.FORWARD_START (2026-10-29 restart; fixtures still use the Oct 2 calendar). 1) The dashboard's per-stock forward test (forward_test): only sessions on/after FORWARD_START count (a trade
 before it is ignored, a position held into it starts at the start close), trades fill at the decision-day close with COST
 per side, and the empty state is None (the panel then says no closed trades yet). 2) forward_test.py (the live account):
 picks start from a flat position on/after the start, trading cost vs the decision price, deposits are not returns, weekly
@@ -23,7 +23,10 @@ def check(what, ok, got=""):
     if not ok:
         FAIL.append(what)
 
-check("one start-date constant: 2026-10-02", be.FORWARD_START == "2026-10-02", be.FORWARD_START)
+check("one start-date constant: 2026-10-29", be.FORWARD_START == "2026-10-29", be.FORWARD_START)
+# Fixtures below keep the Oct 2–16 calendar from the first forward run so accounting shapes stay stable.
+be.FORWARD_START = "2026-10-02"
+
 d = pd.bdate_range("2026-09-21", "2026-10-16")
 close = pd.Series(range(100, 100 + len(d)), index=d, dtype=float)
 w = pd.Series(0.0, index=d)
@@ -320,8 +323,13 @@ with tempfile.TemporaryDirectory() as tmp:
     _st = [pd.Timestamp((c.get("combo") or {}).get("start") or be.FORWARD_START) for c in ft.STRATEGIES]
     n_rows = lambda lo, hi=None: sum(int(((sdays >= max(lo, s0)) & (sdays <= (hi or sdays.max()))).sum()) for s0 in _st)
     n_oct2 = sum(s0 == pd.Timestamp(be.FORWARD_START) for s0 in _st)
-    check("update: one row per strategy and trading day from its start close (Oct 2; the live halves Oct 16), 1.0 on Oct 2",
-          n1 == n_rows(pd.Timestamp(be.FORWARD_START)) and (v.loc[v["Date"] == "2026-10-02", "Value"] == ft.START_CASH).sum() == n_oct2, n1)
+    oct2_vals = v.loc[v["Date"] == "2026-10-02", "Value"]
+    check("update: one row per strategy and trading day from its start close (fixture Oct 2), START_CASH on Oct 2",
+          n1 == n_rows(pd.Timestamp(be.FORWARD_START))
+          and len(oct2_vals) == n_oct2
+          and (oct2_vals - ft.START_CASH).abs().lt(1e-4).all(),
+          {"n1": n1, "expect": n_rows(pd.Timestamp(be.FORWARD_START)), "n_oct2": n_oct2,
+           "oct2": len(oct2_vals), "minmax": (float(oct2_vals.min()), float(oct2_vals.max())) if len(oct2_vals) else None})
     import shutil  # noqa: E402
     shutil.copy(P("a")["path"], os.path.join(tmp, "a_copy.csv"))
     ft.update_strategies(SIG[SIG["Date"] <= "2026-10-05"], FACTS, NO_EARN, BENCH, BARS, **P("r"))
