@@ -1,4 +1,4 @@
-"""Live rules from Tue Oct 27, 2026 (Chirag): 100% "RS short-term (weekly + Mon–Thu sells)", exactly its forward_test line
+"""Live rules from Tue Oct 27, 2026 (Chirag): 100% "Short-term relative strength", exactly its forward_test line
 (+ the no-idle-cash fill). Mocked: no broker calls, the ledger is a temp file."""
 import os
 import sys
@@ -23,9 +23,9 @@ def check(ok, what, got=""):
 
 W = be.WINNER
 check(W.get("halves") and W.get("sleeves") == {"rs_short": 1.0}, "WINNER = one sleeve, RS short-term 100%", W.get("sleeves"))
-check(be.winner_label(90)[0] == "RS-S-U90" and be.winner_label(90)[1].startswith("Live: RS short-term"), "tag / name", be.winner_label(90))
+check(be.winner_label(90)[0] == "RS-S-U90" and be.winner_label(90)[1].startswith("Live: Short-term relative strength"), "tag / name", be.winner_label(90))
 names = {c["name"] for c in ft.STRATEGIES}
-check(ft.LIVE == sleeves.STRATEGY["rs_short"] and {ft.LIVE, "RS standard (Fridays only)", ft.BLEND} <= names,
+check(ft.LIVE == sleeves.STRATEGY["rs_short"] and {ft.LIVE, ft.RS_FRIDAYS, ft.BLEND} <= names,
       "the live line is RS short-term; RS Fridays and the 50/50 stay as paper lines")
 check(pt.MAX_ORDER_PCT == 0.20, "order backstop = 20% of equity")
 check(sleeves.LEDGER_JSON.startswith(tempfile.gettempdir()) or "tmp" in sleeves.LEDGER_JSON, "test ledger is a temp file")

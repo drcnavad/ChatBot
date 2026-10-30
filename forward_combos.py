@@ -13,7 +13,7 @@ A line = legs [(key, mode, calendar, share)]:
   key      ("<key>+mb" = that leg + the live manual buy blocks; "<key>@5" = that leg with its top 5 instead of 10; the sector cap scales: floor(0.4 x 5) = 2 per sector)
            "lowvol" (low volatility in uptrend, equal weight) / "sr<n>" (sector rotation: the C6 score in the 3 sectors
            whose ETF has the best n-day return, equal weights) / "vam" (volatility-adjusted momentum, equal weight)
-           / "calm" (the Oct 15 rules' calmer half, "Now: RS, calmer half of the list": relative strength, 63-day volatility at or below the median, no buys
+           / "calm" (the Oct 15 rules' calmer half, "Relative strength among calm stocks": relative strength, 63-day volatility at or below the median, no buys
            5 days before earnings)
   mode     "full" = the leg's top 10 on each calendar day (a full rebalance) / "swap<k>" = buy the top 10 once, then on
            each calendar day sell a holding ranked worse than k (or held by the first leg) for the best stock not held
@@ -78,11 +78,11 @@ class Ctx:
         if key == "lowvol":
             cfg, score = _cfg("Low volatility in uptrend"), inp["scores"]["low_vol"]
         elif key == "vam":
-            cfg, score = _cfg("Volatility-adjusted momentum"), inp["scores"]["mom_risk"]
+            cfg, score = _cfg("Momentum per unit of risk"), inp["scores"]["mom_risk"]
         elif key == "calm":
-            cfg, score = _cfg("Now: RS, calmer half of the list"), inp["scores"]["rs_calm"]
+            cfg, score = _cfg("Relative strength among calm stocks"), inp["scores"]["rs_calm"]
         elif key.startswith("sr"):
-            cfg, n = _cfg("Sector rotation"), int(key[2:])
+            cfg, n = _cfg("Best stocks in hottest sectors"), int(key[2:])
             b = inp["bench"]
             etf_of = {s: sm.sector_etf_for(s) for s in self.cols}
             r = b / b.shift(n) - 1

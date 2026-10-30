@@ -22,7 +22,7 @@ TABLE = "backtest_results"
 COLS = ba.COLS
 START_CASH = 100_000.0
 START = "2025-01-02"   # first NYSE session on/after 2025-01-01
-LIVE = "RS short-term (weekly + Mon–Thu sells)"
+LIVE = "Short-term relative strength"
 NOTE_TAG = (
     f"$100k share-based from {START}; universe {date.today().isoformat()} "
     f"({len([s for s in sm.tradable_symbols if s not in set(sm.do_not_buy)])} buyable; "
@@ -181,7 +181,7 @@ def main():
         print(f"\nLIVE {LIVE}: end_rank={int(r.end_rank)} end=${r.end_value:,.0f} "
               f"total={r.total_return:.2f}% 2025={r.ret_2025:.2f}% 2026YTD={r.ret_2026_ytd:.2f}% "
               f"maxDD={r.max_drawdown:.2f}% trades={int(r.trades)}", flush=True)
-    for name in ("RS standard (Fridays only)", LIVE):
+    for name in ("Relative strength, Fridays only", LIVE):
         sub = det[det["strategy"] == name]
         if len(sub):
             print(f"  reconcile {name}: combined {sub.iloc[0].total_return:.2f}%", flush=True)

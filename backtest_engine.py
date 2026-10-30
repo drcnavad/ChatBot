@@ -130,7 +130,7 @@ def winner_label(n_stocks):
     """(tag, name) of the live rules for n_stocks scored stocks, e.g. 'LV-M-U84' / 'C6-U91-NS-MW30R10-E5'."""
     S, mw = WINNER, WINNER.get("midweek_swap")
     if S.get("halves"):
-        return (f"RS-S-U{n_stocks}", "Live: RS short-term - RS short-term (weekly + Mon–Thu sells): 10/21/63-day relative "
+        return (f"RS-S-U{n_stocks}", "Live: Short-term relative strength - Short-term relative strength: 10/21/63-day relative "
                 "strength, top 10 equal weight (no defensive sleeve), Friday rebalance + Mon-Thu exit below rank 20 "
                 f"refilled by the next eligible stock ranked 20 or better, soft QQQ regime ({n_stocks} stocks)")
     if S.get("score") == "low_vol" and S.get("calendar") == "monthly":

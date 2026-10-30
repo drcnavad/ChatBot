@@ -203,7 +203,7 @@ for sym in dict.fromkeys(cases):
     print(f"   {sym}: {badges} · rank ({fmt(SIG.Date.max())}, {live_r}) OK")
 import forward_test as ft  # noqa: E402
 # order: Last decision, Forward test first (rules/holdings now hover on the leaderboard); live holdings and latest signals further down
-exp_titles = ["Last decision · portfolio and RS short-term ranks",
+exp_titles = ["Last decision · portfolio and short-term relative strength ranks",
               f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 29, 2026",
               "Data freshness and settings"]
 at.radio(key="nav").set_value("Strategy").run()

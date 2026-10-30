@@ -2,8 +2,7 @@
   1. the real Alpaca account (read-only GETs through alpaca_paper, never orders) -> Reports/forward_test_daily.csv, one
      row per trading day: equity, cash, net deposits (a deposit booked after the close, ~4:15 PM CT, counts from the next
      row), positions, closed / winning picks, $ traded and its cost vs the decision price;
-  2. STRATEGIES: the paper-only strategies (the current live rules, the pinned Oct 2 rules name as a paper variant, the
-     Oct 15 50/50 and low-volatility lines of forward_combos; never traded), built from the saved Reports files
+  2. STRATEGIES: the paper-only strategies (the current live rules and paper-only variants (50/50 and event lines; never traded), built from the saved Reports files
      (signal_analysis, factor_history, earnings_date, benchmark_prices) + Alpaca daily volume (forward_bars) ->
      Reports/forward_strategies.csv (Value = shares×close+cash, START_CASH at the start; Cash) + holdings.
 leaderboard(): every strategy + the account + QQQ / SPY, ranked by total return; This week (so far) % plus one column per completed week.
@@ -49,14 +48,13 @@ EARN_DAYS = 5
 BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
 START_CASH = 185_000.0   # each paper strategy starts with this cash on FORWARD_START (Chirag Oct 29 restart; ~account size)
-MON5 = "Live 50/50, top 5, sector on Mondays"   # Oct 21: the top-5 rules with the sector half on Mondays (live Oct 21 morning)
-MON = "Live 50/50, top 10 each half"    # the live rules Oct 19-25 (sector half on Mondays, 10 stocks per half)
-# (Chirag, Oct 27, 2026, final) the live rules from the 2:30 PM CT run of Tue Oct 27: 100% "RS short-term (weekly + Mon–Thu
-# sells)" (sleeves.py, one sleeve = the whole account). That line itself is the live line (shown as "Live: RS short-term").
-# Oct 29, 2026 (Chirag): defensive sleeve removed from this live line — top 10 only (~9.9% each, 99% invested).
-NOW_HALVES = ("RS short-term (weekly + Mon–Thu sells)", "RS standard (Fridays only)")   # the 50/50 paper line's two halves
-BLEND = "50/50: RS short-term + RS Fridays"      # paper line (was the live line "Live: RS short-term + RS Fridays", Oct 26 only)
-LIVE_NOW = NOW_HALVES[0]
+MON5 = "Live 50/50, top 5, sector on Mondays"   # removed Oct 29 rename (Oct 16-era); kept for REMOVED / tests
+MON = "Live 50/50, top 10 each half"    # removed Oct 29 rename (Oct 16-era); kept for REMOVED / tests
+# Live rules (Chirag, Oct 27): 100% short-term relative strength. Defensive sleeve off Oct 29.
+LIVE_NOW = "Short-term relative strength"
+RS_FRIDAYS = "Relative strength, Fridays only"
+NOW_HALVES = (LIVE_NOW, RS_FRIDAYS)   # the 50/50 paper line's two halves
+BLEND = "Half short-term, half Friday relative strength"
 MARKED = LIVE_NOW
 LIVE = LIVE_NOW     # the line the verdict and the dashboard compare against
 # Names dropped from the active board (purge_removed). Archives keep their own history; do not reintroduce these.
@@ -67,9 +65,58 @@ REMOVED = {"Short-term reversal", "12-1 month momentum", "RSI pullback in uptren
            "200-day breakout, 1 day above, exit 2% below", "200-day breakout, 3 days above, exit 2% below",
            "200-day breakout, 5 days above, exit 2% below",
            "Top 20 rank-weighted (70/30)",
-           "Old live: Low vol + Sector rotation (Oct 16-26)"}
-# Active forward files are Oct 29 names only (archives hold older labels). Kept empty so hot paths do no rename work.
-OLD_NAMES = {}
+           "Old live: Low vol + Sector rotation (Oct 16-26)",
+           # Oct 29 rename cleanup (Chirag): drop the dated Oct 2 / Oct 16 rule lines and the never-traded ATR duplicate
+           "Oct 2 rules (pinned)",
+           "Live half: Low vol monthly", "Live half: Sector rotation Mondays (63d)",
+           MON5, MON,
+           "ATR dip buy (top 10)"}
+# Renamed lines: saved rows take the new name (migrate_names). Archives keep old labels.
+OLD_NAMES = {
+    "C6, 4 per sector, no earnings skip": "Half tech half strength, max 4 per sector",
+    "Technical score only": "Top technical scores",
+    "Quant Score top 10": "Top 10 quant scores",
+    "Quant Score top 5": "Top 5 quant scores",
+    "Quant + relative strength": "Quant plus relative strength",
+    "Company fundamentals": "Best company fundamentals",
+    "Monthly": "Half tech half strength, monthly",
+    "Trend following 50/200": "Above both 50-day and 200-day averages",
+    "Volatility-adjusted momentum": "Momentum per unit of risk",
+    "200-day high": "Closest to 200-day highs",
+    "Quality + momentum": "Quality plus momentum",
+    "Earnings drift": "Post-earnings winners",
+    "Sector rotation": "Best stocks in hottest sectors",
+    "ATR dip buy, sell on signal": "Buy deep dips, sell on weak signal",
+    "RS standard (Fridays only)": RS_FRIDAYS,
+    "Now: top 15": "Relative strength, top 15",
+    "RS short-term (weekly + Mon–Thu sells)": LIVE_NOW,
+    "Now: longer RS (63/126/252 days)": "Longer-term relative strength",
+    "Now: 30% technical + 70% RS": "Mostly relative strength plus technical",
+    "Now: RS, calmer half of the list": "Relative strength among calm stocks",
+    "50/50: RS short-term + RS Fridays": BLEND,
+    "50/50: Low vol + SR every 2 weeks 63d": "Half low vol, half sector rotation every 2 weeks",
+    "50/50: Low vol + SR Friday swap, keep top 10": "Half low vol, half sector Friday swap",
+    "50/50: Low vol + Vol-adjusted momentum weekly": "Half low vol, half risk-adjusted momentum",
+    "50/50: Low vol + Calmer half weekly": "Half low vol, half calm relative strength",
+    "200-day breakout, 2 days above, exit 2% below": "Break above 200-day average (2 days)",
+    "200-day breakout, 4 days above, exit 2% below": "Break above 200-day average (4 days)",
+    "Tech score 80/60 + TP20": "Technical surge with 20% take-profit",
+    "Tech score 70/60/90": "Technical rise, exit if extreme",
+    "MA10 x MA30": "10-day average crosses above 30-day",
+    "MA50 x MA200 (golden cross)": "Golden cross (50-day above 200-day)",
+    "MACD cross": "MACD bullish cross above 200-day",
+    "Donchian 20-day breakout": "New 20-day high breakout",
+    "Bollinger mean reversion": "Bounce from lower Bollinger band",
+    "EMA 9/21 cross": "Fast EMA crosses above slow EMA",
+    "EMA 9/21 + ADX>25": "EMA cross in a strong trend",
+    "Minervini trend template": "Minervini uptrend template",
+    "52-week high momentum": "Near 52-week highs",
+    "Dual MA + RSI filter": "Uptrend with healthy RSI",
+    "Worst 3 sectors 14d, +10%/-3%": "Best stocks in worst sectors (2 weeks)",
+    "Worst 3 sectors 1M, +10%/-3%": "Best stocks in worst sectors (1 month)",
+    "Worst 3 sectors 2M, +10%/-3%": "Best stocks in worst sectors (2 months)",
+    "Golden cross + MACD confirm": "Golden cross confirmed by MACD",
+}
 # the live 50/50 (be.WINNER "sleeves", from the Oct 16, 2026 switch): forward_combos legs, low-volatility half first
 # "+mb" = the live manual buy blocks too (Reports/manual_block.json, e.g. KO; Oct 21, 2026) on the live lines only
 PREV_LEGS = (("lowvol+mb", "full", "month", 0.5), ("sr63+mb", "full", "weekstart", 0.5))   # top 10 per half (Oct 19-25)
@@ -128,167 +175,142 @@ NOW = dict(score="rs", midweek={"enter_top": None, "exit_below": None, "days": M
 EQ = PLAIN                                                # (equal weight is now the only sizing)
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
 STRATEGIES = [
-    dict(name=C6, group="blend",
-         rule="What the bot traded Oct 2-7 (pinned): 50% technical + 50% relative strength, top 10, Fri rebalance + "
-              "Mon-Thu top-3 swap (below rank 15) and exit below rank 30 (checks Mon/Wed until Oct 15)."),
-    dict(name="C6, 4 per sector, no earnings skip", select=PLAIN, earnings=None, group="blend",
-         rule="The Oct 2 rules (half technical, half relative strength, top 10, Friday rebalance and Mon-Thu checks) with two "
-              "changes: at most 4 stocks from any one sector, and an earnings date never blocks a buy. It still ranks the whole "
-              "list. Sector rotation is a different line: it first keeps only the 3 sectors whose ETF has the best 63-day return."),
-    dict(name="Technical score only", score="tech", group="technical",
-         rule="Oct 2 rules ranking on the technical score alone (moving averages, RSI, MACD). Top 10."),
-    dict(name="Quant Score top 10", score="quant", tiebreak=None, group="quant",
+    dict(name="Half tech half strength, max 4 per sector", select=PLAIN, earnings=None, group="blend",
+         rule="Half technical score, half relative strength, top 10, Friday rebalance and Mon-Thu checks, with two "
+              "changes from the plain blend: at most 4 stocks from any one sector, and an earnings date never blocks a buy. "
+              "It still ranks the whole list. Best stocks in hottest sectors is different: it first keeps only the 3 sectors "
+              "whose ETF has the best 63-day return."),
+    dict(name="Top technical scores", score="tech", group="technical",
+         rule="Ranks on the technical score alone (moving averages, RSI, MACD). Top 10, Friday rebalance and Mon-Thu checks."),
+    dict(name="Top 10 quant scores", score="quant", tiebreak=None, group="quant",
          rule="Quant Score only, 10 stocks. The score is 0-100 from the trend, the moving averages, the 20-day VWAP, RSI, MACD "
-              "and Bollinger bands (a missing part counts as 50). It holds the 10 highest scores above 50, on the Oct 2 calendar "
-              "(Friday rebalance and Mon-Thu checks), equal weights. Quant Score top 5 is the same score with 5 stocks."),
-    dict(name="Quant Score top 5", score="quant", tiebreak=None, select={"n": 5}, group="quant",
-         rule="The same Quant Score as Quant Score top 10 (the 0-100 trend, moving-average, VWAP, RSI, MACD and Bollinger score, "
+              "and Bollinger bands (a missing part counts as 50). It holds the 10 highest scores above 50, Friday rebalance "
+              "and Mon-Thu checks, equal weights. Top 5 quant scores is the same score with 5 stocks."),
+    dict(name="Top 5 quant scores", score="quant", tiebreak=None, select={"n": 5}, group="quant",
+         rule="The same Quant Score as Top 10 quant scores (the 0-100 trend, moving-average, VWAP, RSI, MACD and Bollinger score, "
               "above 50), holding 5 stocks instead of 10."),
-    dict(name="Quant + relative strength", score="quant_rs", group="quant",
-         rule="Oct 2 rules ranking on a 50/50 blend of Quant Score rank and relative strength rank. Top 10."),
-    dict(name="Company fundamentals", score="fundamental", calendar="monthly", select=EQ, earnings=None, group="fundamental",
+    dict(name="Quant plus relative strength", score="quant_rs", group="quant",
+         rule="Ranks on a 50/50 blend of Quant Score rank and relative strength rank. Top 10, Friday rebalance and Mon-Thu checks."),
+    dict(name="Best company fundamentals", score="fundamental", calendar="monthly", select=EQ, earnings=None, group="fundamental",
          rule="Top 10 by the company-report score (Fundamental_Weight), equal weight, monthly."),
     dict(name="6-month momentum", score="mom_6", calendar="weekly", **SIMPLE, group="momentum",
          rule="Top 10 by the plain return over the last 126 trading days (about 6 months), including the last month. Every Friday, "
-              "equal weights. 12-1 month momentum leaves out the last month and rebalances once a month."),
+              "equal weights."),
     dict(name="Low volatility in uptrend", score="low_vol", calendar="monthly", select=EQ, earnings=None, group="lowvol",
          rule="The 10 calmest stocks by 63-day volatility, and only those whose close is above the 200-day average. "
-              "How far the price rose is not the rank. Equal weight, monthly. Volatility-adjusted momentum is a different "
+              "How far the price rose is not the rank. Equal weight, monthly. Momentum per unit of risk is a different "
               "line: it ranks 6-month return divided by 6-month volatility, every Friday, with no 200-day filter."),
     dict(name="Buy the dip", weights="dip", group="event",
          rule="Buy a stock at the close when it is 8% or more below its 50-day average; sell when it is back at the average or "
               "after 30 days; 10% each, at most 10, deepest first, checked daily."),
-    dict(name="Monthly", calendar="monthly", group="blend",
-         rule="The Oct 2 rules, rebalanced on the last trading day of each month only."),
-    dict(name="Trend following 50/200", weights="trend", group="technical",
+    dict(name="Half tech half strength, monthly", calendar="monthly", group="blend",
+         rule="Half technical score, half relative strength, top 10, rebalanced on the last trading day of each month only."),
+    dict(name="Above both 50-day and 200-day averages", weights="trend", group="technical",
          rule="Every Friday, each scored stock whose 50-day average is above its 200-day average gets one equal slot: "
               "1 divided by how many stocks are scored that day. A stock below that trend gets nothing, so part of the book "
               "stays in cash when few stocks qualify. Slots stay put until the next Friday. The count is however many stocks "
               "are in the uptrend, not a fixed top 10."),
-    dict(name="Volatility-adjusted momentum", score="mom_risk", calendar="weekly", select=EQ, earnings=None, group="momentum",
+    dict(name="Momentum per unit of risk", score="mom_risk", calendar="weekly", select=EQ, earnings=None, group="momentum",
          rule="Top 10 by the 6-month return divided by 6-month volatility, so more gain per unit of swing ranks higher. "
               "The 6-month return must be positive. Equal weight, every Friday. Low volatility in uptrend is a different "
               "line: it holds the calmest stocks above their 200-day average and does not rank the size of the gain."),
-    dict(name="200-day high", score="high_200", calendar="monthly", select={**EQ, "n": 20}, earnings=None, group="momentum",
+    dict(name="Closest to 200-day highs", score="high_200", calendar="monthly", select={**EQ, "n": 20}, earnings=None, group="momentum",
          rule="The 20 stocks closest to their highest close of the last 200 trading days (today's close divided by that "
               "high; 1 means the stock is at the high). Equal weight, monthly."),
-    dict(name="Quality + momentum", score="quality_mom", calendar="monthly", **SIMPLE, group="fundamental",
+    dict(name="Quality plus momentum", score="quality_mom", calendar="monthly", **SIMPLE, group="fundamental",
          rule="Top 10 by half the company-report score (Fundamental_Weight, the quality rank) and half the 12-1 month momentum "
               "rank (return from 12 months ago to 1 month ago). Monthly, equal weights."),
-    dict(name="Earnings drift", score="drift", calendar="weekly", **SIMPLE, group="event",
+    dict(name="Post-earnings winners", score="drift", calendar="weekly", **SIMPLE, group="event",
          rule="Stocks whose last earnings reaction beat SPY, biggest jump first. A morning report is judged that same day; "
               "an afternoon report is judged the next session. That one-day jump versus SPY is kept for 60 trading days. "
               "Top 10, every Friday. There is no EPS-surprise feed, so the price jump stands in for the beat."),
-    dict(name="Sector rotation", score="sector_rot", calendar="weekly", **SIMPLE, group="sector",
-         rule="The 3 sector ETFs with the best 63-day (about 3-month) return, then the best Oct 2 scores (half technical, "
-              "half relative strength) inside only those sectors. Top 10, every Friday, no Mon-Thu checks, and an earnings date "
-              "never blocks a buy. The C6 4-per-sector line is different: it ranks the whole list and can hold any sector."),
-    dict(name="ATR dip buy (top 10)", weights="atr_dip", group="event",
-         rule="Same dip as ATR dip buy, sell on signal, with a shorter list and a fixed exit. Buy only a top-10 name on the "
-              "Oct 2 score (half technical, half relative strength, score above 0) when the close is 3 times ATR(14) or more "
-              "below the highest close of the last 20 days. 10% each, at most 10, best rank first. Sold after 10 trading days."),
-    dict(name="ATR dip buy, sell on signal", weights="atr_dip_signal", group="event",
-         rule="Same dip as ATR dip buy (top 10): the close is 3 times ATR(14) or more below the highest close of the last "
-              "20 days. This line uses the top 30 of the Oct 2 score, and it does not sell after 10 days. It sells when "
+    dict(name="Best stocks in hottest sectors", score="sector_rot", calendar="weekly", **SIMPLE, group="sector",
+         rule="The 3 sector ETFs with the best 63-day (about 3-month) return, then the best half-technical half-relative-strength "
+              "scores inside only those sectors. Top 10, every Friday, no Mon-Thu checks, and an earnings date "
+              "never blocks a buy. Half tech half strength, max 4 per sector is different: it ranks the whole list and can hold any sector."),
+    dict(name="Buy deep dips, sell on weak signal", weights="atr_dip_signal", group="event",
+         rule="Buy when the close is 3 times ATR(14) or more below the highest close of the last 20 days, among the top 30 "
+              "of the half-technical half-relative-strength score. Does not sell after a fixed number of days. Sells when "
               "signal analysis says SELL (score below 0) or the rank falls below 30. 10% each, at most 10, best rank first."),
-    # ---- the live rules of Oct 15, 2026 (pinned) with one change each (added Oct 15, computed from Oct 2)
-    dict(name="RS standard (Fridays only)", **NOW, calendar="weekly", group="rs",
-         rule="The Oct 15 rules (relative strength, top 10, the five defensive stocks) with the Friday rebalance only. "
+    dict(name=RS_FRIDAYS, **NOW, calendar="weekly", group="rs",
+         rule="Relative strength, top 10, the five defensive stocks, with the Friday rebalance only. "
               "Mon-Thu does not sell or replace anything."),
-    dict(name="Now: top 15", **NOW, select={"n": 15}, group="rs",
-         rule="The Oct 15 rules (relative strength only, Friday rebalance, Mon-Thu sell below rank 20) with 15 ranked stocks "
+    dict(name="Relative strength, top 15", **NOW, select={"n": 15}, group="rs",
+         rule="Relative strength only, Friday rebalance, Mon-Thu sell below rank 20, with 15 ranked stocks "
               "plus the five defensive stocks."),
-    dict(name="RS short-term (weekly + Mon–Thu sells)", **{**NOW, "score": "rs_short", "sleeve": False}, group="rs",
+    dict(name=LIVE_NOW, **{**NOW, "score": "rs_short", "sleeve": False}, group="rs",
          rule="Live from Oct 29, 2026 (Chirag): relative strength over 10, 21 and 63 trading days (60% stock vs its sector "
               "ETF, 40% that ETF vs SPY), top 10 equal weight (no defensive sleeve), Friday rebalance + Mon-Thu sell below "
               "rank 20 refilled by the next eligible stock ranked 20 or better (earnings within 5 days skipped). "
-              "do_not_buy never bought. The Oct 15 windows were 21/63/126 days and included the five defensive stocks."),
-    dict(name="Now: longer RS (63/126/252 days)", **{**NOW, "score": "rs_long"}, group="rs",
-         rule="The Oct 15 rules, with relative strength measured over 63, 126 and 252 trading days (about 3 months, 6 months "
-              "and 1 year). The Oct 15 windows are 21, 63 and 126 days (about 1, 3 and 6 months). Same blend on each window: "
-              "60% the stock versus its sector ETF, 40% that ETF versus SPY."),
-    dict(name="Now: 30% technical + 70% RS", **{**NOW, "score": "tech30"}, group="blend",
-         rule="The Oct 15 rules (top 10, the five defensive stocks, Friday rebalance, Mon-Thu sell below rank 20), with the "
-              "rank changed to 30% technical score and 70% relative strength. The Oct 15 rank itself was 100% relative strength. "
-              "The Oct 2 score was 50% technical and 50% relative strength."),
-    dict(name="Now: RS, calmer half of the list", **{**NOW, "score": "rs_calm"}, group="rs",
-         rule="The Oct 15 rules (relative strength, top 10, the five defensive stocks, Mon-Thu sell below rank 20), limited to "
+              "do_not_buy never bought."),
+    dict(name="Longer-term relative strength", **{**NOW, "score": "rs_long"}, group="rs",
+         rule="Relative strength measured over 63, 126 and 252 trading days (about 3 months, 6 months "
+              "and 1 year), top 10 plus the five defensive stocks, Friday rebalance, Mon-Thu sell below rank 20. "
+              "Same blend on each window: 60% the stock versus its sector ETF, 40% that ETF versus SPY."),
+    dict(name="Mostly relative strength plus technical", **{**NOW, "score": "tech30"}, group="blend",
+         rule="Top 10 plus the five defensive stocks, Friday rebalance, Mon-Thu sell below rank 20, ranked 30% technical "
+              "score and 70% relative strength."),
+    dict(name="Relative strength among calm stocks", **{**NOW, "score": "rs_calm"}, group="rs",
+         rule="Relative strength, top 10, the five defensive stocks, Mon-Thu sell below rank 20, limited to "
               "the calmer half of the list. A stock can be bought only when its 63-day volatility is at or below the middle of "
               "the list that day. A holding that moves into the jumpier half is sold on Mon-Thu."),
-    # ---- added Oct 15, 2026 (evening, Chirag): the live 50/50 halves (from the Oct 16 close) and every rule discussed
-    # that day (from Oct 2), simulated by forward_combos (no_overlap: the low-volatility half has priority)
-    dict(name="Live half: Low vol monthly", combo=dict(legs=PREV_LEGS, which=0), ranked=False, group="lowvol",
-         rule="The live account's low-volatility half on its own (from the Oct 16 close, 1.0 then): the 10 calmest stocks "
-              "above their 200-day average, max 4 per sector, equal weight, rebalanced on Oct 16 and then the last trading "
-              "day of each month; do_not_buy never bought. Not ranked (starts Oct 16)."),
-    dict(name="Live half: Sector rotation Mondays (63d)", combo=dict(legs=PREV_LEGS, which=1), ranked=False,
-         group="sector",
-         rule="The live account's sector-rotation half on its own (from the Oct 16 close, 1.0 then): the best C6-score "
-              "stocks in the 3 sectors whose ETF has the best 63-day return, top 10, equal weights, rebalanced every Monday (the first session of the week); never buys a stock the low-volatility half holds. Not ranked (starts Oct 16)."),
-    dict(name=MON5, combo=dict(legs=MON5_LEGS), group="combo",
-         rule="The old live top-5 rules (Old live: Low vol + Sector rotation (Oct 16-26)) computed from Oct 2 with the sector half rebalanced "
-              "every Monday (Tuesday after a Monday holiday) instead of Friday: top 5 per half, max 2 per sector, equal "
-              "weight, no overlap, do_not_buy and the live manual buy blocks such as KO never bought."),
-    dict(name=MON, combo=dict(legs=PREV_LEGS), group="combo",
-         rule="The live 50/50 computed from Oct 2: low vol half on the last trading day of the month + sector rotation "
-              "half rebalanced every Monday (Tuesday after a Monday holiday), no overlap, 10 stocks per half. The live rules Oct 19 "
-              "until the 5-per-half switch (sector half Fri Oct 23, low vol half Fri Oct 30)."),
     dict(name=BLEND, blend=NOW_HALVES, ranked=True, group="combo",
-         rule="Paper line (was the planned live rules on Oct 26, 2026): two independent halves of 50% each, computed from Oct 2. Half 1 = "
-              "\"RS short-term (weekly + Mon–Thu sells)\" (Friday rebalance + Mon-Thu sell below rank 20, refilled from the top 10); "
-              "half 2 = \"RS standard (Fridays only)\" (Friday rebalance only). Each half follows its own line exactly; a stock both "
-              "pick is held by both, each paying from its own half (no overlap rule). Value = the average of the two lines."),
-    dict(name="50/50: Low vol + SR every 2 weeks 63d", combo=dict(legs=(LV, ("sr63", "full", "2week", 0.5))),
+         rule="Two independent halves of 50% each. Half 1 = Short-term relative strength (Friday rebalance + Mon-Thu sell "
+              "below rank 20, refilled from the top 10); half 2 = Relative strength, Fridays only. Each half follows its own "
+              "line exactly; a stock both pick is held by both, each paying from its own half (no overlap rule). "
+              "Value = the average of the two lines."),
+    dict(name="Half low vol, half sector rotation every 2 weeks", combo=dict(legs=(LV, ("sr63", "full", "2week", 0.5))),
          group="combo",
-         rule="50/50, the sector-rotation half (63 days) rebalanced every other Friday (from Oct 2), no overlap."),
-    dict(name="50/50: Low vol + SR Friday swap, keep top 10", combo=dict(legs=(LV, ("sr63", "swap10", "week", 0.5))),
+         rule="50/50: low-volatility half monthly + sector-rotation half (63 days) rebalanced every other Friday, no overlap."),
+    dict(name="Half low vol, half sector Friday swap", combo=dict(legs=(LV, ("sr63", "swap10", "week", 0.5))),
          group="combo",
-         rule="50/50, the sector-rotation half swap-only (keep top 10) checked on Fridays only."),
-    dict(name="50/50: Low vol + Vol-adjusted momentum weekly", combo=dict(legs=(LV, ("vam", "full", "week", 0.5))),
+         rule="50/50: low-volatility half monthly + sector-rotation half that only swaps (keeps top 10) on Fridays."),
+    dict(name="Half low vol, half risk-adjusted momentum", combo=dict(legs=(LV, ("vam", "full", "week", 0.5))),
          group="combo",
-         rule="50/50, the second half = volatility-adjusted momentum (6-month return / 6-month volatility), top 10, equal "
-              "weight, weekly, no overlap."),
-    dict(name="50/50: Low vol + Calmer half weekly", combo=dict(legs=(LV, ("calm", "full", "week", 0.5))),
+         rule="50/50: low-volatility half monthly + volatility-adjusted momentum (6-month return / 6-month volatility), top 10, "
+              "equal weight, weekly, no overlap."),
+    dict(name="Half low vol, half calm relative strength", combo=dict(legs=(LV, ("calm", "full", "week", 0.5))),
          group="combo",
-         rule="50/50, the second half = 'Now: RS, calmer half of the list' (relative strength among stocks at or below the "
-              "median 63-day volatility) rebalanced weekly, no Mon-Thu checks, no overlap."),
-    dict(name="200-day breakout, 2 days above, exit 2% below", b200=dict(tp=0.2, days=2, buffer=0.98), earnings=None, group="event",
+         rule="50/50: low-volatility half monthly + relative strength among stocks at or below the median 63-day volatility, "
+              "rebalanced weekly, no Mon-Thu checks, no overlap."),
+    dict(name="Break above 200-day average (2 days)", b200=dict(tp=0.2, days=2, buffer=0.98), earnings=None, group="event",
          rule="Buy a stock on the 2nd close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
-    dict(name="200-day breakout, 4 days above, exit 2% below", b200=dict(tp=0.2, days=4, buffer=0.98), earnings=None, group="event",
+    dict(name="Break above 200-day average (4 days)", b200=dict(tp=0.2, days=4, buffer=0.98), earnings=None, group="event",
          rule="Buy a stock on the 4th close in a row above its 200-day average after a close at or below it (10% each, at most 10, calmest first). Sell at +20% from the entry or when the close is 2% or more below the 200-day average (no other stop). Checked at the close."),
-    dict(name="Tech score 80/60 + TP20", event=dict(kind="tech80", tp=0.2), earnings=None, group="event",
+    dict(name="Technical surge with 20% take-profit", event=dict(kind="tech80", tp=0.2), earnings=None, group="event",
          rule="Buy when the stock's Technical_Score percentile (among the day's stocks) crosses above 80; sell when it falls below 60 or at +20% from the entry (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="Tech score 70/60/90", event=dict(kind="tech70", tp=None), earnings=None, group="event",
+    dict(name="Technical rise, exit if extreme", event=dict(kind="tech70", tp=None), earnings=None, group="event",
          rule="Buy when the Technical_Score percentile crosses above 70 (not if already 90+); sell when it falls below 60 or reaches 90 or above (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="MA10 x MA30", event=dict(kind="ma10_30", tp=None), earnings=None, group="event",
+    dict(name="10-day average crosses above 30-day", event=dict(kind="ma10_30", tp=None), earnings=None, group="event",
          rule="Buy on the 2nd close after the 10-day average crosses above the 30-day; sell when the 10-day is 2% or more below the 30-day (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="MA50 x MA200 (golden cross)", event=dict(kind="golden", tp=0.2), earnings=None, group="event",
+    dict(name="Golden cross (50-day above 200-day)", event=dict(kind="golden", tp=0.2), earnings=None, group="event",
          rule="Buy on the 2nd close after the 50-day average crosses above the 200-day; sell when the 10-day drops below the 50-day or at +20% from the entry (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="MACD cross", event=dict(kind="macd", tp=0.2), earnings=None, group="event",
+    dict(name="MACD bullish cross above 200-day", event=dict(kind="macd", tp=0.2), earnings=None, group="event",
          rule="Buy when MACD(12,26) crosses above its 9-day signal line with the close above the 200-day average; sell when MACD crosses below the signal or at +20% from the entry (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="Donchian 20-day breakout", event=dict(kind="donchian"), earnings=None, group="event",
+    dict(name="New 20-day high breakout", event=dict(kind="donchian"), earnings=None, group="event",
          rule="Turtle-style: buy on a close at a new 20-day high; sell on a close at a 10-day low (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="Bollinger mean reversion", event=dict(kind="bollinger", stop=0.05), earnings=None, group="event",
+    dict(name="Bounce from lower Bollinger band", event=dict(kind="bollinger", stop=0.05), earnings=None, group="event",
          rule="Buy when the close is below the lower Bollinger band (20, 2) with the close above the 200-day average; sell when the close is at or above the middle band or 5% below the entry (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="EMA 9/21 cross", event=dict(kind="ema"), earnings=None, group="event",
+    dict(name="Fast EMA crosses above slow EMA", event=dict(kind="ema"), earnings=None, group="event",
          rule="Buy on the 2nd close after the 9-day EMA crosses above the 21-day EMA; sell when the 9-day crosses below the 21-day (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="EMA 9/21 + ADX>25", event=dict(kind="ema_adx"), earnings=None, group="event",
-         rule="The EMA 9/21 cross (2 closes) only when ADX(14) is above 25 (ADX from closes); sell when the 9-day crosses below the 21-day (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="Minervini trend template", event=dict(kind="minervini"), earnings=None, group="event",
+    dict(name="EMA cross in a strong trend", event=dict(kind="ema_adx"), earnings=None, group="event",
+         rule="The fast/slow EMA cross (2 closes) only when ADX(14) is above 25 (ADX from closes); sell when the 9-day crosses below the 21-day (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="Minervini uptrend template", event=dict(kind="minervini"), earnings=None, group="event",
          rule="Buy when price > SMA50 > SMA150 > SMA200, the SMA200 is up over 1 month, within 25% of the 52-week high and over 30% above the 52-week low; sell on a close below the SMA50 (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="52-week high momentum", event=dict(kind="high52", stop=0.08), earnings=None, group="event",
+    dict(name="Near 52-week highs", event=dict(kind="high52", stop=0.08), earnings=None, group="event",
          rule="Buy when the close gets within 5% of its 52-week high and is above the 200-day average; sell 8% below the entry or on a close below the SMA50 (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="Dual MA + RSI filter", event=dict(kind="ma_rsi"), earnings=None, group="event",
+    dict(name="Uptrend with healthy RSI", event=dict(kind="ma_rsi"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and RSI(14) is 50-70; sell when RSI(14) falls below 40 (10% each, at most 10, calmest first; checked at the close)."),
-    dict(name="Worst 3 sectors 14d, +10%/-3%", worst=dict(look=10), earnings=None, group="event",
-         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 14 days (10 sessions); hold the top 10 stocks across them by Strategy_Score (the signal-analysis score, relative strength since Oct 13), 10% each. Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (not one sold that same day) (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
-    dict(name="Worst 3 sectors 1M, +10%/-3%", worst=dict(look=21), earnings=None, group="event",
-         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last month (21 sessions); hold the top 10 stocks across them by Strategy_Score (the signal-analysis score, relative strength since Oct 13), 10% each. Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (not one sold that same day) (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
-    dict(name="Worst 3 sectors 2M, +10%/-3%", worst=dict(look=42), earnings=None, group="event",
-         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 2 months (42 sessions); hold the top 10 stocks across them by Strategy_Score (the signal-analysis score, relative strength since Oct 13), 10% each. Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (not one sold that same day) (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
-    dict(name="Golden cross + MACD confirm", event=dict(kind="golden_macd"), earnings=None, group="event",
+    dict(name="Best stocks in worst sectors (2 weeks)", worst=dict(look=10), earnings=None, group="event",
+         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 14 days (10 sessions); hold the top 10 stocks across them by Strategy_Score (the signal-analysis score), 10% each. Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (not one sold that same day) (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
+    dict(name="Best stocks in worst sectors (1 month)", worst=dict(look=21), earnings=None, group="event",
+         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last month (21 sessions); hold the top 10 stocks across them by Strategy_Score (the signal-analysis score), 10% each. Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (not one sold that same day) (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
+    dict(name="Best stocks in worst sectors (2 months)", worst=dict(look=42), earnings=None, group="event",
+         rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 2 months (42 sessions); hold the top 10 stocks across them by Strategy_Score (the signal-analysis score), 10% each. Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (not one sold that same day) (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
+    dict(name="Golden cross confirmed by MACD", event=dict(kind="golden_macd"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and MACD is above its signal; sell when MACD falls below the signal (10% each, at most 10, calmest first; checked at the close)."),
 ]
+
 def _common_rules(c):
     """The limits a line inherits from strategy_targets / be.winner_targets, said once (appended to its rule)."""
     if c.get("combo"):
@@ -825,12 +847,12 @@ def combo_weights(cfg, inp, through=None):
     return w
 
 def migrate_names(*paths):
-    """Drop REMOVED strategy rows from active forward files (archives keep history). OLD_NAMES is empty after the Oct 29 restart."""
+    """Saved rows of a renamed line (OLD_NAMES) take its new name; REMOVED rows are dropped. Archives keep their own history."""
     for p in paths:
         df = _read(p)
-        if df is not None and len(df) and df["Strategy"].isin(REMOVED).any():
+        if df is not None and len(df) and df["Strategy"].isin(list(OLD_NAMES) + list(REMOVED)).any():
             df = df[~df["Strategy"].isin(REMOVED)]
-            df.pipe(db.to_csv, p, index=False)
+            df.assign(Strategy=df["Strategy"].replace(OLD_NAMES)).pipe(db.to_csv, p, index=False)
 
 def rebalance_days(cfg, inp):
     """Days on which every holding is brought back to its target (unless within 1 point of it), like the live Friday

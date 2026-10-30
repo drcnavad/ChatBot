@@ -1,7 +1,7 @@
 """The live account as one sleeve - backtest_engine.WINNER["sleeves"] = {"rs_short": 1.0}.
 
 Live from the 2:30 PM CT run of Tue Oct 27, 2026 (Chirag, Oct 27, final: "keep it simple and do RS short-term (weekly +
-Mon–Thu sells)"): 100% forward_test.py's "RS short-term (weekly + Mon–Thu sells)" - relative strength over 10/21/63 days,
+Mon–Thu sells)"): 100% forward_test.py's "Short-term relative strength" - relative strength over 10/21/63 days,
 top 10 equal weight (defensive sleeve removed Oct 29, 2026), Friday rebalance (the week's last session) and the Mon-Thu
 exit check (a stock worse than rank 20 is sold and replaced by the next eligible stock ranked 20 or better; earnings
 within 5 days skipped), earnings within 5 days not newly bought, soft QQQ regime, do_not_buy never bought, do_not_sell
@@ -34,9 +34,9 @@ REPORTS = os.path.join(ROOT, "Reports")
 LEDGER_JSON = os.environ.get("STOCK_ANALYSIS_SLEEVE_LEDGER") or os.path.join(REPORTS, "sleeve_ledger.json")
 PLAN_CSV = os.environ.get("STOCK_ANALYSIS_SLEEVE_PLAN") or os.path.join(REPORTS, "sleeve_plan.csv")
 HALVES = ("rs_short",)
-STRATEGY = {"rs_short": "RS short-term (weekly + Mon–Thu sells)"}
-LABEL = {"rs_short": "RS short-term (weekly + Mon–Thu sells)"}
-SHORT = {"rs_short": "RS short-term"}
+STRATEGY = {"rs_short": "Short-term relative strength"}
+LABEL = {"rs_short": "Short-term relative strength"}
+SHORT = {"rs_short": "Short-term relative strength"}
 VERSION = 4
 CT = ZoneInfo("America/Chicago")
 

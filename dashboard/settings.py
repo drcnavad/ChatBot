@@ -40,7 +40,7 @@ STRATEGY_NAME = ("Low volatility in uptrend (monthly)" if LOW_VOL and MONTHLY el
 SLEEVES = WINNER.get("sleeves")                                      # the live sleeve (sleeves.py), else None
 HALVES = bool(WINNER.get("halves"))                                 # (Oct 27, 2026) live = RS short-term (weekly + Mon–Thu sells)
 if SLEEVES and HALVES:
-    STRATEGY_NAME = "Live: RS short-term (weekly + Mon–Thu sells)"
+    STRATEGY_NAME = "Live: Short-term relative strength"
 REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day average"   # market filter off
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
@@ -52,7 +52,7 @@ except Exception:
 def halves_rules_text():
     """The live rules (from the first RS short-term rebalance, Fri Oct 30, 2026; defensive sleeve off Oct 29) in plain words."""
     return (f"**Strategy rules: {STRATEGY_NAME} ({STRATEGY_TAG})**\n"
-            "- **Whole account** runs forward_test's \"RS short-term (weekly + Mon–Thu sells)\" exactly (Reports/sleeve_ledger.json).\n"
+            "- **Whole account** runs forward_test's \"Short-term relative strength\" exactly (Reports/sleeve_ledger.json).\n"
             "- **Score:** relative strength over 10, 21 and 63 trading days (60% stock vs its sector ETF, 40% that ETF vs SPY); "
             "the top 10, equal weights (~9.9% each), 99% invested. No defensive sleeve (removed Oct 29, 2026).\n"
             "- **When:** full rebalance every Friday 2:30 PM CT (Thursday when Friday is a holiday); Mon-Thu 2:30 PM a holding "

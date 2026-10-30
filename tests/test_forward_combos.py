@@ -29,7 +29,7 @@ def check(ok, what, detail=""):
     if not ok:
         FAIL.append(what)
 
-if not (db.exists(ft.SIGNAL_CSV) and db.exists(ft.STRATEGIES_CSV) and db.exists(ft.FWD_BARS)):
+if not (db.exists(ft.SIGNAL_CSV) and db.exists(ft.STRATEGIES_CSV) and db.has_bars()):
     print("SKIP no saved data"); sys.exit(0)
 sig = db.read_csv(ft.SIGNAL_CSV, usecols=ft.SIG_COLS, parse_dates=["Date"])
 bars = ft.forward_bars(fetch=False)
@@ -73,27 +73,30 @@ vp, hp = os.path.join(tmp, "v.csv"), os.path.join(tmp, "h.csv")
 v0 = db.read_csv(ft.STRATEGIES_CSV)
 h0 = db.read_csv(ft.HOLDINGS_CSV)
 removed = sorted(ft.REMOVED)[0]
-extra = v0[v0["Strategy"] == ft.MON].assign(Strategy=removed)     # a removed line still in a saved file
+# inject a REMOVED name so purge is exercised (bars currently end before FORWARD_START, so do not strip
+# combo rows that cannot be rebuilt until volume catches up)
+seed = v0[v0["Strategy"] == ft.LIVE].head(1)
+extra = seed.assign(Strategy=removed) if len(seed) else v0.head(1).assign(Strategy=removed)
 v0 = pd.concat([v0, extra], ignore_index=True)
 names = [c["name"] for c in ft.STRATEGIES if c.get("combo")]
-v0, h0 = v0[~v0["Strategy"].isin(names)], h0[~h0["Strategy"].isin(names)]
 v0.pipe(db.to_csv, vp, index=False); h0.pipe(db.to_csv, hp, index=False)
 fc._CACHE.clear()
 ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)
 v1, h1 = db.read_csv(vp), db.read_csv(hp)
 check(not set(v1["Strategy"]) & ft.REMOVED and not set(h1["Strategy"]) & ft.REMOVED, "removed lines purged from both files")
-check(ft.LIVE == ft.LIVE_NOW and {ft.LIVE, ft.MON5, ft.MON} <= set(v1["Strategy"]), "the live line is RS short-term (paper halves kept)")
+check(ft.LIVE == ft.LIVE_NOW and ft.LIVE in set(v1["Strategy"]), "the live line is short-term relative strength")
+check(not ({ft.MON5, ft.MON} & set(v1["Strategy"])), "Oct 16-era live 50/50 lines stay removed")
 new = v1[v1["Strategy"].isin(names)]
-starts = new.groupby("Strategy")["Date"].min()
-halves = list(ft.LIVE_HALVES)
-check(set(starts.drop(halves, errors="ignore")) == {str(be.FORWARD_START)[:10]}, "the new lines start on FORWARD_START", starts.to_dict())
-check(all(abs(v - ft.START_CASH) < 1e-6 for v in new[new["Date"] == str(be.FORWARD_START)[:10]]["Value"]), "each new line is START_CASH at FORWARD_START")
-T5 = ft.MON5
-h5 = h1[(h1["Strategy"] == T5) & (h1["Shares"] > 0)]
-check(T5 in starts and str(starts[T5])[:10] == str(be.FORWARD_START)[:10] and len(h5) and h5.groupby("Date")["Symbol"].nunique().max() <= 10,
-      "top 5 each half: from FORWARD_START, at most 5 + 5 stocks", h5.groupby("Date")["Symbol"].nunique().to_dict())
+starts = pd.to_datetime(new.groupby("Strategy")["Date"].min())
+check(len(names) and set(starts.dt.strftime("%Y-%m-%d")) == {str(be.FORWARD_START)[:10]},
+      "the combo lines start on FORWARD_START", starts.to_dict())
+day0 = new[pd.to_datetime(new["Date"]) == pd.Timestamp(be.FORWARD_START)]
+check(len(day0) and all(abs(v - ft.START_CASH) < 1e-6 for v in day0["Value"]),
+      "each combo line is START_CASH at FORWARD_START")
+unranked = [c["name"] for c in ft.STRATEGIES if c.get("combo") and c.get("ranked") is False]
 lb = ft.leaderboard(values=v1.assign(Date=pd.to_datetime(v1["Date"])))
-check(lb.set_index("Strategy").loc[halves, "Rank"].isna().all(), "the live halves are not ranked")
+if unranked:
+    check(lb.set_index("Strategy").loc[unranked, "Rank"].isna().all(), "unranked combo halves are not ranked")
 again = ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)
 check(again == 0, "a second update adds nothing (saved days never redone)", again)
 shutil.rmtree(tmp, ignore_errors=True)

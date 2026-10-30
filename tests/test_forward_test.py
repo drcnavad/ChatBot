@@ -117,30 +117,30 @@ check("leaderboard: QQQ from the start close", abs(q["Total return %"] + 1) < 1e
       q.to_dict())
 check("leaderboard: the account and QQQ / SPY are not ranked", sm.loc[[ft.ACCOUNT, "QQQ (comparison)", "SPY (comparison)"], "Rank"].isna().all())
 vals = pd.DataFrame([{"Date": d, "Strategy": c["name"], "Value": 1.0} for d in days for c in ft.STRATEGIES])
-vals.loc[(vals["Strategy"] == "Quant Score top 5") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02   # +2% then flat
-vals.loc[(vals["Strategy"] == "Quant Score top 10") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02
-vals.loc[(vals["Strategy"] == "Quant Score top 10") & (vals["Date"] == pd.Timestamp("2026-10-05")), "Value"] = 0.95  # same total, deeper drop
+vals.loc[(vals["Strategy"] == "Top 5 quant scores") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02   # +2% then flat
+vals.loc[(vals["Strategy"] == "Top 10 quant scores") & (vals["Date"] >= pd.Timestamp("2026-10-09")), "Value"] = 1.02
+vals.loc[(vals["Strategy"] == "Top 10 quant scores") & (vals["Date"] == pd.Timestamp("2026-10-05")), "Value"] = 0.95  # same total, deeper drop
 lb = ft.leaderboard(daily, bench, vals)
 N_RANKED = sum(bool(c.get("ranked", True)) for c in ft.STRATEGIES)   # the Oct 16 live halves are shown, not ranked
 # LIVE+LIVE_MARK is an extra ranked row = real account TWR (paper LIVE stays unmarked). N includes that mark when daily exists.
 N_WITH_LIVE = N_RANKED + 1
 check("leaderboard: ranked by total return since Oct 2, a tie goes to the smaller drawdown; Rank counts strategies only",
-      list(lb.dropna(subset=["Rank"])["Strategy"][:3]) == [ft.MARKED + ft.LIVE_MARK, "Quant Score top 5", "Quant Score top 10"]
+      list(lb.dropna(subset=["Rank"])["Strategy"][:3]) == [ft.MARKED + ft.LIVE_MARK, "Top 5 quant scores", "Top 10 quant scores"]
       and list(lb.dropna(subset=["Rank"])["Rank"][:3]) == [1, 2, 3]
       and sorted(lb["Rank"].dropna()) == list(range(1, N_WITH_LIVE + 1)), lb.head(4).to_dict("records"))
 check("leaderboard: the live row is marked", (lb["Strategy"] == ft.MARKED + ft.LIVE_MARK).sum() == 1, list(lb["Strategy"]))
 _early = ft.leaderboard(daily.iloc[:3], bench.iloc[:3], vals[vals["Date"] <= "2026-10-06"])
 check("leaderboard: ranked from day one (no wait for a full week)",
-      sorted(_early["Rank"].dropna()) == list(range(1, N_WITH_LIVE + 1)) and _early.dropna(subset=["Rank"])["Strategy"].iloc[-1] == "Quant Score top 10",
+      sorted(_early["Rank"].dropna()) == list(range(1, N_WITH_LIVE + 1)) and _early.dropna(subset=["Rank"])["Strategy"].iloc[-1] == "Top 10 quant scores",
       _early.head(3).to_dict("records"))
 check("verdict: too early before 12 weeks", ft.verdict(lb) == "Week 2 of 12: too early to name a winner.", ft.verdict(lb))
 long_days = pd.bdate_range("2026-10-02", periods=70)
-lv = pd.DataFrame([{"Date": d, "Strategy": c["name"], "Value": 1.0 + i * (0.002 if c["name"] == "Quant Score top 5" else 0.0)}
+lv = pd.DataFrame([{"Date": d, "Strategy": c["name"], "Value": 1.0 + i * (0.002 if c["name"] == "Top 5 quant scores" else 0.0)}
                    for i, d in enumerate(long_days) for c in ft.STRATEGIES])
 lbq = lambda q_end: ft.leaderboard(daily.iloc[:0], pd.DataFrame({"Date": long_days, "QQQ": 100.0, "SPY": 100.0}).assign(
     QQQ=lambda x: [100.0] * 69 + [q_end]), lv)
 check("verdict: after 12 weeks the top strategy wins only if it beats live and QQQ",
-      "the winner is Quant Score top 5" in ft.verdict(lbq(100.0)) and "no winner" in ft.verdict(lbq(200.0)),
+      "the winner is Top 5 quant scores" in ft.verdict(lbq(100.0)) and "no winner" in ft.verdict(lbq(200.0)),
       (ft.verdict(lbq(100.0)), ft.verdict(lbq(200.0))))
 
 class FakeAccount:
@@ -227,13 +227,13 @@ tg = {k: t.loc["2026-10-02":] for k, t in full.items()}
 check(f"registry: {len(ft.STRATEGIES)} strategies with unique names, each with a one-line rule and a color",
       len({c["name"] for c in ft.STRATEGIES}) == len(ft.STRATEGIES) >= 28
       and all(c.get("rule") and ft.strategy_color(c["name"]) for c in ft.STRATEGIES)
-      and any(c["name"] == "Quant Score top 10" for c in ft.STRATEGIES)
-      and any(c["name"] == "ATR dip buy (top 10)" for c in ft.STRATEGIES))
+      and any(c["name"] == "Top 10 quant scores" for c in ft.STRATEGIES)
+      and any(c["name"] == "Buy deep dips, sell on weak signal" for c in ft.STRATEGIES))
 _combo = {c["name"] for c in ft.STRATEGIES if c.get("combo")}   # forward_combos lines (tests/test_forward_combos.py)
 check("registry: every strategy picks something, weights 0..19.8% (20% max x 99%), at most 99% invested",
       all((t.to_numpy() >= 0).all() and t.to_numpy().max() <= (0.198 + 1e-12 if k not in _combo else 0.25)
           and t.sum(axis=1).max() <= (0.99 + 1e-9 if k not in _combo else 1.0 + 1e-9)   # combo: drifted weights, no margin
-          and (t.sum(axis=1).max() > 0 or k == "EMA 9/21 + ADX>25") for k, t in tg.items()),   # ADX>25: none on the fake data
+          and (t.sum(axis=1).max() > 0 or k == "EMA cross in a strong trend") for k, t in tg.items()),   # ADX>25: none on the fake data
       {k: (round(t.to_numpy().max(), 4), round(t.sum(axis=1).max(), 4)) for k, t in tg.items()})
 check("registry: the strategies are not copies of each other (distinct weights over the fake history)",
       len({t.round(4).to_numpy().tobytes() for k, t in full.items() if k not in _combo}) >= len(ft.STRATEGIES) - len(_combo) - 5)   # the small fake history makes a few
@@ -358,7 +358,7 @@ with tempfile.TemporaryDirectory() as tmp:
     for k in ("path", "hold_path"):
         d_ = rd(P("a")[k]); d_[d_["Date"] <= "2026-10-05"].pipe(db.to_csv, P("c")[k], index=False)
     hc = rd(P("c")["hold_path"])
-    FO = "RS standard (Fridays only)"                                               # no decision on Tue Oct 6 (Mon-Thu checks would)
+    FO = "Relative strength, Fridays only"                                               # no decision on Tue Oct 6 (Mon-Thu checks would)
     L = (hc["Strategy"] == FO) & (hc["Date"] == "2026-10-05") & (hc["Shares"] > 0)
     alien = next(s for s in sorted(SIG["Symbol"].unique()) if s not in set(hc.loc[hc["Strategy"] == FO, "Symbol"]))
     gone = hc.loc[L, "Symbol"].iloc[0]
@@ -475,7 +475,7 @@ with tempfile.TemporaryDirectory() as tmp:
           abs(ht.at[pd.Timestamp("2026-10-07"), "Value"] - t7) < 1e-4 and (ht["Cash"] >= -1e-6).all(), ht.round(8).to_dict())
     rd = {c["name"]: ft.rebalance_days(c, {"weekly": "W", "monthly": "M"}) for c in ft.STRATEGIES}
     check("rebalance days: the calendar of each rule (Fridays, month ends, never for the dip and threshold rules)",
-          rd[ft.LIVE] == rd["RS standard (Fridays only)"] == "W" and rd["Monthly"] == "M"
+          rd[ft.LIVE] == rd["Relative strength, Fridays only"] == "W" and rd["Half tech half strength, monthly"] == "M"
           and rd["Buy the dip"] is None and set(rd.values()) <= {"W", "M", None}, rd)
 
 # 200-day breakout family (Oct 19, 2026): 3 closes above the 200-day after one below, bought on the 3rd; TP / stop / 200-day exit
@@ -533,9 +533,9 @@ _dn = sorted(set(sector_mapping.do_not_buy) & set(full))
 check("do-not-buy: no paper strategy (all but the live rules) ever holds one",
       all((full[k][_dn].to_numpy() == 0).all() for k in full if not k.startswith("Live") and k != ft.LIVE), _dn)
 check("event lines: 13 named lines, no calendar rebalance",
-      [c["name"] for c in ft.STRATEGIES if c.get("event")] == ["Tech score 80/60 + TP20", "Tech score 70/60/90", "MA10 x MA30",
-       "MA50 x MA200 (golden cross)", "MACD cross", "Donchian 20-day breakout", "Bollinger mean reversion", "EMA 9/21 cross",
-       "EMA 9/21 + ADX>25", "Minervini trend template", "52-week high momentum", "Dual MA + RSI filter", "Golden cross + MACD confirm"]
+      [c["name"] for c in ft.STRATEGIES if c.get("event")] == ["Technical surge with 20% take-profit", "Technical rise, exit if extreme", "10-day average crosses above 30-day",
+       "Golden cross (50-day above 200-day)", "MACD bullish cross above 200-day", "New 20-day high breakout", "Bounce from lower Bollinger band", "Fast EMA crosses above slow EMA",
+       "EMA cross in a strong trend", "Minervini uptrend template", "Near 52-week highs", "Uptrend with healthy RSI", "Golden cross confirmed by MACD"]
       and all(ft.rebalance_days(c, {"weekly": "W"}) is None for c in ft.STRATEGIES if c.get("event")))
 
 # the rules that are not rankings, on tiny hand-made data

@@ -1,4 +1,4 @@
-"""Strategy tab, Last decision (live from Oct 27, 2026: "RS short-term (weekly + Mon–Thu sells)", one sleeve = the account; defensive sleeve off Oct 29):
+"""Strategy tab, Last decision (live from Oct 27, 2026: "Short-term relative strength", one sleeve = the account; defensive sleeve off Oct 29):
 a summary line (stocks, value, next rebalance), the top-20 ranking at the latest decision (Reports/decision_ranks.csv,
 saved by the trade run) with held stocks marked, then the next decision preview from the latest close. Weights from the
 live Alpaca positions; the ledger is never written here."""
@@ -108,7 +108,7 @@ def render_last_decision(p):
         return
     positions, equity = data["positions"], data["equity"]
     if led is None:
-        st.info("RS short-term (weekly + Mon–Thu sells) starts at its first full rebalance, Fri Oct 30, 2026 "
+        st.info("Short-term relative strength starts at its first full rebalance, Fri Oct 30, 2026 "
                 "2:30 PM CT (Reports/sleeve_ledger.json is written then).")
     else:
         for line in sleeve_summary(pd.Timestamp(led["day"]), positions, led, equity):
