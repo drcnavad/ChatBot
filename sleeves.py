@@ -208,6 +208,41 @@ def _prev_session(d, idx):
     before = idx[idx < d]
     return before[-1] if len(before) else None
 
+def replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested):
+    """Keep `n_picks` names: drop NEW picks that cannot be bought and fill each empty slot with the next
+    eligible live-ranked stock (Chirag, Oct 29).
+
+    Triggers: symbol in `blocked` (do_not_buy, sold_block, earnings-soon top-up, no price, …) and not already
+    held. Held blocked names stay (not topped up by fill_idle). Walks the live ranking with no hard rank cap
+    so the book stays at 10 whenever enough eligible names exist. Only re-equalizes when a slot was actually
+    replaced; otherwise returns `tw` unchanged so strategy_targets weights (regime etc.) stay intact.
+    """
+    tw = dict(tw)
+    dropped = [s for s in list(tw) if s in blocked and float(hw.get(s, 0.0) or 0.0) <= 0]
+    if not dropped:
+        return tw
+    for s in dropped:
+        del tw[s]
+    held = {s for s, w in hw.items() if float(w or 0.0) > 0}
+    taken = set(tw) | held
+    added = []
+    r = ranking(h, d, inp)
+    for s in r.index:
+        if len(tw) >= int(n_picks):
+            break
+        if s in taken or s in blocked or not _num(px.get(s)):
+            continue
+        tw[s] = 0.0
+        taken.add(s)
+        added.append(s)
+    final = [s for s in tw if (s not in blocked or s in held) and (_num(px.get(s)) or s in held)]
+    if not final:
+        return {}
+    w = float(invested) / len(final)
+    return {s: w for s in final}
+
+
+
 def fill_idle(tw, hw, move, blocked, px, invested):
     """No idle cash (Chirag, Oct 26, 2026 - NOT in the backtest, which keeps that cash): the weight of a target that cannot
     be bought (manual block / do_not_buy / earnings-soon top-up / no price) and any cash below `invested` (the strategy's own total weight today: 99%, or less under the QQQ halving) (rounding, unfilled
@@ -261,8 +296,20 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
     blocked = {**{s: n for s, n in (no_buy or {}).items()},
                **{s: "earnings within 5 days (held: not topped up)" for s in names if soon_d[s] and hw[s] > 0
                   and s in tw and tw[s] > hw[s]}}
+    # New picks with no price are also unbuyable (same as blocked for slot-fill)
+    for s in list(tw):
+        if float(hw.get(s, 0.0) or 0.0) <= 0 and not _num(px.get(s)):
+            blocked.setdefault(s, "no live price")
     if trade_today and move.any():
-        tw = fill_idle(tw, hw, move, blocked, px, float(wd[wd > 0].sum()))
+        import forward_test as ft
+        n_picks = int(( _cfg(h).get("select") or {}).get("n") or ft.PIN.get("n") or 10)
+        invested = float(wd[wd > 0].sum()) or float(ft.PIN.get("invested") or 0.99)
+        tw = replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
+        # Include any rank-11+ replacements in the move mask so build_orders sizes them
+        move = move.reindex(sorted(set(move.index) | set(tw) | set(hw.index))).fillna(False)
+        for s in tw:
+            move.loc[s] = True
+        tw = fill_idle(tw, hw, move, blocked, px, invested)
     tg = pd.DataFrame({"Symbol": list(tw), "Weight": [tw[s] for s in tw], "Price": [px.get(s) for s in tw]})
     if tg["Weight"].sum() > 1:
         tg["Weight"] = tg["Weight"] / tg["Weight"].sum()

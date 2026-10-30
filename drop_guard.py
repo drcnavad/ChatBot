@@ -647,7 +647,32 @@ def held_candidates(now, cfg, acct=None, earnings=None):
 
 # ----------------------------------------------------------------------------- replacement
 def latest_ranking():
-    """DataFrame Symbol, Strategy_Rank, Strategy_Score, Close from latest signal_analysis day."""
+    """Live RS short-term ranking (sleeves.ranking) — same order live trading uses, not pipeline Strategy_Rank.
+
+    Pipeline Strategy_Rank in signal_analysis is a different score (e.g. KO pipeline rank 2 vs live RS 51).
+    Falls back to signal_analysis only if sleeves inputs are unavailable.
+    """
+    try:
+        import sleeves as sl
+        inp = sl.inputs()
+        day = inp["close"].index[-1]
+        r = sl.ranking(sl.HALVES[0], day, inp)
+        close = inp["close"]
+        rows = []
+        for i, (sym, score) in enumerate(r.items(), 1):
+            px = float(close.at[day, sym]) if sym in close.columns and day in close.index else float("nan")
+            ma = float("nan")
+            if "ma_200" in inp and sym in getattr(inp["ma_200"], "columns", []):
+                try:
+                    ma = float(inp["ma_200"].at[day, sym])
+                except Exception:
+                    ma = float("nan")
+            rows.append({"Symbol": sym, "Strategy_Rank": i, "Strategy_Score": float(score),
+                         "Close": px, "ma_200": ma})
+        if rows:
+            return pd.DataFrame(rows)
+    except Exception:
+        pass
     sig = db.read_csv(SIGNAL_CSV)
     if sig is None or sig.empty:
         return pd.DataFrame()

@@ -1,5 +1,5 @@
 """Stock Analysis: a Finviz-style heatmap of every stock in sector_mapping.py (display only): one grid of equal
-small tiles in one compact grid, ordered Buy -> Sell by the strategy signal (then rank / score), colored by today's % change (Alpaca snapshots,
+small tiles in one compact grid, ordered by live RS short-term rank (same as the stock note / Strategy tab), colored by today's % change (Alpaca snapshots,
 SIP -> IEX, vs the previous close; red -> green, centered at 0, clipped at +-3 %). Its own fragment: refreshes silently
 every 30 s. A yellow corner dot marks names currently held in the live Alpaca account (cached ~1 min via account_core; fails open if Alpaca is down). A tile click opens the stock in the picker and chart below."""
 
@@ -24,24 +24,32 @@ def tile_color(c):
 def _open(sym):
     st.session_state["_hm_open"] = sym
 
-# Buy, Hold, then every other ranked stock by today's live rank: "Sold" only means it left the portfolio at the last
-# rebalance (UNH: sold Oct 16 at rank 9) and can rank well today, so it sorts with Watch, not at the end (Oct 22, 2026)
+# Sort by live RS short-term rank only (same sleeves.live_ranks / Strategy_Rank as the stock note and Strategy tab).
+# Do NOT prefer stale signal_board Buy/Hold tags from strategy_changes / pipeline Strategy_Weight — those still
+# said KO was "Hold · top 5, rank 2" and floated it to tile #4 while live RS rank was 51 (Chirag, Oct 29).
 SIGNAL_ORDER = {"Strong Buy": 0, "Buy": 1, "Hold": 2, "Watch": 3, "Sold": 3, "Sell": 3, "Strong Sell": 3,
-                "Not ranked": 4, "Score below 0": 5}
+                "Not ranked": 4, "Score below 0": 5}  # kept for any caller that still groups by tag
 
 def order(p, syms):
-    """Buy, Hold, then Watch / Sold by the latest Strategy_Rank (then score), Not ranked, Score below 0."""
+    """Live RS short-term rank ascending (then score); unranked / non-finite last. Same key as live trading."""
     def key(s):
-        sig = str(p.sig_off.get(s, "Not ranked"))
         r = p.by_symbol.loc[s] if s in p.by_symbol.index else {}
         rank, score = r.get("Strategy_Rank", None), r.get("combined_signal", None)
-        return (SIGNAL_ORDER.get(sig, 4), rank if rank == rank and rank is not None else 1e9,
-                -(score if score == score and score is not None else -1e9))
+        try:
+            rank = float(rank) if rank is not None and rank == rank else None
+        except (TypeError, ValueError):
+            rank = None
+        try:
+            score = float(score) if score is not None and score == score else None
+        except (TypeError, ValueError):
+            score = None
+        return (rank is None, rank if rank is not None else 1e9,
+                -(score if score is not None else -1e9), s)
     return sorted(syms, key=key)
 
 @st.fragment(run_every=30)
 def render_heatmap(p):
-    """One compact grid of small equal tiles, Buy -> Sell (the strategy signal, then rank / score), colored by today's %;
+    """One compact grid of small equal tiles, live RS short-term rank order, colored by today's %;
     a tile click opens the stock in the picker and chart below (a whole-page rerun; the page stays on Stock Analysis)."""
     from dashboard.page import fresh
     p = fresh(p)

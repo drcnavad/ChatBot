@@ -2443,6 +2443,8 @@ def main(argv=None):
     p.add_argument("--min-value", type=float, default=1.0, help="skip trades smaller than this many dollars")
     p.add_argument("--out", help="also write the order list to this CSV")
     p.add_argument("--submit", action="store_true", help="send the orders to the Alpaca LIVE account (REAL MONEY)")
+    p.add_argument("--force-hold", action="store_true",
+                   help="allow --submit even when run_state hold_until is set (default: refuse)")
     p.add_argument("--fill-check", action="store_true",
                    help="morning fill check: complete unfilled extended-hours orders from the last auto_trade (LIVE)")
     p.add_argument("--live", action="store_true", help=argparse.SUPPRESS)
@@ -2451,6 +2453,21 @@ def main(argv=None):
     a = p.parse_args(argv)
     if a.from_account and a.submit:
         sys.exit("Refusing: --from-account is a read-only dry run (no --submit).")
+    if a.submit and not a.force_hold:
+        try:
+            import run_all as ra
+            hold = str((ra.load_state() or {}).get("hold_until") or "")
+            if hold:
+                import backtest_engine as be
+                sys.exit(
+                    f"Refusing --submit: live trading is on hold until {hold} "
+                    f"{be.slot_text(hold)} (run_state hold_until). "
+                    f"Pass --force-hold only if Chirag explicitly overrides the hold."
+                )
+        except SystemExit:
+            raise
+        except Exception as e:
+            print(f"WARNING: could not read hold_until ({e}); continuing with --submit")
 
     if a.submit and a.fractional:
         sys.exit("Refusing: submit mode uses whole shares only.")
