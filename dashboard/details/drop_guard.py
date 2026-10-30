@@ -40,7 +40,7 @@ def render_drop_guard():
     conf = float(cfg.get("min_confidence", 0.75))
     status = ("LIVE" if enabled and not dry else "DRY-RUN" if dry else "DISABLED")
     info_text(
-        f"Drop guard · {status}: every 15 min ~8:45 AM–2:15 PM CT, any held stock down ≥{drop:g}% vs prior close "
+        f"Drop guard · {status}: every 15 min ~8:30 AM–2:15 PM CT, any held stock down ≥{drop:g}% vs prior close "
         f"is reviewed by the LLM (sell if SELL and confidence ≥{conf:g}). After a fill, proceeds buy the top-ranked "
         f"eligible replacement (do_not_buy, ≤{float(cfg.get('max_weight', 0.15))*100:g}% weight, above SMA200, "
         f"not sold today, not itself down ≥{drop:g}%). Cash waits for 2:30 if nothing qualifies."

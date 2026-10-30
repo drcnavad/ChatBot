@@ -1,6 +1,6 @@
 """Intraday drop guard for the LIVE Alpaca account (Chirag, Oct 29–30 2026).
 
-Every 15 minutes on market days ~8:45 AM–2:15 PM CT, checks every held live position.
+Every 15 minutes on market days ~8:30 AM–2:15 PM CT, checks every held live position.
 Trigger (configurable): mid quote down >= DROP_PCT (default 4.1%) vs the previous regular close.
 When triggered, an LLM reviews earnings facts (when a recent report exists) plus a full
 technical snapshot computed in code (SMAs/EMAs, Fib, RSI, MACD, Bollinger, ATR, S/R,
@@ -53,7 +53,7 @@ DEFAULT_CONFIG = {
     "dry_run": False,                # True = never submit orders (tests / first enable)
     "drop_pct": 0.041,                # trigger: mid <= prev_close * (1 - drop_pct)
     "min_confidence": 0.75,          # sell only when AI confidence >= this
-    "window_start_ct": [8, 45],      # CT inclusive
+    "window_start_ct": [8, 30],      # CT inclusive
     "window_end_ct": [14, 15],       # CT exclusive (stop before 2:30 job)
     "max_weight": 0.15,              # replacement: do not push a name above this of equity
     "earnings_lookback_days": 5,     # include earnings facts when a report falls in this window
@@ -70,16 +70,31 @@ LOG_COLS = [
     "Dry_Run", "Note",
 ]
 
-# LLM provider chain (same order as pipeline_watchdog.py)
+# LLM provider chain (same order as pipeline_watchdog.py).
+# Gemini: flash-latest can take 30s+ / empty with small max tokens; flash-lite is fast.
+# Groq: Cloudflare blocks Python-urllib default UA (error 1010); llama-3.3-70b retired for this key.
 LLM_PROVIDERS = (
-    ("GEMINI_API_KEY", "gemini-flash-latest", "gemini"),
-    ("GROQ_API_KEY", "llama-3.3-70b-versatile", "groq"),
+    ("GEMINI_API_KEY", "gemini-flash-lite-latest", "gemini"),
+    ("GROQ_API_KEY", "openai/gpt-oss-20b", "groq"),
     ("ANTHROPIC_API_KEY", "claude-haiku-4-5", "anthropic"),
     ("OPENAI_API_KEY", "gpt-4o-mini", "openai"),
     ("XAI_API_KEY", "grok-2-latest", "xai"),
 )
-GEMINI_FALLBACK_MODELS = ("gemini-2.5-flash",)
-LLM_TIMEOUT_S = 12
+GEMINI_FALLBACK_MODELS = (
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-flash-latest",
+)
+GROQ_FALLBACK_MODELS = (
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b",
+)
+LLM_TIMEOUT_S = 45
+LLM_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 
 # ----------------------------------------------------------------------------- config / state / lock
@@ -454,12 +469,16 @@ def llm_provider():
 
 
 def _llm_complete(provider, model, key, prompt):
-    headers = {"content-type": "application/json"}
+    headers = {"content-type": "application/json", "User-Agent": LLM_USER_AGENT}
     if provider == "gemini":
         url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
                f":generateContent?key={key}")
         body = {"contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": 800, "temperature": 0.1}}
+                "generationConfig": {
+                    "maxOutputTokens": 1024,
+                    "temperature": 0.1,
+                    "responseMimeType": "application/json",
+                }}
     elif provider in ("groq", "openai", "xai"):
         base = {"groq": "https://api.groq.com/openai/v1/chat/completions",
                 "openai": "https://api.openai.com/v1/chat/completions",
@@ -533,7 +552,12 @@ def ask_ai(sym, tech, earnings, cfg):
         if not key:
             continue
         any_key = True
-        models = [model] + ([m for m in GEMINI_FALLBACK_MODELS if m != model] if provider == "gemini" else [])
+        if provider == "gemini":
+            models = [model] + [m for m in GEMINI_FALLBACK_MODELS if m != model]
+        elif provider == "groq":
+            models = [model] + [m for m in GROQ_FALLBACK_MODELS if m != model]
+        else:
+            models = [model]
         for m in models:
             try:
                 text = _llm_complete(provider, m, key, prompt)
@@ -546,7 +570,8 @@ def ask_ai(sym, tech, earnings, cfg):
             except Exception as e:
                 code = getattr(e, "code", None)
                 last_err = f"{provider}/{m}: {type(e).__name__}: {str(e)[:120]}"
-                if code == 404 and m != models[-1]:
+                # 404 / model_not_found: try next fallback model; else next provider
+                if code in (404, 400) and m != models[-1]:
                     continue
                 break  # try next provider
     if not any_key:

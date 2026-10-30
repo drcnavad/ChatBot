@@ -33,6 +33,7 @@ check("default drop 4.1%", abs(cfg["drop_pct"] - 0.041) < 1e-12)
 check("default confidence 0.75", cfg["min_confidence"] == 0.75)
 check("default max_weight 15%", cfg["max_weight"] == 0.15)
 check("window ends before 2:30", tuple(cfg["window_end_ct"]) == (14, 15))
+check("window starts 8:30 CT", tuple(cfg["window_start_ct"]) == (8, 30))
 
 # window: Friday regular hours CT
 fri = datetime(2026, 10, 30, 11, 0, tzinfo=be.CENTRAL)
@@ -42,8 +43,11 @@ ok2, why2 = dg.in_window(datetime(2026, 10, 30, 14, 20, tzinfo=be.CENTRAL), cfg)
 check("Fri 14:20 CT outside window", not ok2, why2)
 ok3, _ = dg.in_window(datetime(2026, 10, 31, 11, 0, tzinfo=be.CENTRAL), cfg)  # Saturday
 check("Saturday idle", not ok3)
-ok4, _ = dg.in_window(datetime(2026, 10, 30, 8, 0, tzinfo=be.CENTRAL), cfg)
-check("before open idle", not ok4)
+ok4, why4 = dg.in_window(datetime(2026, 10, 30, 8, 0, tzinfo=be.CENTRAL), cfg)
+check("before 8:30 idle", not ok4, why4)
+ok4b, why4b = dg.in_window(datetime(2026, 10, 30, 8, 30, tzinfo=be.CENTRAL), cfg)
+# 8:30 CT = 9:30 ET = regular open — should be in window on a session day
+check("Fri 8:30 CT in window", ok4b, why4b)
 
 # technical snapshot
 idx = pd.bdate_range("2025-10-01", "2026-10-29")
