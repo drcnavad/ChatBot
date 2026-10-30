@@ -1083,7 +1083,10 @@ def run_check(now=None, dry_run=None, cfg=None):
     if dry_run is None:
         dry_run = bool(cfg.get("dry_run", False))
     ok, why = in_window(now_ct, cfg)
-    if not ok and not dry_run:
+    # Always honor the CT window (including dry_run / --scheduled). --as-of still
+    # goes through in_window against that clock, so only in-window as-of times evaluate.
+    # Prevents overnight dry_run launchd ticks from calling the LLM on a coincidental trigger.
+    if not ok:
         print(f"{now_ct:%Y-%m-%d %H:%M:%S} CT: idle — {why}")
         return []
     if not cfg.get("enabled", True) and not dry_run:
