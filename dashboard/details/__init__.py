@@ -78,7 +78,7 @@ def render_trading_tab(p):
     with st.expander("Live holdings (Alpaca account)", expanded=True):
         render_live_holdings()
 
-    _lazy("Drop guard · intraday AI sell / replace", "drop_guard", render_drop_guard)
+    _lazy("Drop guard · intraday auto-sell / replace", "drop_guard", render_drop_guard)
     _lazy("Target sells · limit + sold block", "target_sells", render_target_sells)
 
     def _audit():

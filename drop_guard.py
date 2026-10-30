@@ -1,11 +1,9 @@
 """Intraday drop guard for the LIVE Alpaca account (Chirag, Oct 29–30 2026).
 
 Every 15 minutes on market days ~8:30 AM–2:15 PM CT, checks every held live position.
-Trigger (configurable): mid quote down >= DROP_PCT (default 4.1%) vs the previous regular close.
-When triggered, an LLM reviews earnings facts (when a recent report exists) plus a full
-technical snapshot computed in code (SMAs/EMAs, Fib, RSI, MACD, Bollinger, ATR, S/R,
-intraday volume vs average, gap, RS vs QQQ/sector). No news headlines.
-Sell only when the model returns action=SELL with confidence >= MIN_CONFIDENCE.
+Trigger (configurable): mid quote down >= DROP_PCT (default 4.0%) vs the previous regular close.
+When triggered, SELL automatically (no LLM). Cancels any open target_sells limit on that
+symbol first so qty is free, then sells at a bid limit (same as paper_trade).
 After a sell fills, immediately buy the top-ranked eligible replacement with that sale's
 proceeds only (do_not_buy, 15% weight cap, above SMA200, not sold by the guard today,
 not itself down >= the same drop_pct today). If nothing qualifies, cash waits for the 2:30 run.
@@ -25,10 +23,8 @@ import argparse
 import json
 import math
 import os
-import re
 import sys
 import time
-import urllib.request
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -51,13 +47,11 @@ RUN = "Drop guard"
 DEFAULT_CONFIG = {
     "enabled": True,                 # kill switch: False = evaluate+log only, never order
     "dry_run": True,                 # True = never submit orders (safe default; live Reports JSON overrides)
-    "drop_pct": 0.041,                # trigger: mid <= prev_close * (1 - drop_pct)
-    "min_confidence": 0.75,          # sell only when AI confidence >= this
+    "drop_pct": 0.04,                # trigger+auto-sell: mid <= prev_close * (1 - drop_pct)
     "window_start_ct": [8, 30],      # CT inclusive
     "window_end_ct": [14, 15],       # CT exclusive (stop before 2:30 job)
     "max_weight": 0.15,              # replacement: do not push a name above this of equity
     "earnings_lookback_days": 5,     # include earnings facts when a report falls in this window
-    "llm_required_for_live": True,   # refuse live sells when no LLM key is available
     "vol_avg_days": 20,              # days for average volume / typical cumulative volume
 }
 
@@ -69,33 +63,6 @@ LOG_COLS = [
     "Replace_Note", "Close_Price", "Close_Vs_Sell_%", "Next_Close", "Next_Vs_Sell_%",
     "Dry_Run", "Note",
 ]
-
-# LLM provider chain (same order as pipeline_watchdog.py).
-# Gemini: flash-latest can take 30s+ / empty with small max tokens; flash-lite is fast.
-# Groq: Cloudflare blocks Python-urllib default UA (error 1010); llama-3.3-70b retired for this key.
-LLM_PROVIDERS = (
-    ("GEMINI_API_KEY", "gemini-flash-lite-latest", "gemini"),
-    ("GROQ_API_KEY", "openai/gpt-oss-20b", "groq"),
-    ("ANTHROPIC_API_KEY", "claude-haiku-4-5", "anthropic"),
-    ("OPENAI_API_KEY", "gpt-4o-mini", "openai"),
-    ("XAI_API_KEY", "grok-2-latest", "xai"),
-)
-GEMINI_FALLBACK_MODELS = (
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash-lite",
-    "gemini-3.5-flash",
-    "gemini-flash-latest",
-)
-GROQ_FALLBACK_MODELS = (
-    "openai/gpt-oss-120b",
-    "qwen/qwen3.8-27b",
-)
-LLM_TIMEOUT_S = 45
-LLM_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
-
 
 # ----------------------------------------------------------------------------- config / state / lock
 def load_config(path=None):
@@ -459,139 +426,6 @@ def recent_earnings(sym, day, earnings, lookback_days):
 
 
 # ----------------------------------------------------------------------------- LLM
-def _load_dotenv():
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(os.path.join(ROOT, ".env"))
-    except Exception:
-        pass
-
-
-def llm_provider():
-    _load_dotenv()
-    override = os.getenv("DROP_GUARD_LLM_MODEL") or os.getenv("PIPELINE_LLM_MODEL") or os.getenv("LLM_PROVIDERS")
-    for env, model, name in LLM_PROVIDERS:
-        key = os.getenv(env)
-        if key:
-            if override and name in ("gemini", "groq", "anthropic", "openai", "xai"):
-                # keep provider from first key found; model override only when it matches provider family
-                pass
-            return name, (override if (override and name == "gemini" and "gemini" in override.lower()) else model), key
-    return None, None, None
-
-
-def _llm_complete(provider, model, key, prompt):
-    headers = {"content-type": "application/json", "User-Agent": LLM_USER_AGENT}
-    if provider == "gemini":
-        url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-               f":generateContent?key={key}")
-        body = {"contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "maxOutputTokens": 1024,
-                    "temperature": 0.1,
-                    "responseMimeType": "application/json",
-                }}
-    elif provider in ("groq", "openai", "xai"):
-        base = {"groq": "https://api.groq.com/openai/v1/chat/completions",
-                "openai": "https://api.openai.com/v1/chat/completions",
-                "xai": "https://api.x.ai/v1/chat/completions"}[provider]
-        url = base
-        headers["Authorization"] = f"Bearer {key}"
-        body = {"model": model, "max_tokens": 800, "temperature": 0.1,
-                "messages": [{"role": "user", "content": prompt}]}
-    else:  # anthropic
-        url = "https://api.anthropic.com/v1/messages"
-        headers.update({"x-api-key": key, "anthropic-version": "2023-06-01"})
-        body = {"model": model, "max_tokens": 800,
-                "messages": [{"role": "user", "content": prompt}]}
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers=headers)
-    with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_S) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    if provider == "gemini":
-        parts = payload["candidates"][0]["content"]["parts"]
-        return "".join(p.get("text", "") for p in parts)
-    if provider in ("groq", "openai", "xai"):
-        return payload["choices"][0]["message"]["content"]
-    return "".join(b.get("text", "") for b in payload.get("content", []) if b.get("type") == "text")
-
-
-def _parse_ai_json(text):
-    if not text:
-        return None
-    text = text.strip()
-    m = re.search(r"\{[\s\S]*\}", text)
-    if not m:
-        return None
-    try:
-        obj = json.loads(m.group(0))
-    except ValueError:
-        return None
-    action = str(obj.get("action", "")).strip().upper()
-    if action not in ("SELL", "HOLD"):
-        return None
-    try:
-        conf = float(obj.get("confidence", 0))
-    except (TypeError, ValueError):
-        return None
-    conf = max(0.0, min(1.0, conf))
-    reasons = obj.get("reasons", [])
-    if isinstance(reasons, str):
-        reasons = [reasons]
-    if not isinstance(reasons, list):
-        reasons = [str(reasons)]
-    return {"action": action, "confidence": conf, "reasons": [str(r)[:200] for r in reasons[:6]]}
-
-
-def ask_ai(sym, tech, earnings, cfg):
-    """(parsed|None, raw_text|err). Tries every configured provider that has a key."""
-    _load_dotenv()
-    prompt = (
-        "You are a risk guard for a live stock account. A held stock is down sharply today. "
-        "Decide whether to SELL now or HOLD for the scheduled 2:30 PM CT rebalance.\n"
-        "Reply with JSON ONLY, no markdown fences:\n"
-        '{"action":"SELL"|"HOLD","confidence":0.0-1.0,"reasons":["short bullet",...]}\n'
-        "Sell only if technical damage looks persistent (breakdown vs MAs, weak RSI/MACD, "
-        "failed support, heavy volume, bad relative strength) and/or earnings look clearly bad. "
-        "Prefer HOLD when the drop looks like noise or the stock still holds major MAs/support.\n\n"
-        f"Symbol: {sym}\n"
-        f"Technical snapshot: {json.dumps(tech, default=str)[:3500]}\n"
-        f"Earnings (if any): {json.dumps(earnings, default=str) if earnings else 'none in lookback'}\n"
-    )
-    last_err = "no LLM key (need GEMINI_API_KEY / GROQ_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / XAI_API_KEY)"
-    any_key = False
-    for env, model, provider in LLM_PROVIDERS:
-        key = os.getenv(env)
-        if not key:
-            continue
-        any_key = True
-        if provider == "gemini":
-            models = [model] + [m for m in GEMINI_FALLBACK_MODELS if m != model]
-        elif provider == "groq":
-            models = [model] + [m for m in GROQ_FALLBACK_MODELS if m != model]
-        else:
-            models = [model]
-        for m in models:
-            try:
-                text = _llm_complete(provider, m, key, prompt)
-                parsed = _parse_ai_json(text)
-                if parsed:
-                    parsed["provider"] = provider
-                    parsed["model"] = m
-                    return parsed, text
-                last_err = f"unparseable reply from {provider}/{m}"
-            except Exception as e:
-                code = getattr(e, "code", None)
-                last_err = f"{provider}/{m}: {type(e).__name__}: {str(e)[:120]}"
-                # 404 / model_not_found: try next fallback model; else next provider
-                if code in (404, 400) and m != models[-1]:
-                    continue
-                break  # try next provider
-    if not any_key:
-        return None, last_err
-    return None, last_err
-
-
-# ----------------------------------------------------------------------------- trigger + candidates
 def prev_close_map(bars, day):
     """{symbol: previous regular close before `day`}."""
     day = pd.Timestamp(day).normalize()
@@ -785,7 +619,7 @@ def _wait_fill(client, order_id, timeout_s=90, poll_s=3):
             pt._safe_number(getattr(last, "filled_avg_price", 0)))
 
 
-def execute_sell_and_replace(c, mid, bid, ask, tech, ai, cfg, state, now, dry_run, equity, held, bars_all):
+def execute_sell_and_replace(c, mid, bid, ask, cfg, state, now, dry_run, equity, held, bars_all):
     """Sell the candidate; on fill, try a replacement buy. Returns log-field dict."""
     import paper_trade as pt
     import run_all
@@ -946,8 +780,8 @@ def execute_sell_and_replace(c, mid, bid, ask, tech, ai, cfg, state, now, dry_ru
         log_event("ok", "yes",
                   f"Drop guard: sold {filled:g} {s} at ~${avg or limit:,.2f} "
                   f"({((avg or limit) / c['prev'] - 1):.1%} vs prev close ${c['prev']:,.2f}). "
-                  f"AI confidence {ai['confidence']:.2f}.",
-                  f"order {order.id}; reasons={ai.get('reasons')}")
+                  f"Auto sell (≥{float(cfg['drop_pct'])*100:g}% drop).",
+                  f"order {order.id}")
         # Refresh holdings after sell
         held2 = dict(held)
         held2[s] = max(0.0, held_now - filled)
@@ -1190,25 +1024,8 @@ def run_check(now=None, dry_run=None, cfg=None):
             equity = float(snap.get("Equity") or snap.get("equity") or 0) or 1.0
         except Exception:
             equity = 1.0
-        # QQQ day return so far (for RS) — use quote if possible
-        qqq_ret = None
-        try:
-            if "QQQ" in prev_map:
-                qm, *_ = quote_mid(latest_quote("QQQ"), now_ct)
-                if qm:
-                    qqq_ret = qm / prev_map["QQQ"] - 1
-        except Exception:
-            pass
-
-        # minute bars for triggered names only (fetched lazily)
-        minute_cache = {}
         day = now_ct.astimezone(be.EASTERN).date()
         stamp = now_ct.strftime("%Y-%m-%d %H:%M:%S")
-        provider, model, key = llm_provider()
-        if not key and cfg.get("llm_required_for_live") and not dry_run:
-            print("No LLM key — refusing live sells (set dry_run or add GEMINI_API_KEY).")
-            dry_run = True
-
         for c in cands:
             s = c["symbol"]
             mid = bid = ask = None
@@ -1250,52 +1067,18 @@ def run_check(now=None, dry_run=None, cfg=None):
                 rows_out.append(base)
                 continue
 
-            # sector RS
-            sector_ret = None
-            try:
-                etf = sm.sector_etf_for(s)
-                if etf and etf in prev_map:
-                    em, *_ = quote_mid(latest_quote(etf), now_ct)
-                    if em:
-                        sector_ret = em / prev_map[etf] - 1
-                elif etf:
-                    # fetch prev for etf
-                    eb = daily_bars([etf], now_ct, lookback=40)
-                    pm = prev_close_map(eb, pd.Timestamp(day))
-                    if etf in pm:
-                        em, *_ = quote_mid(latest_quote(etf), now_ct)
-                        if em:
-                            sector_ret = em / pm[etf] - 1
-            except Exception:
-                pass
-
-            if s not in minute_cache:
-                try:
-                    minute_cache[s] = minute_bars([s], day)
-                except Exception:
-                    minute_cache[s] = pd.DataFrame()
-            mins = minute_cache[s]
-            mins_s = mins[mins["Symbol"] == s] if not mins.empty and "Symbol" in mins.columns else mins
-            tech = technical_snapshot(c["bars"], mins_s, mid, c["prev"], cfg, qqq_ret, sector_ret)
-            ai, raw = ask_ai(s, tech, c.get("earnings"), cfg)
-            if not ai:
-                base["Action"] = "SKIP_AI"
-                base["Note"] = (base["Note"] + "; " if base["Note"] else "") + f"AI unavailable: {raw}"
-                append_log(base)
-                rows_out.append(base)
-                continue
-            base["AI_Action"] = ai["action"]
-            base["AI_Confidence"] = ai["confidence"]
-            base["AI_Reasons"] = " | ".join(ai.get("reasons") or [])[:500]
-            sell_ok = ai["action"] == "SELL" and ai["confidence"] >= float(cfg["min_confidence"])
-            if not sell_ok:
-                base["Action"] = "HOLD_AI"
-                append_log(base)
-                rows_out.append(base)
-                continue
+            # Auto-sell at threshold (Chirag Oct 30 2026: no LLM gate).
+            # Keep AI_* log columns for dashboard/CSV compatibility.
+            drop_pct = float(cfg["drop_pct"])
+            base["AI_Action"] = "AUTO"
+            base["AI_Confidence"] = 1.0
+            base["AI_Reasons"] = (
+                f"auto sell: mid down {vs:.2f}% ≥ {drop_pct*100:g}% vs prior close "
+                f"(AI gate removed Oct 30 2026)"
+            )
 
             result = execute_sell_and_replace(
-                c, mid, bid, ask, tech, ai, cfg, state, now_ct, dry_run, equity, held, bars_all)
+                c, mid, bid, ask, cfg, state, now_ct, dry_run, equity, held, bars_all)
             base["Action"] = result.get("Action", "HOLD")
             for k in ("Sell_Order_Id", "Sell_Limit", "Sell_Filled_Qty", "Sell_Proceeds",
                       "Replace_Symbol", "Replace_Order_Id", "Replace_Limit", "Replace_Qty", "Replace_Note"):

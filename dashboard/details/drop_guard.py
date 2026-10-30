@@ -32,18 +32,17 @@ def _read_log(_mtime):
 
 
 def render_drop_guard():
-    """Show recent drop-guard evaluations, AI decisions, sells/replacements, and a simple hit rate."""
+    """Show recent drop-guard evaluations, auto-sells/replacements, and a simple hit rate."""
     cfg = _cfg()
     enabled = cfg.get("enabled", True)
     dry = cfg.get("dry_run", True)
     drop = float(cfg.get("drop_pct", 0.05)) * 100
-    conf = float(cfg.get("min_confidence", 0.75))
     status = ("LIVE" if enabled and not dry else "DRY-RUN" if dry else "DISABLED")
     info_text(
         f"Drop guard · {status}: every 15 min ~8:30 AM–2:15 PM CT, any held stock down ≥{drop:g}% vs prior close "
-        f"is reviewed by the LLM (sell if SELL and confidence ≥{conf:g}). After a fill, proceeds buy the top-ranked "
-        f"eligible replacement (do_not_buy, ≤{float(cfg.get('max_weight', 0.15))*100:g}% weight, above SMA200, "
-        f"not sold today, not itself down ≥{drop:g}%). Cash waits for 2:30 if nothing qualifies."
+        f"is sold automatically (no AI). Cancels any open target limit on that name first. After a fill, proceeds "
+        f"buy the top-ranked eligible replacement (do_not_buy, ≤{float(cfg.get('max_weight', 0.15))*100:g}% weight, "
+        f"above SMA200, not sold today, not itself down ≥{drop:g}%). Cash waits for 2:30 if nothing qualifies."
     )
     try:
         import db

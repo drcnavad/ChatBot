@@ -29,8 +29,8 @@ def check(what, ok, got=""):
 
 # config defaults
 cfg = dict(dg.DEFAULT_CONFIG)
-check("default drop 4.1%", abs(cfg["drop_pct"] - 0.041) < 1e-12)
-check("default confidence 0.75", cfg["min_confidence"] == 0.75)
+check("default drop 4.0%", abs(cfg["drop_pct"] - 0.04) < 1e-12)
+check("no AI min_confidence in defaults", "min_confidence" not in cfg)
 check("default max_weight 15%", cfg["max_weight"] == 0.15)
 check("window ends before 2:30", tuple(cfg["window_end_ct"]) == (14, 15))
 check("window starts 8:30 CT", tuple(cfg["window_start_ct"]) == (8, 30))
@@ -62,11 +62,7 @@ check("snapshot has macd", tech["macd"] is not None)
 check("snapshot has fib", "fib_0.618" in tech["fibonacci"])
 check("day_return negative when price down", tech["day_return_pct"] < 0)
 
-# AI JSON parse
-parsed = dg._parse_ai_json('{"action":"SELL","confidence":0.8,"reasons":["broke SMA50","volume spike"]}')
-check("parse SELL", parsed and parsed["action"] == "SELL" and parsed["confidence"] == 0.8)
-check("reject bad action", dg._parse_ai_json('{"action":"BUY","confidence":1}') is None)
-check("clamp confidence", dg._parse_ai_json('{"action":"HOLD","confidence":2}')["confidence"] == 1.0)
+# AI JSON parse removed Oct 30 2026 (auto-sell, no LLM)
 
 # cid
 check("sell cid shape", dg._cid("sell", "2026-10-30", "ACN") == "live-dguard-sell-20261030-ACN")
@@ -100,16 +96,16 @@ dg.latest_ranking = real
 # trigger math
 prev = 100.0
 trig = prev * (1 - cfg["drop_pct"])
-check("trigger at 95.9", abs(trig - 95.9) < 1e-9)
-check("95.8 triggers", 95.8 <= trig)
-check("96.0 does not", 96.0 > trig)
+check("trigger at 96.0", abs(trig - 96.0) < 1e-9)
+check("95.9 triggers", 95.9 <= trig)
+check("96.1 does not", 96.1 > trig)
 
 # dry-run path does not call trading client
 calls = {"trade": 0}
 dg.trading_client = lambda: (_ for _ in ()).throw(RuntimeError("no client in dry-run"))
 # execute_sell_and_replace dry_run
 c = {"symbol": "TEST", "shares": 10, "prev": 100.0, "trigger": 95.0, "earnings": None}
-out = dg.execute_sell_and_replace(c, 90.0, 89.5, 90.5, {}, {"confidence": 0.9, "reasons": ["x"]},
+out = dg.execute_sell_and_replace(c, 90.0, 89.5, 90.5,
                                   cfg, {"sold_today": {}}, fri, True, 185000, {"TEST": 10}, None)
 check("dry-run action WOULD_SELL", out["Action"] == "WOULD_SELL", out)
 check("dry-run no order id", not out.get("Sell_Order_Id"))
