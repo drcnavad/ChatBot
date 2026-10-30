@@ -860,12 +860,15 @@ def _tick(price, up):
     x = round(price * step, 6)
     return (math.ceil(x) if up else math.floor(x)) / step
 
-def smart_quote(sym, side):
-    """The limit price for one order: buy at the ask + 0.05%, sell at the bid - 0.05% (LIMIT_OFFSET).
+def smart_quote(sym, side, passive=False):
+    """Limit from the live SIP quote.
 
-    Returns {bid, ask, spread_pct, limit, feed, skip}. skip is None when the quote is usable, otherwise why not:
-    missing, stale (older than QUOTE_MAX_AGE_SECS) or a spread over MAX_SPREAD. A bad quote is asked again
-    (QUOTE_TRIES in all, QUOTE_RETRY_SECS apart) before giving up."""
+    Default (aggressive fill): buy at ask + 0.05%, sell at bid - 0.05% (LIMIT_OFFSET).
+    passive=True (Chirag Oct 30): buy at BID, sell at ASK — no chase; may not fill; ignores
+    quote age / wide-spread skips (after-hours quotes are often stale/wide).
+
+    Returns {bid, ask, spread_pct, limit, feed, skip}. skip is None when usable.
+    """
     import time
     from datetime import datetime, timezone
     q = {}
@@ -884,6 +887,10 @@ def smart_quote(sym, side):
             continue
         mid = (bid + ask) / 2
         q["spread_pct"] = round((ask - bid) / mid * 100, 3)
+        if passive:
+            # SELL @ ASK, BUY @ BID (tick toward not crossing the other side)
+            q["limit"] = _tick(ask, False) if side == "SELL" else _tick(bid, False)
+            return q
         if age > QUOTE_MAX_AGE_SECS:
             q["skip"] = f"stale quote ({age:.0f} s old)" if math.isfinite(age) else "stale quote (no time)"
         elif (ask - bid) / mid > MAX_SPREAD:
@@ -1049,9 +1056,10 @@ def _record_sold_blocks_from_results(results, source="pipeline"):
             pass
 
 
-def submit_paper_extended(orders, positions=None, record=None, client=None, order_date=None):
+def submit_paper_extended(orders, positions=None, record=None, client=None, order_date=None, passive=False):
     """Send the BUY/SELL rows as DAY limit orders at the planned (closing) price, eligible for
     extended-hours (after-hours) execution on the Alpaca LIVE account (sells first).
+    passive=True: SELL limit = ASK, BUY limit = BID (no 0.05% chase; Chirag Oct 30).
 
     After hours = WHOLE shares only: the planned 2-decimal quantity is floored to whole
     shares for the limit order. The fractional rest (e.g. 0.58 of a planned 3.58, or the
@@ -1108,9 +1116,11 @@ def submit_paper_extended(orders, positions=None, record=None, client=None, orde
                 results.append((r.Symbol, r.Side, planned, None,
                                 "STAGED for morning (<1 whole share after hours)"))
             continue
-        q = smart_quote(r.Symbol, r.Side)
-        why = q["skip"] or (f"ask ${q['ask']:g} is over {CASH_CUSHION:.0%} above the planned ${price:g}"
-                            if r.Side == "BUY" and q["limit"] > price * (1 + CASH_CUSHION) else None)
+        q = smart_quote(r.Symbol, r.Side, passive=passive)
+        why = q["skip"]
+        if not passive:
+            why = why or (f"ask ${q['ask']:g} is over {CASH_CUSHION:.0%} above the planned ${price:g}"
+                          if r.Side == "BUY" and q.get("limit") and q["limit"] > price * (1 + CASH_CUSHION) else None)
         if why:
             if record is None:
                 results.append((r.Symbol, r.Side, planned, None, f"SKIPPED (bad quote: {why})", q))
@@ -1300,8 +1310,9 @@ def _stage_orders_for_morning(orders_df, positions, record, reason):
         [(s["symbol"], s["side"], s["qty"], None, reason) for s in staged] + skipped,
         columns=cols)
 
-def submit_paper_extended_sequenced(orders, positions=None, record=None, client=None, order_date=None):
+def submit_paper_extended_sequenced(orders, positions=None, record=None, client=None, order_date=None, passive=False):
     """Evening extended-hours submission: SELLs first, then BUYs sized from the cash actually free.
+    passive: forwarded to submit_paper_extended (SELL@ASK / BUY@BID).
 
     1. Submits the SELL rows as extended-hours limit orders (each recorded).
     2. Waits (bounded, SELL_SETTLE_WAIT_SECS) for the sells to fill - a sell's cash is only
@@ -1321,10 +1332,13 @@ def submit_paper_extended_sequenced(orders, positions=None, record=None, client=
     sells = orders[orders["Side"] == "SELL"]
     buys = orders[orders["Side"] == "BUY"]
     sell_results = submit_paper_extended(sells, positions=positions, record=record,
-                                         client=client, order_date=order_date)
-    sell_ids = [oid for oid in sell_results["Order_ID"] if oid]
-    if sell_ids:
-        _wait_for_terminal_all(client, sell_ids)
+                                         client=client, order_date=order_date, passive=passive)
+    # Default: wait for sells to free cash, then size buys. passive: Chirag does not chase —
+    # sells may not fill, so size buys from cash on hand NOW (no wait, no assumed sell proceeds).
+    if not passive:
+        sell_ids = [oid for oid in sell_results["Order_ID"] if oid]
+        if sell_ids:
+            _wait_for_terminal_all(client, sell_ids)
     fresh_bp = _read_buying_power(client)
     if fresh_bp is None:
         buy_results = _stage_orders_for_morning(
@@ -1333,7 +1347,7 @@ def submit_paper_extended_sequenced(orders, positions=None, record=None, client=
     fit = apply_buying_power_guard(buys, fresh_bp, fractional=True)
     fit["Plan_Shares"] = buys["Shares"]
     buy_results = submit_paper_extended(fit[fit["Side"] == "BUY"], positions=positions, record=record,
-                                        client=client, order_date=order_date)
+                                        client=client, order_date=order_date, passive=passive)
     later = buys.loc[fit.index[fit["Side"] != "BUY"]]
     if len(later):
         buy_results = pd.concat([buy_results, _stage_orders_for_morning(
@@ -2218,7 +2232,7 @@ def _past_evening_cutoff(now=None):
     cutoff = EARLY_CLOSE_SUBMIT_CUTOFF_CT if be.is_early_close(now.date()) else EVENING_SUBMIT_CUTOFF_CT
     return now.strftime("%H:%M") >= cutoff
 
-def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=None, session=False):
+def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=None, session=False, passive=False):
     """Full auto flow for the pipeline: pull LIVE positions + equity, plan, optionally submit.
 
     - Pulls current stock positions, equity, cash and buying power from the Alpaca LIVE account.
@@ -2369,7 +2383,8 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         def _recorder(entry):
             record_pending_order(entry, meta, PENDING_ORDERS_JSON)  # incremental: a crash still leaves these recorded
         results = submit_paper_extended_sequenced(orders_to_send, positions=positions,
-                                                  record=_recorder, client=client, order_date=date_str)
+                                                  record=_recorder, client=client, order_date=date_str,
+                                                  passive=passive)
         if dup_rows:
             results = pd.concat([results, pd.DataFrame(dup_rows, columns=cols)], ignore_index=True)
     if log_csv and not results.empty:
@@ -2450,10 +2465,18 @@ def main(argv=None):
     p.add_argument("--live", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--from-account", action="store_true",
                    help="dry run with the LIVE account's positions, equity and cash (read only - nothing is sent)")
+    p.add_argument("--passive", action="store_true",
+                   help="SELL limit = SIP ASK, BUY limit = SIP BID (no 0.05%% chase; may not fill). "
+                        "With --submit-extended, sizes buys from cash on hand only (no wait for sells).")
+    p.add_argument("--submit-extended", action="store_true",
+                   help="submit as DAY + extended_hours limit orders (evening path; REAL MONEY). "
+                        "Use instead of --submit after the close.")
     a = p.parse_args(argv)
-    if a.from_account and a.submit:
-        sys.exit("Refusing: --from-account is a read-only dry run (no --submit).")
-    if a.submit and not a.force_hold:
+    if a.from_account and (a.submit or a.submit_extended):
+        sys.exit("Refusing: --from-account is a read-only dry run (no --submit / --submit-extended).")
+    if a.submit and a.submit_extended:
+        sys.exit("Refusing: use either --submit (regular DAY market) or --submit-extended (AH limits), not both.")
+    if (a.submit or getattr(a, 'submit_extended', False)) and not a.force_hold:
         try:
             import run_all as ra
             hold = str((ra.load_state() or {}).get("hold_until") or "")
@@ -2485,10 +2508,11 @@ def main(argv=None):
 
     positions = {}                                   # holdings come only from the live account (--from-account / --submit)
     account_size, buying_power = a.account_size, None
+    live_submit = bool(a.submit or a.submit_extended)
     if a.from_account:                               # read-only GETs (account + positions); nothing is sent
         positions, equity, _cash, buying_power = get_live_positions_and_equity()
         account_size = account_size or equity
-    if a.submit:
+    if live_submit:
         client = paper_trading_client()
         import holdings
         positions = holdings.held_qty(client)
@@ -2499,9 +2523,11 @@ def main(argv=None):
     account_size = account_size or 100_000.0
 
     orders, meta, targets = plan_orders(a.target, account_size, positions, min_value=a.min_value, fractional=a.fractional)
-    if a.submit:   # same cash cap as the pipeline: buys fit in buying power + the sells' proceeds, less the 1% cushion
+    if a.submit and not a.submit_extended:   # regular --submit: buys fit in BP + sell proceeds
         sells_value = orders.loc[orders["Side"] == "SELL", "Est_Value"].sum()
         orders = apply_buying_power_guard(orders, buying_power + sells_value)
+    # --submit-extended: BP sizing happens inside submit_paper_extended_sequenced
+    # (passive → cash on hand only; leftover buys STAGED for Mon 9 AM fill check).
     inv = meta["invested"]
     print(f"Strategy: {meta['strategy']} | targets = {meta['source']} weights | as of {meta['as_of']} "
           f"(last weekly rebalance {meta['last_rebalance']}, last decision {meta['last_decision']}) | "
@@ -2511,6 +2537,8 @@ def main(argv=None):
               + (substitution_text(meta["substitutions"]) or "none needed"))
     if meta.get("kept_outside"):
         print(f"KEPT OUTSIDE THE PICKS (do-not-sell / in profit + uptrend): {kept_text(meta['kept_outside'])} - the picks share the rest")
+    if a.passive:
+        print("Pricing: PASSIVE (SELL @ SIP ASK, BUY @ SIP BID) — no chase")
     print(earnings_rule_note())
     print(f"Account size ${account_size:,.2f}; prices = latest close (actual fills will differ)\n")
     print(orders.to_string(index=False))
@@ -2519,12 +2547,37 @@ def main(argv=None):
     print(f"\nBuys ${buys:,.2f} · Sells ${sells:,.2f} · invested after ≈ ${held_after:,.2f} · cash after ≈ ${account_size - held_after:,.2f}")
     if a.out:
         orders.pipe(db.to_csv, a.out, index=False)
-    if not a.submit:
-        print("\nDRY RUN - nothing was sent. Use --submit to send these orders to the Alpaca LIVE account (REAL MONEY).")
+    if not live_submit:
+        print("\nDRY RUN - nothing was sent. Use --submit or --submit-extended to send to Alpaca LIVE (REAL MONEY).")
         return orders
     print("\nSubmitting to Alpaca LIVE (REAL MONEY) ...")
+    if a.submit_extended:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        date_str = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y%m%d")
+        def _recorder(entry):
+            record_pending_order(entry, meta, PENDING_ORDERS_JSON)
+        # AH whole-shares only: skip sub-1 share dust (e.g. 0.08 RVTY) — do not stage for morning.
+        dust = orders[(orders["Side"] == "SELL") & (orders["Shares"].astype(float) < 1)]
+        if len(dust):
+            print("Skipping AH dust SELLs (<1 share, not staged): "
+                  + ", ".join(f"{r.Symbol} {r.Shares:g}" for r in dust.itertuples()))
+            orders = orders.drop(dust.index)
+        results = submit_paper_extended_sequenced(
+            orders, positions=positions, record=_recorder, client=client,
+            order_date=date_str, passive=bool(a.passive))
+        print(results.to_string(index=False))
+        # Update last_trade_at so dashboards know money was attempted today.
+        try:
+            import run_all as ra
+            from datetime import datetime as _dt
+            ra.update_state(last_trade_at=_dt.now(ZoneInfo("America/Chicago")).isoformat(timespec="seconds"))
+        except Exception as e:
+            print(f"WARNING: could not stamp last_trade_at ({e})")
+        return results
     print(submit_paper(orders, positions=positions).to_string(index=False))
     return orders
+
 
 if __name__ == "__main__":
     main()
