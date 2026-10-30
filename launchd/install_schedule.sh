@@ -10,6 +10,7 @@
 #                                     (company reports, news sentiment, earnings dates: the quota APIs, each run > 24 h
 #                                     after the last; trading days 12:30-2:00 PM only, never beside a trade run)
 #   com.stockanalysis.morning         Mon-Fri 9:00 AM CT, at login, on wake, every 30 min: pipeline_watchdog.py --fill-check --scheduled
+#   com.stockanalysis.drop_guard        every 15 min + at login: drop_guard.py --scheduled (LIVE intraday AI drop guard ~8:45 AM-2:15 PM CT; sells when mid is >=4.1% below prior close and the LLM agrees at >=0.75 confidence; optional replacement buy with proceeds; kill switch + dry_run in Reports/drop_guard_config.json)
 #   com.stockanalysis.earningsstop    every 5 min + at login: earnings_stop.py --loop (LIVE earnings-day 5% drop stop;
 #                                     30-second checks only while a held stock is in an earnings-day session, 3:00 AM-
 #                                     7:00 PM CT on trading days; one loop at a time; otherwise exits after a quick look)

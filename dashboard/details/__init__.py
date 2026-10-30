@@ -10,6 +10,7 @@ from dashboard.details.last_decision import render_last_decision
 from dashboard.details.live_holdings import render_live_holdings
 from dashboard.details.tax_view import render_tax_view
 from dashboard.details.trade_audit import render_trade_audit
+from dashboard.details.drop_guard import render_drop_guard
 from dashboard.settings import rules_text
 
 
@@ -75,6 +76,8 @@ def render_trading_tab(p):
         render_equity_chart()
     with st.expander("Live holdings (Alpaca account)", expanded=True):
         render_live_holdings()
+
+    _lazy("Drop guard · intraday AI sell / replace", "drop_guard", render_drop_guard)
 
     def _audit():
         from datetime import datetime

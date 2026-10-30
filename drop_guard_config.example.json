@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "dry_run": true,
+  "drop_pct": 0.041,
+  "min_confidence": 0.75,
+  "window_start_ct": [
+    8,
+    45
+  ],
+  "window_end_ct": [
+    14,
+    15
+  ],
+  "max_weight": 0.15,
+  "earnings_lookback_days": 5,
+  "llm_required_for_live": true,
+  "vol_avg_days": 20,
+  "_comment": "Chirag Oct 29 2026 drop guard. enabled=False is kill switch. dry_run=True never orders.",
+  "_live_blocked": "LIVE sells not enabled: GEMINI_API_KEY times out (12s) from this Mac; GROQ_API_KEY returns HTTP 403; ANTHROPIC_API_KEY / OPENAI_API_KEY / XAI_API_KEY missing. Set a working key, confirm ask_ai works, then set dry_run=false in this file."
+}

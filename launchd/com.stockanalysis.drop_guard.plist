@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Intraday drop guard: every 15 min; drop_guard.py --scheduled idles outside 8:45–2:15 CT market days. -->
+<dict>
+	<key>Label</key>
+	<string>com.stockanalysis.drop_guard</string>
+	<key>WorkingDirectory</key>
+	<string>/Users/drcnavad/Desktop/Stock Analysis</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/anaconda3/bin/python</string>
+		<string>/Users/drcnavad/Desktop/Stock Analysis/drop_guard.py</string>
+		<string>--scheduled</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>900</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/anaconda3/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_drop_guard.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_drop_guard.err</string>
+</dict>
+</plist>
