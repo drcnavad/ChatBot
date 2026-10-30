@@ -194,6 +194,14 @@ def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quo
         return log({**base, "status": "refused: market closed (regular hours only, 8:30 AM-3:00 PM CT)"})
     if side == "BUY" and sym in blocked_notes():
         return log({**base, "status": f"refused: {blocked_notes()[sym]}"})
+    if side == "BUY":
+        try:
+            import sold_block
+            blk = sold_block.active_blocks()
+            if sym in blk:
+                return log({**base, "status": f"refused: {blk[sym]}"})
+        except Exception:
+            pass
     q_fn = quote or pt.smart_quote
     q = q_fn(sym, side)
     if q.get("skip") or not q.get("limit"):
@@ -215,6 +223,12 @@ def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quo
     if not dry_run:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import LimitOrderRequest
+        if side == "SELL":
+            try:
+                import target_sells as ts
+                ts.cancel_for_symbol(client, sym, reason="manual sell")
+            except Exception:
+                pass
         req = LimitOrderRequest(symbol=sym, qty=qty, limit_price=limit, time_in_force=TimeInForce.DAY,
                                 side=OrderSide.SELL if side == "SELL" else OrderSide.BUY,
                                 client_order_id=f"manual-{_now():%Y%m%d%H%M%S}-{side}-{sym}"[:48])
@@ -223,6 +237,17 @@ def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quo
             entry.update(status=f"submitted ({getattr(o.status, 'value', o.status)})", order_id=str(getattr(o, "id", "")))
         except Exception as e:
             return log({**entry, "status": f"FAILED: {str(e)[:200]}"})
+        if side == "SELL":
+            try:
+                import sold_block
+                sold_block.record_sell(sym, source="manual_trade", note=f"qty {qty:g} @ {limit}")
+            except Exception:
+                pass
+            try:
+                import target_sells as ts
+                ts.remove_target(sym, reason="manual sold")
+            except Exception:
+                pass
     else:
         entry["status"] = "dry run: not sent"
     fill = None

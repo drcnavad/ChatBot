@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "dry_run": true,
+  "targets": {
+    "CRL": {
+      "limit": 387.68,
+      "qty": "full",
+      "added": "2026-10-29"
+    }
+  },
+  "window_start_ct": [
+    3,
+    0
+  ],
+  "window_end_ct": [
+    19,
+    0
+  ],
+  "_comment": "Example. On Mac mini, Reports/target_sells_config.json is LIVE (dry_run=false). Add via: python target_sells.py add SYM PRICE"
+}

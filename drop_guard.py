@@ -655,6 +655,11 @@ def pick_replacement(sold_sym, proceeds, equity, held, sold_today, cfg, now, pri
     if rank.empty:
         return None, "no signal_analysis ranking"
     do_not = {str(x).upper() for x in sm.do_not_buy}
+    try:
+        import sold_block
+        do_not |= set(sold_block.active_blocks())
+    except Exception:
+        pass
     max_w = float(cfg.get("max_weight", 0.15))
     drop = float(cfg["drop_pct"])
     day = pd.Timestamp(now.astimezone(be.EASTERN).date())
@@ -804,11 +809,26 @@ def execute_sell_and_replace(c, mid, bid, ask, tech, ai, cfg, state, now, dry_ru
                 out["Action"] = "SKIP"
                 out["Replace_Note"] = "sell rejected 3 times"
                 return out
+        # Free any target_sells limit so we can sell at the bid
+        try:
+            import target_sells as ts
+            oid, note = ts.cancel_for_symbol(client, s, reason="drop_guard sell")
+            if oid:
+                out["Replace_Note"] = (out.get("Replace_Note") or "") + f"canceled target {oid}; "
+        except Exception as e:
+            out["Replace_Note"] = (out.get("Replace_Note") or "") + f"target cancel err: {e}; "
         held_now, open_now = pt._symbol_state(client, s)
         if held_now is None:
             out["Action"] = "SKIP"
             out["Replace_Note"] = "position unreadable"
             return out
+        # Ignore remaining target cids (should be gone); other open orders still block
+        try:
+            import target_sells as ts
+            open_now = [o for o in (open_now or [])
+                        if not ts.is_target_cid(getattr(o, "client_order_id", "") or "")]
+        except Exception:
+            pass
         if open_now:
             out["Action"] = "SKIP"
             out["Replace_Note"] = "open order already working"
@@ -842,6 +862,17 @@ def execute_sell_and_replace(c, mid, bid, ask, tech, ai, cfg, state, now, dry_ru
             "at": now.astimezone(be.CENTRAL).isoformat(timespec="seconds"),
             "order_id": str(order.id), "qty": filled, "limit": limit,
         }
+        try:
+            import sold_block
+            sold_block.record_sell(s, sold_on=day, source="drop_guard",
+                                   note=f"filled {filled:g} @ {limit}")
+        except Exception:
+            pass
+        try:
+            import target_sells as ts
+            ts.remove_target(s, reason="drop_guard sold")
+        except Exception:
+            pass
         # also block buy-back via earnings_stop state when on an earnings reaction day
         try:
             _mirror_stop_block(s, c.get("earnings"), now)

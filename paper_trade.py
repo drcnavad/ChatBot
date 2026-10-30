@@ -324,6 +324,12 @@ def manual_list(kind):
             out.update(manual_trade.blocked_notes())
         except Exception as e:
             print(f"  Manual blocks unreadable ({type(e).__name__}: {e}) - check Reports/manual_block.json")
+        # + sold_block: any live sell blocks rebuy for N business days (default 5)
+        try:
+            import sold_block
+            out.update(sold_block.active_blocks())
+        except Exception as e:
+            print(f"  sold_block unreadable ({type(e).__name__}: {e}) - check Reports/sold_block.json")
     return out
 
 def build_orders(targets, account_size, positions=None, prices=None, min_value=1.0, fractional=False,
@@ -982,6 +988,59 @@ def submit_paper(orders, positions=None, client=None, order_date=None):
             results.append((r.Symbol, r.Side, qty, f"FAILED: {e}"))
     return pd.DataFrame(results, columns=["Symbol", "Side", "Shares", "Status"])
 
+
+def _cancel_target_sells_for_orders(client, orders):
+    """Before live SELLs, cancel any target_sells DAY+extended limits so qty is free."""
+    try:
+        import target_sells as ts
+    except Exception:
+        return
+    if orders is None or getattr(orders, "empty", True):
+        return
+    sells = orders[orders["Side"] == "SELL"]["Symbol"].astype(str).str.upper().unique() if "Side" in orders.columns else []
+    for sym in sells:
+        try:
+            oid, note = ts.cancel_for_symbol(client, sym, reason="pipeline sell")
+            if oid:
+                print(f"  Canceled target sell for {sym}: {note}")
+        except Exception as e:
+            print(f"  WARNING: could not cancel target sell for {sym}: {e}")
+
+
+def _record_sold_blocks_from_results(results, source="pipeline"):
+    """Record sold_block for each SELL that was submitted (filled or working)."""
+    try:
+        import sold_block
+    except Exception:
+        return
+    if results is None or getattr(results, "empty", True):
+        return
+    cols = set(results.columns)
+    if "Side" not in cols or "Symbol" not in cols:
+        return
+    for r in results.itertuples():
+        side = str(getattr(r, "Side", "")).upper()
+        if side != "SELL":
+            continue
+        status = str(getattr(r, "Status", getattr(r, "status", ""))).upper()
+        # Count anything that reached the broker (not SKIP/FAIL/STAGED-without-id)
+        if status in ("SKIP", "FAILED", "FAIL", "REFUSED"):
+            continue
+        sym = str(getattr(r, "Symbol", "")).upper()
+        if not sym:
+            continue
+        try:
+            sold_block.record_sell(sym, source=source, note=f"status={status}")
+        except Exception as e:
+            print(f"  WARNING: sold_block record failed for {sym}: {e}")
+        try:
+            import target_sells as ts
+            if ts.remove_target(sym, reason=f"{source} sold"):
+                print(f"  Removed target sell entry for {sym}")
+        except Exception:
+            pass
+
+
 def submit_paper_extended(orders, positions=None, record=None, client=None, order_date=None):
     """Send the BUY/SELL rows as DAY limit orders at the planned (closing) price, eligible for
     extended-hours (after-hours) execution on the Alpaca LIVE account (sells first).
@@ -1016,6 +1075,8 @@ def submit_paper_extended(orders, positions=None, record=None, client=None, orde
         client = paper_trading_client()
     date_str = order_date or _today_ct().date().strftime("%Y%m%d")
     results = []
+    _cancel_target_sells_for_orders(client, orders)
+
     for r in orders[orders["Side"].isin(["SELL", "BUY"])].itertuples():
         planned, is_exit, reason = _plan_qty(r.Symbol, r.Side, r.Shares, positions)
         if reason:
@@ -1270,6 +1331,7 @@ def submit_paper_extended_sequenced(orders, positions=None, record=None, client=
         buy_results = pd.concat([buy_results, _stage_orders_for_morning(
             later, positions, record, "STAGED for morning (no free cash yet - the 9 AM check buys what fits)")],
             ignore_index=True)
+    _record_sold_blocks_from_results(sell_results, source="pipeline_sell")
     return pd.concat([sell_results, buy_results], ignore_index=True)
 
 def _morning_completion_plan(broker_by_cid, sym, side, qty, price, date_str, kind="fill"):

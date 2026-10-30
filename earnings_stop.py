@@ -289,6 +289,15 @@ def _sell(c, q, session, now, state, pending_path):
             _once(state, f"read|{key}", today, "failed", "no", f"{s} fell 5% below its previous close on its earnings day but "
                   "the position could not be read, so nothing was sent (fails closed). Next check in 30 seconds.")
             return "at trigger - position unreadable, not sent"
+        # Cancel a target_sells limit so the stop can take the shares
+        try:
+            import target_sells as ts
+            ts.cancel_for_symbol(client, s, reason="earnings_stop")
+            held_now, open_now = pt._symbol_state(client, s)
+            open_now = [o for o in (open_now or [])
+                        if not ts.is_target_cid(getattr(o, "client_order_id", "") or "")]
+        except Exception:
+            pass
         if open_now:
             _once(state, f"open|{key}", today, "warning", "no", f"{s} fell 5% below its previous close on its earnings day "
                   "but already has an open order, so the stop waits (it never stacks a second order).")
@@ -314,6 +323,18 @@ def _sell(c, q, session, now, state, pending_path):
         state["sold"][key] = {"at": stamp, "order_id": oid, "qty": qty, "limit": limit, "held": held_now,
                               "react": f"{c['last']:%Y-%m-%d}"}
         _save_state(state)
+        try:
+            import sold_block
+            sold_block.record_sell(s, sold_on=today, source="earnings_stop",
+                                   note=f"earnings stop qty {qty:g} @ {limit}")
+        except Exception:
+            pass
+        try:
+            import target_sells as ts
+            ts.cancel_for_symbol(client, s, reason="earnings_stop")
+            ts.remove_target(s, reason="earnings_stop sold")
+        except Exception:
+            pass
         frac = round(held_now - qty, 6)
         try:
             _append_pending({"symbol": s, "side": "SELL", "qty": held_now, "limit_price": limit, "order_id": oid,
