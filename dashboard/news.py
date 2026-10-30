@@ -301,10 +301,32 @@ def render_latest_news():
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def stock_news(sym, limit=5):
-    """(items, label) for one stock from its Yahoo Finance feed: today's (New York) headlines, else the last 48 h."""
-    items, label = _recent(_safe(("Yahoo Finance", STOCK_FEED.format(sym=sym), sym)), 48)
-    return items[:limit], label
+def stock_news(sym, limit=10):
+    """Up to `limit` headlines for one stock (Yahoo + Nasdaq), today in New York else last 48 h.
+
+    eb03d4e moved per-stock feeds out of headlines() and promised them here, but only Yahoo at
+    limit=5 remained and _recent()'s is_news filter often left ~3. Restore both feeds and 10 items;
+    prefer event headlines, then fill from the rest so the Stock Analysis tab stays useful.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    jobs = [("Yahoo Finance", STOCK_FEED.format(sym=sym), sym),
+            ("Nasdaq", NASDAQ_STOCK_FEED.format(sym=sym), sym)]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        raw = [i for got in pool.map(_safe, jobs) for i in got]
+    seen, uniq = set(), []
+    for it in sorted(raw, key=lambda x: x["time"], reverse=True):
+        key = "".join(c for c in it["title"].lower() if c.isalnum())[:80]
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(it)
+    now = datetime.now(timezone.utc)
+    today = [i for i in uniq if i["time"].astimezone(NY).date() == now.astimezone(NY).date()]
+    pool = today if today else [i for i in uniq if now - i["time"] <= timedelta(hours=48)]
+    label = "today" if today else "last 48 hours"
+    event = [i for i in pool if is_news(i["title"], i["source"])]
+    rest = [i for i in pool if i not in event]
+    return (event + rest)[:limit], label
 
 def render_stock_news(sym):
     """A compact list of the stock's headlines (links open in a new tab); nothing when there are none."""

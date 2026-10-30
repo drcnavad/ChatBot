@@ -161,7 +161,7 @@ for sym in TICKERS:
 # ---------------------------------------------------------------- live Short-term relative strength badge / plan chip
 # Badge + plan come from live_stock_note (sleeves ranks + next_plan), not Oct-16 strategy_changes.
 from dashboard.page import build_page
-from dashboard.signals import LIVE_STRATEGY, live_stock_note
+from dashboard.signals import live_stock_note
 _p = build_page()
 cases = [s for s in ("CRL", "KO", "HAS", "MSFT") if s in _p.options]
 if not cases:
@@ -172,13 +172,15 @@ for sym in cases:
     hero = next((m.value for m in at.markdown if 'class="sa-ident"' in m.value), "")
     badges = [re.sub("<[^>]+>", "", b) for b in re.findall(r'<span class="sa-badge[^"]*"[^>]*>[^<]*</span>', hero)]
     note = live_stock_note(sym, _p)
-    expect(bool(badges) and badges[0].startswith(LIVE_STRATEGY),
-           f"{sym}: badge {badges[:1]} should start with {LIVE_STRATEGY!r}")
-    expect(note["status"] in badges[0], f"{sym}: status {note['status']!r} missing from {badges[0]!r}")
+    # Short plain badge e.g. "Hold · rank 1" / "Sell · rank 51" (no long strategy title prefix)
+    expect(bool(badges) and note["status"] in badges[0],
+           f"{sym}: badge {badges[:1]} should contain status {note['status']!r}")
+    expect("rank" in badges[0].lower() or note["status"] in ("Not ranked", "Watch", "Score below 0"),
+           f"{sym}: badge {badges[0]!r} should show rank")
     expect(any(note["plan_text"] == b or note["plan_text"] in b for b in badges),
            f"{sym}: plan chip missing {note['plan_text']!r} in {badges}")
     if note["held"] and sym in ("CRL", "KO"):
-        expect(any("Limit sell:" in b for b in badges),
+        expect(any(b.startswith("Limit sell") for b in badges),
                f"{sym}: expected Limit sell chip in {badges}")
     live_r = _p.by_symbol.loc[sym, "Strategy_Rank"] if sym in _p.by_symbol.index else float("nan")
     expect(sym in _p.short.index or pd.notna(live_r),

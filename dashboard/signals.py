@@ -7,9 +7,9 @@ import streamlit as st
 from dashboard.data import read_report_csv
 from dashboard.settings import CHANGES_CSV, EARNINGS, EXIT_BELOW, EXIT_TO_TOP, N_PICKS, PICKS_CSV
 
-SIGNAL_BADGE = {"Buy": "sa-badge-bull", "Hold": "sa-badge-hold", "Sold": "sa-badge-bear",
-                "Score below 0": "sa-badge-bear", "Watch": "sa-badge-hold", "Not ranked": "sa-badge-grey"}
-PLAN_BADGE = {"Buy": "sa-badge-bull", "Keep": "sa-badge-hold", "Take over": "sa-badge-hold", "Sell": "sa-badge-bear", "Blocked": "sa-badge-bear"}
+SIGNAL_BADGE = {"Buy": "sa-badge-bull", "Hold": "sa-badge-hold", "Sell": "sa-badge-bear", "Sold": "sa-badge-bear",
+                "Score below 0": "sa-badge-bear", "Blocked": "sa-badge-bear", "Watch": "sa-badge-hold", "Not ranked": "sa-badge-grey"}
+PLAN_BADGE = {"Buy": "sa-badge-bull", "Add": "sa-badge-bull", "Keep": "sa-badge-hold", "Hold": "sa-badge-hold", "Take over": "sa-badge-hold", "Sell": "sa-badge-bear", "Blocked": "sa-badge-bear"}
 
 def plain_reason(signal, reason, rank=None, score=None):
     """Engine reason string -> short plain-English explanation for the given display signal."""
@@ -204,10 +204,9 @@ def _overlays(sym, held=False):
             o = (st.get("orders") or {}).get(su) or {}
             oid, day = o.get("order_id") or "", o.get("day") or ""
             if oid:
-                status = f"open order {str(oid)[:8]}… · day {day}" if day else f"open order {str(oid)[:8]}…"
+                chips.append((f"Limit sell ${limit:,.2f} · order open", "sa-badge-hold"))
             else:
-                status = "no open broker order yet (job refreshes 3 AM–7 PM CT session days)"
-            chips.append((f"Limit sell: ${limit:,.2f} · {status}", "sa-badge-hold"))
+                chips.append((f"Limit sell ${limit:,.2f}", "sa-badge-hold"))
     except Exception:
         pass
     try:
@@ -219,26 +218,18 @@ def _overlays(sym, held=False):
         sold = (dg.get("sold_today") or {}).get(su)
         if sold:
             chips.append((f"drop_guard sold today ({sold.get('at', '')[:16]})", "sa-badge-bear"))
-        else:
-            # only mention drop_guard when config is live-enabled — keep quiet otherwise
-            cfg_path = os.path.join(os.path.dirname(path), "drop_guard_config.json")
-            try:
-                with open(cfg_path) as f:
-                    dgc = json.load(f)
-                if held and dgc.get("enabled") and not dgc.get("dry_run", True):
-                    chips.append(("drop_guard armed (4.1% + AI)", "sa-badge-grey"))
-            except Exception:
-                pass
+        # no "drop_guard armed …" chip — Chirag: keep the note quiet; guard still runs live
     except Exception:
         pass
     return chips
 
 
 def live_stock_note(ticker, p):
-    """Status for the Stock Analysis header under Short-term relative strength.
+    """Short Stock Analysis status under Short-term relative strength.
 
     Returns dict: status, badge, why, plan_text, plan_action, plan_tip, chips[(text,class)].
-    Uses live ranks on `p.by_symbol` (build_page overwrites pipeline ranks) and `p.plan` from next_plan.
+    Badge is plain e.g. "Hold · rank 1". Limit-sell chip is "Limit sell $X" (+ " · order open" only when a
+    broker order id is live). Uses live ranks on `p.by_symbol` and `p.plan` from next_plan.
     """
     import math
     import pandas as pd
@@ -260,21 +251,26 @@ def live_stock_note(ticker, p):
             score = float(score) if score == score and score is not None else None
         except (TypeError, ValueError):
             score = None
+    # Prefer sleeves.live_ranks day for as-of (same ranking the note's rank comes from)
+    asof = getattr(p, "plan_asof", None)
+    try:
+        asof = sl.inputs()["close"].index[-1]
+    except Exception:
+        pass
 
     entry = (getattr(p, "plan", None) or {}).get(sym) or (getattr(p, "plan", None) or {}).get(ticker)
     action = entry[0] if entry else None
     weight = entry[1] if entry and len(entry) > 1 else 0.0
     plan_day = entry[2] if entry and len(entry) > 2 and entry[2] is not None else getattr(p, "plan_day", None)
 
-    # Derive status from live plan + hold + rank (never from Oct-16 strategy_changes)
     if action == "Blocked":
         status = "Blocked"
     elif held and action == "Sell":
         status = "Sell"
-    elif held and action in ("Keep", "Take over", "Buy"):
+    elif held and action in ("Keep", "Take over", "Buy", "Add"):
         status = "Hold"
     elif held and action is None:
-        status = "Hold"  # held but not in next plan preview yet
+        status = "Hold"
     elif (not held) and action == "Buy":
         status = "Buy"
     elif rank is None and (score is None or (isinstance(score, float) and math.isnan(score))):
@@ -285,71 +281,31 @@ def live_stock_note(ticker, p):
         status = "Watch"
 
     rk = f"{int(rank)}" if rank is not None and rank == rank else "?"
-    sc = f"{score:.1f}" if score is not None and score == score else "?"
-    if status == "Hold":
-        if rank is not None and rank <= LIVE_N:
-            why = f"held · rank {rk} of top {LIVE_N} (score {sc})"
-        elif rank is not None and rank <= LIVE_EXIT_BELOW:
-            why = f"held · rank {rk} (inside Mon-Thu exit band ≤{LIVE_EXIT_BELOW}; still above sell line)"
-        else:
-            why = f"held · rank {rk} (score {sc})"
-    elif status == "Sell":
-        if rank is not None and rank > LIVE_EXIT_BELOW:
-            why = f"held · rank {rk} worse than {LIVE_EXIT_BELOW} — Mon-Thu exit / Friday drop"
-        elif rank is not None and rank > LIVE_N:
-            why = f"held · rank {rk} outside top {LIVE_N} — next rebalance sells"
-        else:
-            why = f"held · plan sells (rank {rk}, score {sc})"
-    elif status == "Buy":
-        why = f"not held · rank {rk} in top {LIVE_N} — next run buys (~{weight:.1f}% of account)"
-    elif status == "Blocked":
-        why = f"rank {rk} would be bought but a buy block is active"
-    elif status == "Watch":
-        why = f"rank {rk}, score {sc} — outside top {LIVE_N}, not held"
-    elif status == "Score below 0":
-        why = f"score {sc} ≤ 0 — not eligible"
-    else:
-        why = "not enough history / not in the live ranking"
+    badge = f"{status} · rank {rk}" if rk != "?" else status
+    why = ""  # keep the header quiet; chips + plan carry the rest
 
-    asof = getattr(p, "plan_asof", None)
-    asof_s = f"{asof:%a %b %-d}" if asof is not None else "latest close"
-    badge = f"{LIVE_STRATEGY} · as of {asof_s}: {status}"
-    if rank is not None and rank == rank:
-        badge += f" · rank {int(rank)}"
-
-    # Next run chip
     led = None
     try:
         led = sl.load_ledger()
     except Exception:
         pass
     slot, kind = next_run(ledger=led)
-    if kind == "full rebalance":
-        kind_label = "Friday rebalance"
-    elif kind and "mid" in str(kind).lower():
-        kind_label = "Mon-Thu check"
-    elif kind:
-        kind_label = str(kind)
-    else:
-        kind_label = "Next run"
-    when = f"{slot:%a %b %-d %-I:%M %p CT}" if slot is not None else (
-        f"{plan_day:%a %b %-d}" if plan_day is not None else "Next run")
-    if action in ("Buy", "Keep", "Take over"):
-        plan_txt = f"{kind_label} · {when}: {action} {weight:.2f}%"
+    # Plan chip: "Fri Oct 30: Keep 10%" / "Fri Oct 30: Sell" (date already names the weekday)
+    when = f"{slot:%a %b %-d}" if slot is not None else (
+        f"{plan_day:%a %b %-d}" if plan_day is not None else "next")
+    if action in ("Buy", "Keep", "Take over", "Add"):
+        plan_txt = f"{when}: {action}"
+        if weight:
+            plan_txt += f" {weight:.0f}%"
     elif action:
-        plan_txt = f"{kind_label} · {when}: {action}"
+        plan_txt = f"{when}: {action}"
     else:
-        plan_txt = f"{kind_label} · {when}: not picked"
-    tip = ("Preview from the latest close under Short-term relative strength. "
-           "Final orders go out at the 2:30 PM CT decision slot "
-           "(or 11:00 AM CT on early-close days).")
+        plan_txt = f"{when}: —"
+    tip = f"Short-term relative strength as of {asof:%a %b %-d}." if asof is not None else "Short-term relative strength."
 
     chips = _overlays(sym, held=held)
-    if held:
-        chips.insert(0, ("held in Alpaca", "sa-badge-bull"))
     return {
         "status": status, "badge": badge, "why": why,
         "plan_text": plan_txt, "plan_action": action or "not picked",
         "plan_tip": tip, "chips": chips, "rank": rank, "score": score, "held": held,
     }
-
