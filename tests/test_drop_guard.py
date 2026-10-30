@@ -100,11 +100,84 @@ check("trigger at 96.0", abs(trig - 96.0) < 1e-9)
 check("95.9 triggers", 95.9 <= trig)
 check("96.1 does not", 96.1 > trig)
 
+
+# --- entry OR prev trigger (Chirag Oct 30) ---
+# Fake account with avg_entry_price + bars/prev + today's fills
+class _FakeAcct:
+    def position_dicts(self):
+        return [
+            {"symbol": "OLD", "qty": 10, "avg_entry_price": 100.0, "current_price": 90, "market_value": 900},
+            {"symbol": "TODAY", "qty": 5, "avg_entry_price": 50.0, "current_price": 49, "market_value": 245},
+            {"symbol": "ENTRY_ONLY", "qty": 8, "avg_entry_price": 200.0, "current_price": 190, "market_value": 1520},
+        ]
+    def account_summary(self):
+        return {"Equity": 100000}
+
+# bars: OLD prev=110 (so prev trig=105.6, entry trig=96 → trigger=max=105.6)
+# TODAY prev=60 but opened today → entry only trig=48
+# ENTRY_ONLY prev=195 → entry trig=192, prev trig=187.2 → trigger=192
+bars = pd.DataFrame({
+    "Symbol": ["OLD", "OLD", "TODAY", "TODAY", "ENTRY_ONLY", "ENTRY_ONLY", "QQQ", "QQQ"],
+    "Date": pd.to_datetime(
+        ["2026-10-28", "2026-10-29"] * 4
+    ),
+    "Open": [1]*8, "High": [1]*8, "Low": [1]*8,
+    "Close": [108, 110, 58, 60, 194, 195, 400, 401],
+    "Volume": [1e6]*8,
+})
+real_daily = dg.daily_bars
+real_fills = dg._todays_buy_fills
+real_earn = be.load_earnings
+dg.daily_bars = lambda syms, now, lookback=260: bars
+dg._todays_buy_fills = lambda now=None, client=None: (
+    {"TODAY": 50.0}, {"TODAY": 5.0}
+)
+be.load_earnings = lambda *a, **k: pd.DataFrame(columns=["Symbol","Report_Date","EPS","Estimate"])
+rows, held, _, prev, _ = dg.held_candidates(fri, cfg, acct=_FakeAcct(),
+    earnings=pd.DataFrame(columns=["Symbol","Report_Date","EPS","Estimate"]))
+by = {r["symbol"]: r for r in rows}
+check("held_candidates has OLD/TODAY/ENTRY_ONLY", set(by) == {"OLD", "TODAY", "ENTRY_ONLY"}, set(by))
+check("OLD basis_kind entry_or_prev", by["OLD"]["basis_kind"] == "entry_or_prev", by["OLD"]["basis_kind"])
+check("OLD trigger = max(entry,prev) thresh", abs(by["OLD"]["trigger"] - max(100*0.96, 110*0.96)) < 1e-9, by["OLD"]["trigger"])
+check("TODAY opened_today", by["TODAY"]["opened_today"] is True)
+check("TODAY basis_kind entry_today", by["TODAY"]["basis_kind"] == "entry_today", by["TODAY"]["basis_kind"])
+check("TODAY trigger = entry only", abs(by["TODAY"]["trigger"] - 50*0.96) < 1e-9, by["TODAY"]["trigger"])
+check("TODAY ignores higher prev thresh", by["TODAY"]["trigger"] < 60*0.96)
+check("ENTRY_ONLY trigger uses higher of entry/prev", abs(by["ENTRY_ONLY"]["trigger"] - max(200*0.96, 195*0.96)) < 1e-9, by["ENTRY_ONLY"]["trigger"])
+# mid 97 on OLD: below entry thresh 96? no; below prev thresh 105.6? yes → would trigger via prev
+check("OLD mid 97 hits prev not entry", 97 <= by["OLD"]["prev_trigger"] and 97 > by["OLD"]["entry_trigger"])
+# mid 49 on TODAY: below entry 48? no → no trigger even though vs prev 60 is -18%
+check("TODAY mid 49 does NOT trigger (entry-only)", 49 > by["TODAY"]["trigger"])
+check("TODAY mid 47 does trigger", 47 <= by["TODAY"]["trigger"])
+dg.daily_bars = real_daily
+dg._todays_buy_fills = real_fills
+be.load_earnings = real_earn
+
+# fractional dry-run note
+c_frac = {"symbol": "FRAC", "shares": 10.25, "prev": 100.0, "entry": 100.0, "basis": 100.0,
+          "basis_kind": "entry_or_prev", "trigger": 96.0, "opened_today": False, "earnings": None}
+out_f = dg.execute_sell_and_replace(c_frac, 90.0, 89.5, 90.5,
+                                    cfg, {"sold_today": {}}, fri, True, 185000, {"FRAC": 10.25}, None)
+check("frac dry-run WOULD_SELL", out_f["Action"] == "WOULD_SELL", out_f)
+check("frac dry-run mentions market", "fractional DAY market" in str(out_f.get("Note_extra","")), out_f.get("Note_extra"))
+check("_submit_market exists", callable(getattr(dg, "_submit_market", None)))
+
+# replacements already down are NOT skipped by pick_replacement (Chirag dropped item 2)
+dg.latest_ranking = lambda: sig
+sm.do_not_buy = set(old_dnb) | {"AAA"}  # AAA blocked; BBB under MA200
+# CCC Close=30 ma200=25; live 27 is above MA200 but already down ~10% vs Close — still eligible
+pick_down, why_down = dg.pick_replacement("ZZZ", 5000, 100000, held={}, sold_today={}, cfg=cfg, now=fri,
+                                          price_map={"AAA": 50, "BBB": 40, "CCC": 27, "DDD": 20})
+check("down replacement still eligible", pick_down and pick_down["symbol"] == "CCC", f"{pick_down} {why_down}")
+sm.do_not_buy = old_dnb
+dg.latest_ranking = real
+
 # dry-run path does not call trading client
 calls = {"trade": 0}
 dg.trading_client = lambda: (_ for _ in ()).throw(RuntimeError("no client in dry-run"))
 # execute_sell_and_replace dry_run
-c = {"symbol": "TEST", "shares": 10, "prev": 100.0, "trigger": 95.0, "earnings": None}
+c = {"symbol": "TEST", "shares": 10, "prev": 100.0, "entry": 100.0, "basis": 100.0,
+     "basis_kind": "entry_or_prev", "trigger": 95.0, "opened_today": False, "earnings": None}
 out = dg.execute_sell_and_replace(c, 90.0, 89.5, 90.5,
                                   cfg, {"sold_today": {}}, fri, True, 185000, {"TEST": 10}, None)
 check("dry-run action WOULD_SELL", out["Action"] == "WOULD_SELL", out)

@@ -1,12 +1,16 @@
 """Intraday drop guard for the LIVE Alpaca account (Chirag, Oct 29–30 2026).
 
 Every 15 minutes on market days ~8:30 AM–2:15 PM CT, checks every held live position.
-Trigger (configurable): mid quote down >= DROP_PCT (default 4.0%) vs the previous regular close.
-When triggered, SELL automatically (no LLM). Cancels any open target_sells limit on that
-symbol first so qty is free, then sells at a bid limit (same as paper_trade).
-After a sell fills, immediately buy the top-ranked eligible replacement with that sale's
-proceeds only (do_not_buy, 15% weight cap, above SMA200, not sold by the guard today,
-not itself down >= the same drop_pct today). If nothing qualifies, cash waits for the 2:30 run.
+Trigger (configurable DROP_PCT, default 4.0%): mid quote down >= DROP_PCT from Alpaca
+avg_entry_price OR from the previous regular close (either fires). Exception: a position
+whose whole qty was bought TODAY uses only the entry-price check that day (ignore prior
+close); from the next day both checks apply. When triggered, SELL automatically (no LLM).
+Cancels any open target_sells limit on that symbol first so qty is free, then sells whole
+shares at a bid limit and any fractional remainder with a regular-hours DAY market order
+(no dust left). After a sell fills, immediately buy the top-ranked eligible replacement
+with that sale's proceeds only (do_not_buy, 15% weight cap, above SMA200, not sold by the
+guard today; already-down replacements are allowed). If nothing qualifies, cash waits for
+the 2:30 run.
 
 Hard guardrails: never sell do_not_sell; sell path never buys a new name except the
 replacement; max one sell per symbol per day; bid/ask limit orders (same as paper_trade);
@@ -47,7 +51,7 @@ RUN = "Drop guard"
 DEFAULT_CONFIG = {
     "enabled": True,                 # kill switch: False = evaluate+log only, never order
     "dry_run": True,                 # True = never submit orders (safe default; live Reports JSON overrides)
-    "drop_pct": 0.04,                # trigger+auto-sell: mid <= prev_close * (1 - drop_pct)
+    "drop_pct": 0.04,                # trigger+auto-sell: mid <= entry*(1-d) OR prev*(1-d); today-buys: entry only
     "window_start_ct": [8, 30],      # CT inclusive
     "window_end_ct": [14, 15],       # CT exclusive (stop before 2:30 job)
     "max_weight": 0.15,              # replacement: do not push a name above this of equity
@@ -439,6 +443,44 @@ def prev_close_map(bars, day):
     return out
 
 
+def _todays_buy_fills(now=None, client=None):
+    """({SYMBOL: vwap}, {SYMBOL: qty}) of BUY fills today (CT). Empty dicts on failure."""
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+        now = now or datetime.now(be.CENTRAL)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=be.CENTRAL)
+        start = now.astimezone(be.CENTRAL).replace(hour=0, minute=0, second=0, microsecond=0)
+        client = client or trading_client()
+        orders = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.CLOSED, after=start, limit=500))
+    except Exception:
+        return {}, {}
+    qty_px = {}
+    for o in orders or []:
+        side = getattr(getattr(o, "side", None), "value", str(getattr(o, "side", ""))).lower()
+        filled = float(getattr(o, "filled_qty", 0) or 0)
+        px = float(getattr(o, "filled_avg_price", 0) or 0)
+        if side != "buy" or filled <= 0 or px <= 0:
+            continue
+        sym = str(o.symbol).upper()
+        q, n = qty_px.get(sym, (0.0, 0.0))
+        qty_px[sym] = (q + filled, n + filled * px)
+    vwap = {s: notional / q for s, (q, notional) in qty_px.items() if q > 0}
+    qty = {s: q for s, (q, _n) in qty_px.items() if q > 0}
+    return vwap, qty
+
+
+def todays_buy_vwap(now=None, client=None):
+    """{SYMBOL: vwap} of BUY fills today (CT calendar day)."""
+    return _todays_buy_fills(now, client)[0]
+
+
+def todays_buy_qty(now=None, client=None):
+    """{SYMBOL: filled BUY qty today (CT)}."""
+    return _todays_buy_fills(now, client)[1]
+
+
 def quote_mid(q, now):
     """(mid, bid, ask, skip_reason)."""
     import earnings_stop as es
@@ -448,30 +490,80 @@ def quote_mid(q, now):
 
 
 def held_candidates(now, cfg, acct=None, earnings=None):
-    """Held names (not do_not_sell) with prev close. Returns (rows, held_dict)."""
+    """Held names (not do_not_sell) with entry/prev triggers.
+
+    Sell when mid is down >= drop_pct from Alpaca avg_entry_price OR from prior close
+    (either). Exception: whole position bought today → entry check only that day.
+    Returns (rows, held, bars, prev, bench).
+    """
     import holdings
     acct = acct or account()
-    held = holdings.held_qty(account=acct)
+    positions = holdings.get_positions(account=acct, fresh=True)
+    held = {s: p["qty"] for s, p in positions.items()}
     keep = {str(x).upper() for x in sm.do_not_sell}
     syms = sorted(s for s, q in held.items() if q > 0 and s not in keep)
     if not syms:
-        return [], held
+        return [], held, pd.DataFrame(), {}, {}
     day = pd.Timestamp(now.astimezone(be.EASTERN).date())
     bars = daily_bars(syms + ["QQQ"], now)
     prev = prev_close_map(bars, day)
+    buy_vwap, buy_qty = _todays_buy_fills(now)
     earnings = be.load_earnings(EARNINGS_CSV) if earnings is None else earnings
+    drop = float(cfg["drop_pct"])
     rows = []
     for s in syms:
-        if s not in prev:
+        shares = float(held[s])
+        prev_c = prev.get(s)
+        entry = positions[s].get("avg_entry_price")
+        # Prefer today's buy VWAP when we have it (same economics as avg_entry for same-day opens).
+        if s in buy_vwap and buy_vwap[s] > 0:
+            # If whole position bought today, today's VWAP is the clean entry; else still use Alpaca.
+            opened_today = buy_qty.get(s, 0) + 1e-9 >= 0.95 * shares
+            if opened_today:
+                entry = float(buy_vwap[s])
+            elif entry is None or not (isinstance(entry, (int, float)) and entry > 0):
+                entry = float(buy_vwap[s])
+                opened_today = False
+            else:
+                entry = float(entry)
+        else:
+            opened_today = False
+            if entry is not None and isinstance(entry, (int, float)) and entry > 0:
+                entry = float(entry)
+            else:
+                entry = None
+        if entry is None and not prev_c:
             continue
+        entry_trig = entry * (1 - drop) if entry else None
+        prev_trig = prev_c * (1 - drop) if prev_c else None
+        if opened_today:
+            # Today-only: ignore prior close.
+            trigger = entry_trig
+            basis_kind = "entry_today"
+            basis = entry
+        else:
+            # Either check fires → effective trigger is the higher threshold.
+            candidates = [t for t in (entry_trig, prev_trig) if t is not None]
+            if not candidates:
+                continue
+            trigger = max(candidates)
+            if entry_trig is not None and prev_trig is not None:
+                basis_kind = "entry_or_prev"
+            elif entry_trig is not None:
+                basis_kind = "entry"
+            else:
+                basis_kind = "prev_close"
+            basis = entry if entry is not None else prev_c
         rows.append({
-            "symbol": s, "shares": float(held[s]), "prev": prev[s],
-            "trigger": prev[s] * (1 - float(cfg["drop_pct"])),
+            "symbol": s, "shares": shares,
+            "prev": prev_c if prev_c else (entry or 0.0),
+            "entry": entry, "basis": basis, "basis_kind": basis_kind,
+            "entry_trigger": entry_trig, "prev_trigger": prev_trig,
+            "trigger": trigger, "opened_today": opened_today,
             "earnings": recent_earnings(s, day, earnings, cfg.get("earnings_lookback_days", 5)),
             "bars": bars[bars["Symbol"] == s].sort_values("Date").set_index("Date")
                     if not bars.empty else pd.DataFrame(),
         })
-    # benchmark day returns (vs their own prev closes) for RS
     bench = {}
     for b in ("QQQ",):
         if b in prev:
@@ -532,7 +624,6 @@ def pick_replacement(sold_sym, proceeds, equity, held, sold_today, cfg, now, pri
     except Exception:
         pass
     max_w = float(cfg.get("max_weight", 0.15))
-    drop = float(cfg["drop_pct"])
     day = pd.Timestamp(now.astimezone(be.EASTERN).date())
     # need SMA200 + prev closes for candidates — use ranking Close + ma_200 when present, else bars
     for _, r in rank.iterrows():
@@ -592,6 +683,18 @@ def _submit_limit(client, sym, qty, side, limit, cid, extended=False):
     return client.submit_order(req)
 
 
+def _submit_market(client, sym, qty, side, cid):
+    """Regular-hours DAY market order (fractional qty OK)."""
+    from alpaca.trading.enums import OrderSide, TimeInForce
+    from alpaca.trading.requests import MarketOrderRequest
+    req = MarketOrderRequest(
+        symbol=sym, qty=qty,
+        side=OrderSide.SELL if side == "SELL" else OrderSide.BUY,
+        time_in_force=TimeInForce.DAY, client_order_id=cid,
+    )
+    return client.submit_order(req)
+
+
 def _wait_fill(client, order_id, timeout_s=90, poll_s=3):
     """Poll until filled/partial enough or timeout. Returns (status, filled_qty, filled_avg_price)."""
     import paper_trade as pt
@@ -631,13 +734,18 @@ def execute_sell_and_replace(c, mid, bid, ask, cfg, state, now, dry_run, equity,
         "Replace_Note": "", "Action": "HOLD",
     }
     if dry_run or not cfg.get("enabled", True):
-        whole = math.floor(c["shares"] + 1e-9)
+        shares = float(c["shares"])
+        whole = math.floor(shares + 1e-9)
+        frac = round(shares - whole, 6)
         limit = pt._tick(bid * (1 - pt.LIMIT_OFFSET), False) if bid else None
         out["Action"] = "WOULD_SELL"
         out["Sell_Limit"] = limit
-        out["Note_extra"] = f"dry-run/disabled would sell {whole:g} @ {limit}"
+        note = f"dry-run/disabled would sell {whole:g} @ {limit}"
+        if frac > 1e-9:
+            note += f" + {frac:g} fractional DAY market"
+        out["Note_extra"] = note
         # still propose replacement for the log
-        proceeds = (limit or mid) * whole
+        proceeds = (limit or mid) * shares
         price_map = {}
         pick, why = pick_replacement(s, proceeds, equity, held, state.get("sold_today", {}), cfg, now, price_map)
         if pick:
@@ -709,44 +817,83 @@ def execute_sell_and_replace(c, mid, bid, ask, cfg, state, now, dry_run, equity,
             out["Replace_Note"] = "no longer held"
             return out
         whole = math.floor(held_now + 1e-9)
-        qty = held_now if whole < 1 else whole
-        if qty <= 0:
+        frac = round(held_now - whole, 6)
+        if held_now <= 0:
             out["Action"] = "SKIP"
             out["Replace_Note"] = "qty 0"
             return out
-        limit = pt._tick(bid * (1 - pt.LIMIT_OFFSET), False)
-        cid = _cid("sell", day, s, attempt)
-        try:
-            order = _submit_limit(client, s, qty, "SELL", limit, cid, extended=False)
-        except Exception as e:
-            out["Action"] = "SKIP"
-            out["Replace_Note"] = f"sell submit failed: {str(e)[:100]}"
-            return out
-        out["Sell_Order_Id"] = str(order.id)
-        out["Sell_Limit"] = limit
-        out["Action"] = "SELL_SENT"
-        st, filled, avg = _wait_fill(client, order.id, timeout_s=90)
-        out["Sell_Filled_Qty"] = filled
-        proceeds = filled * (avg if avg else limit)
+        limit = pt._tick(bid * (1 - pt.LIMIT_OFFSET), False) if bid else None
+        filled = 0.0
+        proceeds = 0.0
+        avg = None
+        st = "skipped"
+        order = None
+        # Whole shares: bid limit (same as paper_trade). Sub-1 share positions go straight to market.
+        if whole >= 1:
+            cid = _cid("sell", day, s, attempt)
+            try:
+                order = _submit_limit(client, s, whole, "SELL", limit, cid, extended=False)
+            except Exception as e:
+                out["Action"] = "SKIP"
+                out["Replace_Note"] = f"sell submit failed: {str(e)[:100]}"
+                return out
+            out["Sell_Order_Id"] = str(order.id)
+            out["Sell_Limit"] = limit
+            out["Action"] = "SELL_SENT"
+            st, filled, avg = _wait_fill(client, order.id, timeout_s=90)
+            proceeds = filled * (avg if avg else limit)
+        # Fractional remainder: regular-hours DAY market (Alpaca allows fractional market, not limit).
+        frac_filled = 0.0
+        if frac > 1e-9:
+            fcid = _cid("sellfrac", day, s, attempt)
+            try:
+                forder = _submit_market(client, s, frac, "SELL", fcid)
+                fst, ff, favg = _wait_fill(client, forder.id, timeout_s=60)
+                frac_filled = ff
+                proceeds += ff * (favg if favg else (mid or limit or 0))
+                if not out.get("Sell_Order_Id"):
+                    out["Sell_Order_Id"] = str(forder.id)
+                    out["Action"] = "SELL_SENT"
+                    st, avg = fst, favg
+                out["Replace_Note"] = (out.get("Replace_Note") or "") + f"frac market {ff:g}; "
+            except Exception as e:
+                out["Replace_Note"] = (out.get("Replace_Note") or "") + f"frac market err: {e}; "
+                # leave dust for morning fill check if whole already sold
+                try:
+                    if filled > 0:
+                        _append_pending({
+                            "symbol": s, "side": "SELL", "qty": frac, "limit_price": None,
+                            "order_id": None, "order_qty": frac, "exit": True,
+                            "recorded_at": now.astimezone(be.CENTRAL).isoformat(timespec="seconds"),
+                            "decision": None, "evening_date": str(day), "source": "drop-guard-frac",
+                        }, pt.PENDING_ORDERS_JSON)
+                except Exception:
+                    pass
+        filled_total = filled + frac_filled
+        out["Sell_Filled_Qty"] = filled_total
         out["Sell_Proceeds"] = round(proceeds, 2)
+        if out.get("Sell_Limit") is None and limit is not None:
+            out["Sell_Limit"] = limit
         # Max one sell attempt per symbol per day (even if still working / rejected).
         state.setdefault("sold_today", {})[s] = {
             "at": now.astimezone(be.CENTRAL).isoformat(timespec="seconds"),
-            "order_id": str(order.id), "qty": filled, "limit": limit, "status": st,
+            "order_id": str(order.id) if order is not None else out.get("Sell_Order_Id"),
+            "qty": filled_total, "limit": limit, "status": st,
         }
         _save_state(state)
-        # append pending for morning fill check (fractional rest / unfilled working order)
+        # pending only when whole limit still working / underfilled (frac handled above)
         try:
-            frac = round(held_now - qty, 6)
-            if frac > 0 or filled + 1e-9 < qty:
+            if order is not None and (filled + 1e-9 < whole):
                 _append_pending({
                     "symbol": s, "side": "SELL", "qty": held_now, "limit_price": limit,
-                    "order_id": str(order.id), "order_qty": qty, "exit": True,
+                    "order_id": str(order.id), "order_qty": whole, "exit": True,
                     "recorded_at": now.astimezone(be.CENTRAL).isoformat(timespec="seconds"),
                     "decision": None, "evening_date": str(day), "source": "drop-guard",
                 }, pt.PENDING_ORDERS_JSON)
         except Exception:
             pass
+        # Normalize names used by the rest of this function
+        filled = filled_total
         working = st in ("new", "accepted", "pending_new", "partially_filled", "held")
         # sold_block only when shares actually left (filled) or a working sell is still live.
         # Rejected/canceled/expired with 0 fill must NOT block rebuy or drop a target limit.
@@ -772,16 +919,27 @@ def execute_sell_and_replace(c, mid, bid, ask, cfg, state, now, dry_run, equity,
                 pass
         if filled <= 0:
             out["Replace_Note"] = (out.get("Replace_Note") or "") + f"sell not filled ({st}) — no replacement"
+            oid = out.get("Sell_Order_Id") or (str(order.id) if order is not None else "")
+            lim_s = f"${limit:,.2f}" if limit else "market"
             log_event("ok", "unknown",
-                      f"Drop guard: sold signal on {s} but order not filled ({st}). Limit ${limit:,.2f}.",
-                      f"order {order.id}")
+                      f"Drop guard: sold signal on {s} but order not filled ({st}). Limit {lim_s}.",
+                      f"order {oid}")
             return out
         out["Action"] = "SOLD"
+        px = avg or limit or mid or 0.0
+        entry = c.get("entry") or c.get("basis") or c.get("prev")
+        prev_c = c.get("prev")
+        parts = []
+        if entry:
+            parts.append(f"{(px / entry - 1):.1%} vs entry ${entry:,.2f}")
+        if prev_c and not c.get("opened_today"):
+            parts.append(f"{(px / prev_c - 1):.1%} vs prev ${prev_c:,.2f}")
+        vs_txt = "; ".join(parts) if parts else "n/a"
+        oid = out.get("Sell_Order_Id") or (str(order.id) if order is not None else "")
         log_event("ok", "yes",
-                  f"Drop guard: sold {filled:g} {s} at ~${avg or limit:,.2f} "
-                  f"({((avg or limit) / c['prev'] - 1):.1%} vs prev close ${c['prev']:,.2f}). "
-                  f"Auto sell (≥{float(cfg['drop_pct'])*100:g}% drop).",
-                  f"order {order.id}")
+                  f"Drop guard: sold {filled:g} {s} at ~${px:,.2f} ({vs_txt}). "
+                  f"Auto sell (≥{float(cfg['drop_pct'])*100:g}% drop, {c.get('basis_kind','')}).",
+                  f"order {oid}")
         # Refresh holdings after sell
         held2 = dict(held)
         held2[s] = max(0.0, held_now - filled)
@@ -801,15 +959,6 @@ def execute_sell_and_replace(c, mid, bid, ask, cfg, state, now, dry_run, equity,
                 m, b, a, skip = quote_mid(q, now)
                 if m is None:
                     continue
-                # prev close from bars_all
-                prev = None
-                if bars_all is not None and not bars_all.empty:
-                    g = bars_all[bars_all["Symbol"] == sym]
-                    g = g[g["Date"] < pd.Timestamp(day)].sort_values("Date")
-                    if not g.empty:
-                        prev = float(g["Close"].iloc[-1])
-                if prev and m <= prev * (1 - float(cfg["drop_pct"])):
-                    continue  # candidate itself down >= drop
                 price_map[sym] = m
             except Exception:
                 continue
@@ -832,16 +981,7 @@ def execute_sell_and_replace(c, mid, bid, ask, cfg, state, now, dry_run, equity,
         if buy_qty * buy_limit < 1:
             out["Replace_Note"] = "replacement qty too small — cash for 2:30"
             return out
-        # final down-5% check
-        prev_c = None
-        g = bars_all[bars_all["Symbol"] == pick["symbol"]] if bars_all is not None else pd.DataFrame()
-        g = g[g["Date"] < pd.Timestamp(day)].sort_values("Date") if not g.empty else g
-        if not g.empty:
-            prev_c = float(g["Close"].iloc[-1])
-            if m <= prev_c * (1 - float(cfg["drop_pct"])):
-                out["Replace_Note"] = f"{pick['symbol']} itself down >= drop — cash for 2:30"
-                out["Replace_Symbol"] = pick["symbol"]
-                return out
+        # Chirag Oct 30: replacements already down >= drop_pct are fine to buy (no skip).
         bcid = _cid("buy", day, pick["symbol"])
         if bcid in (broker or {}):
             out["Replace_Note"] = "replacement already submitted"
@@ -1035,12 +1175,37 @@ def run_check(now=None, dry_run=None, cfg=None):
                 mid, bid, ask, skip = quote_mid(q, now_ct)
             except Exception as e:
                 skip = f"no quote ({str(e)[:60]})"
-            vs = ((mid / c["prev"] - 1) * 100) if mid and c["prev"] else float("nan")
-            triggered = bool(mid is not None and mid <= c["trigger"])
+            entry = c.get("entry")
+            prev_c = c.get("prev")
+            vs_prev = ((mid / prev_c - 1) * 100) if mid and prev_c else float("nan")
+            vs_entry = ((mid / entry - 1) * 100) if mid and entry else float("nan")
+            # Recompute which check(s) fire at this mid (mirrors held_candidates).
+            hit_entry = bool(mid is not None and c.get("entry_trigger") is not None
+                             and mid <= c["entry_trigger"])
+            hit_prev = bool(
+                mid is not None and c.get("prev_trigger") is not None
+                and mid <= c["prev_trigger"]
+                and not c.get("opened_today")
+            )
+            triggered = bool(mid is not None and c.get("trigger") is not None and mid <= c["trigger"])
+            if hit_entry and hit_prev:
+                trig_by = "entry+prev"
+            elif hit_entry:
+                trig_by = "entry"
+            elif hit_prev:
+                trig_by = "prev"
+            else:
+                trig_by = ""
+            note_bits = []
+            if skip:
+                note_bits.append(skip)
+            if entry:
+                note_bits.append(f"entry ${entry:,.4f} ({c.get('basis_kind','')})")
             base = {
                 "Checked_At_CT": stamp, "Symbol": s, "Shares": c["shares"],
-                "Prev_Close": round(c["prev"], 4), "Price": round(mid, 4) if mid else "",
-                "Vs_Prev_%": round(vs, 3) if math.isfinite(vs) else "",
+                "Prev_Close": round(prev_c, 4) if prev_c else "",
+                "Price": round(mid, 4) if mid else "",
+                "Vs_Prev_%": round(vs_prev, 3) if math.isfinite(vs_prev) else "",
                 "Triggered": "yes" if triggered else "no",
                 "AI_Action": "", "AI_Confidence": "", "AI_Reasons": "",
                 "Action": "WATCH", "Sell_Order_Id": "", "Sell_Limit": "",
@@ -1049,8 +1214,14 @@ def run_check(now=None, dry_run=None, cfg=None):
                 "Replace_Qty": "", "Replace_Note": "",
                 "Close_Price": "", "Close_Vs_Sell_%": "", "Next_Close": "", "Next_Vs_Sell_%": "",
                 "Dry_Run": "yes" if dry_run else "no",
-                "Note": skip or "",
+                "Note": "; ".join(note_bits),
             }
+            # stash for AI_Reasons below
+            c["_vs_entry"] = vs_entry
+            c["_vs_prev"] = vs_prev
+            c["_trig_by"] = trig_by
+            c["_hit_entry"] = hit_entry
+            c["_hit_prev"] = hit_prev
             if s in state.get("sold_today", {}):
                 base["Action"] = "ALREADY_SOLD_TODAY"
                 base["Note"] = f"sold earlier {state['sold_today'][s].get('at','')}"
@@ -1072,10 +1243,16 @@ def run_check(now=None, dry_run=None, cfg=None):
             drop_pct = float(cfg["drop_pct"])
             base["AI_Action"] = "AUTO"
             base["AI_Confidence"] = 1.0
-            base["AI_Reasons"] = (
-                f"auto sell: mid down {vs:.2f}% ≥ {drop_pct*100:g}% vs prior close "
-                f"(AI gate removed Oct 30 2026)"
-            )
+            ve = c.get("_vs_entry")
+            vp = c.get("_vs_prev")
+            by = c.get("_trig_by") or c.get("basis_kind") or ""
+            bits = [f"auto sell via {by}"]
+            if ve == ve:  # not NaN
+                bits.append(f"vs entry {ve:.2f}%")
+            if vp == vp and not c.get("opened_today"):
+                bits.append(f"vs prev {vp:.2f}%")
+            bits.append(f"threshold {drop_pct*100:g}%")
+            base["AI_Reasons"] = "; ".join(bits)
 
             result = execute_sell_and_replace(
                 c, mid, bid, ask, cfg, state, now_ct, dry_run, equity, held, bars_all)
