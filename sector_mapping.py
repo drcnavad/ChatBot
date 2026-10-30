@@ -11,19 +11,18 @@ REPORTS_DIR = os.path.join(PROJECT_ROOT, "Reports")
 
 # The stocks the strategy ranks and trades (QQQ is the benchmark; it is listed for the dashboard but never traded).
 stock_symbols = [
-    'AAPL', 'AMZN', 'ANET', 'AMD', 'APP', 'AVGO', 'BIIB', 'BKR', 'CDNS', 'CRM', 'CVLT', 'DASH',
+    'AAPL', 'ANET', 'AMD', 'APP', 'AVGO', 'BIIB', 'BKR', 'CDNS', 'CRM', 'CVLT', 'DASH',
     'ENPH', 'FTNT', 'GOOGL', 'HAL', 'HOOD', 'INTU', 'LRCX', 'MCK', 'MRK', 'META', 'MRVL', 'MSFT',
-    'NFLX', 'NOW', 'NVDA', 'ORCL', 'PANW', 'RCL', 'REGN', 'SLB', 'TSLA', 'UBER', 'UI', 'UNH',
-    'UPST', 'VEEV', 'VRT', 'NOC', 'LMT', 'TWLO', 'ALAB', 'ARM', 'CVNA', 'RDDT',
-    'SMCI', 'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'BE', 'BA', 'PH', 'FCX',
-    'CRDO', 'CLS', 'HIMX', 'NU',
-    'PWR', 'GEV', 'CAT', 'CMI', 'ROK', 'MS', 'GS', 'HWM',   # high-beta industrials / financials (2026-10-13)
+    'NFLX', 'NOW', 'NVDA', 'PANW', 'RCL', 'REGN', 'SLB', 'TSLA', 'UBER', 'UI', 'UNH',
+    'VEEV', 'VRT', 'NOC', 'LMT', 'TWLO', 'ALAB', 'ARM', 'CVNA', 'RDDT',
+    'APA', 'OXY', 'TRGP', 'DVN', 'FANG', 'BE', 'PH', 'FCX',
+    'CRDO', 'CLS', 'HIMX',
+    'PWR', 'GEV', 'CAT', 'CMI', 'ROK', 'HWM',   # high-beta industrials (2026-10-13; MS/GS removed Oct 30)
     'ANF', 'JCI', 'DAL', 'WSM', 'IBKR', 'GRMN',   # high-beta non-tech (2026-10-14)
     'ABBV', 'KO',   # added Oct 15, 2026 (were the defensive sleeve; still in the universe)
-    'WULF',   # TeraWulf (Chirag, 2026-10-15)
     'LIN', 'STLD', 'MLM',   # Materials (2026-10-17)
     'COST', 'WMT', 'MNST',   # Consumer Staples (2026-10-17)
-    'LYV', 'OMC', 'DIS', 'C', 'V', 'JPM', 'MA', 'TXN', 'CSCO', 'AMAT',   # Comm Services / Financials / Technology (Chirag, 2026-10-21)
+    'LYV', 'OMC', 'DIS', 'V', 'MA', 'TXN', 'CSCO', 'AMAT',   # Comm Services / Financials / Technology (Chirag, 2026-10-21; C/JPM removed Oct 30)
     # Removed by Chirag 2026-10-19 (uncomment to re-add). PG / EMR / PFE were still held: their half sells them at its
     # next rebalance (not in the universe = no target; priced from Alpaca market data until then):
     # 'PG', 'EMR', 'PFE', 'ECL', 'SHW', 'NUE', 'URI', 'SHOP', 'PEP', 'VMC', 'CRCL', 'ETN',
@@ -31,6 +30,8 @@ stock_symbols = [
     # 'AVAV', 'COIN', 'CRWV', 'FIG', 'GTLB', 'HIMS', 'IREN', 'SNOW', 'TEAM', 'ZS', 'UMAC', 'U',
     # 'ACHR', 'ASTS', 'CIFR', 'IONQ', 'JOBY', 'MARA', 'NVTS', 'RKLB', 'SOUN', 'TEM', 'TTWO', 'SPCX',
     # 'LYB', 'NBIS', 'LITE', 'RBRK', 'CORZ', 'LUNR', 'APLD',
+    # Removed by Chirag 2026-10-30 (negative TTM operating cash flow, or positive OCF / negative FCF):
+    # 'JPM', 'GS', 'C', 'MS', 'SMCI', 'NU', 'UPST', 'WULF', 'AMZN', 'BA', 'ORCL',
     # Oct 28, 2026 (Chirag): strong momentum, reasonable valuation
     'CRL', 'RVTY', 'HAS', 'COP', 'LH', 'EL', 'ACN', 'PTC', 'ULTA', 'IT', 'MPC', 'PPG', 'FDS', 'EXPD', 'ALLE',
     'QQQ'
@@ -39,12 +40,13 @@ stock_symbols = [
 # Your manual overrides for the live Mon-Fri trades and the 9 AM fill check (paper_trade.py), e.g. ['TSLA', 'NVDA'].
 # do_not_buy: never bought or topped up (on Friday its slot goes to the next eligible stock, down to rank 20).
 # do_not_sell: never sold or trimmed (at a rebalance too). The earnings-day stop skips it too.
-# SHOP kept (Chirag); Oct 28, 2026 (Chirag): AI names in net debt / bubble risk — WULF, SMCI, MRVL, VRT, ORCL (AVGO removed from block same day).
+# SHOP kept (Chirag); Oct 28, 2026 (Chirag): AI names in net debt / bubble risk — VRT (AVGO removed from block same day).
 # Oct 28, 2026 (Chirag): high valuation / AI bubble risk — ALAB, BE.
 # Oct 28, 2026 (Chirag): removed AVGO from do_not_buy (still in universe); TSLA re-blocked same day with LYV.
 # Oct 28, 2026 (Chirag): high valuation, LYV fwd P/E ~91, TSLA fwd P/E ~188.
 # Oct 28, 2026 (Chirag): ALAB and MRVL unblocked (top RS short-term winners).
-do_not_buy = ['AMD', 'ARM', 'PANW', 'SHOP', 'WULF', 'SMCI', 'VRT', 'ORCL', 'BE', 'LYV', 'TSLA']
+# Oct 30, 2026 (Chirag): WULF, SMCI, ORCL dropped from universe (cash-flow screen) — removed from do_not_buy too.
+do_not_buy = ['AMD', 'ARM', 'PANW', 'SHOP', 'VRT', 'BE', 'LYV', 'TSLA']
 do_not_sell = []
 # Defensive sleeve of Oct 15, 2026 (LMT, NOC, ABBV, KO; PFE dropped Oct 19). Live RS short-term dropped it Oct 29, 2026
 # (Chirag: top 10 only). Kept only for the other pinned forward-test 'Now' paper lines (forward_test NOW sleeve=True).
@@ -66,10 +68,10 @@ symbol_sector = {
     'WSM': 'Consumer Discretionary',
     'IBKR': 'Financials',
     'GRMN': 'Consumer Discretionary',
-    'GEV': 'Industrials', 'CMI': 'Industrials', 'EMR': 'Industrials', 'ROK': 'Industrials', 'GS': 'Financials',
+    'GEV': 'Industrials', 'CMI': 'Industrials', 'EMR': 'Industrials', 'ROK': 'Industrials',
     'ETN': 'Industrials', 'HWM': 'Industrials',
     'AAPL': 'Technology', 'ADBE': 'Technology', 'ADSK': 'Technology',
-    'AFRM': 'Financials', 'AMD': 'Technology', 'AMZN': 'Consumer Discretionary',
+    'AFRM': 'Financials', 'AMD': 'Technology',
     'ANET': 'Technology', 'APH': 'Technology', 'APP': 'Communication Services',
     'ARM': 'Technology', 'ASML': 'Technology', 'AVAV': 'Industrials',
     'AVGO': 'Technology', 'AXON': 'Industrials', 'BAC': 'Financials',
@@ -96,7 +98,7 @@ symbol_sector = {
     'NEM': 'Materials', 'NET': 'Technology', 'NFLX': 'Communication Services',
     'NKE': 'Consumer Discretionary', 'NOC': 'Industrials', 'NOW': 'Technology',
     'NSC': 'Industrials', 'NUE': 'Materials', 'NVDA': 'Technology',
-    'NVO': 'Health Care', 'ORCL': 'Technology', 'PA=F': 'Commodities',
+    'NVO': 'Health Care', 'PA=F': 'Commodities',
     'PANW': 'Technology', 'PFE': 'Health Care', 'PATH': 'Technology', 'PAYX': 'Industrials',
     'PCTY': 'Technology', 'PLTR': 'Technology', 'POOL': 'Consumer Discretionary',
     'PWR': 'Industrials', 'QQQ': 'Technology', 'RCL': 'Consumer Discretionary',
@@ -107,14 +109,13 @@ symbol_sector = {
     'TMO': 'Health Care', 'TMUS': 'Communication Services', 'TSLA': 'Consumer Discretionary',
     'TTD': 'Communication Services', 'TTWO': 'Communication Services', 'TWLO': 'Technology',
     'TXN': 'Technology', 'TYL': 'Technology', 'UBER': 'Industrials',
-    'UI': 'Technology', 'UMAC': 'Technology', 'UNH': 'Health Care',
-    'UPST': 'Financials', 'VEEV': 'Technology', 'VRT': 'Industrials',
+    'UI': 'Technology', 'UMAC': 'Technology', 'UNH': 'Health Care', 'VEEV': 'Technology', 'VRT': 'Industrials',
     'WAT': 'Health Care', 'WDAY': 'Technology', 'ZENA': 'Technology',
     'ZS': 'Technology', 'ABNB': 'Consumer Discretionary', 'ALAB': 'Technology',
     'CAVA': 'Consumer Discretionary', 'CPNG': 'Consumer Discretionary', 'DUOL': 'Technology',
-    'ELF': 'Consumer Staples', 'MDB': 'Technology', 'NU': 'Financials',
+    'ELF': 'Consumer Staples', 'MDB': 'Technology',
     'TMDX': 'Health Care', 'TOST': 'Technology', 'COST': 'Consumer Staples',
-    'JNJ': 'Health Care', 'JPM': 'Financials', 'MA': 'Financials',
+    'JNJ': 'Health Care', 'MA': 'Financials',
     'MCD': 'Consumer Discretionary', 'PEP': 'Consumer Staples', 'PG': 'Consumer Staples',
     'V': 'Financials', 'WM': 'Industrials', 'WMT': 'Consumer Staples',
     'AMT': 'Real Estate', 'NEE': 'Utilities', 'PLD': 'Real Estate',
@@ -123,7 +124,7 @@ symbol_sector = {
     'CTSH': 'Technology', 'ZBRA': 'Technology', 'ACHR': 'Industrials',
     'APLD': 'Technology', 'ASTS': 'Communication Services', 'CIFR': 'Technology',
     'CVNA': 'Consumer Discretionary', 'MARA': 'Technology', 'NVTS': 'Technology',
-    'RDDT': 'Communication Services', 'RKLB': 'Industrials', 'SMCI': 'Technology',
+    'RDDT': 'Communication Services', 'RKLB': 'Industrials',
     'SPCX': 'Technology', 'WBD': 'Communication Services', 'T': 'Communication Services',
     'DIS': 'Communication Services', 'TJX': 'Consumer Discretionary', 'BKNG': 'Consumer Discretionary',
     'COP': 'Energy', 'PSX': 'Energy', 'MPC': 'Energy',
@@ -139,12 +140,10 @@ symbol_sector = {
     'SRE': 'Utilities', 'ETR': 'Utilities', 'XEL': 'Utilities',
     'VST': 'Utilities', 'CRDO': 'Technology', 'LITE': 'Technology',
     'CLS': 'Technology', 'RBRK': 'Technology', 'APA': 'Energy',
-    'OXY': 'Energy', 'TRGP': 'Energy', 'DVN': 'Energy',
-    'C': 'Financials', 'APO': 'Financials', 'MS': 'Financials',
-    'AXP': 'Financials', 'BE': 'Industrials', 'BA': 'Industrials',
+    'OXY': 'Energy', 'TRGP': 'Energy', 'DVN': 'Energy', 'APO': 'Financials',
+    'AXP': 'Financials', 'BE': 'Industrials',
     'URI': 'Industrials', 'PH': 'Industrials', 'TDG': 'Industrials',
-    'LYB': 'Materials', 'MOS': 'Materials', 'SW': 'Materials',
-    'WULF': 'Technology', 'CORZ': 'Technology', 'HIMX': 'Technology', 'LUNR': 'Industrials',
+    'LYB': 'Materials', 'MOS': 'Materials', 'SW': 'Materials', 'CORZ': 'Technology', 'HIMX': 'Technology', 'LUNR': 'Industrials',
     'CRL': 'Health Care', 'RVTY': 'Health Care', 'HAS': 'Consumer Discretionary', 'LH': 'Health Care', 'EL': 'Consumer Staples', 'ACN': 'Technology', 'PTC': 'Technology', 'ULTA': 'Consumer Discretionary', 'PPG': 'Materials', 'FDS': 'Financials', 'EXPD': 'Industrials', 'ALLE': 'Industrials',
 }
 
@@ -158,15 +157,14 @@ symbol_name = {
     'WSM': 'Williams-Sonoma, Inc.',
     'IBKR': 'Interactive Brokers Group, Inc.',
     'GRMN': 'Garmin Ltd.',
-    'GEV': 'GE Vernova Inc.', 'CMI': 'Cummins Inc.', 'EMR': 'Emerson Electric Co.', 'ROK': 'Rockwell Automation, Inc.',
-    'GS': 'The Goldman Sachs Group, Inc.', 'ETN': 'Eaton Corporation plc', 'HWM': 'Howmet Aerospace Inc.',
+    'GEV': 'GE Vernova Inc.', 'CMI': 'Cummins Inc.', 'EMR': 'Emerson Electric Co.', 'ROK': 'Rockwell Automation, Inc.', 'ETN': 'Eaton Corporation plc', 'HWM': 'Howmet Aerospace Inc.',
     'AAPL': 'Apple Inc.', 'AFRM': 'Affirm Holdings, Inc.',
     'QQQ': 'Invesco QQQ Trust Series 1', 'BKR': 'Baker Hughes Company',
     'HG=F': 'Gold', 'SI=F': 'Silver',
     'BTC-USD': 'Bitcoin', 'ETH-USD': 'Ethereum',
     'SOL-USD': 'Solana', 'PA=F': 'Palladium',
     'ADSK': 'Autodesk, Inc.', 'ADBE': 'Adobe Inc.',
-    'AMD': 'Advanced Micro Devices, Inc.', 'AMZN': 'Amazon.com, Inc.',
+    'AMD': 'Advanced Micro Devices, Inc.',
     'ANET': 'Arista Networks, Inc.', 'APH': 'Amphenol Corporation',
     'APP': 'AppLovin Corporation', 'ARM': 'Arm Holdings plc',
     'ASML': 'ASML Holding N.V.', 'AVAV': 'AeroVironment, Inc.',
@@ -204,7 +202,7 @@ symbol_name = {
     'NKE': 'Nike, Inc.', 'NVO': 'Novo Nordisk',
     'NOW': 'ServiceNow, Inc.', 'NOC': 'Northrop Grumman Corporation',
     'NSC': 'Norfolk Southern Corporation', 'NUE': 'Nucor Corporation',
-    'NVDA': 'NVIDIA Corporation', 'ORCL': 'Oracle Corporation',
+    'NVDA': 'NVIDIA Corporation',
     'PANW': 'Palo Alto Networks, Inc.', 'PFE': 'Pfizer Inc.', 'PAYX': 'Paychex, Inc.',
     'PATH': 'UiPath, Inc.', 'PCTY': 'Paylocity Holding Corporation',
     'PLTR': 'Palantir Technologies Inc.', 'POOL': 'Pool Corporation',
@@ -219,17 +217,16 @@ symbol_name = {
     'TXN': 'Texas Instruments Incorporated', 'TYL': 'Tyler Technologies, Inc.',
     'TWLO': 'Twilio Inc.', 'UBER': 'Uber Technologies, Inc.',
     'UI': 'Ubiquiti Inc.', 'UMAC': 'Unusual Machines, Inc.',
-    'UNH': 'UnitedHealth Group Incorporated', 'UPST': 'Upstart Holdings, Inc.',
+    'UNH': 'UnitedHealth Group Incorporated',
     'VEEV': 'Veeva Systems Inc.', 'VRT': 'Vertiv Holdings Co',
     'WAT': 'Waters Corporation', 'WDAY': 'Workday, Inc.',
     'ZENA': 'Zenatech, Inc.', 'ZS': 'Zscaler, Inc.',
     'ABNB': 'Airbnb, Inc.', 'ALAB': 'Astera Labs, Inc.',
     'CAVA': 'CAVA Group, Inc.', 'CPNG': 'Coupang, Inc.',
     'DUOL': 'Duolingo, Inc.', 'ELF': 'e.l.f. Beauty, Inc.',
-    'MDB': 'MongoDB, Inc.', 'NU': 'Nu Holdings Ltd.',
+    'MDB': 'MongoDB, Inc.',
     'TMDX': 'TransMedics Group, Inc.', 'TOST': 'Toast, Inc.',
-    'COST': 'Costco Wholesale Corporation', 'JNJ': 'Johnson & Johnson',
-    'JPM': 'JPMorgan Chase & Co.', 'MA': 'Mastercard Incorporated',
+    'COST': 'Costco Wholesale Corporation', 'JNJ': 'Johnson & Johnson', 'MA': 'Mastercard Incorporated',
     'MCD': "McDonald's Corporation", 'PEP': 'PepsiCo, Inc.',
     'PG': 'Procter & Gamble Company', 'V': 'Visa Inc.',
     'WM': 'Waste Management, Inc.', 'WMT': 'Walmart Inc.',
@@ -242,8 +239,7 @@ symbol_name = {
     'APLD': 'Applied Digital Corporation', 'ASTS': 'AST SpaceMobile, Inc.',
     'CIFR': 'Cipher Digital Inc.', 'CVNA': 'Carvana Co.',
     'MARA': 'MARA Holdings, Inc.', 'NVTS': 'Navitas Semiconductor Corporation',
-    'RDDT': 'Reddit, Inc.', 'RKLB': 'Rocket Lab Corporation',
-    'SMCI': 'Super Micro Computer, Inc.', 'TTWO': 'Take-Two Interactive Software, Inc.',
+    'RDDT': 'Reddit, Inc.', 'RKLB': 'Rocket Lab Corporation', 'TTWO': 'Take-Two Interactive Software, Inc.',
     'SPCX': 'SpaceX, Inc.', 'WBD': 'Warner Bros. Discovery, Inc.',
     'T': 'AT&T Inc.', 'DIS': 'The Walt Disney Company',
     'TJX': 'The TJX Companies, Inc.', 'BKNG': 'Booking Holdings Inc.',
@@ -268,14 +264,11 @@ symbol_name = {
     'CRDO': 'Credo Technology Group Holding Ltd', 'LITE': 'Lumentum Holdings Inc.',
     'CLS': 'Celestica Inc.', 'RBRK': 'Rubrik, Inc.',
     'APA': 'APA Corporation', 'OXY': 'Occidental Petroleum Corporation',
-    'TRGP': 'Targa Resources Corp.', 'DVN': 'Devon Energy Corporation',
-    'C': 'Citigroup Inc.', 'APO': 'Apollo Global Management, Inc.',
-    'MS': 'Morgan Stanley', 'AXP': 'American Express Company',
-    'BE': 'Bloom Energy Corporation', 'BA': 'The Boeing Company',
+    'TRGP': 'Targa Resources Corp.', 'DVN': 'Devon Energy Corporation', 'APO': 'Apollo Global Management, Inc.', 'AXP': 'American Express Company',
+    'BE': 'Bloom Energy Corporation',
     'URI': 'United Rentals, Inc.', 'PH': 'Parker-Hannifin Corporation',
     'TDG': 'TransDigm Group Incorporated', 'LYB': 'LyondellBasell Industries N.V.',
-    'MOS': 'The Mosaic Company', 'SW': 'Smurfit Westrock plc',
-    'WULF': 'TeraWulf Inc.', 'CORZ': 'Core Scientific, Inc.', 'HIMX': 'Himax Technologies, Inc.', 'LUNR': 'Intuitive Machines, Inc.',
+    'MOS': 'The Mosaic Company', 'SW': 'Smurfit Westrock plc', 'CORZ': 'Core Scientific, Inc.', 'HIMX': 'Himax Technologies, Inc.', 'LUNR': 'Intuitive Machines, Inc.',
     'CRL': "Charles River Laboratories International, Inc.", 'RVTY': "Revvity, Inc.", 'HAS': "Hasbro, Inc.", 'LH': "Labcorp Holdings Inc.", 'EL': "The Est\u00e9e Lauder Companies Inc.", 'ACN': "Accenture plc", 'PTC': "PTC Inc.", 'ULTA': "Ulta Beauty, Inc.", 'PPG': "PPG Industries, Inc.", 'FDS': "FactSet Research Systems Inc.", 'EXPD': "Expeditors International of Washington, Inc.", 'ALLE': "Allegion plc",
 }
 
