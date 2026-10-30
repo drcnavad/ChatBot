@@ -158,49 +158,36 @@ for sym in TICKERS:
         expect("Moving averages" in hero and "Fundamentals &amp; news" in hero and "Per-stock backtest" not in hero,
                f"{sym}: stock card detail groups missing")
 
-# ---------------------------------------------------------------- decision badge / rank label / plan chip / Details tables agree
-# decision in force = strategy_changes.csv (what the app reads); today's rank = latest signal_analysis; plan = strategy_picks
-CH = db.read_csv("Reports/strategy_changes.csv", parse_dates=["Date"])
-CH = CH[CH.Symbol.notna()]
-dec_day = CH.Date.iloc[0]
-PK = db.read_csv("Reports/strategy_picks.csv", parse_dates=["As_Of", "Last_Rebalance"])
-as_of = PK.As_Of.iloc[0]
-plan_day = as_of if as_of == PK.Last_Rebalance.iloc[0] else None
-if plan_day is None:
-    d = as_of
-    for _ in range(6):
-        d, kind, _f = be.next_decision(d)
-        if kind == "full rebalance":
-            plan_day = d; break
-prev = SIG[SIG.Date < plan_day]; prev = prev[prev.Date == prev.Date.max()]
-held_into = set(prev.loc[prev.Strategy_Weight.fillna(0) > 0, "Symbol"])
-pw = PK.set_index("Symbol").Provisional_Weight.fillna(0)
-def want_plan(sym):
-    w = pw.get(sym, 0.0) * 100
-    return (f"Keep {w:.2f}%" if sym in held_into else f"Buy {w:.2f}%") if w > 0 else ("Sell" if sym in held_into else "not picked")
-WORD = {"add": "Buy", "hold": "Hold", "drop": "Sold"}
-st_ = CH.set_index("Symbol").Status
-picks_for = {"drop": CH[CH.Status == "drop"].Symbol.tolist(), "hold": CH[CH.Status == "hold"].Symbol.tolist()}
-cases = (["FTNT"] if "FTNT" in st_.index else []) + picks_for["drop"][:1] + picks_for["hold"][:1] \
-    + [s for s in pw.index if pw[s] > 0 and s not in held_into][:1]
+# ---------------------------------------------------------------- live Short-term relative strength badge / plan chip
+# Badge + plan come from live_stock_note (sleeves ranks + next_plan), not Oct-16 strategy_changes.
+from dashboard.page import build_page
+from dashboard.signals import LIVE_STRATEGY, live_stock_note
+_p = build_page()
+cases = [s for s in ("CRL", "KO", "HAS", "MSFT") if s in _p.options]
+if not cases:
+    cases = list(_p.options[:3])
 fmt = lambda d: f"{d:%a %b} {d.day}"
-for sym in dict.fromkeys(cases):
+for sym in cases:
     at = at.selectbox(key="ticker_dropdown").set_value(sym).run()
     hero = next((m.value for m in at.markdown if 'class="sa-ident"' in m.value), "")
     badges = [re.sub("<[^>]+>", "", b) for b in re.findall(r'<span class="sa-badge[^"]*"[^>]*>[^<]*</span>', hero)]
-    word = WORD.get(st_.get(sym), None)
-    want_badge = f"Strategy decision · {fmt(dec_day)}: " + (word or "")
-    expect(bool(badges) and badges[0].startswith(want_badge), f"{sym}: badge {badges[:1]} should start {want_badge!r}")
-    want_chip = f"{fmt(plan_day)} plan: {want_plan(sym)}"
-    expect(want_chip in badges, f"{sym}: plan chip {badges[1:]} != {want_chip!r}")
-    # Rank comes from live_ranks() on the page (not the picker label); stock list was replaced by the heatmap (3454ff6)
-    from dashboard.page import build_page
-    _p = build_page()
+    note = live_stock_note(sym, _p)
+    expect(bool(badges) and badges[0].startswith(LIVE_STRATEGY),
+           f"{sym}: badge {badges[:1]} should start with {LIVE_STRATEGY!r}")
+    expect(note["status"] in badges[0], f"{sym}: status {note['status']!r} missing from {badges[0]!r}")
+    expect(any(note["plan_text"] == b or note["plan_text"] in b for b in badges),
+           f"{sym}: plan chip missing {note['plan_text']!r} in {badges}")
+    if note["held"] and sym in ("CRL", "KO"):
+        expect(any("Limit sell:" in b for b in badges),
+               f"{sym}: expected Limit sell chip in {badges}")
     live_r = _p.by_symbol.loc[sym, "Strategy_Rank"] if sym in _p.by_symbol.index else float("nan")
-    # live_ranks can differ from the last pipeline Strategy_Rank; require a finite live rank when the stock is scored
     expect(sym in _p.short.index or pd.notna(live_r),
-           f"{sym}: live rank {live_r!r} / stock list date vs latest {fmt(SIG.Date.max())} rank {r}")
-    print(f"   {sym}: {badges} · rank ({fmt(SIG.Date.max())}, {live_r}) OK")
+           f"{sym}: live rank {live_r!r}")
+    # No stale Oct-16 / Score-below / low-vol wording in the hero
+    expect("Strategy decision ·" not in hero, f"{sym}: stale Strategy decision badge still present")
+    expect("Score below 0 /" not in hero and "top 5" not in hero.lower(),
+           f"{sym}: stale score/top-5 wording in hero")
+    print(f"   {sym}: {badges[:3]} · rank {live_r} OK")
 import forward_test as ft  # noqa: E402
 # order: Last decision, Forward test first (rules/holdings now hover on the leaderboard); live holdings and latest signals further down
 exp_titles = ["Last decision · portfolio and short-term relative strength ranks",

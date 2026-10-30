@@ -50,7 +50,7 @@ RUN = "Drop guard"
 
 DEFAULT_CONFIG = {
     "enabled": True,                 # kill switch: False = evaluate+log only, never order
-    "dry_run": False,                # True = never submit orders (tests / first enable)
+    "dry_run": True,                 # True = never submit orders (safe default; live Reports JSON overrides)
     "drop_pct": 0.041,                # trigger: mid <= prev_close * (1 - drop_pct)
     "min_confidence": 0.75,          # sell only when AI confidence >= this
     "window_start_ct": [8, 30],      # CT inclusive
@@ -124,7 +124,6 @@ def _load_state(path=None):
     except (OSError, ValueError):
         s = {}
     s.setdefault("sold_today", {})       # {SYMBOL: {at, order_id, ...}} keyed per calendar day via prune
-    s.setdefault("notes", {})
     s.setdefault("day", "")
     return s
 
@@ -135,9 +134,7 @@ def _save_state(s, path=None):
     if s.get("day") != today:
         s["sold_today"] = {}
         s["day"] = today
-    # keep notes a few days
-    cutoff = str(today and (pd.Timestamp(today) - pd.Timedelta(days=7)).date())
-    s["notes"] = {k: v for k, v in s.get("notes", {}).items() if str(v) >= cutoff}
+    s.pop("notes", None)  # unused (earnings_stop has its own state)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(s, f, indent=2)
@@ -153,8 +150,17 @@ def _ensure_day(state):
 
 
 def _acquire_lock(path=LOCK_PATH, stale_s=14 * 60):
-    """One guard process at a time. Stale lock (dead PID or older than stale_s) is taken over."""
+    """One guard process at a time. Stale lock (dead PID or older than stale_s) is taken over.
+    Uses O_EXCL so two concurrent ticks cannot both think they own the lock."""
     now = time.time()
+    payload = json.dumps({"pid": os.getpid(), "at": now})
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w") as f:
+            f.write(payload)
+        return True, ""
+    except FileExistsError:
+        pass
     try:
         with open(path) as f:
             meta = json.load(f)
@@ -170,11 +176,17 @@ def _acquire_lock(path=LOCK_PATH, stale_s=14 * 60):
             return False, f"held by pid {pid}"
     except (OSError, ValueError, TypeError):
         pass
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump({"pid": os.getpid(), "at": now}, f)
-    os.replace(tmp, path)
-    return True, ""
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w") as f:
+            f.write(payload)
+        return True, ""
+    except FileExistsError:
+        return False, "lock race"
 
 
 def _release_lock(path=LOCK_PATH):
@@ -674,16 +686,15 @@ def pick_replacement(sold_sym, proceeds, equity, held, sold_today, cfg, now, pri
         if pd.notna(score) and float(score) <= 0:
             continue
         px = price_map.get(sym)
+        try:
+            px = float(px) if px is not None else None
+        except (TypeError, ValueError):
+            px = None
         if not px or not math.isfinite(px) or px <= 0:
             # fall back to signal close
             px = float(r["Close"]) if pd.notna(r.get("Close")) else None
         if not px or px <= 0:
             continue
-        # not down >= drop today vs ranking's prior — use live quote vs we need prev close
-        # price_map stores (mid, prev_close) optional; here price_map is mid only; check via bars later
-        prev = None
-        if isinstance(price_map.get(sym), tuple):
-            px, prev = price_map[sym]
         # under 200-day MA?
         ma200 = float(r["ma_200"]) if "ma_200" in r and pd.notna(r.get("ma_200")) else None
         if ma200 and px < ma200:
@@ -815,6 +826,7 @@ def execute_sell_and_replace(c, mid, bid, ask, tech, ai, cfg, state, now, dry_ru
             oid, note = ts.cancel_for_symbol(client, s, reason="drop_guard sell")
             if oid:
                 out["Replace_Note"] = (out.get("Replace_Note") or "") + f"canceled target {oid}; "
+                time.sleep(0.5)  # let Alpaca free qty_available before we read / submit
         except Exception as e:
             out["Replace_Note"] = (out.get("Replace_Note") or "") + f"target cancel err: {e}; "
         held_now, open_now = pt._symbol_state(client, s)
@@ -858,28 +870,13 @@ def execute_sell_and_replace(c, mid, bid, ask, tech, ai, cfg, state, now, dry_ru
         out["Sell_Filled_Qty"] = filled
         proceeds = filled * (avg if avg else limit)
         out["Sell_Proceeds"] = round(proceeds, 2)
+        # Max one sell attempt per symbol per day (even if still working / rejected).
         state.setdefault("sold_today", {})[s] = {
             "at": now.astimezone(be.CENTRAL).isoformat(timespec="seconds"),
-            "order_id": str(order.id), "qty": filled, "limit": limit,
+            "order_id": str(order.id), "qty": filled, "limit": limit, "status": st,
         }
-        try:
-            import sold_block
-            sold_block.record_sell(s, sold_on=day, source="drop_guard",
-                                   note=f"filled {filled:g} @ {limit}")
-        except Exception:
-            pass
-        try:
-            import target_sells as ts
-            ts.remove_target(s, reason="drop_guard sold")
-        except Exception:
-            pass
-        # also block buy-back via earnings_stop state when on an earnings reaction day
-        try:
-            _mirror_stop_block(s, c.get("earnings"), now)
-        except Exception:
-            pass
         _save_state(state)
-        # append pending for morning fill check (fractional rest)
+        # append pending for morning fill check (fractional rest / unfilled working order)
         try:
             frac = round(held_now - qty, 6)
             if frac > 0 or filled + 1e-9 < qty:
@@ -891,8 +888,31 @@ def execute_sell_and_replace(c, mid, bid, ask, tech, ai, cfg, state, now, dry_ru
                 }, pt.PENDING_ORDERS_JSON)
         except Exception:
             pass
+        working = st in ("new", "accepted", "pending_new", "partially_filled", "held")
+        # sold_block only when shares actually left (filled) or a working sell is still live.
+        # Rejected/canceled/expired with 0 fill must NOT block rebuy or drop a target limit.
+        if filled > 0 or working:
+            try:
+                import sold_block
+                sold_block.record_sell(s, sold_on=day, source="drop_guard",
+                                       note=f"filled {filled:g} @ {limit} ({st})")
+            except Exception:
+                pass
+        # Remove target config only once the position has actually been sold.
+        # If the bid sell is still working / failed, leave the target entry so the
+        # next target_sells tick can re-place the high limit (or remove when flat).
+        if filled > 0:
+            try:
+                import target_sells as ts
+                ts.remove_target(s, reason="drop_guard sold")
+            except Exception:
+                pass
+            try:
+                _mirror_stop_block(s, c.get("earnings"), now)
+            except Exception:
+                pass
         if filled <= 0:
-            out["Replace_Note"] = f"sell not filled ({st}) — no replacement"
+            out["Replace_Note"] = (out.get("Replace_Note") or "") + f"sell not filled ({st}) — no replacement"
             log_event("ok", "unknown",
                       f"Drop guard: sold signal on {s} but order not filled ({st}). Limit ${limit:,.2f}.",
                       f"order {order.id}")

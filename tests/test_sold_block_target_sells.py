@@ -87,6 +87,41 @@ txt = pl.read_text()
 check("plist --scheduled", "--scheduled" in txt)
 check("plist interval 900", "<integer>900</integer>" in txt)
 
+
+# paper_trade: STAGED/no Order_ID must not record sold_block or remove targets
+import pandas as pd
+import paper_trade as pt
+with tempfile.TemporaryDirectory() as td:
+    sb_path = os.path.join(td, "sold_block.json")
+    cfg_path = os.path.join(td, "targets.json")
+    old_sb, old_cfg = sb.BLOCK_JSON, ts.CONFIG_JSON
+    sb.BLOCK_JSON = sb_path
+    ts.CONFIG_JSON = cfg_path
+    try:
+        ts.save_config({"enabled": True, "dry_run": True, "targets": {
+            "AAA": {"limit": 10.0, "qty": "full", "added": "2026-10-29"},
+            "BBB": {"limit": 20.0, "qty": "full", "added": "2026-10-29"},
+        }})
+        staged = pd.DataFrame([
+            {"Symbol": "AAA", "Side": "SELL", "Shares": 1, "Order_ID": None,
+             "Status": "STAGED for morning (bad quote)"},
+            {"Symbol": "BBB", "Side": "SELL", "Shares": 2, "Order_ID": "oid-1",
+             "Status": "submitted (new)"},
+            {"Symbol": "CCC", "Side": "SELL", "Shares": 1, "Order_ID": None,
+             "Status": "SKIPPED: not held"},
+        ])
+        pt._record_sold_blocks_from_results(staged, source="unit_test")
+        blocks = sb.active_blocks(as_of=date(2026, 10, 29))
+        check("Order_ID gate: STAGED not blocked", "AAA" not in blocks, blocks)
+        check("Order_ID gate: submitted is blocked", "BBB" in blocks, blocks)
+        check("Order_ID gate: SKIPPED not blocked", "CCC" not in blocks, blocks)
+        cfg = ts.load_config()
+        check("STAGED did not remove target AAA", "AAA" in cfg["targets"], cfg["targets"])
+        check("submitted removed target BBB", "BBB" not in cfg["targets"], cfg["targets"])
+    finally:
+        sb.BLOCK_JSON = old_sb
+        ts.CONFIG_JSON = old_cfg
+
 print(f"\n{len(passed)} passed, {len(failed)} failed")
 if failed:
     sys.exit(1)

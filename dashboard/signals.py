@@ -157,3 +157,199 @@ def plan_text(plan, sym):
     """'Buy 14.23%' / 'Keep 9.14%' / 'Sell' / 'not picked'."""
     action, w = plan.get(sym, (None, 0.0))[:2]
     return f"{action} {w:.2f}%" if action in ("Buy", "Keep", "Take over") else (action or "not picked")
+
+
+# ----------------------------------------------------------------------------- live Short-term relative strength note
+LIVE_STRATEGY = "Short-term relative strength"
+LIVE_N = 10          # top-N equal weight (forward_test LIVE_NOW / sleeves)
+LIVE_EXIT_BELOW = 20 # Mon-Thu: sell when worse than this rank
+
+
+def _held_symbols():
+    """Uppercase symbols currently held in live Alpaca (empty on failure)."""
+    try:
+        from dashboard.details.live_holdings import account_core
+        data, _ = account_core()
+        if not data:
+            return set()
+        return {str(r.get("symbol") or "").upper()
+                for r in (data.get("positions") or []) if float(r.get("qty") or 0) > 0}
+    except Exception:
+        return set()
+
+
+def _overlays(sym, held=False):
+    """Extra chips: do_not_sell/buy, sold_block, target limit sell + order status, drop_guard."""
+    import sector_mapping as sm
+    chips = []  # (text, css_class)
+    su = str(sym).upper()
+    if su in {str(x).upper() for x in sm.do_not_sell}:
+        chips.append(("do_not_sell", "sa-badge-hold"))
+    if su in {str(x).upper() for x in sm.do_not_buy}:
+        chips.append(("do_not_buy", "sa-badge-bear"))
+    try:
+        import sold_block as sb
+        blk = sb.active_blocks()
+        if su in blk:
+            chips.append((blk[su], "sa-badge-bear"))
+    except Exception:
+        pass
+    try:
+        import target_sells as ts
+        cfg = ts.load_config()
+        entry = (cfg.get("targets") or {}).get(su)
+        if entry and float(entry.get("limit") or 0) > 0:
+            limit = float(entry["limit"])
+            st = ts._load_state()
+            o = (st.get("orders") or {}).get(su) or {}
+            oid, day = o.get("order_id") or "", o.get("day") or ""
+            if oid:
+                status = f"open order {str(oid)[:8]}… · day {day}" if day else f"open order {str(oid)[:8]}…"
+            else:
+                status = "no open broker order yet (job refreshes 3 AM–7 PM CT session days)"
+            chips.append((f"Limit sell: ${limit:,.2f} · {status}", "sa-badge-hold"))
+    except Exception:
+        pass
+    try:
+        import json, os
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "Reports", "drop_guard_state.json")
+        with open(path) as f:
+            dg = json.load(f)
+        sold = (dg.get("sold_today") or {}).get(su)
+        if sold:
+            chips.append((f"drop_guard sold today ({sold.get('at', '')[:16]})", "sa-badge-bear"))
+        else:
+            # only mention drop_guard when config is live-enabled — keep quiet otherwise
+            cfg_path = os.path.join(os.path.dirname(path), "drop_guard_config.json")
+            try:
+                with open(cfg_path) as f:
+                    dgc = json.load(f)
+                if held and dgc.get("enabled") and not dgc.get("dry_run", True):
+                    chips.append(("drop_guard armed (4.1% + AI)", "sa-badge-grey"))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return chips
+
+
+def live_stock_note(ticker, p):
+    """Status for the Stock Analysis header under Short-term relative strength.
+
+    Returns dict: status, badge, why, plan_text, plan_action, plan_tip, chips[(text,class)].
+    Uses live ranks on `p.by_symbol` (build_page overwrites pipeline ranks) and `p.plan` from next_plan.
+    """
+    import math
+    import pandas as pd
+    from dashboard.details.last_decision import next_run
+    import sleeves as sl
+
+    sym = str(ticker).upper()
+    held = sym in _held_symbols()
+    rank = score = None
+    if sym in getattr(p, "by_symbol", pd.DataFrame()).index:
+        row = p.by_symbol.loc[sym]
+        rank = row.get("Strategy_Rank")
+        score = row.get("Strategy_Score")
+        try:
+            rank = float(rank) if rank == rank and rank is not None else None
+        except (TypeError, ValueError):
+            rank = None
+        try:
+            score = float(score) if score == score and score is not None else None
+        except (TypeError, ValueError):
+            score = None
+
+    entry = (getattr(p, "plan", None) or {}).get(sym) or (getattr(p, "plan", None) or {}).get(ticker)
+    action = entry[0] if entry else None
+    weight = entry[1] if entry and len(entry) > 1 else 0.0
+    plan_day = entry[2] if entry and len(entry) > 2 and entry[2] is not None else getattr(p, "plan_day", None)
+
+    # Derive status from live plan + hold + rank (never from Oct-16 strategy_changes)
+    if action == "Blocked":
+        status = "Blocked"
+    elif held and action == "Sell":
+        status = "Sell"
+    elif held and action in ("Keep", "Take over", "Buy"):
+        status = "Hold"
+    elif held and action is None:
+        status = "Hold"  # held but not in next plan preview yet
+    elif (not held) and action == "Buy":
+        status = "Buy"
+    elif rank is None and (score is None or (isinstance(score, float) and math.isnan(score))):
+        status = "Not ranked"
+    elif score is not None and score <= 0:
+        status = "Score below 0"
+    else:
+        status = "Watch"
+
+    rk = f"{int(rank)}" if rank is not None and rank == rank else "?"
+    sc = f"{score:.1f}" if score is not None and score == score else "?"
+    if status == "Hold":
+        if rank is not None and rank <= LIVE_N:
+            why = f"held · rank {rk} of top {LIVE_N} (score {sc})"
+        elif rank is not None and rank <= LIVE_EXIT_BELOW:
+            why = f"held · rank {rk} (inside Mon-Thu exit band ≤{LIVE_EXIT_BELOW}; still above sell line)"
+        else:
+            why = f"held · rank {rk} (score {sc})"
+    elif status == "Sell":
+        if rank is not None and rank > LIVE_EXIT_BELOW:
+            why = f"held · rank {rk} worse than {LIVE_EXIT_BELOW} — Mon-Thu exit / Friday drop"
+        elif rank is not None and rank > LIVE_N:
+            why = f"held · rank {rk} outside top {LIVE_N} — next rebalance sells"
+        else:
+            why = f"held · plan sells (rank {rk}, score {sc})"
+    elif status == "Buy":
+        why = f"not held · rank {rk} in top {LIVE_N} — next run buys (~{weight:.1f}% of account)"
+    elif status == "Blocked":
+        why = f"rank {rk} would be bought but a buy block is active"
+    elif status == "Watch":
+        why = f"rank {rk}, score {sc} — outside top {LIVE_N}, not held"
+    elif status == "Score below 0":
+        why = f"score {sc} ≤ 0 — not eligible"
+    else:
+        why = "not enough history / not in the live ranking"
+
+    asof = getattr(p, "plan_asof", None)
+    asof_s = f"{asof:%a %b %-d}" if asof is not None else "latest close"
+    badge = f"{LIVE_STRATEGY} · as of {asof_s}: {status}"
+    if rank is not None and rank == rank:
+        badge += f" · rank {int(rank)}"
+
+    # Next run chip
+    led = None
+    try:
+        led = sl.load_ledger()
+    except Exception:
+        pass
+    slot, kind = next_run(ledger=led)
+    if kind == "full rebalance":
+        kind_label = "Friday rebalance"
+    elif kind and "mid" in str(kind).lower():
+        kind_label = "Mon-Thu check"
+    elif kind:
+        kind_label = str(kind)
+    else:
+        kind_label = "Next run"
+    when = f"{slot:%a %b %-d %-I:%M %p CT}" if slot is not None else (
+        f"{plan_day:%a %b %-d}" if plan_day is not None else "Next run")
+    if action in ("Buy", "Keep", "Take over"):
+        plan_txt = f"{kind_label} · {when}: {action} {weight:.2f}%"
+    elif action:
+        plan_txt = f"{kind_label} · {when}: {action}"
+    else:
+        plan_txt = f"{kind_label} · {when}: not picked"
+    tip = ("Preview from the latest close under Short-term relative strength. "
+           "Final orders go out at the 2:30 PM CT decision slot "
+           "(or 11:00 AM CT on early-close days).")
+
+    chips = _overlays(sym, held=held)
+    if held:
+        chips.insert(0, ("held in Alpaca", "sa-badge-bull"))
+    return {
+        "status": status, "badge": badge, "why": why,
+        "plan_text": plan_txt, "plan_action": action or "not picked",
+        "plan_tip": tip, "chips": chips, "rank": rank, "score": score, "held": held,
+    }
+

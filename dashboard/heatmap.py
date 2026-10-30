@@ -1,7 +1,7 @@
 """Stock Analysis: a Finviz-style heatmap of every stock in sector_mapping.py (display only): one grid of equal
 small tiles in one compact grid, ordered Buy -> Sell by the strategy signal (then rank / score), colored by today's % change (Alpaca snapshots,
 SIP -> IEX, vs the previous close; red -> green, centered at 0, clipped at +-3 %). Its own fragment: refreshes silently
-every 30 s. A green corner dot marks names currently held in the live Alpaca account (cached ~1 min via account_core; fails open if Alpaca is down). A tile click opens the stock in the picker and chart below."""
+every 30 s. A yellow corner dot marks names currently held in the live Alpaca account (cached ~1 min via account_core; fails open if Alpaca is down). A tile click opens the stock in the picker and chart below."""
 
 import streamlit as st
 
@@ -108,7 +108,7 @@ def render_heatmap(p):
         ring = ";box-shadow:inset 0 0 0 2px #fcd34d" if s == current else ""
         css.append(f'<style>.st-key-hm_{s.replace(".", "_")} button{{background:{tile_color(c)}!important{ring}}}</style>')
         if s.upper() in held:
-            # Green corner dot = currently held in the live Alpaca account
+            # Yellow corner dot = currently held in the live Alpaca account
             css.append(
                 f'<style>.st-key-hm_{s.replace(".", "_")} button::after{{'
                 f'content:"";position:absolute;top:3px;right:3px;width:7px;height:7px;'

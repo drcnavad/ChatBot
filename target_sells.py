@@ -432,10 +432,25 @@ def run_check(now=None, dry_run=None, cfg=None):
         return []
     rows = []
     try:
-        # Share FILL_LOCK lightly so we don't collide with drop_guard / fill-check mid-submit
+        # Idle while the 2:30 trade job or drop_guard/earnings fill-check holds a live lock
+        # (stale lock files with dead PIDs are ignored so we don't stall forever).
         import run_all
-        if os.path.exists(run_all.TRADE_LOCK):
+        def _pid_lock_busy(path):
+            try:
+                with open(path) as f:
+                    meta = json.load(f)
+                pid = int(meta.get("pid", 0))
+                if pid <= 0:
+                    return False
+                os.kill(pid, 0)
+                return True
+            except (OSError, ValueError, TypeError):
+                return False
+        if _pid_lock_busy(run_all.TRADE_LOCK):
             print(f"{now_ct:%Y-%m-%d %H:%M:%S} CT: idle — trade job running")
+            return []
+        if _pid_lock_busy(run_all.FILL_LOCK):
+            print(f"{now_ct:%Y-%m-%d %H:%M:%S} CT: idle — fill-check / drop_guard lock held")
             return []
         client = None if dry_run else trading_client()
         import paper_trade as pt

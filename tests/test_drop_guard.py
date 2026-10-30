@@ -34,6 +34,7 @@ check("default confidence 0.75", cfg["min_confidence"] == 0.75)
 check("default max_weight 15%", cfg["max_weight"] == 0.15)
 check("window ends before 2:30", tuple(cfg["window_end_ct"]) == (14, 15))
 check("window starts 8:30 CT", tuple(cfg["window_start_ct"]) == (8, 30))
+check("default dry_run True (safe)", cfg["dry_run"] is True)
 
 # window: Friday regular hours CT
 fri = datetime(2026, 10, 30, 11, 0, tzinfo=be.CENTRAL)

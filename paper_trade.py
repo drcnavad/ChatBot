@@ -1008,7 +1008,11 @@ def _cancel_target_sells_for_orders(client, orders):
 
 
 def _record_sold_blocks_from_results(results, source="pipeline"):
-    """Record sold_block for each SELL that was submitted (filled or working)."""
+    """Record sold_block for each SELL that actually reached the broker (has Order_ID).
+
+    STAGED / SKIPPED / FAILED rows must not block rebuy or drop target_sells entries —
+    those never left the account.
+    """
     try:
         import sold_block
     except Exception:
@@ -1022,9 +1026,13 @@ def _record_sold_blocks_from_results(results, source="pipeline"):
         side = str(getattr(r, "Side", "")).upper()
         if side != "SELL":
             continue
-        status = str(getattr(r, "Status", getattr(r, "status", ""))).upper()
-        # Count anything that reached the broker (not SKIP/FAIL/STAGED-without-id)
-        if status in ("SKIP", "FAILED", "FAIL", "REFUSED"):
+        status = str(getattr(r, "Status", getattr(r, "status", "")) or "")
+        status_u = status.upper()
+        # Must have a broker order id — STAGED/SKIPPED have Order_ID None
+        oid = getattr(r, "Order_ID", None)
+        if oid is None or oid == "" or str(oid).lower() in ("none", "nan"):
+            continue
+        if any(tok in status_u for tok in ("SKIP", "FAIL", "REFUSED", "STAGED")):
             continue
         sym = str(getattr(r, "Symbol", "")).upper()
         if not sym:

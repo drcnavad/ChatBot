@@ -9,7 +9,7 @@ from dashboard.ai import ai_analysis_dialog
 from dashboard.data import (company_metrics, last_next_earnings, live_quote, load_company,
     row_for)
 from dashboard.settings import CT, HOLDINGS_CSV, symbol_sector
-from dashboard.signals import PLAN_BADGE, SIGNAL_BADGE, plan_text
+from dashboard.signals import PLAN_BADGE, SIGNAL_BADGE, live_stock_note
 from dashboard.style import (BAD, GOOD, INK, MA_COLS, esc, fmt, num, score_tone,
     show_html, tone)
 
@@ -74,22 +74,23 @@ def render_stock_section(p, ticker, tdata):
             )
     score = num(latest.get('Strategy_Score'))
     weight = num(latest.get('Strategy_Weight')) or 0.0
-    status, why = p.sig_off.get(ticker, "Not ranked"), p.why_off.get(ticker, "")
-    chips = []
+    # Live Short-term relative strength note (not the Oct-16 pipeline strategy_changes board)
+    note = live_stock_note(ticker, p)
+    status, why = note["status"], note["why"]
+    chips = list(note.get("chips") or [])
     if latest['final_trade'] == 'EARNING':
-        chips.append(("Earnings within 2 sessions", "sa-badge-hold"))
-    chips_html = "".join(f'<span class="sa-badge {c}" style="font-weight:600;font-size:0.72rem;">{esc(t)}</span>' for t, c in chips)
+        chips.append(("Earnings within 5 sessions (no new buy)", "sa-badge-hold"))
+    chips_html = "".join(
+        f'<span class="sa-badge {c}" style="font-weight:600;font-size:0.72rem;">{esc(t)}</span>'
+        for t, c in chips)
     next_ed = last_next_earnings([ticker])['Next ED'].iloc[0]
-    badge = f"Strategy decision · {p.off_date:%a %b %-d}: {status}" + (f" ({p.tag_off[ticker]})" if p.tag_off.get(ticker) else "")
+    badge = note["badge"]
     plan_html = ""
     if ticker in symbol_sector or ticker in p.plan:                      # tradable stocks only (not the QQQ benchmark)
-        entry = p.plan.get(ticker, ("not picked",))
-        action, day = entry[0], (entry[2] if len(entry) > 2 and entry[2] is not None else p.plan_day)
-        when = f"{day:%a %b %-d}" if day is not None else "Next rebalance"
-        tip = (f"Next rebalance preview at the {p.plan_asof:%a %b %-d} close (the bot's own selection code; % of "
-               f"account). Final at the {when} close; orders go out that day at the decision slot (2:30 PM CT, or 11:00 AM CT on early-close days)." if p.plan_asof is not None else "")
-        plan_html = (f'<span class="sa-badge {PLAN_BADGE.get(action, "sa-badge-grey")}" title="{esc(tip)}">'
-                     f'{esc(when + " plan: " + plan_text(p.plan, ticker))}</span>')
+        action = note["plan_action"]
+        plan_html = (f'<span class="sa-badge {PLAN_BADGE.get(action, "sa-badge-grey")}" '
+                     f'title="{esc(note["plan_tip"])}">'
+                     f'{esc(note["plan_text"])}</span>')
     stats = [
         ("Strategy score", fmt(score, ".1f"), score_tone(score)),
         ("Technical", fmt(num(latest.get('Technical_Score')), ".1f"), score_tone(num(latest.get('Technical_Score')))),
@@ -141,11 +142,11 @@ def render_stock_section(p, ticker, tdata):
             <div class="sa-sym">{esc(ticker)}</div>
             <div class="sa-price" title="Latest completed daily bar — the strategy's official price">{fmt(num(latest['Close']), ",.2f", "$")}</div>
             {live_html}
-            <span class="sa-badge {SIGNAL_BADGE.get(status, 'sa-badge-grey')}" title="The strategy's decision in force (last decision)">{esc(badge)}</span>
+            <span class="sa-badge {SIGNAL_BADGE.get(status, 'sa-badge-grey')}" title="Live Short-term relative strength status (rank + next-run plan)">{esc(badge)}</span>
             {plan_html}
             {chips_html}
           </div>
-          <div class="sa-why">{esc(status + ": " + why) if why else ""}</div>
+          <div class="sa-why">{esc(why) if why else ""}</div>
           {groups}
         </div>""")
 

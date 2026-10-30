@@ -292,7 +292,10 @@ def _sell(c, q, session, now, state, pending_path):
         # Cancel a target_sells limit so the stop can take the shares
         try:
             import target_sells as ts
-            ts.cancel_for_symbol(client, s, reason="earnings_stop")
+            import time as _time
+            oid, _ = ts.cancel_for_symbol(client, s, reason="earnings_stop")
+            if oid:
+                _time.sleep(0.5)
             held_now, open_now = pt._symbol_state(client, s)
             open_now = [o for o in (open_now or [])
                         if not ts.is_target_cid(getattr(o, "client_order_id", "") or "")]
@@ -331,7 +334,6 @@ def _sell(c, q, session, now, state, pending_path):
             pass
         try:
             import target_sells as ts
-            ts.cancel_for_symbol(client, s, reason="earnings_stop")
             ts.remove_target(s, reason="earnings_stop sold")
         except Exception:
             pass
