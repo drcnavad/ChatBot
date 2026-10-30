@@ -73,7 +73,7 @@ def render_heatmap(p):
     except Exception:
         held_note = " · holdings unavailable"
     legend = (' · <span style="display:inline-block;width:7px;height:7px;border-radius:50%;'
-              'background:#4ade80;box-shadow:0 0 0 1px rgba(0,0,0,.35);vertical-align:middle;'
+              'background:#facc15;box-shadow:0 0 0 1px rgba(0,0,0,.35);vertical-align:middle;'
               'margin:0 3px 1px 2px"></span>held in Alpaca' if held else "")
     st.caption(
         f"Updated {datetime.now(CT):%I:%M:%S %p} CT · Alpaca prices · refreshes every 30 s"
@@ -112,7 +112,7 @@ def render_heatmap(p):
             css.append(
                 f'<style>.st-key-hm_{s.replace(".", "_")} button::after{{'
                 f'content:"";position:absolute;top:3px;right:3px;width:7px;height:7px;'
-                f'border-radius:50%;background:#4ade80;box-shadow:0 0 0 1px rgba(0,0,0,.4);'
+                f'border-radius:50%;background:#facc15;box-shadow:0 0 0 1px rgba(0,0,0,.4);'
                 f'pointer-events:none}}</style>'
             )
     st.markdown("".join(css), unsafe_allow_html=True)
