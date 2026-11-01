@@ -326,17 +326,20 @@ def _sell(c, q, session, now, state, pending_path):
         state["sold"][key] = {"at": stamp, "order_id": oid, "qty": qty, "limit": limit, "held": held_now,
                               "react": f"{c['last']:%Y-%m-%d}"}
         _save_state(state)
-        try:
-            import sold_block
-            sold_block.record_sell(s, sold_on=today, source="earnings_stop",
-                                   note=f"earnings stop qty {qty:g} @ {limit}")
-        except Exception:
-            pass
-        try:
-            import target_sells as ts
-            ts.remove_target(s, reason="earnings_stop sold")
-        except Exception:
-            pass
+        # sold_block / target removal only on a true fill (0-fill stays open via pending).
+        if filled > 0:
+            try:
+                import sold_block
+                sold_block.record_sell(s, sold_on=today, source="earnings_stop",
+                                       note=f"earnings stop filled {filled:g}/{qty:g} @ {limit}",
+                                       order_id=str(oid or ""))
+            except Exception:
+                pass
+            try:
+                import target_sells as ts
+                ts.remove_target(s, reason="earnings_stop sold")
+            except Exception:
+                pass
         frac = round(held_now - qty, 6)
         try:
             _append_pending({"symbol": s, "side": "SELL", "qty": held_now, "limit_price": limit, "order_id": oid,

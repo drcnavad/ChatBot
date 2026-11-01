@@ -237,17 +237,6 @@ def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quo
             entry.update(status=f"submitted ({getattr(o.status, 'value', o.status)})", order_id=str(getattr(o, "id", "")))
         except Exception as e:
             return log({**entry, "status": f"FAILED: {str(e)[:200]}"})
-        if side == "SELL":
-            try:
-                import sold_block
-                sold_block.record_sell(sym, source="manual_trade", note=f"qty {qty:g} @ {limit}")
-            except Exception:
-                pass
-            try:
-                import target_sells as ts
-                ts.remove_target(sym, reason="manual sold")
-            except Exception:
-                pass
     else:
         entry["status"] = "dry run: not sent"
     fill = None
@@ -255,6 +244,18 @@ def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quo
         fill = (wait or _wait_fill)(client, entry["order_id"])
         if fill:
             entry.update(status="filled", filled_qty=fill[0], fill_price=fill[1])
+            try:
+                import sold_block
+                sold_block.record_sell(sym, source="manual_trade",
+                                       note=f"filled {fill[0]:g} @ {fill[1]}",
+                                       order_id=str(entry.get("order_id") or ""))
+            except Exception:
+                pass
+            try:
+                import target_sells as ts
+                ts.remove_target(sym, reason="manual sold")
+            except Exception:
+                pass
     if side == "SELL" and not dry_run:
         entry["ledger_half_removed"] = half_of(sym)      # tag dropped once the stock is out of the live positions
     if side == "SELL" and block_drop:

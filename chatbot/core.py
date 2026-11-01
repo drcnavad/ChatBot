@@ -239,6 +239,27 @@ def execute(p, pin, client=None, verify=None):
         return False, f"{p['symbol']} is on your do-not-sell list; not sent."
     if p.get("side") == "buy" and p["symbol"] in no_buy():
         return False, f"{p['symbol']} is on your do-not-buy list; not sent."
+    def _status_val(o):
+        st = getattr(o, "status", "")
+        return (st.value if hasattr(st, "value") else str(st)).lower()
+
+    def _record_chatbot_sell(sym, o):
+        """sold_block only when the sell actually filled (shares left)."""
+        try:
+            filled = float(getattr(o, "filled_qty", 0) or 0)
+        except (TypeError, ValueError):
+            filled = 0.0
+        if filled <= 0 and _status_val(o) != "filled":
+            return False
+        try:
+            import sold_block
+            sold_block.record_sell(str(sym).upper(), source="chatbot",
+                                   note=f"chatbot fill {filled:g}",
+                                   order_id=str(getattr(o, "id", "") or ""))
+        except Exception:
+            pass
+        return True
+
     c = client or trading_client()
     try:
         if p["kind"] == "cancel":
@@ -247,6 +268,7 @@ def execute(p, pin, client=None, verify=None):
             return True, f"Cancel sent for {len(p['ids'])} order(s)."
         if p["kind"] == "close":
             o = c.close_position(p["symbol"])
+            _record_chatbot_sell(p["symbol"], o)
             return True, f"Close sent for {p['symbol']} (order `{str(getattr(o, 'id', ''))[:8]}`, {getattr(getattr(o, 'status', ''), 'value', '')})."
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
@@ -257,6 +279,8 @@ def execute(p, pin, client=None, verify=None):
             kw["qty"] = p["qty"]
         req = LimitOrderRequest(limit_price=round(p["limit"], 2), **kw) if p.get("limit") else MarketOrderRequest(**kw)
         o = c.submit_order(req)
+        if p.get("side") == "sell":
+            _record_chatbot_sell(p["symbol"], o)
         return True, f"Order sent: `{str(getattr(o, 'id', ''))[:8]}` ({getattr(getattr(o, 'status', ''), 'value', getattr(o, 'status', ''))})."
     except Exception as e:
         return False, f"Alpaca refused it: {str(e)[:200]}"
