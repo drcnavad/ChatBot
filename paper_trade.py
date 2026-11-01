@@ -1041,10 +1041,11 @@ def _record_sold_blocks_from_results(results, source="pipeline"):
             continue
         if any(tok in status_u for tok in ("SKIP", "FAIL", "REFUSED", "STAGED", "WAITING")):
             continue
-        # Require an actual fill signal in the status text (evening immediate fill, or
-        # fill-check COMPLETED/FILLED). Bare "submitted (pending_new)" must not block.
-        filled_hint = ("FILLED" in status_u or "COMPLETED" in status_u
-                       or "(FILLED)" in status_u or "FILL " in status_u)
+        # Require an actual fill signal. "COMPLETED via limit" is the morning *submit*
+        # status (before _chase) and must NOT block — only FILLED / filled counts here.
+        # (True fills after _chase call sold_block.record_sell directly.)
+        filled_hint = ("FILLED" in status_u or "(FILLED)" in status_u
+                       or status_u.startswith("FILLED") or " FILL" in f" {status_u}")
         if not filled_hint:
             continue
         sym = str(getattr(r, "Symbol", "")).upper()
