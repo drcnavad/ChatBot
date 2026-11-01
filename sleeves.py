@@ -300,38 +300,37 @@ def replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
     return out
 
 def fill_idle(tw, hw, move, blocked, px, invested):
-    """No idle cash (Chirag, Oct 26, 2026 - NOT in the backtest, which keeps that cash): the weight of a target that cannot
-    be bought (manual block / do_not_buy / earnings-soon top-up / no price) and any cash below `invested` (the strategy's own total weight today: 99%, or less under the QQQ halving) (rounding, unfilled
-    orders, dividends) are spread over the half's buyable names that trade today, in proportion to their target weights.
-    Returns the new {symbol: weight}."""
+    """Spread blocked/unpriced weight and cash below `invested` onto buyable names that trade today.
+    Movers get first claim (capped at 15%); any remainder tops up held names under the cap (prefer at/above entry)."""
     tw = dict(tw)
     for s in list(tw):
         if (s in blocked or not _num(px.get(s))) and tw[s] > hw.get(s, 0.0):
-            tw[s] = float(hw.get(s, 0.0))      # held: kept as is; not held: 0
+            tw[s] = float(hw.get(s, 0.0))
             if tw[s] <= 0:
                 del tw[s]
-    free = invested - sum(tw.values())
     ok = [s for s in tw if move.get(s, False) and s not in blocked and _num(px.get(s))]
-    base = sum(tw[s] for s in ok)
-    if free > 1e-9 and base > 0:
-        for s in ok:
-            tw[s] += free * tw[s] / base
-    # Cap only movers (ok). Continues above 15% stay until Friday — never silent-trim them.
-    for _ in range(len(tw) + 1):
-        over = {s: tw[s] - MAX_NAME_WEIGHT for s in ok if s in tw and tw[s] > MAX_NAME_WEIGHT + 1e-12}
-        if not over:
-            break
-        for s in over:
-            tw[s] = MAX_NAME_WEIGHT
-        leftover = sum(over.values())
-        room = [s for s in ok if s in tw and tw[s] < MAX_NAME_WEIGHT - 1e-12]
-        room_w = sum(MAX_NAME_WEIGHT - tw[s] for s in room)
-        if leftover <= 1e-12 or room_w <= 1e-12:
-            break
-        for s in room:
-            tw[s] = min(MAX_NAME_WEIGHT, tw[s] + leftover * (MAX_NAME_WEIGHT - tw[s]) / room_w)
-    # Still short of invested after movers hit the 15% cap: top up held names under the cap
-    # (prefer at/above entry). Unheld already got first claim above.
+
+    def _give(cands, free):
+        if free <= 1e-9 or not cands:
+            return
+        base = sum(max(tw[s], 1e-12) for s in cands)
+        for s in cands:
+            tw[s] += free * (tw[s] / base)
+        for _ in range(len(tw) + 1):
+            over = {s: tw[s] - MAX_NAME_WEIGHT for s in cands if tw[s] > MAX_NAME_WEIGHT + 1e-12}
+            if not over:
+                return
+            for s in over:
+                tw[s] = MAX_NAME_WEIGHT
+            left = sum(over.values())
+            room = [s for s in cands if tw[s] < MAX_NAME_WEIGHT - 1e-12]
+            room_w = sum(MAX_NAME_WEIGHT - tw[s] for s in room)
+            if left <= 1e-12 or room_w <= 1e-12:
+                return
+            for s in room:
+                tw[s] = min(MAX_NAME_WEIGHT, tw[s] + left * (MAX_NAME_WEIGHT - tw[s]) / room_w)
+
+    _give(ok, float(invested) - sum(tw.values()))
     free = float(invested) - sum(tw.values())
     if free > 1e-9:
         held = [s for s in tw if float(hw.get(s, 0.0) or 0.0) > 0 and s not in blocked
@@ -342,24 +341,7 @@ def fill_idle(tw, hw, move, blocked, px, invested):
         except Exception:
             ent = {}
         prefer = [s for s in held if ent.get(s) and px.get(s) and float(px[s]) >= float(ent[s])]
-        dest = prefer or held
-        if dest:
-            base = sum(max(tw[s], 1e-12) for s in dest)
-            for s in dest:
-                tw[s] += free * (tw[s] / base if base > 0 else 1.0 / len(dest))
-            for _ in range(len(tw) + 1):
-                over = {s: tw[s] - MAX_NAME_WEIGHT for s in dest if tw[s] > MAX_NAME_WEIGHT + 1e-12}
-                if not over:
-                    break
-                for s in over:
-                    tw[s] = MAX_NAME_WEIGHT
-                leftover = sum(over.values())
-                room = [s for s in dest if tw[s] < MAX_NAME_WEIGHT - 1e-12]
-                room_w = sum(MAX_NAME_WEIGHT - tw[s] for s in room)
-                if leftover <= 1e-12 or room_w <= 1e-12:
-                    break
-                for s in room:
-                    tw[s] = min(MAX_NAME_WEIGHT, tw[s] + leftover * (MAX_NAME_WEIGHT - tw[s]) / room_w)
+        _give(prefer or held, free)
     return tw
 
 def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_value):
