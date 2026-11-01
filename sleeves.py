@@ -38,6 +38,7 @@ STRATEGY = {"rs_short": "Short-term relative strength"}
 LABEL = {"rs_short": "Short-term relative strength"}
 SHORT = {"rs_short": "Short-term relative strength"}
 VERSION = 4
+MAX_NAME_WEIGHT = 0.15   # per-stock cap (Chirag): fill_idle / replacements never push a name above 15%
 CT = ZoneInfo("America/Chicago")
 
 def config():
@@ -152,6 +153,52 @@ def save_ledger(led, path=None):
     os.replace(tmp, path)
     return path
 
+def write_strategy_picks(day, path=None, inp=None, led=None):
+    """Rewrite Reports/strategy_picks.csv from the live RS short-term sleeve (top-n equal weight).
+
+    The notebook still writes a WINNER-n=5 / low_vol picks file for display columns; live trading
+    and trade_audit must follow the sleeve. Called after a successful ledger save.
+    """
+    import sector_mapping as sm
+    path = path or os.path.join(REPORTS, "strategy_picks.csv")
+    inp = inp or inputs()
+    d = pd.Timestamp(day).normalize()
+    w = half_weights(HALVES[0], d, inp)
+    w = w[w > 0].sort_values(ascending=False)
+    r = ranking(HALVES[0], d, inp)
+    close = inp["close"]
+    soon = inp.get("soon")
+    tags = set((led or {}).get("halves", {}).get(HALVES[0], {}).get("tags") or [])
+    rows = []
+    for s, wt in w.items():
+        rank = int(r.index.get_loc(s)) + 1 if s in r.index else None
+        score = float(r.get(s)) if s in r.index else None
+        px = float(close.at[d, s]) if s in close.columns and d in close.index and _num(close.at[d, s]) else None
+        earn = None
+        if soon is not None and d in soon.index and s in soon.columns and bool(soon.at[d, s]):
+            earn = "within_5d"
+        rows.append({
+            "As_Of": d.date().isoformat(),
+            "Last_Rebalance": (led or {}).get("day") or d.date().isoformat(),
+            "Last_Decision": d.date().isoformat(),
+            "Strategy": STRATEGY[HALVES[0]],
+            "Regime_On": 1,
+            "Symbol": s,
+            "Sector": (sm.symbol_sector.get(s, "") if hasattr(sm, "symbol_sector") else ""),
+            "Held": 1 if s in tags else 0,
+            "Strategy_Weight": round(float(wt), 4),
+            "Provisional_Weight": round(float(wt), 4),
+            "Strategy_Score": None if score is None else round(score, 4),
+            "Strategy_Rank": rank,
+            "Technical_Score": None,
+            "RS_Score": None if score is None else round(score, 4),
+            "Close": None if px is None else round(px, 4),
+            "Next_Earnings": earn,
+        })
+    out = pd.DataFrame(rows)
+    out.pipe(db.to_csv, path, index=False)
+    return path
+
 def holders(led):
     """{SYMBOL: [halves claiming it]}."""
     out = {}
@@ -238,7 +285,7 @@ def replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
     final = [s for s in tw if (s not in blocked or s in held) and (_num(px.get(s)) or s in held)]
     if not final:
         return {}
-    w = float(invested) / len(final)
+    w = min(float(invested) / len(final), MAX_NAME_WEIGHT)
     return {s: w for s in final}
 
 
@@ -260,6 +307,21 @@ def fill_idle(tw, hw, move, blocked, px, invested):
     if free > 1e-9 and base > 0:
         for s in ok:
             tw[s] += free * tw[s] / base
+    # Cap each name at MAX_NAME_WEIGHT; re-spread leftover onto names still under the cap.
+    for _ in range(len(tw) + 1):
+        over = {s: tw[s] - MAX_NAME_WEIGHT for s in tw if tw[s] > MAX_NAME_WEIGHT + 1e-12}
+        if not over:
+            break
+        for s in over:
+            tw[s] = MAX_NAME_WEIGHT
+        leftover = sum(over.values())
+        room = [s for s in ok if s in tw and tw[s] < MAX_NAME_WEIGHT - 1e-12]
+        room_w = sum(MAX_NAME_WEIGHT - tw[s] for s in room)
+        if leftover <= 1e-12 or room_w <= 1e-12:
+            break
+        for s in room:
+            add = leftover * (MAX_NAME_WEIGHT - tw[s]) / room_w
+            tw[s] = min(MAX_NAME_WEIGHT, tw[s] + add)
     return tw
 
 def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_value):

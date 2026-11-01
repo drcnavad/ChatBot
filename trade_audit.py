@@ -270,18 +270,29 @@ def reconcile(data, pending=None, stop_state=None, picks=None):
         # The live account also holds today's top-n rule picks (Provisional_Weight: Mon-Thu refills and spare-cash buys).
         prov = pd.to_numeric(picks.reindex(columns=["Provisional_Weight"])["Provisional_Weight"], errors="coerce").fillna(0)
         live = set(target) | {str(s).upper() for s, w in zip(picks["Symbol"], prov) if w > 0}
-        try:                                    # live sleeve (sleeves.py): the targets are the ledger's planned holdings
+        try:                                    # live sleeve (sleeves.py): the targets are the ledger / RS half weights
             import backtest_engine as be
             import sleeves
             led = sleeves.load_ledger() if be.WINNER.get("sleeves") else None
         except Exception:
             led = None
-        if led is not None:                     # the halves' tags (no shares: live positions are the record) + the plan's targets
+            be = None
+        if be is not None and be.WINNER.get("sleeves") and led is not None:
+            # Prefer the saved sleeve ledger / plan over strategy_picks (notebook still writes n=5/low_vol).
+            # No ledger yet → keep picks-based target (tests / first run).
+            target = {}
             try:
                 plan = db.read_csv(sleeves.PLAN_CSV)
                 target = {str(s).upper(): float(w) / 100 for s, w in zip(plan["Symbol"], plan["Target_of_account_%"]) if float(w) > 0}
-            except (OSError, KeyError, ValueError):
+            except (OSError, KeyError, ValueError, TypeError):
                 target = {}
+            if not target:
+                try:
+                    tags = (led.get("halves") or {}).get(sleeves.HALVES[0], {}).get("tags") or []
+                    n = max(len(tags), 1)
+                    target = {str(s).upper(): 0.99 / n for s in tags}
+                except Exception:
+                    target = {}
             live = set(sleeves.owners(led)) | set(target)
         import sector_mapping as sm
         kept = {str(s).upper() for s in sm.do_not_sell}
