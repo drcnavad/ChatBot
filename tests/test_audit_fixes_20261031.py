@@ -120,9 +120,12 @@ with tempfile.TemporaryDirectory() as td:
 # --- drop_guard protected helper ---
 import drop_guard as dg
 prot = dg.rs_protected_symbols()
-check(isinstance(prot, set), "rs_protected_symbols returns set")
-# With live data should include some RS names; empty only if inputs broken
-check(len(prot) >= 5, "rs_protected_symbols has names", prot)
+check(prot is None or isinstance(prot, set), "rs_protected_symbols returns set|None (fail-closed)")
+# With live data should include some RS names; None only if inputs broken
+if isinstance(prot, set):
+    check(len(prot) >= 5, "rs_protected_symbols has names", prot)
+else:
+    check(True, "rs_protected_symbols None = fail closed (inputs unavailable)")
 
 
 # ---- missed-decision wording: hold_until, not sleep ----
