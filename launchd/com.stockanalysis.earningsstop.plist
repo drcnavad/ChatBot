@@ -14,11 +14,11 @@
     <key>ProgramArguments</key>
     <array>
         <string>/opt/anaconda3/bin/python</string>
-        <string>/Users/drcnavad/Desktop/Stock Analysis/earnings_stop.py</string>
+        <string>/Users/drcnavad/Stock Analysis/earnings_stop.py</string>
         <string>--loop</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/drcnavad/Desktop/Stock Analysis</string>
+    <string>/Users/drcnavad/Stock Analysis</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
@@ -29,8 +29,8 @@
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_earningsstop.log</string>
+    <string>/Users/drcnavad/Stock Analysis/Reports/logs/launchd_earningsstop.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_earningsstop.err</string>
+    <string>/Users/drcnavad/Stock Analysis/Reports/logs/launchd_earningsstop.err</string>
 </dict>
 </plist>

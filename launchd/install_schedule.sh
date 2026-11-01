@@ -22,7 +22,7 @@
 #                                     trips, reconciliation + alerts to the run log; GET only, never orders)
 #   com.stockanalysis.dashboard-8502  always on (restarted if it stops): the app on http://localhost:8502
 #   com.unicorn.voice                 Voice Genie (Unicorn), template in ../Voice Genie/launchd/ (when that folder exists)
-# The plists in this folder are templates written on the old Mac: their paths (/Users/drcnavad/Desktop/..., /opt/anaconda3)
+# The plists in this folder are templates: paths (/Users/drcnavad/Stock Analysis or legacy Desktop/..., /opt/anaconda3)
 # are rewritten to this folder's real location and the python in $PYTHON (default: /opt/anaconda3/bin/python3, else
 # python3 on PATH) before they are copied to ~/Library/LaunchAgents. run_all.py decides whether anything is due; run_state
 # last_decision and lock files stop double runs, so extra starts are harmless.
@@ -43,7 +43,9 @@ render() {   # template -> $OUT/<label>.plist with this Mac's paths
     "$PY" - "$1" "$OUT/$(basename "$1")" "$ROOT" "$VG" "$PY" <<'PYEOF'
 import os, plistlib, re, sys
 src, dst, root, vg, py = sys.argv[1:]
-subs = [("/Users/drcnavad/Desktop/Stock Analysis", root), ("/Users/drcnavad/Desktop/Voice Genie", vg),
+subs = [("/Users/drcnavad/Desktop/Stock Analysis", root),
+        ("/Users/drcnavad/Stock Analysis", root),
+        ("/Users/drcnavad/Desktop/Voice Genie", vg),
         ("/opt/anaconda3/bin", os.path.dirname(py))]
 def fix(x):
     if isinstance(x, str):

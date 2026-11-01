@@ -13,12 +13,12 @@
     <key>ProgramArguments</key>
     <array>
         <string>/opt/anaconda3/bin/python</string>
-        <string>/Users/drcnavad/Desktop/Stock Analysis/run_all.py</string>
+        <string>/Users/drcnavad/Stock Analysis/run_all.py</string>
         <string>--support</string>
         <string>--scheduled</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/drcnavad/Desktop/Stock Analysis</string>
+    <string>/Users/drcnavad/Stock Analysis</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
@@ -33,8 +33,8 @@
         <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>13</integer><key>Minute</key><integer>28</integer></dict>
     </array>
     <key>StandardOutPath</key>
-    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_support.log</string>
+    <string>/Users/drcnavad/Stock Analysis/Reports/logs/launchd_support.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_support.err</string>
+    <string>/Users/drcnavad/Stock Analysis/Reports/logs/launchd_support.err</string>
 </dict>
 </plist>

@@ -12,10 +12,10 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/drcnavad/Desktop/Stock Analysis/refresh_dashboard_data.sh</string>
+        <string>/Users/drcnavad/Stock Analysis/refresh_dashboard_data.sh</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/drcnavad/Desktop/Stock Analysis</string>
+    <string>/Users/drcnavad/Stock Analysis</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
@@ -100,8 +100,8 @@
         <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>45</integer></dict>
     </array>
     <key>StandardOutPath</key>
-    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_tradeaudit.log</string>
+    <string>/Users/drcnavad/Stock Analysis/Reports/logs/launchd_tradeaudit.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/drcnavad/Desktop/Stock Analysis/Reports/logs/launchd_tradeaudit.err</string>
+    <string>/Users/drcnavad/Stock Analysis/Reports/logs/launchd_tradeaudit.err</string>
 </dict>
 </plist>
