@@ -10,24 +10,43 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 TESTS = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswith(".py"))   # every test file
 
+# Paths that must not touch the real Reports/ files. Fresh per test file so one file's
+# writes (sold_block on fill, manual blocks, …) cannot poison the next.
+_ISOLATE = (
+    ("STOCK_ANALYSIS_RUN_LOG", "run_log.csv"),
+    ("STOCK_ANALYSIS_EARNINGS_STOP_STATE", "earnings_stop_state.json"),
+    ("STOCK_ANALYSIS_SLEEVE_LEDGER", "sleeve_ledger.json"),
+    ("STOCK_ANALYSIS_SLEEVE_PLAN", "sleeve_plan.csv"),
+    ("STOCK_ANALYSIS_DECISION_RANKS", "decision_ranks.csv"),
+    ("STOCK_ANALYSIS_MANUAL_ORDERS", "manual_orders.json"),
+    ("STOCK_ANALYSIS_MANUAL_BLOCK", "manual_block.json"),
+    ("STOCK_ANALYSIS_SOLD_BLOCK", "sold_block.json"),
+    ("STOCK_ANALYSIS_TARGET_SELLS", "target_sells.json"),
+)
+
+def _env_for_test():
+    """Build a child env with brand-new temp paths (files must not exist yet — empty
+    mktemp files break JSON loaders with JSONDecodeError)."""
+    d = tempfile.mkdtemp(prefix="sa_test_")
+    env = dict(os.environ,
+               PYTHONPATH=ROOT + os.pathsep + os.environ.get("PYTHONPATH", ""),
+               PYTHONDONTWRITEBYTECODE="1",
+               STOCK_ANALYSIS_LIVE_HOLDINGS="off",
+               STOCK_ANALYSIS_LAZY_EXPANDERS="off",
+               PYTHONWARNINGS="ignore")
+    for key, name in _ISOLATE:
+        env[key] = os.path.join(d, name)  # path only; file created by the module when needed
+    return env
+
 def main():
     fast = "--fast" in sys.argv
-    env = dict(os.environ, PYTHONPATH=ROOT + os.pathsep + os.environ.get("PYTHONPATH", ""), PYTHONDONTWRITEBYTECODE="1", STOCK_ANALYSIS_LIVE_HOLDINGS="off",
-               STOCK_ANALYSIS_LAZY_EXPANDERS="off",
-               PYTHONWARNINGS="ignore",   # tests never write the real Reports/run_log.csv
-               STOCK_ANALYSIS_RUN_LOG=os.path.join(tempfile.mkdtemp(), "run_log.csv"),
-               STOCK_ANALYSIS_EARNINGS_STOP_STATE=os.path.join(tempfile.mkdtemp(), "earnings_stop_state.json"),   # never the real stop sales
-               STOCK_ANALYSIS_SLEEVE_LEDGER=os.path.join(tempfile.mkdtemp(), "sleeve_ledger.json"),   # never the real halves' ledger
-               STOCK_ANALYSIS_SLEEVE_PLAN=os.path.join(tempfile.mkdtemp(), "sleeve_plan.csv"),
-               STOCK_ANALYSIS_DECISION_RANKS=os.path.join(tempfile.mkdtemp(), "decision_ranks.csv"),
-               STOCK_ANALYSIS_MANUAL_ORDERS=os.path.join(tempfile.mkdtemp(), "manual_orders.json"),   # never the real manual log
-               STOCK_ANALYSIS_MANUAL_BLOCK=os.path.join(tempfile.mkdtemp(), "manual_block.json"))   # never the real ranks file
     results = []
     for t in TESTS:
         if fast and t in ("test_app.py", "test_dashboard_http.py"):
             continue
         t0 = time.time()
-        p = subprocess.run([sys.executable, os.path.join(HERE, t)], cwd=ROOT, env=env, capture_output=True, text=True)
+        p = subprocess.run([sys.executable, os.path.join(HERE, t)], cwd=ROOT, env=_env_for_test(),
+                           capture_output=True, text=True)
         ok = p.returncode == 0
         results.append((t, ok, time.time() - t0))
         tail = [l for l in (p.stdout + p.stderr).splitlines() if l.strip()][-4 if ok else -25:]

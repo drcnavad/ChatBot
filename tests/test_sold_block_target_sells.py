@@ -101,23 +101,31 @@ with tempfile.TemporaryDirectory() as td:
         ts.save_config({"enabled": True, "dry_run": True, "targets": {
             "AAA": {"limit": 10.0, "qty": "full", "added": "2026-10-29"},
             "BBB": {"limit": 20.0, "qty": "full", "added": "2026-10-29"},
+            "DDD": {"limit": 30.0, "qty": "full", "added": "2026-10-29"},
         }})
         staged = pd.DataFrame([
             {"Symbol": "AAA", "Side": "SELL", "Shares": 1, "Order_ID": None,
              "Status": "STAGED for morning (bad quote)"},
             {"Symbol": "BBB", "Side": "SELL", "Shares": 2, "Order_ID": "oid-1",
-             "Status": "submitted (new)"},
+             "Status": "submitted (pending_new) at $10"},
+            {"Symbol": "DDD", "Side": "SELL", "Shares": 2, "Order_ID": "oid-2",
+             "Status": "submitted (filled) at $10"},
             {"Symbol": "CCC", "Side": "SELL", "Shares": 1, "Order_ID": None,
              "Status": "SKIPPED: not held"},
         ])
         pt._record_sold_blocks_from_results(staged, source="unit_test")
         blocks = sb.active_blocks(as_of=date(2026, 10, 29))
         check("Order_ID gate: STAGED not blocked", "AAA" not in blocks, blocks)
-        check("Order_ID gate: submitted is blocked", "BBB" in blocks, blocks)
+        check("submit-only pending_new NOT blocked", "BBB" not in blocks, blocks)
+        check("filled submit IS blocked", "DDD" in blocks, blocks)
         check("Order_ID gate: SKIPPED not blocked", "CCC" not in blocks, blocks)
         cfg = ts.load_config()
         check("STAGED did not remove target AAA", "AAA" in cfg["targets"], cfg["targets"])
-        check("submitted removed target BBB", "BBB" not in cfg["targets"], cfg["targets"])
+        check("pending_new did not remove target BBB", "BBB" in cfg["targets"], cfg["targets"])
+        check("filled removed target DDD", "DDD" not in cfg.get("targets", {"DDD": 1}), cfg)
+        # clear_block
+        check("clear_block removes DDD", sb.clear_block("DDD", reason="unit"), True)
+        check("DDD cleared", "DDD" not in sb.active_blocks(as_of=date(2026, 10, 29)))
     finally:
         sb.BLOCK_JSON = old_sb
         ts.CONFIG_JSON = old_cfg

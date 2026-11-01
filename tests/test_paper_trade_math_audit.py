@@ -333,11 +333,18 @@ def test_morning_sells_complete_before_buys():
 def test_morning_buy_cumulative_cash_reserved():
     # Two BUYs each fit in cash alone but not together: the second buys only the part that
     # still fits after the first (1% cushion), never more than the cash.
+    # Use CCC/DDD (not AAA): earlier tests may have sold AAA and recorded sold_block-on-fill.
+    try:
+        import sold_block as _sb
+        for _s in ("AAA", "BBB", "CCC", "DDD"):
+            _sb.clear_block(_s, reason="math-audit reset")
+    except Exception:
+        pass
     with tempfile.TemporaryDirectory() as td:
         pp = os.path.join(td, "pending.json")
         _write_pending(pp, [
-            {"symbol": "AAA", "side": "BUY", "qty": 60, "limit_price": 100.0, "order_id": None},
-            {"symbol": "BBB", "side": "BUY", "qty": 60, "limit_price": 100.0, "order_id": None},
+            {"symbol": "CCC", "side": "BUY", "qty": 60, "limit_price": 100.0, "order_id": None},
+            {"symbol": "DDD", "side": "BUY", "qty": 60, "limit_price": 100.0, "order_id": None},
         ])
         fake = FakeClient()
         fake.buying_power = 10000.0  # cash defaults to buying_power in the fake
@@ -347,11 +354,11 @@ def test_morning_buy_cumulative_cash_reserved():
         finally:
             paper_trade.paper_trading_client = orig
         got = [(r.symbol, r.qty) for r in fake.submitted]
-        check(got == [("AAA", 60), ("BBB", 39.0)],
+        check(got == [("CCC", 60), ("DDD", 39.0)],
               f"morning: first BUY in full ($6,060 with cushion), second cut to what is left: 3,940 / 101 = 39 (got {got})")
         check(sum(q * 100.0 * 1.01 for _, q in got) <= 10000.0, "morning: both BUYs together stay within buying power")
         left = json.load(open(pp))["orders"] if db.exists(pp) else []
-        check([(o["symbol"], o["qty"], o["order_id"]) for o in left] == [("BBB", 21.0, None)],
+        check([(o["symbol"], o["qty"], o["order_id"]) for o in left] == [("DDD", 21.0, None)],
               f"morning: the part that did not fit (21) waits for the next fill check (got {left})")
 
 def test_morning_malformed_row_dropped():

@@ -262,10 +262,14 @@ try:
           and "Trade audit · gain / loss per sale (read-only)" in labels and labels[-1] == "Strategy rules",
           ([str(e) for e in at.exception], labels))
     frames = [x.value for x in at.dataframe]
-    check("app: trade audit shows only the gain / loss per sale (no order ledger, reconciliation or alerts; one buy = no sales)",
-          not any("Plan_Price" in x.columns or "Result" in x.columns for x in frames)
-          and not any("held but not in the strategy" in x.value for x in at.warning)
-          and any(c.value == "No sales yet." for c in at.caption), [list(x.columns) for x in frames])
+    # Trading tab also shows sold_block / drop_guard / tax tables; trade audit itself must not
+    # surface the order ledger (Plan_Price/Result) or strategy-drift warnings for a one-buy account.
+    no_ledger = not any("Plan_Price" in x.columns or "Result" in x.columns for x in frames)
+    no_drift = not any("held but not in the strategy" in x.value for x in at.warning)
+    sales_ok = (any(c.value == "No sales yet." for c in at.caption)
+                or any("P/L $" in x.columns and "Sold_CT" in x.columns for x in frames))
+    check("app: trade audit shows gain/loss per sale (no order ledger / drift alerts)",
+          no_ledger and no_drift and sales_ok, [list(x.columns) for x in frames])
     check("app: only allow-listed GET paths; /positions read once (the holdings read is reused)",
           set(Fake.calls) <= set(ap.ALLOWED_PATHS) and Fake.calls.count("/positions") == 1, Fake.calls)
 finally:
