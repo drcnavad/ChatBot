@@ -355,6 +355,8 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
                 tw[s] = float(wd[s])
         elif hw[s] > 0:
             tw[s] = float(hw[s])              # left alone (within its own weight: the band keeps it untraded)
+    # Continuing holds (not in the move mask): keep share weights — never renormalize them away.
+    continue_syms = {s for s in names if (not bool(move[s])) and float(hw.get(s, 0.0) or 0.0) > 0}
     blocked = {**{s: n for s, n in (no_buy or {}).items()},
                **{s: "earnings within 5 days (held: not topped up)" for s in names if soon_d[s] and hw[s] > 0
                   and s in tw and tw[s] > hw[s]}}
@@ -372,9 +374,22 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
         for s in tw:
             move.loc[s] = True
         tw = fill_idle(tw, hw, move, blocked, px, invested)
+    # Midweek membership: adds can push sum(tw)>1. Never shrink continuing holds —
+    # scale only non-continue weights (new adds / movers) so holds are not trimmed.
+    cont_sum = sum(float(tw[s]) for s in tw if s in continue_syms)
+    add_keys = [s for s in tw if s not in continue_syms]
+    add_sum = sum(float(tw[s]) for s in add_keys)
+    if cont_sum + add_sum > 1.0 + 1e-12:
+        room = max(0.0, 1.0 - cont_sum)
+        if add_sum > 1e-12 and add_sum > room + 1e-12:
+            scale = room / add_sum
+            for s in add_keys:
+                tw[s] = float(tw[s]) * scale
+        elif add_sum > 1e-12 and room <= 1e-12:
+            for s in add_keys:
+                tw[s] = 0.0
+        tw = {s: w for s, w in tw.items() if float(w) > 1e-12}
     tg = pd.DataFrame({"Symbol": list(tw), "Weight": [tw[s] for s in tw], "Price": [px.get(s) for s in tw]})
-    if tg["Weight"].sum() > 1:
-        tg["Weight"] = tg["Weight"] / tg["Weight"].sum()
     stat = {s: ("hold" if s in st["shares"] else "add") for s in tw}
     o = pt.build_orders(tg, value, st["shares"], px, min_value=min_value, fractional=fractional, statuses=stat,
                         blocked=blocked, keep=no_sell)
