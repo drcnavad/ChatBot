@@ -1414,8 +1414,9 @@ def _todays_recorded_orders(pending_path=PENDING_ORDERS_JSON):
     """{(symbol, side)} already submitted or staged by an earlier --trade run this evening.
 
     Makes an evening retry idempotent: rows recorded in today's pending file are skipped
-    instead of being sent to the broker a second time. FAILED rows are never recorded,
-    so they are still retried.
+    instead of being sent to the broker a second time. FAILED submits are staged into the
+    pending file (no order_id) for the next fill-check; they also appear here so an evening
+    retry does not double-submit the same (symbol, side).
     """
     try:
         with open(pending_path) as f:
@@ -1657,9 +1658,36 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         return ((raw.value if hasattr(raw, "value") else str(raw)).lower(), _safe_number(x.filled_qty),
                 _safe_number(getattr(x, "filled_avg_price", None)))
 
-    def _carry(p, rest, order_id, why):
+    def _record_sell_fill(sym, oid, filled, qty):
+        """sold_block only after shares actually left (true fill)."""
+        if filled <= 0:
+            return
+        try:
+            import sold_block
+            sold_block.record_sell(sym, source="fill_check",
+                                   note=f"filled {filled:g}/{qty}",
+                                   order_id=str(oid or ""))
+        except Exception as e:
+            print(f"  WARNING: sold_block on fill failed for {sym}: {e}")
+
+    def _clear_sell_block(sym, oid, reason):
+        """Clear buy-block only when it was recorded for this order id (0-fill / carried unfilled)."""
+        try:
+            import sold_block
+            if sold_block.clear_block(sym, reason=reason, order_id=str(oid or "")):
+                print(f"  cleared sold_block for {sym} ({reason})")
+        except Exception:
+            pass
+
+    def _carry(p, rest, order_id, why, filled_so_far=0.0):
         """A new pending row for the unfilled rest of limit order p, for the next business day's 9 AM CT check.
-        order_id = the order still working (that check reads its fills first) or None (nothing working: sent fresh)."""
+        order_id = the order still working (that check reads its fills first) or None (nothing working: sent fresh).
+        On SELL: record sold_block for any partial fill; clear a block tied to this order only when 0 fill."""
+        if p["side"] == "SELL":
+            if filled_so_far > 0:
+                _record_sell_fill(p["sym"], p["id"], filled_so_far, p["qty"])
+            elif filled_so_far <= 0:
+                _clear_sell_block(p["sym"], p["id"], f"carry 0-fill: {why}")
         o = p["row"]
         day = _next_9am(o, pend)
         if order_id and day is None:   # the next decision comes first: the order just works until the close
@@ -1693,9 +1721,13 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 if cur is not None:
                     px[p["i"]] = _price_cols(p["q"], side, cur[2], cur[1])
                     if cur[1] >= p["qty"] - 1e-9:
+                        if side == "SELL" and cur[1] > 0:
+                            _record_sell_fill(p["sym"], p["id"], cur[1], p["qty"])
                         continue                                   # filled
                 if cur is None or not first:
-                    _carry(p, p["qty"], p["id"], "limit not filled yet")
+                    filled0 = cur[1] if cur is not None else 0.0
+                    _carry(p, p["qty"] if cur is None else max(p["qty"] - filled0, 0), p["id"],
+                           "limit not filled yet", filled_so_far=filled0)
                     continue
                 try:
                     client.cancel_order_by_id(p["id"])
@@ -1703,18 +1735,22 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     pass
                 cur = _read(p["id"]) if _wait_terminal(client, p["id"]) else None
                 if cur is None:                                    # cancel not confirmed: never a second order
-                    _carry(p, p["qty"], p["id"], "limit not filled yet, cancel not confirmed")
+                    _carry(p, p["qty"], p["id"], "limit not filled yet, cancel not confirmed",
+                           filled_so_far=0.0)
                     continue
                 px[p["i"]] = _price_cols(p["q"], side, cur[2], cur[1])
                 rest = p["qty"] - cur[1] if p["exit"] else _floor2(p["qty"] - cur[1])
                 if rest <= 1e-9 or (side == "BUY" and rest * p["q"]["limit"] < 1.0):
+                    if side == "SELL" and cur[1] > 0:
+                        _record_sell_fill(p["sym"], p["id"], cur[1], p["qty"])
                     continue                                       # filled while canceling, or a rest under $1
                 q = _cap_at_ask(smart_quote(p["sym"], side), p["sym"], at_ask)
                 why = q["skip"] and f"bad quote: {q['skip']}"
                 if not why and side == "BUY" and q["limit"] > p["q"]["limit"] * (1 + CASH_CUSHION):
                     why = f"price ran up over {CASH_CUSHION:.0%} since the first limit"
                 if why:
-                    _carry(p, rest, None, f"first limit filled {cur[1]:g} of {p['qty']:g}; {why}")
+                    _carry(p, rest, None, f"first limit filled {cur[1]:g} of {p['qty']:g}; {why}",
+                           filled_so_far=cur[1])
                     continue
                 cid = p["cid"][:46] + "-c"
                 req = LimitOrderRequest(symbol=p["sym"], qty=rest, limit_price=q["limit"], time_in_force=TimeInForce.DAY,
@@ -1722,8 +1758,12 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 try:
                     m = client.submit_order(req)
                 except Exception as e:
-                    _carry(p, rest, None, f"replacement not accepted: {str(e)[:80]}")
+                    _carry(p, rest, None, f"replacement not accepted: {str(e)[:80]}",
+                           filled_so_far=cur[1])
                     continue
+                # First limit's partial fill is real shares sold — block now; replacement chased next.
+                if side == "SELL" and cur[1] > 0:
+                    _record_sell_fill(p["sym"], p["id"], cur[1], p["qty"])
                 i = len(results)
                 px[i] = _price_cols(q, side)
                 results.append((p["sym"], side, rest, str(m.id), f"REPLACED at a fresh quote, limit ${q['limit']:g} "
@@ -1855,7 +1895,8 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     try:
                         import sold_block
                         sold_block.record_sell(sym, source="fill_check",
-                                               note=f"FILLED ({filled:g}/{qty})")
+                                               note=f"FILLED ({filled:g}/{qty})",
+                                               order_id=str(oid or ""))
                     except Exception as e:
                         print(f"  WARNING: sold_block on fill failed for {sym}: {e}")
                 continue
@@ -1866,15 +1907,18 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 if side == "SELL" and filled <= 0:
                     try:
                         import sold_block
-                        sold_block.clear_block(sym, reason=f"rejected 0-fill oid={oid}")
+                        sold_block.clear_block(sym, reason=f"rejected 0-fill oid={oid}",
+                                               order_id=str(oid or ""))
                     except Exception:
                         pass
                 continue
             if status in ("expired", "canceled", "cancelled") and filled <= 0 and side == "SELL":
-                # Evening DAY order died with no fill: do not keep a buy-block from the submit.
+                # Evening DAY order died with no fill: clear only a block tied to THIS order id
+                # (never wipe an earlier real fill's block for the same symbol).
                 try:
                     import sold_block
-                    if sold_block.clear_block(sym, reason=f"{status} 0-fill oid={oid}"):
+                    if sold_block.clear_block(sym, reason=f"{status} 0-fill oid={oid}",
+                                              order_id=str(oid or "")):
                         print(f"  cleared sold_block for {sym} ({status}, 0 fill)")
                 except Exception:
                     pass
@@ -2065,13 +2109,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             how = ("sent now, nothing was sent before" if status == "staged" and not filled
                    else f"{status}, filled {filled:g}/{qty} before")     # a never-sent row vs the rest of an earlier order
             results.append((sym, side, to_order, str(m.id), f"COMPLETED via limit ${q['limit']:g} ({how}){partial}"))
-            if side == "SELL":
-                try:
-                    import sold_block
-                    sold_block.record_sell(sym, source="fill_check",
-                                           note=f"COMPLETED via limit ({to_order:g})")
-                except Exception as e:
-                    print(f"  WARNING: sold_block on COMPLETED failed for {sym}: {e}")
+            # sold_block is recorded only after _chase confirms a real fill (not on submit).
         except Exception as e:                      # e.g. Alpaca rejected the order, or the network dropped
             _retry(o, sym, side, remaining, oid, str(e))
     try:
@@ -2299,7 +2337,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
       after each submit, so re-running --trade in the same window skips them instead of
       duplicating orders. Rows found on the broker from this evening but never recorded
       locally (a crash between submit and record) are likewise skipped - the morning fill
-      check completes any unfilled remainder. FAILED rows are never recorded, so they are retried.
+      check completes any unfilled remainder. FAILED submits are staged (no order_id) for the next fill-check; (symbol, side) is recorded so retries skip duplicates.
     - decision (a date): the decision being traded - run_all passes it, so a missed decision caught up later trades
       that decision's picks (its point-in-time ranks) and the freshness check accepts its files.
     - session=True (run_all: a missed decision caught up during regular hours): sized at current prices
@@ -2445,13 +2483,19 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         # Stage FAILED rows into the pending file (no order_id) so the next 9 AM fill-check retries them.
         for r in failed.itertuples():
             try:
+                side_u = str(r.Side).upper()
+                qty_f = float(r.Shares)
+                is_exit = False
+                if side_u == "SELL":
+                    # True exit only when plan qty covers (almost) the whole holding — not every sell.
+                    _, is_exit, _ = _plan_qty(str(r.Symbol), side_u, qty_f, positions)
                 record_pending_order({
                     "symbol": str(r.Symbol).upper(),
-                    "side": str(r.Side).upper(),
-                    "qty": float(r.Shares),
+                    "side": side_u,
+                    "qty": qty_f,
                     "limit_price": None,
                     "order_id": None,
-                    "exit": str(r.Side).upper() == "SELL",
+                    "exit": bool(is_exit),
                     "failed_submit": True,
                     "recorded_at": datetime.now(ZoneInfo("America/Chicago")).isoformat(timespec="seconds"),
                 }, meta, PENDING_ORDERS_JSON)
