@@ -307,9 +307,10 @@ def fill_idle(tw, hw, move, blocked, px, invested):
     if free > 1e-9 and base > 0:
         for s in ok:
             tw[s] += free * tw[s] / base
-    # Cap each name at MAX_NAME_WEIGHT; re-spread leftover onto names still under the cap.
+    # Cap only names that received idle fill / are in the move mask (ok). Continuing
+    # mid-week holds may sit above 15% until a full rebalance — never silent-trim them here.
     for _ in range(len(tw) + 1):
-        over = {s: tw[s] - MAX_NAME_WEIGHT for s in tw if tw[s] > MAX_NAME_WEIGHT + 1e-12}
+        over = {s: tw[s] - MAX_NAME_WEIGHT for s in ok if s in tw and tw[s] > MAX_NAME_WEIGHT + 1e-12}
         if not over:
             break
         for s in over:
@@ -369,10 +370,12 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
         n_picks = int(( _cfg(h).get("select") or {}).get("n") or ft.PIN.get("n") or 10)
         invested = float(wd[wd > 0].sum()) or float(ft.PIN.get("invested") or 0.99)
         tw = replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
-        # Include any rank-11+ replacements in the move mask so build_orders sizes them
+        # Mark new/moving names only — continuing holds stay out of fill_idle's ok/cap set
+        # so mid-week membership changes never redistribute onto (or trim) them.
         move = move.reindex(sorted(set(move.index) | set(tw) | set(hw.index))).fillna(False)
         for s in tw:
-            move.loc[s] = True
+            if s not in continue_syms:
+                move.loc[s] = True
         tw = fill_idle(tw, hw, move, blocked, px, invested)
     # Midweek membership: adds can push sum(tw)>1. Never shrink continuing holds —
     # scale only non-continue weights (new adds / movers) so holds are not trimmed.
