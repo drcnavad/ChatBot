@@ -650,7 +650,6 @@ def pick_replacement(sold_sym, proceeds, equity, held, sold_today, cfg, now, pri
     except Exception:
         pass
     max_w = float(cfg.get("max_weight", 0.20))
-    day = pd.Timestamp(now.astimezone(be.EASTERN).date())
     # need SMA200 + prev closes for candidates — use ranking Close + ma_200 when present, else bars
     for _, r in rank.iterrows():
         sym = str(r["Symbol"]).upper()
@@ -1177,7 +1176,7 @@ def run_check(now=None, dry_run=None, cfg=None):
     rows_out = []
     try:
         state = _load_state()
-        today = _ensure_day(state)
+        _ensure_day(state)  # reset sold_today on a new CT day
         try:
             pack = held_candidates(now_ct, cfg)
         except Exception as e:
@@ -1190,7 +1189,6 @@ def run_check(now=None, dry_run=None, cfg=None):
             equity = float(snap.get("Equity") or snap.get("equity") or 0) or 1.0
         except Exception:
             equity = 1.0
-        day = now_ct.astimezone(be.EASTERN).date()
         stamp = now_ct.strftime("%Y-%m-%d %H:%M:%S")
         for c in cands:
             s = c["symbol"]

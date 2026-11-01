@@ -24,7 +24,6 @@ import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import numpy as np
 import pandas as pd
 import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
 from tax_lots import _num as _float_or_nan   # one float parser for every account view (sleeves._num adapts it)

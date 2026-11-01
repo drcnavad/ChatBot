@@ -148,7 +148,7 @@ def _today_prefix() -> str:
 
 def cycle(client, data_client, do_not_sell: set, dry_run: bool) -> int:
     """One reprice pass. Returns number of replaces submitted."""
-    from alpaca.trading.enums import OrderSide, QueryOrderStatus
+    from alpaca.trading.enums import QueryOrderStatus
     from alpaca.trading.requests import GetOrdersRequest, ReplaceOrderRequest
 
     prefix = _today_prefix()

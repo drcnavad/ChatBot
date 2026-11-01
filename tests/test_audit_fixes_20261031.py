@@ -1,4 +1,4 @@
-"""Regression tests for the Oct 31 2026 live-trading audit fixes (ledger v4, 15% cap,
+"""Regression tests for the Oct 31 2026 live-trading audit fixes (ledger v4, equal-weight sizing,
 sold_block-on-fill, ah_reprice MAX_SPREAD, evening-retry deferral). No broker orders."""
 import json
 import os

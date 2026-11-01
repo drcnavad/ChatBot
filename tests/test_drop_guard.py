@@ -31,7 +31,7 @@ def check(what, ok, got=""):
 cfg = dict(dg.DEFAULT_CONFIG)
 check("default drop 4.0%", abs(cfg["drop_pct"] - 0.04) < 1e-12)
 check("no AI min_confidence in defaults", "min_confidence" not in cfg)
-check("default max_weight 15%", cfg["max_weight"] == 0.15)
+check("default max_weight 20% backstop", cfg["max_weight"] == 0.20)
 check("window ends before 2:30", tuple(cfg["window_end_ct"]) == (14, 15))
 check("window starts 8:30 CT", tuple(cfg["window_start_ct"]) == (8, 30))
 check("default dry_run True (safe)", cfg["dry_run"] is True)

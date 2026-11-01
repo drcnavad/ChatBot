@@ -1186,7 +1186,6 @@ def verdict(board):
     # Prefer the marked live row (real account path); fall back to the paper LIVE line.
     names = board["Strategy"].astype(str)
     live_row = board[names.str.endswith(LIVE_MARK)]
-    live_key = live_row["Strategy"].iloc[0] if len(live_row) else LIVE
     by = board.assign(_k=names.str.replace(LIVE_MARK, "", regex=False)).drop_duplicates("_k", keep="first").set_index("_k")
     live_stats = live_row.iloc[0] if len(live_row) else (by.loc[LIVE] if LIVE in by.index else None)
     week_cols = [c for c in board.columns if c.startswith("Week ") and "so far" not in c]

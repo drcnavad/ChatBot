@@ -41,7 +41,7 @@ def render_drop_guard():
     info_text(
         f"Drop guard · {status}: every 15 min ~8:30 AM–2:15 PM CT, any held stock down ≥{drop:g}% vs prior close "
         f"is sold automatically (no AI). Cancels any open target limit on that name first. After a fill, proceeds "
-        f"buy the top-ranked eligible replacement (do_not_buy, ≤{float(cfg.get('max_weight', 0.15))*100:g}% weight, "
+        f"buy the top-ranked eligible replacement (do_not_buy, ≤{float(cfg.get('max_weight', 0.20))*100:g}% weight, "
         f"above SMA200, not sold today, not itself down ≥{drop:g}%). Cash waits for 2:30 if nothing qualifies."
     )
     try:

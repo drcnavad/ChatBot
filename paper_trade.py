@@ -48,7 +48,7 @@ CASH_CUSHION = 0.01    # buys are capped at free cash / (1 + 1%) so market fills
 # weight to the next best-ranked eligible stock not already picked, never worse than this rank (else that weight is cash).
 FRIDAY_SUB_MAX_RANK = 20
 # LIVE order pricing (auto_trade and the 9 AM fill check): every order is a LIMIT priced from the latest quote, never a
-# market order. Only the manual `paper_trade.py --submit` CLI sends DAY market orders, without the 15% / freshness checks.
+# market order. Only the manual `paper_trade.py --submit` CLI sends DAY market orders, without the quote freshness / spread checks.
 LIMIT_OFFSET = 0.0005      # buy limit = ask + 0.05%, sell limit = bid - 0.05%
 MAX_SPREAD = 0.005         # a quote with a spread over 0.5% of the mid price is not traded (skipped, see below)
 QUOTE_MAX_AGE_SECS = 60    # a quote older than 60 seconds is stale (not traded)
@@ -647,7 +647,6 @@ def substitute_blocked_picks(targets, positions, ranking, blocked, statuses=None
     touched (not topped up, as before). No candidate left -> that weight stays in cash (noted).
     Returns (targets, statuses, blocked, info) with info = {"replaced": [(skipped, rank, why, replacement, rank, weight)],
     "unfilled": [(skipped, rank, why)], "max_rank": max_rank, "skipped": [(candidate, why)]}."""
-    import backtest_engine as be
     max_rank = FRIDAY_SUB_MAX_RANK if max_rank is None else max_rank
     positions, prices = _clean_positions(positions), prices or {}
     statuses, blocked = dict(statuses or {}), dict(blocked or {})

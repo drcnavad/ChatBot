@@ -794,7 +794,6 @@ def wait_for_final_bar(mode):
 
 def data_summary():
     """(data date, decision lines, next-decision line) from the pipeline outputs."""
-    import pandas as pd
     out = {"data_date": None, "decisions": [], "next": None, "rules": None}
     path = os.path.join(REPORTS, "strategy_midweek_check.csv")
     if db.exists(path):

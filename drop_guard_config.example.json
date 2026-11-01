@@ -11,7 +11,7 @@
     14,
     15
   ],
-  "max_weight": 0.15,
+  "max_weight": 0.2,
   "earnings_lookback_days": 5,
   "llm_required_for_live": true,
   "vol_avg_days": 20,
