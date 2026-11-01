@@ -75,9 +75,10 @@ def _append_log(row):
         pass
 
 
-def record_sell(sym, sold_on=None, source="", note="", n=None, now=None):
+def record_sell(sym, sold_on=None, source="", note="", n=None, now=None, order_id=""):
     """Record a live sell of `sym`. Extends an existing block if the new through-date is later.
-    Returns the block entry. Does nothing for blank symbols."""
+    Returns the block entry. Does nothing for blank symbols.
+    `order_id` (when known) lets clear_block only remove this sell's block on a 0-fill."""
     sym = str(sym or "").strip().upper()
     if not sym:
         return None
@@ -98,11 +99,14 @@ def record_sell(sym, sold_on=None, source="", note="", n=None, now=None):
         "note": str(note or "")[:200],
         "at": now.astimezone(be.CENTRAL).isoformat(timespec="seconds"),
         "business_days": n,
+        "order_id": str(order_id or "")[:80],
     }
     if prev and str(prev.get("through", "")) > entry["through"]:
         # keep the later expiry; update note/source
         entry["through"] = prev["through"]
         entry["sold_on"] = prev.get("sold_on", entry["sold_on"])
+        if not entry["order_id"] and prev.get("order_id"):
+            entry["order_id"] = prev.get("order_id")
     data["blocks"][sym] = entry
     _save(data)
     _append_log({
@@ -169,15 +173,28 @@ def is_blocked(sym, as_of=None):
     return str(sym).upper() in active_blocks(as_of)
 
 
-def clear_block(sym, reason="cleared"):
-    """Remove a buy-block (e.g. evening SELL expired/canceled with 0 fill). Returns True if removed."""
+def clear_block(sym, reason="cleared", order_id=None, source=None):
+    """Remove a buy-block. Returns True if removed.
+
+    When `order_id` and/or `source` are given, only clear if the stored block matches
+    (so a 0-fill of one order cannot wipe a block from an earlier real fill of the same symbol).
+    With neither matcher, clears unconditionally (tests / explicit admin clear).
+    """
     sym = str(sym or "").strip().upper()
     if not sym:
         return False
     data = _load()
-    prev = data["blocks"].pop(sym, None)
+    prev = data["blocks"].get(sym)
     if not prev:
         return False
+    if order_id is not None or source is not None:
+        if order_id is not None:
+            if str(prev.get("order_id") or "") != str(order_id):
+                return False
+        if source is not None and order_id is None:
+            if str(prev.get("source") or "") != str(source):
+                return False
+    del data["blocks"][sym]
     _save(data)
     _append_log({
         "At_CT": datetime.now(be.CENTRAL).strftime("%Y-%m-%d %H:%M:%S"),
