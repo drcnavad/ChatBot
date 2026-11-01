@@ -39,7 +39,7 @@ EARNINGS_STOP_STATE = (os.environ.get("STOCK_ANALYSIS_EARNINGS_STOP_STATE")     
 ORDER_COLUMNS = ["Symbol", "Side", "Shares", "Price", "Est_Value", "Current_Shares", "Target_Shares",
                  "Target_Weight_%", "Target_Value"]
 NO_TRADE_BAND = 0.01   # Friday rebalance: a target holding within 1 percentage point of its weight is not traded
-MAX_ORDER_PCT = 0.20   # backstop: a BUY worth more than 20% of equity is refused (not sent, not carried to 9 AM).
+MAX_ORDER_PCT = 0.15   # backstop: a BUY worth more than 15% of equity is refused (not sent, not carried to 9 AM).
                        # (a safety check only; sizing is equal weight, 1/n per stock, since Oct 21, 2026)
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
 INVESTED_CAP = 0.99   # a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED; a cap, not a scale-down)
@@ -1015,10 +1015,11 @@ def _cancel_target_sells_for_orders(client, orders):
 
 
 def _record_sold_blocks_from_results(results, source="pipeline"):
-    """Record sold_block for each SELL that actually reached the broker (has Order_ID).
+    """Record sold_block only when a SELL actually filled (shares left the account).
 
-    STAGED / SKIPPED / FAILED rows must not block rebuy or drop target_sells entries —
-    those never left the account.
+    Submit-only / pending_new / STAGED / SKIPPED / FAILED / 0-fill must NOT block rebuy —
+    the morning fill-check records the block when FILLED/COMPLETED, and clears it if an
+    evening order expires or cancels with 0 fill.
     """
     try:
         import sold_block
@@ -1035,11 +1036,16 @@ def _record_sold_blocks_from_results(results, source="pipeline"):
             continue
         status = str(getattr(r, "Status", getattr(r, "status", "")) or "")
         status_u = status.upper()
-        # Must have a broker order id — STAGED/SKIPPED have Order_ID None
         oid = getattr(r, "Order_ID", None)
         if oid is None or oid == "" or str(oid).lower() in ("none", "nan"):
             continue
-        if any(tok in status_u for tok in ("SKIP", "FAIL", "REFUSED", "STAGED")):
+        if any(tok in status_u for tok in ("SKIP", "FAIL", "REFUSED", "STAGED", "WAITING")):
+            continue
+        # Require an actual fill signal in the status text (evening immediate fill, or
+        # fill-check COMPLETED/FILLED). Bare "submitted (pending_new)" must not block.
+        filled_hint = ("FILLED" in status_u or "COMPLETED" in status_u
+                       or "(FILLED)" in status_u or "FILL " in status_u)
+        if not filled_hint:
             continue
         sym = str(getattr(r, "Symbol", "")).upper()
         if not sym:
@@ -1845,12 +1851,33 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             if filled >= qty - 1e-9:
                 px[len(results)] = _price_cols(o.get("quote"), side, getattr(alp, "filled_avg_price", None), filled)
                 results.append((sym, side, qty, oid, f"FILLED ({filled:g}/{qty})"))
+                if side == "SELL" and filled > 0:
+                    try:
+                        import sold_block
+                        sold_block.record_sell(sym, source="fill_check",
+                                               note=f"FILLED ({filled:g}/{qty})")
+                    except Exception as e:
+                        print(f"  WARNING: sold_block on fill failed for {sym}: {e}")
                 continue
             if status == "rejected":
                 # A rejected evening order needs a human look (e.g. a buying-power or
                 # corporate-action reject) - it is never auto-retried as a limit order.
                 results.append((sym, side, qty, oid, f"REJECTED - not retried, needs review (filled {filled:g}/{qty})"))
+                if side == "SELL" and filled <= 0:
+                    try:
+                        import sold_block
+                        sold_block.clear_block(sym, reason=f"rejected 0-fill oid={oid}")
+                    except Exception:
+                        pass
                 continue
+            if status in ("expired", "canceled", "cancelled") and filled <= 0 and side == "SELL":
+                # Evening DAY order died with no fill: do not keep a buy-block from the submit.
+                try:
+                    import sold_block
+                    if sold_block.clear_block(sym, reason=f"{status} 0-fill oid={oid}"):
+                        print(f"  cleared sold_block for {sym} ({status}, 0 fill)")
+                except Exception:
+                    pass
         # Anything else not fully filled is completed with a regular-hours DAY limit order
         # for the unfilled remainder: still-open orders, and terminal-but-unfilled ones
         # (expired / done_for_day / canceled - the normal overnight state of a DAY
@@ -2038,6 +2065,13 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             how = ("sent now, nothing was sent before" if status == "staged" and not filled
                    else f"{status}, filled {filled:g}/{qty} before")     # a never-sent row vs the rest of an earlier order
             results.append((sym, side, to_order, str(m.id), f"COMPLETED via limit ${q['limit']:g} ({how}){partial}"))
+            if side == "SELL":
+                try:
+                    import sold_block
+                    sold_block.record_sell(sym, source="fill_check",
+                                           note=f"COMPLETED via limit ({to_order:g})")
+                except Exception as e:
+                    print(f"  WARNING: sold_block on COMPLETED failed for {sym}: {e}")
         except Exception as e:                      # e.g. Alpaca rejected the order, or the network dropped
             _retry(o, sym, side, remaining, oid, str(e))
     try:
@@ -2407,29 +2441,52 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
     n_skipped = int(results["Status"].str.startswith("SKIP").sum())
     print(f"\n  Submitted/Staged: {n_submitted}  |  Failed: {n_failed}  |  Skipped: {n_skipped}")
     if n_failed:
-        # Not retried automatically: a decision runs once (run_state last_decision), and failed rows are
-        # not in the 9 AM list. Say so plainly.
         failed = results[results["Status"].str.startswith("FAILED")]
+        # Stage FAILED rows into the pending file (no order_id) so the next 9 AM fill-check retries them.
+        for r in failed.itertuples():
+            try:
+                record_pending_order({
+                    "symbol": str(r.Symbol).upper(),
+                    "side": str(r.Side).upper(),
+                    "qty": float(r.Shares),
+                    "limit_price": None,
+                    "order_id": None,
+                    "exit": str(r.Side).upper() == "SELL",
+                    "failed_submit": True,
+                    "recorded_at": datetime.now(ZoneInfo("America/Chicago")).isoformat(timespec="seconds"),
+                }, meta, PENDING_ORDERS_JSON)
+            except Exception as e:
+                print(f"  WARNING: could not stage FAILED {r.Side} {r.Symbol} for fill-check retry: {e}")
         log_event("Trade", "failed", "yes" if n_submitted else "no",
                   f"{n_failed} order(s) not sent: Alpaca returned an error for: {_list_syms(zip(failed['Symbol'], failed['Shares']))}. "
-                  f"Other orders are fine. Check Alpaca; place any you still want by hand. "
+                  f"They are staged for the next 9 AM fill-check retry. "
                   f"Log: Reports/live_orders_log.csv",
                   details="; ".join(f"{r.Side} {r.Symbol} {r.Shares}: {r.Status}" for r in failed.itertuples()))
     if n_submitted:
         prices = dict(zip(orders["Symbol"].astype(str), pd.to_numeric(orders["Price"], errors="coerce")))
         log_event("Trade", "ok", *_trade_notice(results, prices))
+    meta["n_failed"] = n_failed
+    meta["n_failed_sells"] = int(((results["Status"].str.startswith("FAILED")) &
+                                  (results["Side"].astype(str).str.upper() == "SELL")).sum()) if not results.empty else 0
+    meta["ledger_saved"] = True  # True when no sleeve ledger to save
     if meta.get("sleeve_ledger") is not None:
-        # The halves' tags + cash claims (no shares: live positions are the record); the next run moves the cash by the
-        # real fills. Saved even if some orders failed or wait for 9 AM.
+        # Crash-safe: run_all must NOT mark last_decision if this save fails.
         import sleeves
         try:
             sleeves.save_ledger(meta["sleeve_ledger"])
             sleeves.plan_table(meta["sleeves"]).pipe(db.to_csv, sleeves.PLAN_CSV, index=False)
+            try:
+                sleeves.write_strategy_picks(meta["sleeve_ledger"].get("day"), led=meta["sleeve_ledger"],
+                                            inp=(meta.get("sleeves") or {}).get("inp"))
+            except Exception as e:
+                print(f"  strategy_picks not synced from sleeve: {type(e).__name__}: {e}")
             print(f"  Sleeve ledger saved: {os.path.relpath(sleeves.LEDGER_JSON, PROJECT_ROOT)}")
-        except Exception as e:   # never hides the trade: logged, the next run reconciles from the account
-            log_event("Trade", "warning", "yes" if n_submitted else "no",
-                      "Couldn't save the live ledger (Reports/sleeve_ledger.json). The orders are not affected; "
-                      "check the file before the next Friday run.", details=str(e))
+            meta["ledger_saved"] = True
+        except Exception as e:
+            meta["ledger_saved"] = False
+            log_event("Trade", "failed", "yes" if n_submitted else "no",
+                      "Couldn't save the live ledger (Reports/sleeve_ledger.json). Decision will NOT be marked done "
+                      "so the next run can retry. Check the file.", details=str(e))
         try:   # the ranks this decision used, for the Strategy tab (display only; the orders are already sent)
             import decision_ranks
             decision_ranks.save(meta["sleeve_ledger"].get("day"))
@@ -2482,11 +2539,16 @@ def main(argv=None):
             hold = str((ra.load_state() or {}).get("hold_until") or "")
             if hold:
                 import backtest_engine as be
-                sys.exit(
-                    f"Refusing --submit: live trading is on hold until {hold} "
-                    f"{be.slot_text(hold)} (run_state hold_until). "
-                    f"Pass --force-hold only if Chirag explicitly overrides the hold."
-                )
+                # hold_until is the decision day trading is postponed until; once that
+                # calendar day is in the past, the hold has expired (do not refuse forever).
+                hold_day = pd.Timestamp(hold).date()
+                today = _today_ct().date()
+                if today <= hold_day:
+                    sys.exit(
+                        f"Refusing --submit: live trading is on hold until {hold} "
+                        f"{be.slot_text(hold)} (run_state hold_until). "
+                        f"Pass --force-hold only if Chirag explicitly overrides the hold."
+                    )
         except SystemExit:
             raise
         except Exception as e:

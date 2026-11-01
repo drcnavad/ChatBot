@@ -169,6 +169,26 @@ def is_blocked(sym, as_of=None):
     return str(sym).upper() in active_blocks(as_of)
 
 
+def clear_block(sym, reason="cleared"):
+    """Remove a buy-block (e.g. evening SELL expired/canceled with 0 fill). Returns True if removed."""
+    sym = str(sym or "").strip().upper()
+    if not sym:
+        return False
+    data = _load()
+    prev = data["blocks"].pop(sym, None)
+    if not prev:
+        return False
+    _save(data)
+    _append_log({
+        "At_CT": datetime.now(be.CENTRAL).strftime("%Y-%m-%d %H:%M:%S"),
+        "Symbol": sym, "Action": "CLEAR",
+        "Sold_On": prev.get("sold_on", ""), "Blocked_Through": prev.get("through", ""),
+        "Source": prev.get("source", ""), "Note": str(reason or "")[:200],
+    })
+    return True
+
+
+
 def set_business_days(n):
     data = _load()
     data["business_days"] = max(1, int(n))
