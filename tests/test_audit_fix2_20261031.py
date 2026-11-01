@@ -192,6 +192,12 @@ for f in (ROOT / "launchd").glob("com.stockanalysis.*.plist"):
 check(desk == 0, "no Desktop paths in repo launchd plists", desk)
 
 
+# --- idle cash: sellable unowned value is folded into half sizing ---
+import inspect
+src = inspect.getsource(sleeves.plan)
+check("unowned_mv" in src, "plan folds unowned_mv into half values")
+
+
 print()
 if fails:
     print(f"{len(fails)} FAILED: {fails}")

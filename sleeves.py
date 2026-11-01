@@ -298,7 +298,6 @@ def replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
         for s in fresh:
             out[s] = w
     elif not kept and fresh:
-        # Init / all-new book: classic equal weight across the filled slots.
         w = min(float(invested) / len(fresh), MAX_NAME_WEIGHT)
         out = {s: w for s in fresh}
     return out
@@ -322,8 +321,7 @@ def fill_idle(tw, hw, move, blocked, px, invested):
     if free > 1e-9 and base > 0:
         for s in ok:
             tw[s] += free * tw[s] / base
-    # Cap only names that received idle fill / are in the move mask (ok). Continuing
-    # mid-week holds may sit above 15% until a full rebalance — never silent-trim them here.
+    # Cap only movers (ok). Continues above 15% stay until Friday — never silent-trim them.
     for _ in range(len(tw) + 1):
         over = {s: tw[s] - MAX_NAME_WEIGHT for s in ok if s in tw and tw[s] > MAX_NAME_WEIGHT + 1e-12}
         if not over:
@@ -336,8 +334,37 @@ def fill_idle(tw, hw, move, blocked, px, invested):
         if leftover <= 1e-12 or room_w <= 1e-12:
             break
         for s in room:
-            add = leftover * (MAX_NAME_WEIGHT - tw[s]) / room_w
-            tw[s] = min(MAX_NAME_WEIGHT, tw[s] + add)
+            tw[s] = min(MAX_NAME_WEIGHT, tw[s] + leftover * (MAX_NAME_WEIGHT - tw[s]) / room_w)
+    # Still short of invested after movers hit the 15% cap: top up held names under the cap
+    # (prefer at/above entry). Unheld already got first claim above.
+    free = float(invested) - sum(tw.values())
+    if free > 1e-9:
+        held = [s for s in tw if float(hw.get(s, 0.0) or 0.0) > 0 and s not in blocked
+                and _num(px.get(s)) and tw[s] < MAX_NAME_WEIGHT - 1e-12]
+        try:
+            import paper_trade as pt
+            ent = getattr(pt, "LIVE_ENTRY", {}) or {}
+        except Exception:
+            ent = {}
+        prefer = [s for s in held if ent.get(s) and px.get(s) and float(px[s]) >= float(ent[s])]
+        dest = prefer or held
+        if dest:
+            base = sum(max(tw[s], 1e-12) for s in dest)
+            for s in dest:
+                tw[s] += free * (tw[s] / base if base > 0 else 1.0 / len(dest))
+            for _ in range(len(tw) + 1):
+                over = {s: tw[s] - MAX_NAME_WEIGHT for s in dest if tw[s] > MAX_NAME_WEIGHT + 1e-12}
+                if not over:
+                    break
+                for s in over:
+                    tw[s] = MAX_NAME_WEIGHT
+                leftover = sum(over.values())
+                room = [s for s in dest if tw[s] < MAX_NAME_WEIGHT - 1e-12]
+                room_w = sum(MAX_NAME_WEIGHT - tw[s] for s in room)
+                if leftover <= 1e-12 or room_w <= 1e-12:
+                    break
+                for s in room:
+                    tw[s] = min(MAX_NAME_WEIGHT, tw[s] + leftover * (MAX_NAME_WEIGHT - tw[s]) / room_w)
     return tw
 
 def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_value):
@@ -397,7 +424,7 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
         tw = replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
         # Mark new/moving names only — continuing holds stay out of fill_idle's ok/cap set
         # so mid-week membership changes never redistribute onto (or trim) them.
-        move = move.reindex(sorted(set(move.index) | set(tw) | set(hw.index))).fillna(False)
+        move = move.reindex(sorted(set(move.index) | set(tw) | set(hw.index))).fillna(False).astype(bool)
         for s in tw:
             if s not in continue_syms:
                 move.loc[s] = True
@@ -446,6 +473,12 @@ def plan(day, positions, equity, prices, no_buy=None, no_sell=None, fractional=T
     init = info["init"]
     no_sell = no_sell or {}
     values = {h: half_value(state[h], px) for h in HALVES}
+    # Unowned names (not do_not_sell) are sold this session — fold their value into the
+    # sleeve so buys size against that cash. Otherwise sell proceeds sit idle (Chirag).
+    unowned_mv = sum(q * (_num(px.get(s)) or 0.0) for s, q in unowned.items() if s not in no_sell)
+    if unowned_mv > 0:
+        for h in HALVES:
+            values[h] += unowned_mv * float(shares.get(h, 0.0) or 0.0)
     parts, tgts, traded = {}, {}, {}
     for h in HALVES:
         if values[h] <= 0:
