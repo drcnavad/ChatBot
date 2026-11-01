@@ -261,8 +261,9 @@ def replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
 
     Triggers: symbol in `blocked` (do_not_buy, sold_block, earnings-soon top-up, no price, …) and not already
     held. Held blocked names stay (not topped up by fill_idle). Walks the live ranking with no hard rank cap
-    so the book stays at 10 whenever enough eligible names exist. Only re-equalizes when a slot was actually
-    replaced; otherwise returns `tw` unchanged so strategy_targets weights (regime etc.) stay intact.
+    so the book stays at 10 whenever enough eligible names exist. When a slot is replaced, held names keep
+    their current weights and only new unheld names share remaining room under `invested` (no mid-week
+    renormalize/trim of continues). If nothing was dropped, returns `tw` unchanged.
     """
     tw = dict(tw)
     dropped = [s for s in list(tw) if s in blocked and float(hw.get(s, 0.0) or 0.0) <= 0]
@@ -285,8 +286,22 @@ def replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
     final = [s for s in tw if (s not in blocked or s in held) and (_num(px.get(s)) or s in held)]
     if not final:
         return {}
-    w = min(float(invested) / len(final), MAX_NAME_WEIGHT)
-    return {s: w for s in final}
+    # Keep already-held weights intact (mid-week continues sit at hw). Only the new
+    # (unheld) names share whatever room is left under `invested` — never renormalize
+    # holds just because a blocked new pick was swapped for another name.
+    kept = {s: float(tw[s]) for s in final if s in held}
+    fresh = [s for s in final if s not in held]
+    room = max(0.0, float(invested) - sum(kept.values()))
+    out = dict(kept)
+    if fresh and room > 1e-12:
+        w = min(room / len(fresh), MAX_NAME_WEIGHT)
+        for s in fresh:
+            out[s] = w
+    elif not kept and fresh:
+        # Init / all-new book: classic equal weight across the filled slots.
+        w = min(float(invested) / len(fresh), MAX_NAME_WEIGHT)
+        out = {s: w for s in fresh}
+    return out
 
 
 
@@ -343,10 +358,20 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
     wd = w.reindex(names).fillna(0.0)
     pv = prev.reindex(names).fillna(0.0)
     hw = held_w.reindex(names).fillna(0.0)
-    changed = ~np.isclose(wd, pv, rtol=0, atol=1e-12)
-    if not init:   # a saved holding the recomputed target disagrees with is re-decided (forward_test's Oct 26 fix)
-        changed |= ((hw > 0) != (wd > 0)) & (not full and half_day(h, d))
-    move = (changed | (full & ((wd > 0) | (hw > 0)))) if trade_today else pd.Series(False, index=names)
+    # Membership flip = held xor in-target. Weight drift among the same names is separate.
+    membership = (hw > 0) != (wd > 0)
+    if trade_today:
+        if full:
+            # Friday / init: every name with a target or a holding moves to its target weight.
+            move = (wd > 0) | (hw > 0)
+        else:
+            # Mid-week exit check: ONLY membership flips (full exits + new adds).
+            # Equal-weight targets drift whenever a peer enters/exits the top-N; treating
+            # that drift as `changed` used to resize continuing holds and silently trim them.
+            # Keep continues at held weight; scale only adds later if sum(tw) > 1.
+            move = membership.copy()
+    else:
+        move = pd.Series(False, index=names)
     soon = inp.get("soon")
     soon_d = (soon.loc[d] if soon is not None and d in soon.index else pd.Series(False, index=cols)).reindex(names).fillna(False)
     tw = {}

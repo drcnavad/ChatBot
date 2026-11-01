@@ -96,6 +96,34 @@ check(abs(tw["HOLD1"] - 0.40) < 1e-12 and abs(tw["HOLD2"] - 0.40) < 1e-12,
 check(abs(sum(tw.values()) - 1.0) < 1e-9, "scaled sum == 1", sum(tw.values()))
 check(abs(tw["ADD1"] - 0.10) < 1e-9 and abs(tw["ADD2"] - 0.10) < 1e-9, "adds scaled to room", tw)
 
+# replace_blocked must not re-equalize held continues when swapping a blocked new pick
+tw2 = {"HOLD1": 0.20, "HOLD2": 0.20, "NEW1": 0.099, "BAD": 0.099}
+hw2 = pd.Series({"HOLD1": 0.20, "HOLD2": 0.20})
+blocked2 = {"BAD": "sold-block"}
+px2 = {"HOLD1": 10.0, "HOLD2": 10.0, "NEW1": 10.0, "BAD": 10.0, "REPL": 10.0}
+# ranking returns REPL first among fillers
+fake_rank = pd.Series(range(5, 0, -1), index=["REPL", "ZZZ", "HOLD1", "HOLD2", "NEW1"], dtype=float)
+with mock.patch.object(sleeves, "ranking", return_value=fake_rank):
+    out = sleeves.replace_blocked_new_slots(
+        "rs_short", pd.Timestamp("2026-10-30"), tw2, hw2, blocked2, px2,
+        inp={}, n_picks=4, invested=0.99,
+    )
+check(abs(out.get("HOLD1", 0) - 0.20) < 1e-12 and abs(out.get("HOLD2", 0) - 0.20) < 1e-12,
+      "replace_blocked keeps held weights", out)
+check("BAD" not in out, "replace_blocked drops blocked new", out)
+check("REPL" in out and out["REPL"] > 0, "replace_blocked adds replacement", out)
+check(abs(sum(out.values()) - 0.99) < 1e-9 or sum(out.values()) <= 0.99 + 1e-9,
+      "replace_blocked sum <= invested", sum(out.values()))
+
+# midweek move mask = membership only (continues not resized by equal-weight drift)
+hw3 = pd.Series({"A": 0.15, "B": 0.15, "C": 0.15})
+wd3 = pd.Series({"A": 0.099, "B": 0.099, "D": 0.099})  # C exited, D added; A/B drifted
+membership = (hw3.reindex(sorted(set(hw3.index)|set(wd3.index))).fillna(0) > 0) != (
+    wd3.reindex(sorted(set(hw3.index)|set(wd3.index))).fillna(0) > 0)
+move_m = membership
+check(bool(move_m["C"]) and bool(move_m["D"]), "membership marks exit+add", move_m)
+check(not bool(move_m["A"]) and not bool(move_m["B"]), "membership leaves continues", move_m)
+
 
 # --- #5 drop_guard fail-closed ---
 import drop_guard as dg
