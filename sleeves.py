@@ -35,8 +35,8 @@ LEDGER_JSON = os.environ.get("STOCK_ANALYSIS_SLEEVE_LEDGER") or os.path.join(REP
 PLAN_CSV = os.environ.get("STOCK_ANALYSIS_SLEEVE_PLAN") or os.path.join(REPORTS, "sleeve_plan.csv")
 HALVES = ("rs_short",)
 STRATEGY = {"rs_short": "Short-term relative strength"}
-LABEL = {"rs_short": "Short-term relative strength"}
-SHORT = {"rs_short": "Short-term relative strength"}
+LABEL = STRATEGY
+SHORT = STRATEGY  # alias
 VERSION = 4
 MAX_NAME_WEIGHT = 0.15   # per-stock cap (Chirag): fill_idle / replacements never push a name above 15%
 CT = ZoneInfo("America/Chicago")
@@ -251,9 +251,6 @@ def half_value(st, prices):
     return st["cash"] + sum(q * (_num(prices.get(s)) or 0.0) for s, q in st["shares"].items())
 
 # ----------------------------------------------------------------------------- the plan
-def _prev_session(d, idx):
-    before = idx[idx < d]
-    return before[-1] if len(before) else None
 
 def replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested):
     """Keep `n_picks` names: drop NEW picks that cannot be bought and fill each empty slot with the next
@@ -301,8 +298,6 @@ def replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
         w = min(float(invested) / len(fresh), MAX_NAME_WEIGHT)
         out = {s: w for s in fresh}
     return out
-
-
 
 def fill_idle(tw, hw, move, blocked, px, invested):
     """No idle cash (Chirag, Oct 26, 2026 - NOT in the backtest, which keeps that cash): the weight of a target that cannot
@@ -368,22 +363,17 @@ def fill_idle(tw, hw, move, blocked, px, invested):
     return tw
 
 def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_value):
-    """build_orders rows for half h (its own account): the names that move (target changed, or every name on its full
-    rebalance / the switch) go to their target weight; the others keep their shares - forward_test.update_strategies."""
+    """build_orders rows for half h: movers go to target weight; continues keep shares."""
     import forward_test as ft
     import paper_trade as pt
-    w_all = targets(h, inp)
     w = half_weights(h, d, inp)
     cols = w.index
-    prev_d = _prev_session(d, w_all.index)
-    prev = w_all.loc[prev_d].reindex(cols).fillna(0.0) if prev_d is not None else pd.Series(0.0, index=cols)
     full = init or full_day(h, d)
     trade_today = init or half_day(h, d)
     held_v = {s: q * (_num(px.get(s)) or 0.0) for s, q in st["shares"].items()}
     held_w = pd.Series({s: v / value for s, v in held_v.items()}, dtype=float) if value > 0 else pd.Series(dtype=float)
     names = sorted(set(cols[w > 0]) | set(st["shares"]))
     wd = w.reindex(names).fillna(0.0)
-    pv = prev.reindex(names).fillna(0.0)
     hw = held_w.reindex(names).fillna(0.0)
     # Membership flip = held xor in-target. Weight drift among the same names is separate.
     membership = (hw > 0) != (wd > 0)
@@ -418,7 +408,6 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
         if float(hw.get(s, 0.0) or 0.0) <= 0 and not _num(px.get(s)):
             blocked.setdefault(s, "no live price")
     if trade_today and move.any():
-        import forward_test as ft
         n_picks = int(( _cfg(h).get("select") or {}).get("n") or ft.PIN.get("n") or 10)
         invested = float(wd[wd > 0].sum()) or float(ft.PIN.get("invested") or 0.99)
         tw = replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
