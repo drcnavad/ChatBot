@@ -615,15 +615,15 @@ def latest_ranking():
 def rs_protected_symbols(n=10):
     """Today's live RS short-term top-n + sleeve ledger tags: drop_guard must not sell these.
 
-    Same ranking live trading uses. Empty set if sleeves inputs unavailable (fail open).
+    Same ranking live trading uses. Returns None if sleeves inputs are unavailable
+    (fail closed: caller must skip auto-sells rather than sell unprotected).
     """
-    out = set()
     try:
         import sleeves as sl
         inp = sl.inputs()
         day = inp["close"].index[-1]
         r = sl.ranking(sl.HALVES[0], day, inp)
-        out |= {str(s).upper() for s in list(r.index)[:int(n)]}
+        out = {str(s).upper() for s in list(r.index)[:int(n)]}
         try:
             w = sl.half_weights(sl.HALVES[0], day, inp)
             out |= {str(s).upper() for s, v in w.items() if float(v or 0) > 0}
@@ -633,9 +633,9 @@ def rs_protected_symbols(n=10):
         if led:
             tags = (led.get("halves") or {}).get(sl.HALVES[0], {}).get("tags") or []
             out |= {str(s).upper() for s in tags}
+        return out
     except Exception:
-        pass
-    return out
+        return None
 
 
 def pick_replacement(sold_sym, proceeds, equity, held, sold_today, cfg, now, price_map):
@@ -1267,7 +1267,17 @@ def run_check(now=None, dry_run=None, cfg=None):
             # Auto-sell at threshold (Chirag Oct 30 2026: no LLM gate).
             # Keep AI_* log columns for dashboard/CSV compatibility.
             # Never fight the 2:30 RS book: skip names still in today's top-n / sleeve tags.
+            # Fail closed: if the protect set cannot be built, skip ALL auto-sells this tick.
             protected = rs_protected_symbols()
+            if protected is None:
+                base["Action"] = "SKIP"
+                base["AI_Action"] = "SKIP"
+                base["AI_Reasons"] = "RS protect unavailable — fail closed, no auto-sell"
+                base["Replace_Note"] = "RS protect unavailable"
+                base["Note"] = (base.get("Note") or "") + ("; " if base.get("Note") else "") + "RS protect unavailable"
+                append_log(base)
+                rows_out.append(base)
+                continue
             if str(c["symbol"]).upper() in protected:
                 base["Action"] = "SKIP"
                 base["AI_Action"] = "SKIP"
