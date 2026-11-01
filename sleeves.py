@@ -395,7 +395,7 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
         tw = replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
         # Mark new/moving names only — continuing holds stay out of fill_idle's ok/cap set
         # so mid-week membership changes never redistribute onto (or trim) them.
-        move = move.reindex(sorted(set(move.index) | set(tw) | set(hw.index))).fillna(False).astype(bool)
+        move = move.reindex(sorted(set(move.index) | set(tw) | set(hw.index)), fill_value=False).astype(bool)
         for s in tw:
             if s not in continue_syms:
                 move.loc[s] = True
