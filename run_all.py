@@ -427,9 +427,10 @@ def decision_gate(now_ct, state, scheduled=False):
     hold = str(state.get("hold_until") or "")      # Chirag, Oct 27: first RS short-term rebalance postponed (Fed week)
     # Once the hold day itself is due (D >= hold) or already traded, the hold has expired.
     # Clear a stale hold_until so later mid-week checks are not blocked forever after a missed clear.
+    # Keep last_cleared_hold_until so superseded/missed notices for days under that hold still cite it.
     if hold and D.date().isoformat() >= hold:
         try:
-            update_state(hold_until="")
+            state.update(update_state(hold_until="", last_cleared_hold_until=hold))
         except Exception:
             pass
         hold = ""
@@ -1058,11 +1059,14 @@ def main(argv=None):
 
 def _miss_reason(state, D, why=""):
     """Plain cause for a decision that did not trade. Prefer hold_until over the old 'asleep' guess —
-    launchd idle lines already prove the Mac was awake when hold_until blocked Wed/Thu Oct 28-29."""
+    launchd idle lines already prove the Mac was awake when hold_until blocked Wed/Thu Oct 28-29.
+    After hold_until is auto-cleared, last_cleared_hold_until still explains superseded days under that hold."""
     import backtest_engine as be
     hold = str(state.get("hold_until") or "")
-    if hold and D.date().isoformat() < hold:
-        return (f"live trading was on hold until the {hold} {be.slot_text(hold)} decision "
+    cleared = str(state.get("last_cleared_hold_until") or "")
+    effective = hold or cleared
+    if effective and D.date().isoformat() < effective:
+        return (f"live trading was on hold until the {effective} {be.slot_text(effective)} decision "
                 f"(run_state hold_until)")
     why = str(why or "")
     if "hold_until" in why or "on hold until" in why:
