@@ -8,7 +8,7 @@ close); from the next day both checks apply. When triggered, SELL automatically 
 Cancels any open target_sells limit on that symbol first so qty is free, then sells whole
 shares at a bid limit and any fractional remainder with a regular-hours DAY market order
 (no dust left). After a sell fills, immediately buy the top-ranked eligible replacement
-with that sale's proceeds only (do_not_buy, 15% weight cap, above SMA200, not sold by the
+with that sale's proceeds only (do_not_buy, 20% weight backstop, above SMA200, not sold by the
 guard today; already-down replacements are allowed). If nothing qualifies, cash waits for
 the 2:30 run.
 
@@ -54,7 +54,7 @@ DEFAULT_CONFIG = {
     "drop_pct": 0.04,                # trigger+auto-sell: mid <= entry*(1-d) OR prev*(1-d); today-buys: entry only
     "window_start_ct": [8, 30],      # CT inclusive
     "window_end_ct": [14, 15],       # CT exclusive (stop before 2:30 job)
-    "max_weight": 0.15,              # replacement: do not push a name above this of equity
+    "max_weight": 0.20,              # sanity backstop (equal-weight live book ~9.9%; above that is refuse)
     "earnings_lookback_days": 5,     # include earnings facts when a report falls in this window
     "vol_avg_days": 20,              # days for average volume / typical cumulative volume
 }
@@ -649,7 +649,7 @@ def pick_replacement(sold_sym, proceeds, equity, held, sold_today, cfg, now, pri
         do_not |= set(sold_block.active_blocks())
     except Exception:
         pass
-    max_w = float(cfg.get("max_weight", 0.15))
+    max_w = float(cfg.get("max_weight", 0.20))
     day = pd.Timestamp(now.astimezone(be.EASTERN).date())
     # need SMA200 + prev closes for candidates — use ranking Close + ma_200 when present, else bars
     for _, r in rank.iterrows():

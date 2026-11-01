@@ -7,10 +7,10 @@ exit check (a stock worse than rank 20 is sold and replaced by the next eligible
 within 5 days skipped), earnings within 5 days not newly bought, soft QQQ regime, do_not_buy never bought, do_not_sell
 never sold.
 
-Targets = forward_test.strategy_targets of that line (the very code the backtest / forward test runs); trades like
-forward_test.update_strategies: names whose target changed (every name on the Friday rebalance) go to their target
-weight (1-point band, 99% invested), the others are left alone. No idle cash (Chirag, Oct 26 - not in the backtest):
-fill_idle spreads a blocked pick's weight and residual cash over the names that trade.
+On every trade day (Friday rebalance and Mon–Thu exit check) the live book is sized with one rule only:
+target = (equity × 0.99) / 10 per stock (equal weight). Exits sold, new names bought, continues trimmed or topped
+to that slot. No per-name weight cap, no fill_idle / scale-adds / renormalize / top-ups (Chirag Oct 31).
+Blocked new picks (e.g. CRL) are replaced from the live ranking; the replacement still gets the same equal slot.
 
 Ledger (Reports/sleeve_ledger.json, version 4): share count per symbol and cash after the planned trades. Next run
 (reconcile): live positions are matched to the ledger; a position the ledger does not claim is sold (do_not_sell kept);
@@ -38,7 +38,6 @@ STRATEGY = {"rs_short": "Short-term relative strength"}
 LABEL = STRATEGY
 SHORT = STRATEGY  # alias
 VERSION = 4
-MAX_NAME_WEIGHT = 0.15   # per-stock cap (Chirag): fill_idle / replacements never push a name above 15%
 CT = ZoneInfo("America/Chicago")
 
 def config():
@@ -97,7 +96,7 @@ def targets(h, inp=None):
     return _TARGETS[key]
 
 def half_weights(h, day, inp=None):
-    """Half h's target weights on session `day` (Series, fractions of the half; stocks removed from the list dropped)."""
+    """Half h's target *membership* on session `day` (Series; >0 = in the book). Live sizing ignores these values and uses equal invested/n."""
     import sector_mapping as sm
     inp = inp or inputs()
     w = targets(h, inp)
@@ -252,25 +251,12 @@ def half_value(st, prices):
 
 # ----------------------------------------------------------------------------- the plan
 
-def replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested):
-    """Keep `n_picks` names: drop NEW picks that cannot be bought and fill each empty slot with the next
-    eligible live-ranked stock (Chirag, Oct 29).
-
-    Triggers: symbol in `blocked` (do_not_buy, sold_block, earnings-soon top-up, no price, …) and not already
-    held. Held blocked names stay (not topped up by fill_idle). Walks the live ranking with no hard rank cap
-    so the book stays at 10 whenever enough eligible names exist. When a slot is replaced, held names keep
-    their current weights and only new unheld names share remaining room under `invested` (no mid-week
-    renormalize/trim of continues). If nothing was dropped, returns `tw` unchanged.
-    """
-    tw = dict(tw)
-    dropped = [s for s in list(tw) if s in blocked and float(hw.get(s, 0.0) or 0.0) <= 0]
-    if not dropped:
-        return tw
-    for s in dropped:
-        del tw[s]
-    held = {s for s, w in hw.items() if float(w or 0.0) > 0}
-    taken = set(tw) | held
-    added = []
+def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, invested):
+    """`n_picks` slots at equal weight invested/n. Drop NEW blocked picks; fill from the live ranking.
+    Held blocked names stay (build_orders freezes top-ups)."""
+    held_set = set(held)
+    tw = {s: 0.0 for s in names if s not in blocked or s in held_set}
+    taken = set(tw) | held_set
     r = ranking(h, d, inp)
     for s in r.index:
         if len(tw) >= int(n_picks):
@@ -279,147 +265,49 @@ def replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
             continue
         tw[s] = 0.0
         taken.add(s)
-        added.append(s)
-    final = [s for s in tw if (s not in blocked or s in held) and (_num(px.get(s)) or s in held)]
+    final = [s for s in tw if (s not in blocked or s in held_set) and (_num(px.get(s)) or s in held_set)]
     if not final:
         return {}
-    # Keep already-held weights intact (mid-week continues sit at hw). Only the new
-    # (unheld) names share whatever room is left under `invested` — never renormalize
-    # holds just because a blocked new pick was swapped for another name.
-    kept = {s: float(tw[s]) for s in final if s in held}
-    fresh = [s for s in final if s not in held]
-    room = max(0.0, float(invested) - sum(kept.values()))
-    out = dict(kept)
-    if fresh and room > 1e-12:
-        w = min(room / len(fresh), MAX_NAME_WEIGHT)
-        for s in fresh:
-            out[s] = w
-    elif not kept and fresh:
-        w = min(float(invested) / len(fresh), MAX_NAME_WEIGHT)
-        out = {s: w for s in fresh}
-    return out
-
-def fill_idle(tw, hw, move, blocked, px, invested):
-    """Spread blocked/unpriced weight and cash below `invested` onto buyable names that trade today.
-    Movers get first claim (capped at 15%); any remainder tops up held names under the cap (prefer at/above entry)."""
-    tw = dict(tw)
-    for s in list(tw):
-        if (s in blocked or not _num(px.get(s))) and tw[s] > hw.get(s, 0.0):
-            tw[s] = float(hw.get(s, 0.0))
-            if tw[s] <= 0:
-                del tw[s]
-    ok = [s for s in tw if move.get(s, False) and s not in blocked and _num(px.get(s))]
-
-    def _give(cands, free):
-        if free <= 1e-9 or not cands:
-            return
-        base = sum(max(tw[s], 1e-12) for s in cands)
-        for s in cands:
-            tw[s] += free * (tw[s] / base)
-        for _ in range(len(tw) + 1):
-            over = {s: tw[s] - MAX_NAME_WEIGHT for s in cands if tw[s] > MAX_NAME_WEIGHT + 1e-12}
-            if not over:
-                return
-            for s in over:
-                tw[s] = MAX_NAME_WEIGHT
-            left = sum(over.values())
-            room = [s for s in cands if tw[s] < MAX_NAME_WEIGHT - 1e-12]
-            room_w = sum(MAX_NAME_WEIGHT - tw[s] for s in room)
-            if left <= 1e-12 or room_w <= 1e-12:
-                return
-            for s in room:
-                tw[s] = min(MAX_NAME_WEIGHT, tw[s] + left * (MAX_NAME_WEIGHT - tw[s]) / room_w)
-
-    _give(ok, float(invested) - sum(tw.values()))
-    free = float(invested) - sum(tw.values())
-    if free > 1e-9:
-        held = [s for s in tw if float(hw.get(s, 0.0) or 0.0) > 0 and s not in blocked
-                and _num(px.get(s)) and tw[s] < MAX_NAME_WEIGHT - 1e-12]
-        try:
-            import paper_trade as pt
-            ent = getattr(pt, "LIVE_ENTRY", {}) or {}
-        except Exception:
-            ent = {}
-        prefer = [s for s in held if ent.get(s) and px.get(s) and float(px[s]) >= float(ent[s])]
-        _give(prefer or held, free)
-    return tw
+    slot = float(invested) / len(final)
+    return {s: slot for s in final}
 
 def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_value):
-    """build_orders rows for half h: movers go to target weight; continues keep shares."""
+    """One sizing rule on a trade day: each of the 10 book names gets invested/n (equal weight).
+    Exits leave the book. Off-day: holds keep shares. No fill_idle / caps / scale-adds / renormalize."""
     import forward_test as ft
     import paper_trade as pt
-    w = half_weights(h, d, inp)
-    cols = w.index
-    full = init or full_day(h, d)
+    w = half_weights(h, d, inp)  # membership only — weight values are not used for sizing
     trade_today = init or half_day(h, d)
     held_v = {s: q * (_num(px.get(s)) or 0.0) for s, q in st["shares"].items()}
     held_w = pd.Series({s: v / value for s, v in held_v.items()}, dtype=float) if value > 0 else pd.Series(dtype=float)
-    names = sorted(set(cols[w > 0]) | set(st["shares"]))
-    wd = w.reindex(names).fillna(0.0)
+    picks = sorted(w[w > 0].index.tolist())
+    names = sorted(set(picks) | set(st["shares"]))
     hw = held_w.reindex(names).fillna(0.0)
-    # Membership flip = held xor in-target. Weight drift among the same names is separate.
-    membership = (hw > 0) != (wd > 0)
-    if trade_today:
-        if full:
-            # Friday / init: every name with a target or a holding moves to its target weight.
-            move = (wd > 0) | (hw > 0)
-        else:
-            # Mid-week exit check: ONLY membership flips (full exits + new adds).
-            # Equal-weight targets drift whenever a peer enters/exits the top-N; treating
-            # that drift as `changed` used to resize continuing holds and silently trim them.
-            # Keep continues at held weight; scale only adds later if sum(tw) > 1.
-            move = membership.copy()
-    else:
-        move = pd.Series(False, index=names)
     soon = inp.get("soon")
-    soon_d = (soon.loc[d] if soon is not None and d in soon.index else pd.Series(False, index=cols)).reindex(names).fillna(False)
-    tw = {}
-    for s in names:
-        if move[s]:
-            if wd[s] > 0:
-                tw[s] = float(wd[s])
-        elif hw[s] > 0:
-            tw[s] = float(hw[s])              # left alone (within its own weight: the band keeps it untraded)
-    # Continuing holds (not in the move mask): keep share weights — never renormalize them away.
-    continue_syms = {s for s in names if (not bool(move[s])) and float(hw.get(s, 0.0) or 0.0) > 0}
-    blocked = {**{s: n for s, n in (no_buy or {}).items()},
-               **{s: "earnings within 5 days (held: not topped up)" for s in names if soon_d[s] and hw[s] > 0
-                  and s in tw and tw[s] > hw[s]}}
-    # New picks with no price are also unbuyable (same as blocked for slot-fill)
+    soon_d = (soon.loc[d] if soon is not None and d in soon.index else pd.Series(False, index=w.index)).reindex(names).fillna(False)
+    if not trade_today:
+        tw = {s: float(hw[s]) for s in names if hw[s] > 0}
+    else:
+        tw = {s: 0.0 for s in picks}
+    blocked = dict(no_buy or {})
+    if trade_today:
+        for s in names:
+            if bool(soon_d.get(s, False)) and hw[s] > 0 and s in tw:
+                blocked.setdefault(s, "earnings within 5 days (held: not topped up)")
     for s in list(tw):
         if float(hw.get(s, 0.0) or 0.0) <= 0 and not _num(px.get(s)):
             blocked.setdefault(s, "no live price")
-    if trade_today and move.any():
-        n_picks = int(( _cfg(h).get("select") or {}).get("n") or ft.PIN.get("n") or 10)
-        invested = float(wd[wd > 0].sum()) or float(ft.PIN.get("invested") or 0.99)
-        tw = replace_blocked_new_slots(h, d, tw, hw, blocked, px, inp, n_picks, invested)
-        # Mark new/moving names only — continuing holds stay out of fill_idle's ok/cap set
-        # so mid-week membership changes never redistribute onto (or trim) them.
-        move = move.reindex(sorted(set(move.index) | set(tw) | set(hw.index)), fill_value=False).astype(bool)
-        for s in tw:
-            if s not in continue_syms:
-                move.loc[s] = True
-        tw = fill_idle(tw, hw, move, blocked, px, invested)
-    # Midweek membership: adds can push sum(tw)>1. Never shrink continuing holds —
-    # scale only non-continue weights (new adds / movers) so holds are not trimmed.
-    cont_sum = sum(float(tw[s]) for s in tw if s in continue_syms)
-    add_keys = [s for s in tw if s not in continue_syms]
-    add_sum = sum(float(tw[s]) for s in add_keys)
-    if cont_sum + add_sum > 1.0 + 1e-12:
-        room = max(0.0, 1.0 - cont_sum)
-        if add_sum > 1e-12 and add_sum > room + 1e-12:
-            scale = room / add_sum
-            for s in add_keys:
-                tw[s] = float(tw[s]) * scale
-        elif add_sum > 1e-12 and room <= 1e-12:
-            for s in add_keys:
-                tw[s] = 0.0
-        tw = {s: w for s, w in tw.items() if float(w) > 1e-12}
+    if trade_today:
+        n_picks = int((_cfg(h).get("select") or {}).get("n") or ft.PIN.get("n") or 10)
+        invested = float(ft.PIN.get("invested") or 0.99)
+        held_set = {s for s in names if hw[s] > 0}
+        tw = replace_blocked_new_slots(h, d, list(tw), held_set, blocked, px, inp, n_picks, invested)
     tg = pd.DataFrame({"Symbol": list(tw), "Weight": [tw[s] for s in tw], "Price": [px.get(s) for s in tw]})
     stat = {s: ("hold" if s in st["shares"] else "add") for s in tw}
     o = pt.build_orders(tg, value, st["shares"], px, min_value=min_value, fractional=fractional, statuses=stat,
                         blocked=blocked, keep=no_sell)
-    return o, {s: float(wd[s]) for s in names if wd[s] > 0}, bool(move.any())
+    return o, dict(tw), bool(trade_today and len(tw) > 0)
+
 
 def plan(day, positions, equity, prices, no_buy=None, no_sell=None, fractional=True, ledger="load", min_value=1.0,
          inp=None, fills=None, pending=(), **_old):

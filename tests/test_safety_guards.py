@@ -1,7 +1,7 @@
 """Live-bot safety guards (mocks and temp files only: no broker, no network; the real run log / run_state are never
 written):
   * backtest_engine.rank_targets: equal weights, 1/n each (Oct 21, 2026; no vol sizing, no weight cap), halved with the regime off
-  * paper_trade.MAX_ORDER_PCT (backstop): a BUY worth more than 15% of equity is refused - not sent, not staged for 9 AM, one
+  * paper_trade.MAX_ORDER_PCT (backstop): a BUY worth more than 20% of equity is refused - not sent, not staged for 9 AM, one
     plain run-log row; sells are never capped; today's plans stay under it
   * run_all: a scheduled decision that missed its 2:30 PM slot and waits for the market gets ONE run-log warning row
     (then the launchd runs stay quiet; the watchdog still sees 'idle:' as the last line); --dry-run writes nothing
@@ -56,7 +56,7 @@ for on in (True, False):
     check(f"equal weight (regime {'on' if on else 'off'}): every pick {want:.0%}", np.allclose(w, want), w.round(4).tolist())
 
 # ------------------------------------------------------------------ order cap (pure backstop)
-check("order backstop constant is 15% of equity here (tests/c6_rules pins it)", pt.MAX_ORDER_PCT == 0.15)
+check("order backstop constant is 20% of equity here (tests/c6_rules pins it)", pt.MAX_ORDER_PCT == 0.20)
 o = pd.DataFrame([{"Symbol": "OK", "Side": "BUY", "Shares": 14.0, "Price": 100.0},
                   {"Symbol": "BIG", "Side": "BUY", "Shares": 21.0, "Price": 100.0},
                   {"Symbol": "OUT", "Side": "SELL", "Shares": 50.0, "Price": 100.0}], columns=pt.ORDER_COLUMNS)
@@ -93,7 +93,7 @@ try:
     staged = [x["symbol"] for x in json.load(open(pend))["orders"]]
     big = res[res["Symbol"] == "BIG"]
     check("auto_trade: the 40% buy is not staged / sent (not carried to 9 AM), the normal one is",
-          staged == ["AAA"] and len(big) == 1 and big["Status"].iloc[0].startswith("SKIPPED: over the 15%"), (staged, res.to_dict("records")))
+          staged == ["AAA"] and len(big) == 1 and big["Status"].iloc[0].startswith("SKIPPED: over the 20%"), (staged, res.to_dict("records")))
     cap_rows = [a for a in seen if "Order cap" in a[3]]
     check("auto_trade: one plain run-log warning row for the refused order",
           len(cap_rows) == 1 and cap_rows[0][:3] == ("Trade", "warning", "no") and "BIG 40 shares" in cap_rows[0][3], seen)

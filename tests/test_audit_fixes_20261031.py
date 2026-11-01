@@ -28,22 +28,12 @@ def check(cond, name, detail=""):
         FAIL.append(name)
         print(f"FAIL {name} {detail}")
 
-# --- 15% cap ---
-check(pt.MAX_ORDER_PCT == 0.15, "MAX_ORDER_PCT is 15%")
-check(sleeves.MAX_NAME_WEIGHT == 0.15, "sleeves.MAX_NAME_WEIGHT is 15%")
-tw = sleeves.fill_idle(
-    {"A": 0.10, "B": 0.10, "C": 0.10, "D": 0.10},
-    {}, {s: True for s in "ABCD"}, {"D": "blocked"},
-    {s: 1 for s in "ABCD"}, 0.99)
-check(all(v <= 0.15 + 1e-12 for v in tw.values()), "fill_idle caps at 15%", tw)
-check("D" not in tw, "fill_idle drops blocked", tw)
-tw2 = sleeves.replace_blocked_new_slots(
-    "rs_short", pd.Timestamp("2026-10-30"),
-    {"A": 0.0, "B": 0.0}, {}, {"A": "x", "B": "x"}, {"A": 1, "B": 1, "C": 1, "D": 1},
-    None, 2, 0.99)  # will fail without ranking - skip if needed
-# replace_blocked needs ranking; test equalize math directly:
-w = min(0.99 / 6, sleeves.MAX_NAME_WEIGHT)
-check(w == 0.15, "replace_blocked equalize capped at 15% when n small", w)
+# --- equal weight / order backstop ---
+check(pt.MAX_ORDER_PCT == 0.20, "MAX_ORDER_PCT is 20% sanity backstop")
+check(not hasattr(sleeves, "MAX_NAME_WEIGHT"), "no sleeves.MAX_NAME_WEIGHT (equal weight)")
+check(not hasattr(sleeves, "fill_idle"), "fill_idle removed")
+w = 0.99 / 10
+check(abs(w - 0.099) < 1e-12, "equal slot = invested/10", w)
 
 # --- ah_reprice respects MAX_SPREAD ---
 why = ah_reprice._sane_ask("FDS", 316.0, 342.15, 330.0)

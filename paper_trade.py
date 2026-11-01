@@ -39,7 +39,7 @@ EARNINGS_STOP_STATE = (os.environ.get("STOCK_ANALYSIS_EARNINGS_STOP_STATE")     
 ORDER_COLUMNS = ["Symbol", "Side", "Shares", "Price", "Est_Value", "Current_Shares", "Target_Shares",
                  "Target_Weight_%", "Target_Value"]
 NO_TRADE_BAND = 0.01   # Friday rebalance: a target holding within 1 percentage point of its weight is not traded
-MAX_ORDER_PCT = 0.15   # backstop: a BUY worth more than 15% of equity is refused (not sent, not carried to 9 AM).
+MAX_ORDER_PCT = 0.20   # sanity backstop only (above equal ~9.9% slot); a BUY over 20% of equity is refused.
                        # (a safety check only; sizing is equal weight, 1/n per stock, since Oct 21, 2026)
 MAX_FILL_TRIES = 3     # a pending row that keeps failing is dropped after this many fill checks (then: by hand)
 INVESTED_CAP = 0.99   # a rebalance with new buys ends at <= 99% invested (== backtest_engine.LIVE_INVESTED; a cap, not a scale-down)

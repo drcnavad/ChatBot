@@ -27,7 +27,7 @@ check(be.winner_label(90)[0] == "RS-S-U90" and be.winner_label(90)[1].startswith
 names = {c["name"] for c in ft.STRATEGIES}
 check(ft.LIVE == sleeves.STRATEGY["rs_short"] and {ft.LIVE, ft.RS_FRIDAYS, ft.BLEND} <= names,
       "the live line is RS short-term; RS Fridays and the 50/50 stay as paper lines")
-check(pt.MAX_ORDER_PCT == 0.15, "order backstop = 15% of equity")
+check(pt.MAX_ORDER_PCT == 0.20, "order backstop = 20% of equity (above equal ~9.9%)")
 check(sleeves.LEDGER_JSON.startswith(tempfile.gettempdir()) or "tmp" in sleeves.LEDGER_JSON, "test ledger is a temp file")
 
 days = pd.date_range("2026-10-26", "2026-12-04")
@@ -70,14 +70,17 @@ check(blk not in set(o3[o3["Side"] == "BUY"]["Symbol"]), "do_not_buy: never boug
 o4, i4 = sleeves.plan(d, {}, 100000.0, px, ledger=None, inp=inp, no_buy={blk: "x"})
 b4 = o4[o4["Side"] == "BUY"]["Est_Value"].sum()
 check(abs(b4 - orders[orders["Side"] == "BUY"]["Est_Value"].sum()) < 300, "blocked pick: its cash is spread over the other buys", b4)
-tw = sleeves.fill_idle({"A": 0.10, "B": 0.10, "C": 0.10}, {}, {"A": True, "B": True, "C": True}, {"C": "x"}, {"A": 1, "B": 1, "C": 1}, 0.30)
-check("C" not in tw and abs(tw["A"] - 0.15) < 1e-9 and abs(tw["B"] - 0.15) < 1e-9,
-      "fill_idle: blocked dropped; 15% cap on redistribution", tw)
-tw = sleeves.fill_idle({"A": 0.2, "B": 0.2}, {}, {"A": True, "B": True}, {}, {"A": 1, "B": 1}, 0.495)
-# 0.2+0.2=0.4 < 0.495 so free=0.095 spreads, then each capped at 0.15 → both 0.15 (idle leftover OK)
-check(all(tw[s] <= sleeves.MAX_NAME_WEIGHT + 1e-12 for s in tw), "fill_idle: never above 15% per name", tw)
-tw2 = sleeves.fill_idle({"A": 0.10, "B": 0.10}, {}, {"A": True, "B": True}, {}, {"A": 1, "B": 1}, 0.20)
-check(abs(sum(tw2.values()) - 0.20) < 1e-9, "fill_idle: under-cap names keep full invested total", tw2)
+# equal-weight slot: invested/n (no fill_idle / name cap)
+from unittest import mock as _mock
+_fake = __import__("pandas").Series([3.0, 2.0, 1.0], index=["A", "B", "D"])
+with _mock.patch.object(sleeves, "ranking", return_value=_fake):
+    slot = sleeves.replace_blocked_new_slots(
+        "rs_short", d, ["A", "B", "C"], set(), {"C": "x"},
+        {"A": 1, "B": 1, "C": 1, "D": 1}, inp, 3, 0.99)
+check("C" not in slot and "D" in slot, "blocked new replaced", slot)
+check(len(slot) == 3 and all(abs(v - 0.33) < 1e-12 for v in slot.values()),
+      "replace_blocked: equal slots invested/n", slot)
+check(not hasattr(sleeves, "fill_idle"), "fill_idle removed")
 
 print("LIVE RS SHORT-TERM OK" if not FAIL else f"LIVE RS SHORT-TERM FAILURES ({len(FAIL)}): {FAIL}")
 sys.exit(1 if FAIL else 0)
