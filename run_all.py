@@ -425,6 +425,14 @@ def decision_gate(now_ct, state, scheduled=False):
         return None, None, "no decision found in the last 15 days"
     label = f"{D:%a %b %d} {be.decision_kind(D)}"
     hold = str(state.get("hold_until") or "")      # Chirag, Oct 27: first RS short-term rebalance postponed (Fed week)
+    # Once the hold day itself is due (D >= hold) or already traded, the hold has expired.
+    # Clear a stale hold_until so later mid-week checks are not blocked forever after a missed clear.
+    if hold and D.date().isoformat() >= hold:
+        try:
+            update_state(hold_until="")
+        except Exception:
+            pass
+        hold = ""
     if hold and D.date().isoformat() < hold:
         return None, None, f"live trading on hold until the {hold} {be.slot_text(hold)} decision (run_state hold_until)"
     done = str(state.get("last_decision") or "")
@@ -442,7 +450,18 @@ def decision_gate(now_ct, state, scheduled=False):
     sup = f"superseded at {until:%a %b %d %I:%M %p} CT" if until else ""
     if now_ct.date() == D.date() and trade_how(D, now_ct) == "session":
         return D, "session", f"{label} after {be.slot_text(D)}, regular-hours orders"
+    # After a prior *session-window* failure for today's decision, do NOT auto-retry into
+    # after-hours (Oct 30: main failed at 2:30, then a later retry slipped the trade to ~3:18 AH).
+    # A failure that was already in the evening window may still retry evening. Manual
+    # `python run_all.py --trade` (scheduled=False) is never deferred.
+    prior_n = int(att.get("n", 0)) if att.get("decision") == D.date().isoformat() else 0
+    prior_at = _parse_ct(att.get("at")) if prior_n >= 1 else None
+    defer_evening = (scheduled and prior_at is not None and trade_how(D, prior_at) == "session")
     if now_ct.date() == D.date() and not paper_trade._past_evening_cutoff(now_ct):
+        if defer_evening:
+            start = next_session_start(now_ct)
+            return D, "wait", (f"{label} prior session attempt failed - evening auto-retry deferred; "
+                               f"runs {start:%a %b %d} 9:00 AM CT ({sup} if not run)")
         return D, "evening", f"{label} after {be.slot_text(D)}, extended-hours orders"
     if in_session(now_ct):
         return D, "session", f"catch-up of the missed {label} now, regular-hours limit orders ({sup} if not run)"
@@ -1037,6 +1056,19 @@ def main(argv=None):
             daily_step(later)
     return rc
 
+def _miss_reason(state, D, why=""):
+    """Plain cause for a decision that did not trade. Prefer hold_until over the old 'asleep' guess —
+    launchd idle lines already prove the Mac was awake when hold_until blocked Wed/Thu Oct 28-29."""
+    import backtest_engine as be
+    hold = str(state.get("hold_until") or "")
+    if hold and D.date().isoformat() < hold:
+        return (f"live trading was on hold until the {hold} {be.slot_text(hold)} decision "
+                f"(run_state hold_until)")
+    why = str(why or "")
+    if "hold_until" in why or "on hold until" in why:
+        return why.split(": ", 1)[-1] if ": " in why else why
+    return "the scheduled run did not place that decision (check launchd_evening.log / hold_until / failures)"
+
 def report_waiting(D, why, state):
     """Log once (run log row) that decision D missed its 2:30 PM CT slot and waits for the next session. Returns the
     state changes ({} when already reported)."""
@@ -1044,15 +1076,18 @@ def report_waiting(D, why, state):
     if str(state.get("last_missed_notice") or "") >= D.date().isoformat():
         return {}
     rest = why.split(": ", 1)[-1]
+    cause = _miss_reason(state, D, why)
     log_event("Missed decision", "warning", "no", f"The {D:%a %b %d} {be.decision_kind(D)} did not run at its "
-              f"{be.slot_text(D)} slot (the Mac was asleep or off). {rest[:1].upper() + rest[1:]}. No money moved yet.")
+              f"{be.slot_text(D)} slot ({cause}). {rest[:1].upper() + rest[1:]}. No money moved yet.")
     return update_state(last_missed_notice=D.date().isoformat())
 
-def report_superseded(prev, now_ct):
+def report_superseded(prev, now_ct, state=None):
     """Log once (run log row) that decision `prev` never ran and is now replaced by the newer one. Returns the new state."""
     import backtest_engine as be
     D = be.last_decision_date(now_ct)
-    msg = (f"The {prev:%a %b %d} {be.decision_kind(prev)} never ran (the Mac was asleep or off). It was skipped at "
+    state = state if state is not None else load_state()
+    cause = _miss_reason(state, prev)
+    msg = (f"The {prev:%a %b %d} {be.decision_kind(prev)} never ran ({cause}). It was skipped at "
            f"{be.decision_slot(D):%a %I:%M %p} CT, when the {D:%a %b %d} {be.decision_kind(D)} replaced it. No money moved.")
     log_event("Missed decision", "warning", "no", msg)
     return update_state(last_superseded=prev.date().isoformat())
@@ -1098,8 +1133,9 @@ def _fill_check(now, run_id, saved_argv, mode, state, ckpt_write, ckpt_clear, cl
 def _trade(D, how, failures, state, clock, ckpt):
     """The --trade phase for decision D (under the trade lock). how = 'evening' (extended-hours limit orders, completed
     by the 9 AM check) or 'session' (a missed decision caught up in regular hours: orders staged, then sent at once as
-    limit orders under the fill-check lock). D is marked done (run_state last_decision) as soon as auto_trade returns,
-    even with FAILED rows, so a decision is never traded twice. Returns (results, meta)."""
+    limit orders under the fill-check lock). D is marked done (run_state last_decision) only when the sleeve
+    ledger saved (if any) and no SELL submit FAILED; FAILED rows are staged for the 9 AM fill-check.
+    Returns (results, meta)."""
     proceed, reason = _trade_decision(failures)
     if not proceed:
         logging.warning("=== trade skipped: %s", reason)
@@ -1129,14 +1165,30 @@ def _trade(D, how, failures, state, clock, ckpt):
             return None, {"error": str(e)}
         st_, side = results["Status"].astype(str), results["Side"]
         n_fail = int(st_.str.startswith("FAILED").sum())
+        n_fail_sell = int(((st_.str.startswith("FAILED")) & (side.astype(str).str.upper() == "SELL")).sum())
         n_sent = int((~st_.str.startswith(("SKIP", "FAILED"))).sum())
-        logging.info("  trade: %d buys, %d sells, %d skipped, %d failed, %d submitted/staged (target=%s, as_of=%s) "
-                     "-> Reports/live_orders_log.csv", int((side == "BUY").sum()), int((side == "SELL").sum()),
-                     int(st_.str.startswith("SKIP").sum()), n_fail, n_sent, meta["source"], meta["as_of"])
-        state.update(update_state(last_decision=D.date().isoformat(), **({"last_trade_at": clock()} if n_sent else {})))
-        logging.info("  decision %s done (run_state last_decision) - it never runs again", D.date())
-        if n_fail:
+        ledger_ok = bool(meta.get("ledger_saved", True))
+        logging.info("  trade: %d buys, %d sells, %d skipped, %d failed, %d submitted/staged (target=%s, as_of=%s, "
+                     "ledger_saved=%s) -> Reports/live_orders_log.csv",
+                     int((side == "BUY").sum()), int((side == "SELL").sum()),
+                     int(st_.str.startswith("SKIP").sum()), n_fail, n_sent, meta["source"], meta["as_of"], ledger_ok)
+        # Mark decision done only when the sleeve ledger saved (if any) and no critical SELL failed.
+        # FAILED rows are staged for the 9 AM fill-check; a missing ledger must not look "done".
+        if not ledger_ok:
+            logging.warning("  decision %s NOT marked done - sleeve ledger save failed", D.date())
+            failures.append("trade")
+        elif n_fail_sell:
+            logging.warning("  decision %s NOT marked done - %d SELL submit(s) FAILED (staged for fill-check)",
+                            D.date(), n_fail_sell)
             failures.append("trade_partial")
+            if n_sent:
+                state.update(update_state(last_trade_at=clock()))
+        else:
+            state.update(update_state(last_decision=D.date().isoformat(),
+                                      **({"last_trade_at": clock()} if n_sent else {})))
+            logging.info("  decision %s done (run_state last_decision) - it never runs again", D.date())
+            if n_fail:
+                failures.append("trade_partial")
         if session and n_sent:
             logging.info("=== send now (paper_trade.complete_unfilled_orders: regular-hours limit orders at the live quote, 2 decimals)")
             try:

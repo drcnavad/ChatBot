@@ -612,6 +612,32 @@ def latest_ranking():
     return sig.sort_values("Strategy_Rank")
 
 
+def rs_protected_symbols(n=10):
+    """Today's live RS short-term top-n + sleeve ledger tags: drop_guard must not sell these.
+
+    Same ranking live trading uses. Empty set if sleeves inputs unavailable (fail open).
+    """
+    out = set()
+    try:
+        import sleeves as sl
+        inp = sl.inputs()
+        day = inp["close"].index[-1]
+        r = sl.ranking(sl.HALVES[0], day, inp)
+        out |= {str(s).upper() for s in list(r.index)[:int(n)]}
+        try:
+            w = sl.half_weights(sl.HALVES[0], day, inp)
+            out |= {str(s).upper() for s, v in w.items() if float(v or 0) > 0}
+        except Exception:
+            pass
+        led = sl.load_ledger()
+        if led:
+            tags = (led.get("halves") or {}).get(sl.HALVES[0], {}).get("tags") or []
+            out |= {str(s).upper() for s in tags}
+    except Exception:
+        pass
+    return out
+
+
 def pick_replacement(sold_sym, proceeds, equity, held, sold_today, cfg, now, price_map):
     """Top-ranked eligible symbol to buy with `proceeds`, or (None, reason)."""
     rank = latest_ranking()
@@ -1240,6 +1266,17 @@ def run_check(now=None, dry_run=None, cfg=None):
 
             # Auto-sell at threshold (Chirag Oct 30 2026: no LLM gate).
             # Keep AI_* log columns for dashboard/CSV compatibility.
+            # Never fight the 2:30 RS book: skip names still in today's top-n / sleeve tags.
+            protected = rs_protected_symbols()
+            if str(c["symbol"]).upper() in protected:
+                base["Action"] = "SKIP"
+                base["AI_Action"] = "SKIP"
+                base["AI_Reasons"] = "RS top-n / sleeve target — drop_guard will not sell"
+                base["Replace_Note"] = "protected RS target"
+                base["Note"] = (base.get("Note") or "") + ("; " if base.get("Note") else "") + "protected RS target"
+                append_log(base)
+                rows_out.append(base)
+                continue
             drop_pct = float(cfg["drop_pct"])
             base["AI_Action"] = "AUTO"
             base["AI_Confidence"] = 1.0

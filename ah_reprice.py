@@ -2,7 +2,7 @@
 """After-hours SELL reprice loop (Chirag, Oct 30 2026).
 
 Every INTERVAL_SECS until STOP_CT (default 18:58 America/Chicago), for each open
-extended-hours SELL from today's evening rebalance: fetch SIP ask; if sane and
+extended-hours SELL from today's evening rebalance: fetch SIP ask; if sane (spread <= paper_trade.MAX_SPREAD) and
 different from the working limit, replace_order_by_id with limit=ask and remaining
 unfilled qty. Updates Reports/live_pending_orders.json order_id so Mon 9 AM
 fill-check does not double-sell. Never touches BUYs, do_not_sell, or unrelated orders.
@@ -31,6 +31,12 @@ LOG_PATH = os.path.join(REPORTS, "logs", "ah_reprice.log")
 PID_PATH = os.path.join(REPORTS, "logs", "ah_reprice.pid")
 PENDING = os.path.join(REPORTS, "live_pending_orders.json")
 MAX_ASK_VS_LAST = 0.10          # ask must be within 10% of last trade
+# Match paper_trade.MAX_SPREAD: do not reprice into a wide AH quote; leave for Mon 9 AM.
+try:
+    import paper_trade as _pt
+    MAX_SPREAD = float(getattr(_pt, "MAX_SPREAD", 0.005))
+except Exception:
+    MAX_SPREAD = 0.005
 INTERVAL_DEFAULT = 120          # seconds
 STOP_DEFAULT = "18:58"
 
@@ -119,13 +125,17 @@ def _sip_quote(sym: str):
 
 
 def _sane_ask(sym: str, bid: float, ask: float, last: float | None) -> str | None:
-    """None if ask is usable; else reason to keep current limit."""
+    """None if ask is usable; else reason to keep current limit (or skip reprice)."""
     if not (ask and ask > 0):
         return "ask missing/<=0"
     if not (bid and bid > 0):
         return "bid missing/<=0"
     if ask < bid:
         return f"ask {ask} < bid {bid}"
+    mid = (bid + ask) / 2.0
+    if mid > 0 and (ask - bid) / mid > MAX_SPREAD:
+        return (f"spread too wide ({(ask - bid) / mid:.2%} > {MAX_SPREAD:.1%}) - "
+                "leave for 9 AM fill-check")
     if last and last > 0:
         if abs(ask / last - 1) > MAX_ASK_VS_LAST:
             return f"ask {ask:g} >{MAX_ASK_VS_LAST:.0%} from last {last:g}"
@@ -236,7 +246,7 @@ def main(argv=None):
     do_not = {str(x).upper() for x in sm.do_not_sell}
 
     log(f"START pid={os.getpid()} stop={stop_at:%H:%M %Z} interval={args.interval}s "
-        f"dry_run={args.dry_run} once={args.once} max_ask_vs_last={MAX_ASK_VS_LAST:.0%}")
+        f"dry_run={args.dry_run} once={args.once} max_ask_vs_last={MAX_ASK_VS_LAST:.0%} max_spread={MAX_SPREAD:.2%}")
     cycle_n = 0
     try:
         while True:
