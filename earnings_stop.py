@@ -39,7 +39,7 @@ import math
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 import db  # noqa: E402  tables live in SQLite (db.py), not CSV files
@@ -171,11 +171,17 @@ def _load_state(path=None):
         s.setdefault(k, {})
     return s
 
-def _save_state(s, path=None):
+def _save_state(s, path=None, as_of=None):
+    """Persist state. `as_of` (date) is the check day — prune notes relative to it so a
+    simulated/as-of run does not wipe today's once-keys with wall-clock now."""
     path = path or STATE_JSON
-    today = datetime.now(be.CENTRAL).date()
-    s["notes"] = {k: v for k, v in s["notes"].items() if v >= str(today - timedelta(days=3))}   # keep a few days
-    s["armed"] = {k: v for k, v in s["armed"].items() if k.split("|")[1] >= str(today - timedelta(days=30))}
+    as_of = as_of or datetime.now(be.CENTRAL).date()
+    if isinstance(as_of, datetime):
+        as_of = as_of.astimezone(be.CENTRAL).date()
+    elif not isinstance(as_of, date):
+        as_of = date.fromisoformat(str(as_of)[:10])
+    s["notes"] = {k: v for k, v in s["notes"].items() if v >= str(as_of - timedelta(days=3))}   # keep a few days
+    s["armed"] = {k: v for k, v in s["armed"].items() if k.split("|")[1] >= str(as_of - timedelta(days=30))}
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(s, f, indent=2)
@@ -325,7 +331,7 @@ def _sell(c, q, session, now, state, pending_path):
         stamp = now.astimezone(be.CENTRAL).isoformat(timespec="seconds")
         state["sold"][key] = {"at": stamp, "order_id": oid, "qty": qty, "limit": limit, "held": held_now,
                               "react": f"{c['last']:%Y-%m-%d}"}
-        _save_state(state)
+        _save_state(state, as_of=today)
         # sold_block / target removal only on a true fill (0-fill stays open via pending).
         if filled > 0:
             try:
@@ -395,7 +401,7 @@ def run_check(now=None, dry_run=False, pending_path=None):
             raise
         _once(state, "inputs", today, "failed", "no", f"The earnings-day stop check could not read its inputs ({str(err)[:150]}). "
               "No stop was checked; next check in 30 seconds.")
-        _save_state(state)
+        _save_state(state, as_of=today)
         RETRY[0] = True
         return []
     if not dry_run:
@@ -438,7 +444,7 @@ def run_check(now=None, dry_run=False, pending_path=None):
         _print_dry(now, session, table, held)
         return rows
     table.pipe(db.to_csv, STATUS_CSV, index=False)
-    _save_state(state)
+    _save_state(state, as_of=today)
     print(f"{stamp} CT ({session}): {len(cands)} held stock(s) on an earnings day" +
           "".join(f"\n  {r['Symbol']}: prev close {r['Prev_Close']} trigger {r['Trigger']} price {r['Price']} -> {r['Status']}"
                   for r in rows))

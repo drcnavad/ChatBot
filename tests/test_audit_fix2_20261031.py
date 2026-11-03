@@ -97,6 +97,26 @@ check(len(out) == 4 and all(abs(v - 0.99/4) < 1e-12 for v in out.values()),
       "replace_blocked equal weight", out)
 check(abs(sum(out.values()) - 0.99) < 1e-9, "replace_blocked sum == invested", sum(out.values()))
 
+# Held stand-ins for blocked ideal picks must stay (rank <= 20), not be sold as "taken"
+names3 = ["H1", "BLK1", "H2", "BLK2"]  # ideal midweek picks; BLK* blocked
+held3 = {"H1", "H2", "SUB1", "SUB2"}   # SUB* are live replacements
+blocked3 = {"BLK1": "sold-block", "BLK2": "sold-block"}
+px3 = {s: 10.0 for s in ["H1", "BLK1", "H2", "BLK2", "SUB1", "SUB2", "X1"]}
+fake_rank3 = pd.Series(
+    [10, 9, 8, 7, 6, 5, 4],
+    index=["X1", "BLK1", "H2", "BLK2", "SUB1", "SUB2", "H1"], dtype=float,
+)
+with mock.patch.object(sleeves, "ranking", return_value=fake_rank3):
+    with mock.patch.object(sleeves, "_cfg", return_value={"exit": (20, 10), "select": {"n": 4}}):
+        out3 = sleeves.replace_blocked_new_slots(
+            "rs_short", pd.Timestamp("2026-11-02"), names3, held3, blocked3, px3,
+            {}, 4, 0.99,
+        )
+check("SUB1" in out3, "SUB1 kept as held replacement", out3)
+check("SUB2" in out3, "SUB2 kept as held replacement", out3)
+check("BLK1" not in out3, "BLK1 still dropped", out3)
+check(len(out3) == 4, "held-replacement book stays at n_picks", out3)
+
 # trade-day move = every target or holding (equal-weight rebalance)
 hw3 = pd.Series({"A": 0.12, "B": 0.08, "C": 0.10})
 wd3 = pd.Series({"A": 0.099, "B": 0.099, "D": 0.099})

@@ -37,7 +37,7 @@ for half in ("rs_short",):
     pos = [{"symbol": x, "qty": "1", "current_price": "450", "market_value": "450"} for x in held]
     t, others = ranking_table(half, day, pos, led, path=REAL_RANKS, equity=1100.0)
     check(f"{half}: ranks 1..n, at most 20", list(t["Rank"]) == list(range(1, len(t) + 1)) and len(t) <= 20, list(t["Rank"]))
-    check(f"{half}: held stock marked", t.iloc[0]["Held by"].startswith("✓"), t.iloc[0].to_dict())
+    check(f"{half}: held stock marked", str(t.iloc[0]["Held"]).startswith("✓"), t.iloc[0].to_dict())
     check(f"{half}: an unranked holding is listed separately", others == ["ZZZ"], others)
 
 # ---------------------------------------------------------------- decision_ranks round trip (temp file, real saved data)

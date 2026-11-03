@@ -171,8 +171,18 @@ try:
           and all(math.isclose(r.Return, r.Gain / (r.Value - r.Gain) * 100) for r in bm[0].iloc[1:].rename(
               columns={"Return %": "Return", "Gain $": "Gain", "Value now": "Value"}).itertuples()), bm)
     # Day 0 of FORWARD_START (start == today): account_vs_etfs shows 0% until a post-start session closes.
-    check("app: day-0 forward restart shows 0% account return until a post-start session closes",
-          len(bm) == 1 and math.isclose(bm[0]["Return %"].iloc[0], 0.0), bm)
+    # Once FORWARD_START is in the past, assert money-return identity instead (stale day-0 check).
+    import backtest_engine as _be
+    _fs = pd.Timestamp(_be.FORWARD_START).normalize()
+    _today = pd.Timestamp.now(tz=_be.CENTRAL).tz_localize(None).normalize()
+    if _fs >= _today:
+        check("app: day-0 forward restart shows 0% account return until a post-start session closes",
+              len(bm) == 1 and math.isclose(bm[0]["Return %"].iloc[0], 0.0), bm)
+    else:
+        row = bm[0].iloc[0]
+        put = float(row["Value now"]) - float(row["Gain $"])
+        check("app: account Return % = Gain $ / money put in (FORWARD_START in the past)",
+              len(bm) == 1 and put > 0 and math.isclose(float(row["Return %"]), float(row["Gain $"]) / put * 100, abs_tol=1e-6), bm)
     check("app: no as-of / comparison captions", not any(c.value.startswith(("As of ", "The same money")) for c in at.caption))
     check("app: only read-only GET paths used", FakeAccount.calls and all(p in ("/positions", "/account", "/account/activities", "/orders", "/clock", "/account/portfolio/history")
                                                                           for p, _ in FakeAccount.calls), FakeAccount.calls)

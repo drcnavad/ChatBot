@@ -1,8 +1,9 @@
-"""Sold-symbol buy block: after ANY live sell, that symbol is not bought again for N
+"""Sold-symbol buy block: after a live FULL EXIT sell, that symbol is not bought again for N
 business days (default 5, skipping weekends/holidays via backtest_engine.is_session).
 
-Covers drop_guard, target_sells, Mon-Thu checks, trims, Friday rebalance — every path
-that records a sell. Does NOT block sales of stocks already held (buy-side only).
+Covers drop_guard, target_sells, Mon-Thu full exits, Friday exits — paths that record an
+exit fill. Equal-weight trims do NOT record a block (continues must stay top-upable).
+Does NOT block sales of stocks already held (buy-side only).
 
 Persisted in Reports/sold_block.json. Shown on the dashboard. Wired into
 paper_trade.manual_list("buy") so spare-cash / sleeves / Friday substitutes / drop_guard

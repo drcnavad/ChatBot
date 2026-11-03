@@ -1013,12 +1013,11 @@ def _cancel_target_sells_for_orders(client, orders):
             print(f"  WARNING: could not cancel target sell for {sym}: {e}")
 
 
-def _record_sold_blocks_from_results(results, source="pipeline"):
-    """Record sold_block only when a SELL actually filled (shares left the account).
+def _record_sold_blocks_from_results(results, source="pipeline", positions=None):
+    """Record sold_block only when a SELL *exit* actually filled (shares left the account).
 
-    Submit-only / pending_new / STAGED / SKIPPED / FAILED / 0-fill must NOT block rebuy —
-    the morning fill-check records the block when FILLED/COMPLETED, and clears it if an
-    evening order expires or cancels with 0 fill.
+    Equal-weight trims must NOT block rebuy/top-up. Submit-only / STAGED / FAILED / 0-fill
+    must NOT block — the morning fill-check records the block on a true exit fill.
     """
     try:
         import sold_block
@@ -1050,6 +1049,12 @@ def _record_sold_blocks_from_results(results, source="pipeline"):
         sym = str(getattr(r, "Symbol", "")).upper()
         if not sym:
             continue
+        # Full exit only (trim of a continue must not sold-block).
+        shares = getattr(r, "Shares", None)
+        if positions is not None and shares is not None:
+            _, is_exit, _ = _plan_qty(sym, "SELL", shares, positions)
+            if not is_exit:
+                continue
         try:
             sold_block.record_sell(sym, source=source, note=f"status={status}")
         except Exception as e:
@@ -1359,7 +1364,7 @@ def submit_paper_extended_sequenced(orders, positions=None, record=None, client=
         buy_results = pd.concat([buy_results, _stage_orders_for_morning(
             later, positions, record, "STAGED for morning (no free cash yet - the 9 AM check buys what fits)")],
             ignore_index=True)
-    _record_sold_blocks_from_results(sell_results, source="pipeline_sell")
+    _record_sold_blocks_from_results(sell_results, source="pipeline_sell", positions=positions)
     return pd.concat([sell_results, buy_results], ignore_index=True)
 
 def _morning_completion_plan(broker_by_cid, sym, side, qty, price, date_str, kind="fill"):
@@ -1658,14 +1663,15 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         return ((raw.value if hasattr(raw, "value") else str(raw)).lower(), _safe_number(x.filled_qty),
                 _safe_number(getattr(x, "filled_avg_price", None)))
 
-    def _record_sell_fill(sym, oid, filled, qty):
-        """sold_block only after shares actually left (true fill)."""
-        if filled <= 0:
+    def _record_sell_fill(sym, oid, filled, qty, is_exit=False):
+        """sold_block only after a FULL exit fill (not equal-weight trims).
+        A trim of ALLE/REGN must not block topping them back up next session."""
+        if filled <= 0 or not is_exit:
             return
         try:
             import sold_block
             sold_block.record_sell(sym, source="fill_check",
-                                   note=f"filled {filled:g}/{qty}",
+                                   note=f"exit filled {filled:g}/{qty}",
                                    order_id=str(oid or ""))
         except Exception as e:
             print(f"  WARNING: sold_block on fill failed for {sym}: {e}")
@@ -1685,7 +1691,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
         On SELL: record sold_block for any partial fill; clear a block tied to this order only when 0 fill."""
         if p["side"] == "SELL":
             if filled_so_far > 0:
-                _record_sell_fill(p["sym"], p["id"], filled_so_far, p["qty"])
+                _record_sell_fill(p["sym"], p["id"], filled_so_far, p["qty"], is_exit=bool(p.get("exit")))
             elif filled_so_far <= 0:
                 _clear_sell_block(p["sym"], p["id"], f"carry 0-fill: {why}")
         o = p["row"]
@@ -1722,7 +1728,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     px[p["i"]] = _price_cols(p["q"], side, cur[2], cur[1])
                     if cur[1] >= p["qty"] - 1e-9:
                         if side == "SELL" and cur[1] > 0:
-                            _record_sell_fill(p["sym"], p["id"], cur[1], p["qty"])
+                            _record_sell_fill(p["sym"], p["id"], cur[1], p["qty"], is_exit=bool(p.get("exit")))
                         continue                                   # filled
                 if cur is None or not first:
                     filled0 = cur[1] if cur is not None else 0.0
@@ -1742,7 +1748,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                 rest = p["qty"] - cur[1] if p["exit"] else _floor2(p["qty"] - cur[1])
                 if rest <= 1e-9 or (side == "BUY" and rest * p["q"]["limit"] < 1.0):
                     if side == "SELL" and cur[1] > 0:
-                        _record_sell_fill(p["sym"], p["id"], cur[1], p["qty"])
+                        _record_sell_fill(p["sym"], p["id"], cur[1], p["qty"], is_exit=bool(p.get("exit")))
                     continue                                       # filled while canceling, or a rest under $1
                 q = _cap_at_ask(smart_quote(p["sym"], side), p["sym"], at_ask)
                 why = q["skip"] and f"bad quote: {q['skip']}"
@@ -1763,7 +1769,7 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
                     continue
                 # First limit's partial fill is real shares sold — block now; replacement chased next.
                 if side == "SELL" and cur[1] > 0:
-                    _record_sell_fill(p["sym"], p["id"], cur[1], p["qty"])
+                    _record_sell_fill(p["sym"], p["id"], cur[1], p["qty"], is_exit=bool(p.get("exit")))
                 i = len(results)
                 px[i] = _price_cols(q, side)
                 results.append((p["sym"], side, rest, str(m.id), f"REPLACED at a fresh quote, limit ${q['limit']:g} "
@@ -1891,11 +1897,11 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             if filled >= qty - 1e-9:
                 px[len(results)] = _price_cols(o.get("quote"), side, getattr(alp, "filled_avg_price", None), filled)
                 results.append((sym, side, qty, oid, f"FILLED ({filled:g}/{qty})"))
-                if side == "SELL" and filled > 0:
+                if side == "SELL" and filled > 0 and is_exit:
                     try:
                         import sold_block
                         sold_block.record_sell(sym, source="fill_check",
-                                               note=f"FILLED ({filled:g}/{qty})",
+                                               note=f"FILLED exit ({filled:g}/{qty})",
                                                order_id=str(oid or ""))
                     except Exception as e:
                         print(f"  WARNING: sold_block on fill failed for {sym}: {e}")

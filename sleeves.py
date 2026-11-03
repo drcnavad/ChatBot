@@ -11,6 +11,7 @@ On every trade day (Friday rebalance and Mon–Thu exit check) the live book is 
 target = (equity × 0.99) / 10 per stock (equal weight). Exits sold, new names bought, continues trimmed or topped
 to that slot. No per-name weight cap, no fill_idle / scale-adds / renormalize / top-ups (Chirag Oct 31).
 Blocked new picks (e.g. CRL) are replaced from the live ranking; the replacement still gets the same equal slot.
+A held replacement stays on later Mon–Thu plans while its rank is <= 20 (not sold just because the ideal pick is still blocked).
 
 Ledger (Reports/sleeve_ledger.json, version 4): share count per symbol and cash after the planned trades. Next run
 (reconcile): live positions are matched to the ledger; a position the ledger does not claim is sold (do_not_sell kept);
@@ -252,11 +253,27 @@ def half_value(st, prices):
 
 def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, invested):
     """`n_picks` slots at equal weight invested/n. Drop NEW blocked picks; fill from the live ranking.
-    Held blocked names stay (build_orders freezes top-ups)."""
+    Held blocked names stay (build_orders freezes top-ups). Held replacements for blocked ideal
+    picks (e.g. MA/V standing in for sold-blocked CRL/FDS) stay when still ranked <= exit_below
+    (live Mon–Thu rule); they used to be marked taken and sold on the next plan."""
     held_set = set(held)
     tw = {s: 0.0 for s in names if s not in blocked or s in held_set}
-    taken = set(tw) | held_set
     r = ranking(h, d, inp)
+    # exit=(20, 10) on the live RS short-term strategy: keep a held stand-in while rank <= 20
+    exit_below = 20
+    try:
+        ex = _cfg(h).get("exit")
+        if isinstance(ex, (list, tuple)) and ex:
+            exit_below = int(ex[0])
+    except Exception:
+        pass
+    rank_of = {s: i + 1 for i, s in enumerate(r.index)}
+    for s in held_set:
+        if s in tw or s in blocked or not _num(px.get(s)):
+            continue
+        if rank_of.get(s, 10**9) <= exit_below:
+            tw[s] = 0.0
+    taken = set(tw)
     for s in r.index:
         if len(tw) >= int(n_picks):
             break
@@ -267,6 +284,10 @@ def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, inve
     final = [s for s in tw if (s not in blocked or s in held_set) and (_num(px.get(s)) or s in held_set)]
     if not final:
         return {}
+    # Prefer n_picks names: if we kept too many holds + ideal picks, drop worst-ranked extras
+    # that are not needed (should be rare). Equal weight the final book.
+    if len(final) > int(n_picks):
+        final = sorted(final, key=lambda s: rank_of.get(s, 10**9))[:int(n_picks)]
     slot = float(invested) / len(final)
     return {s: slot for s in final}
 
