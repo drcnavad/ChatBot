@@ -1,6 +1,6 @@
 """The floating chat button (bottom-right, every tab, phone too) and its panel.
-Logic: chatbot/core.py + chatbot/llm.py. A fragment, so chatting never reruns the rest of the page.
-READ-ONLY: no order confirm / PIN UI. Compact "Send to Mac Mini 4" handoff posts chat context to a webhook."""
+Logic: chatbot/core.py + chatbot/llm.py + PIN gate (chatbot/pin.py). A fragment, so chatting never reruns the rest of the page.
+Compact "Send to Mac Mini 4" handoff posts chat context to a webhook."""
 import json
 import os
 import urllib.error
@@ -71,11 +71,17 @@ def _handle(text):
     except Exception:
         r = None
     if r is not None:
+        st.session_state["sa_chat_pending"] = r["plan"]
         _say("assistant", r["text"])
         return
     cmd = chat.parse(text)
     try:
-        _say("assistant", chat.answer(cmd))
+        if cmd["kind"] in ("order", "close", "cancel"):
+            p, msg = chat.plan(cmd)
+            st.session_state["sa_chat_pending"] = p
+            _say("assistant", msg + ("\n\nConfirm below, or Cancel." if p else ""))
+        else:
+            _say("assistant", chat.answer(cmd))
     except Exception as e:
         _say("assistant", f"Couldn't reach Alpaca: {type(e).__name__}: {str(e)[:150]}")
 
@@ -104,9 +110,30 @@ def render_chat():
                 for role, text in _messages()[-20:]:
                     with st.chat_message(role):
                         st.markdown(text.replace("$", r"\$"))
-                with st.form("sa_chat_form", clear_on_submit=True):
-                    text = st.text_input("Message", placeholder="", label_visibility="collapsed")
-                    if st.form_submit_button("Send") and text.strip():
-                        with st.spinner("..."):
-                            _handle(text.strip())
+                pending = st.session_state.get("sa_chat_pending")
+                if pending:
+                    from chatbot import pin as chat_pin
+                    if not chat_pin.is_set():
+                        st.error("Not available right now.")
+                    with st.form("sa_chat_pin_form", clear_on_submit=True):
+                        pin = st.text_input("Code", type="password", max_chars=12, label_visibility="collapsed")
+                        c1, c2 = st.columns(2)
+                        go = c1.form_submit_button("Confirm & send", type="primary")
+                        stop = c2.form_submit_button("Cancel")
+                    if stop:
+                        st.session_state.pop("sa_chat_pending", None)
+                        _say("assistant", "Cancelled. Nothing was sent.")
                         _rerun()
+                    if go:
+                        ok, msg = chat.execute(pending, pin)
+                        if ok or "locked" in msg.lower() or "not available" in msg.lower() or "do-not-sell" in msg:
+                            st.session_state.pop("sa_chat_pending", None)
+                        _say("assistant", ("✅ " if ok else "⛔ ") + msg)
+                        _rerun()
+                else:
+                    with st.form("sa_chat_form", clear_on_submit=True):
+                        text = st.text_input("Message", placeholder="", label_visibility="collapsed")
+                        if st.form_submit_button("Send") and text.strip():
+                            with st.spinner("..."):
+                                _handle(text.strip())
+                            _rerun()
