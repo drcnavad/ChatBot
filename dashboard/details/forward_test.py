@@ -228,7 +228,8 @@ def board_html(sty, board, pct):
     components.html(f'{BOARD_CSS}<div class="wrap">{body}</div>{SORT_JS}', height=35 * (len(board) + 1) + 4)
 
 def render_curve(board, values):
-    """Interactive growth chart since FORWARD_START: the leaderboard's Rank 1-5, the live strategy, QQQ and SPY by default."""
+    """Interactive growth chart since FORWARD_START. Default: the live strategy, QQQ, SPY and this week's top 3 strategies
+    (by_this_week, as the Top 5 consensus card; live excluded). Any strategy can be added in the selector."""
     import plotly.graph_objects as go
     import forward_test as ft
     from backtest_engine import FORWARD_START
@@ -242,9 +243,14 @@ def render_curve(board, values):
         b = bench.loc[bench.index >= start]
         series.update({f"{x} (comparison)": b[x].dropna() for x in ("QQQ", "SPY") if x in b})
     names = board["Strategy"].str.replace(ft.LIVE_MARK, "", regex=False)
-    ranked = names[board["Rank"].notna()].tolist()
+    try:
+        wk, _ = by_this_week(board, live_returns_cached(values))
+        wk = wk.assign(_n=names)[wk["Rank"].notna()].sort_values("Rank")["_n"]
+        top3 = [n for n in wk if n != ft.LIVE and n in series][:3]
+    except Exception:
+        top3 = []
     options = [n for n in names if n in series]
-    default = [n for n in ranked[:5] + [ft.LIVE, "QQQ (comparison)", "SPY (comparison)"] if n in series]
+    default = [n for n in [ft.LIVE, "QQQ (comparison)", "SPY (comparison)"] + top3 if n in series]
     default = list(dict.fromkeys(default))
     pick = st.multiselect("Compare", options, default=default, key="ft_curve",
                           format_func=lambda n: CURRENT if n == ft.LIVE else n, label_visibility="collapsed")
