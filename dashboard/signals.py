@@ -164,7 +164,7 @@ def _held_symbols():
 
 
 def _overlays(sym, held=False):
-    """Extra chips: do_not_sell/buy, sold_block, target limit sell + order status."""
+    """Extra chips: do_not_sell/buy, target limit sell + order status."""
     import sector_mapping as sm
     chips = []  # (text, css_class)
     su = str(sym).upper()
@@ -172,13 +172,6 @@ def _overlays(sym, held=False):
         chips.append(("do_not_sell", "sa-badge-hold"))
     if su in {str(x).upper() for x in sm.do_not_buy}:
         chips.append(("do_not_buy", "sa-badge-bear"))
-    try:
-        import sold_block as sb
-        blk = sb.active_blocks()
-        if su in blk:
-            chips.append((blk[su], "sa-badge-bear"))
-    except Exception:
-        pass
     try:
         import target_sells as ts
         cfg = ts.load_config()

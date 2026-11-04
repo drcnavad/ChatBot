@@ -154,7 +154,6 @@ def _trade_plan_text():
     from dashboard.details.live_holdings import account_core
     import sleeves as sl
     import paper_trade as pt
-    import sold_block as sb
     data, err = account_core()
     if data is None:
         return f"Trade plan unavailable: {err or 'no account data'}"
@@ -176,7 +175,7 @@ def _trade_plan_text():
     try:
         day = sl.inputs()["close"].index[-1]
         blocked = {**pt.earnings_blocked([p["symbol"] for p in data["positions"]], day),
-                   **pt.earnings_stop_blocked(day), **dict(sb.active_blocks()), **no_buy()}
+                   **pt.earnings_stop_blocked(day), **no_buy()}
         held = {p["symbol"] for p in data["positions"] if float(p.get("qty") or 0) > 0}
         tgt_syms = set(t["Symbol"]) if len(t) else set()
         notes = [f"{s}: {blocked[s]}" for s in sorted(set(blocked) & (held | tgt_syms))]
@@ -194,7 +193,6 @@ def _explain_text(sym, account=None):
     acct = account or _account()
     import sleeves as sl
     import paper_trade as pt
-    import sold_block as sb
     import forward_test as ft
     import backtest_engine as be
     import pandas as pd
@@ -226,12 +224,6 @@ def _explain_text(sym, account=None):
     if sym in no_buy():
         notes.append(f"on do-not-buy ({no_buy()[sym]})")
     try:
-        blk = sb.active_blocks()
-        if sym in blk:
-            notes.append(blk[sym])
-    except Exception:
-        pass
-    try:
         day = sl.inputs()["close"].index[-1]
         earn = pt.earnings_blocked([sym], day)
         if sym in earn:
@@ -261,7 +253,7 @@ def _explain_text(sym, account=None):
     if notes:
         lines.append("Notes: " + "; ".join(notes) + ".")
     elif held_qty and abs(pct - equal) > 0.4:
-        lines.append("No earnings/sold_block/do_not_* note found; weight drift is from price moves since the last fill "
+        lines.append("No earnings/do_not_* note found; weight drift is from price moves since the last fill "
                      "or from cash that other blocked names could not absorb.")
     elif not held_qty:
         lines.append("Equal-weight only applies to the 10 names in the live book after the next trade.")

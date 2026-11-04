@@ -3,7 +3,7 @@
 Live from Fri Nov 6, 2026 (Chirag; locked ~12 weeks, to ~Jan 29, 2027): 100% forward_test.py's "Short-term relative
 strength, skip stretched buys" - relative strength over 10/21/63 days (63-day x2 from Nov 6), top 10 equal weight (max 4 per sector), Friday rebalance only (the
 week's last session; no Mon-Thu trades since Nov 4). A stock more than 15% above its 20-day average is not newly bought
-(a held one in the top 10 is kept; held = this ledger). Blocked picks (earnings within 5 days, do_not_buy, sold_block)
+(a held one in the top 10 is kept; held = this ledger). Blocked picks (earnings within 5 days, do_not_buy)
 are replaced by the next eligible, not stretched stock ranked 20 or better. Soft QQQ regime; do_not_sell never sold.
 
 Sizing: target = (equity × 0.99) / 10 per stock (equal weight); leftover cash stays cash (Chirag Oct 31).
@@ -259,7 +259,7 @@ def exit_rank(h):
 def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, invested):
     """`n_picks` slots at equal weight invested/n. Drop NEW blocked picks; fill from the live ranking.
     Held blocked names stay (build_orders freezes top-ups). Held replacements for blocked ideal
-    picks (e.g. MA/V standing in for sold-blocked CRL/FDS) stay when still ranked <= exit_below
+    picks (e.g. MA/V standing in for earlier blocked picks) stay when still ranked <= exit_below
     (live Mon–Thu rule); they used to be marked taken and sold on the next plan."""
     held_set = set(held)
     tw = {s: 0.0 for s in names if s not in blocked or s in held_set}

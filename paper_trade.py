@@ -324,12 +324,7 @@ def manual_list(kind):
             out.update(manual_trade.blocked_notes())
         except Exception as e:
             print(f"  Manual blocks unreadable ({type(e).__name__}: {e}) - check Reports/manual_block.json")
-        # + sold_block: any live sell blocks rebuy for N business days (default 5)
-        try:
-            import sold_block
-            out.update(sold_block.active_blocks())
-        except Exception as e:
-            print(f"  sold_block unreadable ({type(e).__name__}: {e}) - check Reports/sold_block.json")
+        # (the sold_block no-rebuy-after-a-sell block was removed Nov 4, 2026 - live matches the backtest; Chirag)
     return out
 
 def build_orders(targets, account_size, positions=None, prices=None, min_value=1.0, fractional=False,

@@ -47,7 +47,7 @@ stock_symbols = [
 # Oct 28, 2026 (Chirag): ALAB and MRVL unblocked (top RS short-term winners).
 # Oct 30, 2026 (Chirag): WULF, SMCI, ORCL dropped from universe (cash-flow screen) — removed from do_not_buy too.
 do_not_buy = ['AMD', 'ARM', 'PANW', 'SHOP', 'VRT', 'BE', 'LYV', 'TSLA']
-do_not_sell = ['APA']  # Nov 4, 2026 (Chirag)
+do_not_sell = []  # APA removed Nov 4, 2026 (Chirag); the list stays for later use
 # Defensive sleeve of Oct 15, 2026 (LMT, NOC, ABBV, KO; PFE dropped Oct 19). Live RS short-term dropped it Oct 29, 2026
 # (Chirag: top 10 only). Kept only for the other pinned forward-test 'Now' paper lines (forward_test NOW sleeve=True).
 defensive = [s for s in ['LMT', 'NOC', 'ABBV', 'PFE', 'KO'] if s in stock_symbols]

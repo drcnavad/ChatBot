@@ -51,8 +51,8 @@ Live strategy (facts — do not invent other rules):
 - Book: top 10 stocks, equal weight. Sizing rule: each name targets (equity × 0.99) / 10 (~9.9%). No per-name weight cap.
 - Schedule: Friday 2:30 PM CT full rebalance; No Mon–Thu trades (Nov 4, 2026); drop_guard off.
 - Earnings within 5 days: not newly bought; a held name is not topped up (stays underweight until the window passes).
-- do_not_sell: never sold. do_not_buy / sold_block: never newly bought. Soft QQQ regime.
-- Weight is equal for every name in the live 10-stock book. Rank does NOT set a lighter/heavier weight. Underweight usually means earnings/sold_block blocked a top-up, or price drift.
+- do_not_sell: never sold. do_not_buy: never newly bought (no rebuy block after a sell). Soft QQQ regime.
+- Weight is equal for every name in the live 10-stock book. Rank does NOT set a lighter/heavier weight. Underweight usually means an earnings block stopped a top-up, or price drift.
 - When get_trade_plan gives a Next run date, use that exact weekday/date (if the user said Monday but next run is Tuesday, say Tuesday).
 
 Tool guide:
@@ -82,7 +82,7 @@ TOOLS = [
     _fn("get_news", "Recent headlines for one ticker, or general market news when symbol is omitted.", SYMP),
     _fn("get_strategy", "Live strategy rules, schedule, sizing, do_not_sell/do_not_buy, and next 2:30 PM CT run."),
     _fn("get_trade_plan", "Next decision's planned sells/buys/holds from the bot's dry-run (what will trade), with blockers."),
-    _fn("explain_position", "Why a ticker's weight differs from equal ~9.9%: weight now, target, rank, earnings/sold_block/do_not_* notes.",
+    _fn("explain_position", "Why a ticker's weight differs from equal ~9.9%: weight now, target, rank, earnings/do_not_* notes.",
         SYMP, ["symbol"]),
     _fn("stock_info", "Quote, live RS rank/score, earnings, held?, fundamentals, headlines for one ticker.", SYMP, ["symbol"]),
     _fn("find_symbol", "Look up tickers by company name.", {"name": {"type": "string"}}, ["name"]),

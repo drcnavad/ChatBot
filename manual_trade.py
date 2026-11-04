@@ -194,14 +194,6 @@ def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quo
         return log({**base, "status": "refused: market closed (regular hours only, 8:30 AM-3:00 PM CT)"})
     if side == "BUY" and sym in blocked_notes():
         return log({**base, "status": f"refused: {blocked_notes()[sym]}"})
-    if side == "BUY":
-        try:
-            import sold_block
-            blk = sold_block.active_blocks()
-            if sym in blk:
-                return log({**base, "status": f"refused: {blk[sym]}"})
-        except Exception:
-            pass
     q_fn = quote or pt.smart_quote
     q = q_fn(sym, side)
     if q.get("skip") or not q.get("limit"):
