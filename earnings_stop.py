@@ -339,8 +339,8 @@ def _sell(c, q, session, now, state, pending_path):
                 sold_block.record_sell(s, sold_on=today, source="earnings_stop",
                                        note=f"earnings stop filled {filled:g}/{qty:g} @ {limit}",
                                        order_id=str(oid or ""))
-            except Exception:
-                pass
+            except Exception as e:      # was silent: a missed block lets the 2:30 run / drop guard buy it straight back
+                print(f"  WARNING: sold_block not recorded for {s} ({type(e).__name__}: {e}) - it may be bought back")
             try:
                 import target_sells as ts
                 ts.remove_target(s, reason="earnings_stop sold")
