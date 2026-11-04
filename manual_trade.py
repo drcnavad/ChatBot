@@ -237,13 +237,6 @@ def run(side, sym, amount=None, block_drop=None, dry_run=False, client=None, quo
         if fill:
             entry.update(status="filled", filled_qty=fill[0], fill_price=fill[1])
             try:
-                import sold_block
-                sold_block.record_sell(sym, source="manual_trade",
-                                       note=f"filled {fill[0]:g} @ {fill[1]}",
-                                       order_id=str(entry.get("order_id") or ""))
-            except Exception:
-                pass
-            try:
                 import target_sells as ts
                 ts.remove_target(sym, reason="manual sold")
             except Exception:

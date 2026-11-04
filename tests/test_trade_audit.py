@@ -262,7 +262,7 @@ try:
           and "Trade audit · gain / loss per sale (read-only)" in labels and labels[-1] == "Strategy rules",
           ([str(e) for e in at.exception], labels))
     frames = [x.value for x in at.dataframe]
-    # Trading tab also shows sold_block / drop_guard / tax tables; trade audit itself must not
+    # Trading tab also shows tax tables; trade audit itself must not
     # surface the order ledger (Plan_Price/Result) or strategy-drift warnings for a one-buy account.
     no_ledger = not any("Plan_Price" in x.columns or "Result" in x.columns for x in frames)
     no_drift = not any("held but not in the strategy" in x.value for x in at.warning)

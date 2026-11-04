@@ -333,13 +333,6 @@ def test_morning_sells_complete_before_buys():
 def test_morning_buy_cumulative_cash_reserved():
     # Two BUYs each fit in cash alone but not together: the second buys only the part that
     # still fits after the first (1% cushion), never more than the cash.
-    # Use CCC/DDD (not AAA): earlier tests may have sold AAA and recorded sold_block-on-fill.
-    try:
-        import sold_block as _sb
-        for _s in ("AAA", "BBB", "CCC", "DDD"):
-            _sb.clear_block(_s, reason="math-audit reset")
-    except Exception:
-        pass
     with tempfile.TemporaryDirectory() as td:
         pp = os.path.join(td, "pending.json")
         _write_pending(pp, [

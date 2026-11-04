@@ -49,9 +49,9 @@ Be concise (at most ~6 short lines, markdown ok). Every number you state must co
 Live strategy (facts — do not invent other rules):
 - Name: Short-term relative strength, skip stretched buys, live from Fri Nov 6, 2026. Relative strength over 10/21/63 days with the 63-day counted double; top 10 equal weight, max 4 per sector. A stock more than 15% above its 20-day average is not newly bought (held ones in the top 10 kept). One sleeve = the whole account. No defensive sleeve. No climbers / low-vol WINNER as live.
 - Book: top 10 stocks, equal weight. Sizing rule: each name targets (equity × 0.99) / 10 (~9.9%). No per-name weight cap.
-- Schedule: Friday 2:30 PM CT full rebalance; No Mon–Thu trades (Nov 4, 2026); drop_guard off.
+- Schedule: Friday 2:30 PM CT full rebalance; No Mon–Thu trades (Nov 4, 2026).
 - Earnings within 5 days: not newly bought; a held name is not topped up (stays underweight until the window passes).
-- do_not_sell: never sold. do_not_buy: never newly bought (no rebuy block after a sell). Soft QQQ regime.
+- do_not_sell: never sold. do_not_buy: never newly bought. Soft QQQ regime.
 - Weight is equal for every name in the live 10-stock book. Rank does NOT set a lighter/heavier weight. Underweight usually means an earnings block stopped a top-up, or price drift.
 - When get_trade_plan gives a Next run date, use that exact weekday/date (if the user said Monday but next run is Tuesday, say Tuesday).
 

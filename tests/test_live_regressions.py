@@ -1,5 +1,4 @@
-"""Live-trading regressions from the Oct 31, 2026 audits: sold_block only on fills (+ order-matched clear), full-exit
-flag, blocked-pick replacement in sleeves, evening-retry deferral, ledger v4, missed-decision wording. No broker orders."""
+"""Live-trading regressions from the Oct 31, 2026 audits: full-exit flag, blocked-pick replacement in sleeves, evening-retry deferral, ledger v4, missed-decision wording. No broker orders."""
 import json
 import os
 import sys
@@ -16,7 +15,6 @@ import pandas as pd  # noqa: E402
 import paper_trade as pt  # noqa: E402
 import run_all as ra  # noqa: E402
 import sleeves  # noqa: E402
-import sold_block as sb  # noqa: E402
 
 CT = ZoneInfo("America/Chicago")
 FAIL = []
@@ -25,35 +23,6 @@ def check(cond, name, detail=""):
     print(f"{'PASS' if cond else 'FAIL'} {name}" + ("" if cond else f" {detail}"))
     if not cond:
         FAIL.append(name)
-
-def temp_blocks():
-    td = tempfile.mkdtemp()
-    sb.BLOCK_JSON = os.path.join(td, "sold_block.json")
-
-OLD_BLOCK = sb.BLOCK_JSON
-try:
-    # --- sold_block: only real fills block; clear needs the matching order id ---
-    temp_blocks()
-    pt._record_sold_blocks_from_results(pd.DataFrame([
-        {"Symbol": "AAA", "Side": "SELL", "Shares": 1, "Order_ID": "1", "Status": "submitted (pending_new) at $10"},
-        {"Symbol": "BBB", "Side": "SELL", "Shares": 1, "Order_ID": "2", "Status": "submitted (filled) at $10"},
-        {"Symbol": "CCC", "Side": "SELL", "Shares": 1, "Order_ID": "3", "Status": "FILLED (1/1)"},
-        {"Symbol": "DDD", "Side": "SELL", "Shares": 1, "Order_ID": "4",
-         "Status": "COMPLETED via limit $10 (sent now, nothing was sent before)"},
-    ]), source="unit")
-    active = sb.active_blocks(as_of=date(2026, 10, 31))
-    check("AAA" not in active and "DDD" not in active, "pending_new / COMPLETED-on-submit do not block", active)
-    check("BBB" in active and "CCC" in active, "filled statuses block", active)
-    temp_blocks()
-    sb.record_sell("EEE", sold_on=date(2026, 10, 30), source="fill_check", note="real fill", order_id="oid-real")
-    check(not sb.clear_block("EEE", reason="0-fill other", order_id="oid-other")
-          and "EEE" in sb.active_blocks(as_of=date(2026, 10, 31)), "clear_block refuses a mismatched order_id")
-    check(sb.clear_block("EEE", reason="0-fill same", order_id="oid-real")
-          and "EEE" not in sb.active_blocks(as_of=date(2026, 10, 31)), "clear_block accepts the matching order_id")
-    sb.record_sell("FFF", sold_on=date(2026, 10, 30), source="x", order_id="1")
-    check(sb.clear_block("FFF", reason="admin"), "unconditional clear still works")
-finally:
-    sb.BLOCK_JSON = OLD_BLOCK
 
 # --- full exit flag ---
 _, is_exit, reason = pt._plan_qty("EEE", "SELL", 10, {"EEE": 10.0})

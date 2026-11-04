@@ -11,7 +11,7 @@ ROOT = os.path.dirname(HERE)
 TESTS = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswith(".py"))   # every test file
 
 # Paths that must not touch the real Reports/ files. Fresh per test file so one file's
-# writes (sold_block on fill, manual blocks, …) cannot poison the next.
+# writes (manual blocks, …) cannot poison the next.
 _ISOLATE = (
     ("STOCK_ANALYSIS_RUN_LOG", "run_log.csv"),
     ("STOCK_ANALYSIS_EARNINGS_STOP_STATE", "earnings_stop_state.json"),
@@ -20,7 +20,6 @@ _ISOLATE = (
     ("STOCK_ANALYSIS_DECISION_RANKS", "decision_ranks.csv"),
     ("STOCK_ANALYSIS_MANUAL_ORDERS", "manual_orders.json"),
     ("STOCK_ANALYSIS_MANUAL_BLOCK", "manual_block.json"),
-    ("STOCK_ANALYSIS_SOLD_BLOCK", "sold_block.json"),
     ("STOCK_ANALYSIS_TARGET_SELLS", "target_sells.json"),
 )
 

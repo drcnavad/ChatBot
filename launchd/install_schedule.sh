@@ -12,9 +12,8 @@
 #   com.stockanalysis.morning         Mon-Fri 9:00 AM CT, at login, on wake, every 30 min: pipeline_watchdog.py --fill-check --scheduled
 #   com.stockanalysis.target_sells      every 15 min + at login: target_sells.py --scheduled (LIVE DAY+extended
 #                                     limit sells from Reports/target_sells_config.json, e.g. CRL @ 387.68; window
-#                                     ~3:00 AM-7:00 PM CT session days; cancels when drop_guard / 2:30 sell the name;
-#                                     fills record sold_block for 5 business days)
-#   (drop_guard is off: its plist lives in launchd_disabled/, not installed)
+#                                     ~3:00 AM-7:00 PM CT session days; cancels when the 2:30 run sells the name;
+#                                   )
 #   com.stockanalysis.earningsstop    every 5 min + at login: earnings_stop.py --loop (LIVE earnings-day 5% drop stop;
 #                                     30-second checks only while a held stock is in an earnings-day session, 3:00 AM-
 #                                     7:00 PM CT on trading days; one loop at a time; otherwise exits after a quick look)

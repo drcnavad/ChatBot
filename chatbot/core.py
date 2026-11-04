@@ -141,7 +141,7 @@ def _strategy_text():
         "- A stock more than **15% above its 20-day average** is not newly bought (held ones kept); the next ranks fill in.\n"
         "- Score: relative strength over 10/21/63 days, the **63-day counted double** (from Fri Nov 6, 2026).\n"
         "- Top **10** stocks (at most **4 per sector**), **equal weight**: each targets `(equity × 0.99) / 10` (~9.9%). No per-name weight cap; no defensive sleeve.\n"
-        "- **Friday 2:30 PM CT**: full rebalance. No Mon–Thu trades and drop_guard off (Nov 4, 2026).\n"
+        "- **Friday 2:30 PM CT**: full rebalance. No Mon–Thu trades (Nov 4, 2026).\n"
         "- Earnings within **5 days**: not newly bought; a held name is **not topped up** (can look underweight).\n"
         f"- **do_not_sell** (never sold): {dns}\n"
         f"- **do_not_buy** (never newly bought): {dnb}\n"
@@ -406,20 +406,13 @@ def execute(p, pin, client=None, verify=None):
         return (st.value if hasattr(st, "value") else str(st)).lower()
 
     def _record_chatbot_sell(sym, o):
-        """sold_block only when the sell actually filled (shares left)."""
+        """True when the sell actually filled (shares left)."""
         try:
             filled = float(getattr(o, "filled_qty", 0) or 0)
         except (TypeError, ValueError):
             filled = 0.0
         if filled <= 0 and _status_val(o) != "filled":
             return False
-        try:
-            import sold_block
-            sold_block.record_sell(str(sym).upper(), source="chatbot",
-                                   note=f"chatbot fill {filled:g}",
-                                   order_id=str(getattr(o, "id", "") or ""))
-        except Exception:
-            pass
         return True
 
     c = client or trading_client()

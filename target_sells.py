@@ -14,10 +14,10 @@ CLI: python target_sells.py add CRL 387.68
      python target_sells.py list
      python target_sells.py --dry-run | --scheduled
 
-When the limit fills (or another live path sells the name): record sold_block, remove the
-target entry. drop_guard / 2:30 must call cancel_for_symbol() before selling the same name.
+When the limit fills (or another live path sells the name): remove the target entry.
+The 2:30 run must call cancel_for_symbol() before selling the same name.
 If the daily/weekly plan wants to exit the name (out of top list), cancel the target and
-sell via the normal bid-based path — sold_block still applies.
+sell via the normal bid-based path.
 """
 from __future__ import annotations
 
@@ -30,7 +30,6 @@ import time
 from datetime import datetime
 
 import backtest_engine as be
-import sold_block
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
@@ -262,9 +261,7 @@ def remove_target(sym, cfg=None, reason=""):
 
 
 def _on_filled(sym, qty, limit, order_id, source, cfg, now):
-    """After a target fill (or external sell of a target name): sold_block + drop target."""
-    sold_block.record_sell(sym, sold_on=now.date(), source=source,
-                           note=f"target limit {limit} qty {qty} order {order_id}")
+    """After a target fill (or external sell of a target name): drop the target."""
     remove_target(sym, cfg, reason="filled")
     state = _load_state()
     state.get("orders", {}).pop(sym, None)
@@ -311,7 +308,7 @@ def refresh_one(sym, entry, cfg, state, now, client, broker, acct, dry_run):
                 _on_filled(sym, filled_qty or qty, limit, str(o.id), "target_sell_fill", cfg, now)
                 base["Action"] = "FILLED"
                 base["Order_Id"] = str(o.id)
-                base["Note"] = "filled; sold_block recorded; target removed"
+                base["Note"] = "filled; target removed"
                 return base
             # Open leftover (partial/unfilled) while flat — cancel and drop target
             if not dry_run:
@@ -375,7 +372,7 @@ def refresh_one(sym, entry, cfg, state, now, client, broker, acct, dry_run):
             return base
 
     # Also cancel any non-target open sells? No — leave other jobs alone; they cancel us first.
-    # Check non-target open orders that would block (earnings_stop / drop_guard pattern)
+    # Check non-target open orders that would block (earnings_stop pattern)
     held_now, open_now = (None, [])
     try:
         held_now, open_now = pt._symbol_state(client, sym)
@@ -432,7 +429,7 @@ def run_check(now=None, dry_run=None, cfg=None):
         return []
     rows = []
     try:
-        # Idle while the 2:30 trade job or drop_guard/earnings fill-check holds a live lock
+        # Idle while the 2:30 trade job or earnings fill-check holds a live lock
         # (stale lock files with dead PIDs are ignored so we don't stall forever).
         import run_all
         def _pid_lock_busy(path):
@@ -450,7 +447,7 @@ def run_check(now=None, dry_run=None, cfg=None):
             print(f"{now_ct:%Y-%m-%d %H:%M:%S} CT: idle — trade job running")
             return []
         if _pid_lock_busy(run_all.FILL_LOCK):
-            print(f"{now_ct:%Y-%m-%d %H:%M:%S} CT: idle — fill-check / drop_guard lock held")
+            print(f"{now_ct:%Y-%m-%d %H:%M:%S} CT: idle — fill-check lock held")
             return []
         client = None if dry_run else trading_client()
         import paper_trade as pt
@@ -567,8 +564,7 @@ def main(argv=None):
                   f"order={r['order_id'] or '-'} day={r['day'] or '-'}")
         return 0
     if args.status:
-        print(json.dumps({"config": cfg, "state": _load_state(),
-                          "sold_block": sold_block.active_blocks()}, indent=2))
+        print(json.dumps({"config": cfg, "state": _load_state()}, indent=2))
         return 0
     dry = True if args.dry_run else None
     if args.scheduled and not args.dry_run:

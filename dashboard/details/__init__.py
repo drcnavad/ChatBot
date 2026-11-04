@@ -10,7 +10,6 @@ from dashboard.details.last_decision import render_last_decision
 from dashboard.details.live_holdings import render_live_holdings
 from dashboard.details.tax_view import render_tax_view
 from dashboard.details.trade_audit import render_trade_audit
-from dashboard.details.drop_guard import render_drop_guard
 from dashboard.details.target_sells import render_target_sells
 from dashboard.settings import rules_text
 
@@ -78,8 +77,7 @@ def render_trading_tab(p):
     with st.expander("Live holdings (Alpaca account)", expanded=True):
         render_live_holdings()
 
-    _lazy("Drop guard · OFF since Nov 4, 2026 (history)", "drop_guard", render_drop_guard)
-    _lazy("Target sells · limit + sold block", "target_sells", render_target_sells)
+    _lazy("Target sells · limit", "target_sells", render_target_sells)
 
     def _audit():
         from datetime import datetime
