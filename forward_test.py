@@ -270,6 +270,16 @@ STRATEGIES = [
          select={**PLAIN, "sector_cap": 0.2}, group="rs",
          rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength, but at most 2 of the 10 stocks from one sector "
               "(the next best rank from another sector fills the slot)."),
+    dict(name="Short-term relative strength, take 5% profit / 1% stop", **{**NOW, "score": "rs_short", "sleeve": False},
+         select=PLAIN, tpsl=(0.05, 0.01), group="rs",
+         rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength, but each trading day a holding whose close is "
+              "+5% or more above its entry close is sold (take profit), or -1% or more below it (stop). Checked at the close "
+              "(closes only, no intraday). The freed cash stays in cash until the next Friday rebalance."),
+    dict(name="Short-term relative strength, 5%/1% exits, refill next day", **{**NOW, "score": "rs_short", "sleeve": False},
+         select=PLAIN, tpsl=(0.05, 0.01), refill=True, group="rs",
+         rule="Nov 4, 2026 (Chirag): same +5% / -1% exits (checked at the close), but the next trading day the freed cash "
+              "buys the best-ranked eligible stock not held (live ranking, positive score, never a do-not-buy or a stock "
+              "sold this week). Friday rebalances back to the plain top 10."),
     dict(name="Half relative strength, half buy the dip", blend=(LIVE_NOW, "Buy the dip"), group="combo",
          rule="Nov 4, 2026 (Chirag): 50% Short-term relative strength + 50% Buy the dip, each half follows its own line."),
     dict(name="Half relative strength, half worst sectors", blend=(LIVE_NOW, "Best stocks in worst sectors (2 months)"),
@@ -850,7 +860,40 @@ def strategy_targets(cfg, inp):
                                    exit_all_below=below, exit_to_top=top,
                                    never_buy=be.sector_mapping.do_not_buy if cfg.get("never_buy") else ())
     tgt = tgt.mask(_dnb(inp).reindex(index=tgt.index, columns=tgt.columns, fill_value=False), 0.0)   # its weight: cash
-    return be.live_weights(tgt).reindex(columns=inp["close"].columns).fillna(0.0)
+    w = be.live_weights(tgt).reindex(columns=inp["close"].columns).fillna(0.0)
+    if not cfg.get("tpsl"):
+        return w
+    ref = dict(score=inp["scores"][cfg["score"]], ok=inp["eligible"] & ~_dnb(inp)) if cfg.get("refill") else {}
+    return tpsl_weights(w, inp["close"], inp["weekly"], *cfg["tpsl"], **ref)
+
+def tpsl_weights(w, c, weekly, tp, stop, score=None, ok=None):
+    """A close +tp / -stop from the entry close sells the holding (closes only); it is not bought back before the next
+    rebalance day (weekly). Its cash waits for that day, or (score / ok given: refill) buys the best-scored eligible
+    stock not held at the next close (score > 0). Entries count from be.FORWARD_START."""
+    W, C = w.to_numpy(float), c.reindex_like(w).to_numpy(float)
+    reb = weekly.reindex(w.index).fillna(False).to_numpy(bool)
+    S = score.reindex_like(w).to_numpy(float) if score is not None else None
+    E = ok.reindex_like(w).fillna(False).to_numpy(bool) if ok is not None else None
+    out, entry, extra, cash = np.zeros_like(W), {}, {}, 0.0
+    sold = set()
+    for t in range(int(np.searchsorted(w.index.values, np.datetime64(pd.Timestamp(be.FORWARD_START)))), len(W)):
+        if reb[t]:
+            sold.clear(); extra.clear(); cash = 0.0
+        pos = {j: W[t, j] for j in np.flatnonzero(W[t] > 0) if j not in sold} | extra
+        if S is not None and cash > 0:                    # refill: yesterday's exit cash -> best eligible stock not held
+            for j in np.argsort(-np.nan_to_num(S[t], nan=-np.inf), kind="stable"):
+                if S[t, j] > 0 and E[t, j] and j not in pos and j not in sold:
+                    pos[j] = extra[j] = cash; break
+            cash = 0.0
+        for j in list(entry):
+            if j not in pos:
+                del entry[j]
+        for j, x in list(pos.items()):
+            e = entry.setdefault(j, C[t, j])
+            if C[t, j] >= e * (1 + tp) or C[t, j] <= e * (1 - stop):
+                del pos[j], entry[j]; extra.pop(j, None); sold.add(j); cash += x
+        out[t, list(pos)] = list(pos.values())
+    return pd.DataFrame(out, index=w.index, columns=w.columns)
 
 def combo_weights(cfg, inp, through=None):
     """Date x Symbol end-of-day weights of a forward_combos line (0 before its start)."""
