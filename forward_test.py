@@ -280,6 +280,11 @@ STRATEGIES = [
          rule="Nov 4, 2026 (Chirag): same +5% / -1% exits (checked at the close), but the next trading day the freed cash "
               "buys the best-ranked eligible stock not held (live ranking, positive score, never a do-not-buy or a stock "
               "sold this week). Friday rebalances back to the plain top 10."),
+    dict(name="Short-term relative strength, skip top 2 sectors (1-year)", **{**NOW, "score": "rs_short_cold", "sleeve": False},
+         select=PLAIN, calendar="weekly", group="rs",
+         rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength (Fridays only), but no stock from the 2 sectors "
+              "with the best 1-year return (the Home tab sector table: equal-weight mean of each sector's stocks) is bought "
+              "or kept; the next ranks fill the 10 slots."),
     dict(name="Half relative strength, half buy the dip", blend=(LIVE_NOW, "Buy the dip"), group="combo",
          rule="Nov 4, 2026 (Chirag): 50% Short-term relative strength + 50% Buy the dip, each half follows its own line."),
     dict(name="Half relative strength, half worst sectors", blend=(LIVE_NOW, "Best stocks in worst sectors (2 months)"),
@@ -726,9 +731,17 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
                       if "SPY" in b else rs)                            # RS over other windows (the decision-day closes)
     calm = vol.le(vol.where(eligible).median(axis=1), axis=0)
     mom_12_1, etf_3m = (c.shift(21) / c.shift(252) - 1) * 100, by_etf(b / b.shift(63) - 1)
+    # the dashboard's 1-year sector return (sector_table): equal-weight mean of tradable stocks, close vs the last close a year back
+    sect = pd.Series({x: be.sector_mapping.symbol_sector.get(x) for x in cols})
+    c1 = c.ffill()
+    y1 = (c1 / c1.reindex(dates - pd.DateOffset(years=1), method="ffill").set_axis(dates) - 1)[
+        [x for x in cols if x in be.sector_mapping.tradable_symbols]]
+    top2 = y1.T.groupby(sect).mean().T.rank(axis=1, ascending=False, method="first").le(2)      # Date x sector
+    hot2 = top2.reindex(columns=sect.to_numpy()).fillna(False).set_axis(cols, axis=1).astype(bool)
     scores = {
         "live": live, "now": f["Strategy_Score"], "tech": tech, "rs": rs, "rs_short": rs_w((10, 21, 63)),
         "rs_short_cool": rs_w((10, 21, 63)).where((c / c.rolling(20).mean()).le(1.08) | c.isna(), -1.0),  # Nov 4: skip >8% over 20d avg
+        "rs_short_cold": rs_w((10, 21, 63)).where(~hot2 | c.isna(), -1.0),   # Nov 4: skip the 2 best 1-year sectors
         "rs_long": rs_w((63, 126, 252)),
         "tech30": 0.3 * tech + 0.7 * rs, "rs_calm": rs.where(calm | rs.isna(), -1.0),   # -1: not picked, sleeve kept
         "quant": quant - 50,                                  # > 0 = Quant Score above 50 (the copy's min score)
