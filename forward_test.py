@@ -271,12 +271,12 @@ STRATEGIES = [
          rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength, but at most 2 of the 10 stocks from one sector "
               "(the next best rank from another sector fills the slot)."),
     dict(name="Short-term relative strength, take 5% profit / 1% stop", **{**NOW, "score": "rs_short", "sleeve": False},
-         select=PLAIN, tpsl=(0.05, 0.01), group="rs",
+         select=PLAIN, calendar="weekly", tpsl=(0.05, 0.01), group="rs",
          rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength, but each trading day a holding whose close is "
               "+5% or more above its entry close is sold (take profit), or -1% or more below it (stop). Checked at the close "
               "(closes only, no intraday). The freed cash stays in cash until the next Friday rebalance."),
     dict(name="Short-term relative strength, 5%/1% exits, refill next day", **{**NOW, "score": "rs_short", "sleeve": False},
-         select=PLAIN, tpsl=(0.05, 0.01), refill=True, group="rs",
+         select=PLAIN, calendar="weekly", tpsl=(0.05, 0.01), refill=True, group="rs",
          rule="Nov 4, 2026 (Chirag): same +5% / -1% exits (checked at the close), but the next trading day the freed cash "
               "buys the best-ranked eligible stock not held (live ranking, positive score, never a do-not-buy or a stock "
               "sold this week). Friday rebalances back to the plain top 10."),
