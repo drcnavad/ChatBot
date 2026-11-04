@@ -1,5 +1,5 @@
 """Stock Analysis: a Finviz-style heatmap of every stock in sector_mapping.py (display only): one grid of equal
-small tiles in one compact grid, ordered by live RS short-term rank (same as the stock note / Strategy tab), colored by today's % change (Alpaca snapshots,
+small tiles in one compact grid, sorted A-Z by symbol, colored by today's % change (Alpaca snapshots,
 SIP -> IEX, vs the previous close; red -> green, centered at 0, clipped at +-3 %). Its own fragment: refreshes silently
 every 30 s. A yellow corner dot marks names currently held in the live Alpaca account (cached ~1 min via account_core; fails open if Alpaca is down). A tile click opens the stock in the picker and chart below."""
 
@@ -24,30 +24,9 @@ def tile_color(c):
 def _open(sym):
     st.session_state["_hm_open"] = sym
 
-# Sort by live RS short-term rank only (same sleeves.live_ranks / Strategy_Rank as the stock note and Strategy tab).
-# Do NOT prefer stale signal_board Buy/Hold tags from strategy_changes / pipeline Strategy_Weight — those still
-# said KO was "Hold · top 5, rank 2" and floated it to tile #4 while live RS rank was 51 (Chirag, Oct 29).
-
-def order(p, syms):
-    """Live RS short-term rank ascending (then score); unranked / non-finite last. Same key as live trading."""
-    def key(s):
-        r = p.by_symbol.loc[s] if s in p.by_symbol.index else {}
-        rank, score = r.get("Strategy_Rank", None), r.get("combined_signal", None)
-        try:
-            rank = float(rank) if rank is not None and rank == rank else None
-        except (TypeError, ValueError):
-            rank = None
-        try:
-            score = float(score) if score is not None and score == score else None
-        except (TypeError, ValueError):
-            score = None
-        return (rank is None, rank if rank is not None else 1e9,
-                -(score if score is not None else -1e9), s)
-    return sorted(syms, key=key)
-
 @st.fragment(run_every=30)
 def render_heatmap(p):
-    """One compact grid of small equal tiles, live RS short-term rank order, colored by today's %;
+    """One compact grid of small equal tiles, A-Z by symbol, colored by today's %;
     a tile click opens the stock in the picker and chart below (a whole-page rerun; the page stays on Stock Analysis)."""
     from dashboard.page import fresh
     p = fresh(p)
@@ -130,7 +109,7 @@ def render_heatmap(p):
     except Exception:
         spark = {}
     with st.container(horizontal=True, gap=None, key="hm_grid"):
-        for s in order(p, syms):
+        for s in sorted(syms):
             px, c = q.get(s, (float("nan"), float("nan")))
             k = s.replace('.', '_')
             with st.container(key=f"hmt_{k}"):
