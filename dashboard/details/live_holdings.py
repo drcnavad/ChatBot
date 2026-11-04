@@ -117,16 +117,53 @@ def rank_at_buy(sym, bought):
     r = r[(r["Symbol"] == sym) & (r["Date"].dt.date <= pd.Timestamp(bought).date())].sort_values("Date")
     if col not in r.columns:
         return None
-    return int(r[col].iloc[-1]) if len(r) and pd.notna(r[col].iloc[-1]) else None
+    if len(r) and pd.notna(r[col].iloc[-1]):
+        return int(r[col].iloc[-1])
+    return _computed_rank(sym, pd.Timestamp(bought).date().isoformat())   # no saved row then: recompute (display only)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _computed_ranks(day):
+    """{symbol: rank} recomputed for session `day` from the signal table (decision_ranks.ranks_on); {} if unavailable."""
+    try:
+        import decision_ranks
+        import sleeves
+        idx = sleeves.inputs()["close"].index
+        idx = idx[idx <= pd.Timestamp(day)]                 # a weekend / holiday buy date: the session before it
+        if not len(idx):
+            return {}
+        _, r = decision_ranks.ranks_on(idx[-1])
+        return {s: int(v) for s, v in zip(r["Symbol"], r["Rank_RS_Short"]) if pd.notna(v)}
+    except Exception:
+        return {}
+
+def _computed_rank(sym, day):
+    return _computed_ranks(day).get(sym)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _rank_now():
+    """{symbol: rank} of the live RS short-term ranking at the latest close (sleeves.live_ranks); {} if unavailable."""
+    try:
+        import sleeves
+        return {s: int(v[0]) for s, v in sleeves.live_ranks().items()}
+    except Exception:
+        return {}
+
+def rank_now(sym):
+    """Today's live RS short-term rank (None = not ranked: score <= 0, not eligible or do_not_buy)."""
+    return _rank_now().get(str(sym))
 
 def render_positions(table, data):
     """The holdings table (alpaca_paper.holdings_table) and its caption."""
     table.insert(1, "Rank", pd.array([rank_at_buy(s, d) if not str(s).startswith("Total") else None
                                       for s, d in zip(table["Stock"], table["First bought"])], dtype="Int64"))
+    table.insert(1, "Rank now", pd.array([rank_now(s) if not str(s).startswith("Total") else None
+                                          for s in table["Stock"]], dtype="Int64"))
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
     t = table.drop(columns=["Weight %"], errors="ignore")   # equal weights: not shown (Oct 21, 2026)
     show(t, ["P/L $", "P/L %", "Today %"], fit=True,
-         cols={"Rank": st.column_config.NumberColumn(format="%d", help="RS short-term rank on the day it was first bought"),
+         cols={"Rank now": st.column_config.NumberColumn(format="%d", help="Live RS short-term rank at the latest close "
+                                                     "(Mon-Thu sells below 20); blank = not ranked (score <= 0)"),
+               "Rank": st.column_config.NumberColumn("Rank at buy", format="%d", help="RS short-term rank on the day it was first bought"),
                "Shares": st.column_config.NumberColumn(format="%.2f"), "P/L %": SPCT, "Today %": SPCT,
                **dict.fromkeys(("Avg price", "Cost basis", "Market value", "P/L $", "Price"), MONEY)})
 
