@@ -251,6 +251,16 @@ def half_value(st, prices):
 
 # ----------------------------------------------------------------------------- the plan
 
+def exit_rank(h):
+    """Half h's Mon-Thu exit / refill rank cap: forward_test config 'exit'[0] (20)."""
+    try:
+        ex = _cfg(h).get("exit")
+        if isinstance(ex, (list, tuple)) and ex:
+            return int(ex[0])
+    except Exception:
+        pass
+    return 20
+
 def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, invested):
     """`n_picks` slots at equal weight invested/n. Drop NEW blocked picks; fill from the live ranking.
     Held blocked names stay (build_orders freezes top-ups). Held replacements for blocked ideal
@@ -260,13 +270,7 @@ def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, inve
     tw = {s: 0.0 for s in names if s not in blocked or s in held_set}
     r = ranking(h, d, inp)
     # exit=(20, 10) on the live RS short-term strategy: keep a held stand-in while rank <= 20
-    exit_below = 20
-    try:
-        ex = _cfg(h).get("exit")
-        if isinstance(ex, (list, tuple)) and ex:
-            exit_below = int(ex[0])
-    except Exception:
-        pass
+    exit_below = exit_rank(h)
     rank_of = {s: i + 1 for i, s in enumerate(r.index)}
     for s in held_set:
         if s in tw or s in blocked or not _num(px.get(s)):
@@ -274,13 +278,31 @@ def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, inve
         if rank_of.get(s, 10**9) <= exit_below:
             tw[s] = 0.0
     taken = set(tw)
+    soon = inp.get("soon")
+    soon_d = soon.loc[d] if soon is not None and d in soon.index else pd.Series(dtype=bool)
+    skipped = []
     for s in r.index:
         if len(tw) >= int(n_picks):
             break
-        if s in taken or s in blocked or not _num(px.get(s)):
+        if rank_of[s] > exit_below:      # never refill with a stock ranked worse than exit_below (LIN #21, Nov 3, 2026)
+            break
+        if s in taken:
+            continue
+        if s in blocked:
+            skipped.append(f"{s} #{rank_of[s]} ({blocked[s]})")
+            continue
+        if bool(soon_d.get(s, False)):   # earnings within 5 days: never a NEW buy (refills skipped it before Nov 3, 2026)
+            skipped.append(f"{s} #{rank_of[s]} (earnings within 5 days)")
+            continue
+        if not _num(px.get(s)):
+            skipped.append(f"{s} #{rank_of[s]} (no price)")
             continue
         tw[s] = 0.0
         taken.add(s)
+    if skipped:
+        print(f"  Refill candidates skipped (rank <= {exit_below}): " + "; ".join(skipped))
+    if len(tw) < int(n_picks):
+        print(f"  Only {len(tw)} of {int(n_picks)} slots filled with stocks ranked <= {exit_below}; the rest stays in cash")
     final = [s for s in tw if (s not in blocked or s in held_set) and (_num(px.get(s)) or s in held_set)]
     if not final:
         return {}
@@ -344,8 +366,10 @@ def plan(day, positions, equity, prices, no_buy=None, no_sell=None, fractional=T
     inp = inp or inputs()
     px = {str(k).upper(): v for k, v in (prices or {}).items()}
     close = inp["close"]
-    for h in HALVES:                                        # a target with no live price: the saved close
-        for s in half_weights(h, d, inp).pipe(lambda x: x[x > 0]).index:
+    for h in HALVES:                                        # a target / refill candidate with no live price: the saved close
+        cands = set(half_weights(h, d, inp).pipe(lambda x: x[x > 0]).index)
+        cands |= set(ranking(h, d, inp).index[:exit_rank(h)])   # Mon-Thu refills (rank <= 20) are priced too (Nov 3, 2026)
+        for s in sorted(cands):
             if not _num(px.get(s)) and s in close.columns and d in close.index and _num(close.at[d, s]):
                 px[s] = float(close.at[d, s])
     state, unowned, info = reconcile(led, positions, px, equity, shares, fills=fills, pending=pending)

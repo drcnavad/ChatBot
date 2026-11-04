@@ -2385,11 +2385,17 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
     if session:
         _picks = db.read_csv(PICKS_CSV)
         _syms = set(positions) | set(_picks["Symbol"].astype(str))
-        try:                                        # the possible Friday replacements (ranks up to 20) are priced live too
-            _rk = latest_ranking(str(_picks["As_Of"].iloc[0]))
-            _syms |= set(_rk.loc[pd.to_numeric(_rk["Rank"], errors="coerce") <= FRIDAY_SUB_MAX_RANK, "Symbol"].astype(str))
-        except Exception:
-            pass
+        try:                                        # the live RS short-term refills (ranks up to 20) are priced live too
+            import sleeves                          # (Nov 3, 2026: the old Strategy_Rank list missed WMT/CVNA -> LIN #21)
+            _h = sleeves.HALVES[0]
+            _syms |= set(sleeves.ranking(_h, str(_picks["As_Of"].iloc[0])).index[:max(sleeves.exit_rank(_h), FRIDAY_SUB_MAX_RANK)])
+        except Exception as e:
+            print(f"  live ranking for quotes unavailable ({type(e).__name__}: {e}) - using the pipeline ranking")
+            try:
+                _rk = latest_ranking(str(_picks["As_Of"].iloc[0]))
+                _syms |= set(_rk.loc[pd.to_numeric(_rk["Rank"], errors="coerce") <= FRIDAY_SUB_MAX_RANK, "Symbol"].astype(str))
+            except Exception:
+                pass
         live = current_prices(_syms)
         print(f"  Catch-up in regular hours: sized at current prices ({len(live)} quotes)")
     orders, meta, targets = plan_orders(target, equity, positions, min_value=min_value, fractional=True,
