@@ -228,9 +228,9 @@ STRATEGIES = [
          rule="Nov 4, 2026 (Chirag): the line above, and a stock more than 8% above its 20-day average "
               "is not newly bought (a held one is kept); the next ranks fill the 10 slots."),
     dict(name=LIVE_COOL, **{**NOW, "score": "rs_short", "sleeve": False},
-         select=PLAIN, calendar="weekly", cool_buys=True, group="rs",
+         select=PLAIN, calendar="weekly", cool_buys=True, stretch="stretched_live", group="rs",
          rule="Live from Fri Nov 6, 2026 (Chirag): Short-term relative strength, top 10 equal weight, Fridays only; a stock "
-              "more than 8% above its 20-day average is not newly bought (a held one in the top 10 is kept); the next "
+              "more than 15% (8% until Nov 4, 2026) above its 20-day average is not newly bought (a held one in the top 10 is kept); the next "
               "ranks fill the 10 slots. do_not_buy never bought."),
     dict(name="Half relative strength, half buy the dip", blend=(LIVE_NOW, "Buy the dip"), group="combo",
          rule="Nov 4, 2026 (Chirag): 50% Short-term relative strength + 50% Buy the dip, each half follows its own line."),
@@ -679,7 +679,9 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     y1 = be.window_returns(c[[x for x in cols if x in be.sector_mapping.tradable_symbols]], pd.DateOffset(years=1))
     top2 = y1.T.groupby(sect).mean().T.rank(axis=1, ascending=False, method="first").le(2)      # Date x sector
     hot2 = top2.reindex(columns=sect.to_numpy()).fillna(False).set_axis(cols, axis=1).astype(bool)
-    stretched = (c / c.rolling(20).mean()).gt(1.08)                   # Nov 4: close more than 8% over its 20-day average
+    ma20 = c / c.rolling(20).mean()
+    stretched = ma20.gt(1.08)                   # Nov 4: close more than 8% over its 20-day average (the comparison lines)
+    stretched_live = ma20.gt(1.15)              # live (LIVE_COOL) from Nov 4, 2026 (Chirag t285s1180): more than 15%
     scores = {
         "live": live, "now": f["Strategy_Score"], "tech": tech, "rs": rs, "rs_short": rs_w((10, 21, 63)),
         "rs_short_cool": rs_w((10, 21, 63)).where(~stretched, -1.0),   # Nov 4: skip >8% over 20d avg
@@ -723,7 +725,7 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
                "trend": _carry(((f["ma_50"] > f["ma_200"]) & eligible).astype(float).div(n, axis=0), weekly)}
     have = bx["vwap_ratio"].notna().any(axis=1)
     qqq = b["QQQ"] if "QQQ" in b else pd.Series(np.nan, index=dates)
-    return {"close": c.ffill(), "stretched": stretched, "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
+    return {"close": c.ffill(), "stretched": stretched, "stretched_live": stretched_live, "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
             "bench": b, "up": up, "ma200": f["ma_200"], "ma10": f["ma_10"], "ma30": f["ma_30"], "ma50": f["ma_50"],
             "qqq50": (qqq > qqq.rolling(50).mean()).reindex(dates).fillna(False),
             "weekly": weekly, "live_cal": be.winner_rebalance_days(dates, live=True), "earnings": earnings, "atr": atr,
@@ -817,7 +819,7 @@ def strategy_targets(cfg, inp):
     tgt = tgt.mask(_dnb(inp).reindex(index=tgt.index, columns=tgt.columns, fill_value=False), 0.0)   # its weight: cash
     w = be.live_weights(tgt).reindex(columns=inp["close"].columns).fillna(0.0)
     if cfg.get("cool_buys"):
-        return cool_buys(w, inp["scores"][cfg["score"]], inp["eligible"] & ~_dnb(inp), inp["stretched"], inp["weekly"],
+        return cool_buys(w, inp["scores"][cfg["score"]], inp["eligible"] & ~_dnb(inp), inp[cfg.get("stretch", "stretched")], inp["weekly"],
                          held=inp.get("held"))
     if not cfg.get("tpsl"):
         return w

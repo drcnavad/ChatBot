@@ -33,7 +33,7 @@ def rules_text():
     return (f"**Strategy rules: {STRATEGY_NAME}**\n"
             "- **Whole account** runs forward_test's \"Short-term relative strength, skip stretched buys\" exactly (from Fri Nov 6, 2026) (Reports/sleeve_ledger.json).\n"
             "- **Score:** relative strength over 10, 21 and 63 trading days (60% stock vs its sector ETF, 40% that ETF vs SPY); "
-            "a stock more than 8% above its 20-day average not newly bought (held ones kept); the top 10, equal weights (~9.9% each), 99% invested. No defensive sleeve (removed Oct 29, 2026).\n"
+            "a stock more than 15% above its 20-day average not newly bought (held ones kept); the top 10, equal weights (~9.9% each), 99% invested. No defensive sleeve (removed Oct 29, 2026).\n"
             "- **When:** full rebalance every Friday 2:30 PM CT (Thursday when Friday is a holiday) only; no Mon-Thu trades "
             "(Nov 4, 2026). A blocked pick is replaced by the next eligible, not stretched stock ranked 20 or better. "
             "Strategy locked to ~Jan 29, 2027. On early-close days (market closes "

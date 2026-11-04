@@ -129,7 +129,7 @@ def winner_label(n_stocks):
     S, mw = WINNER, WINNER.get("midweek_swap")
     if S.get("halves"):
         return (f"RS-S-U{n_stocks}", "Live: Short-term relative strength, skip stretched buys (from Fri Nov 6, 2026) - "
-                "10/21/63-day relative strength, top 10 equal weight (~9.9%), Fridays only (no Mon-Thu trades); a stock more than 8% above its 20-day average is not newly bought (held ones kept); blocked picks replaced down to rank 20, "
+                "10/21/63-day relative strength, top 10 equal weight (~9.9%), Fridays only (no Mon-Thu trades); a stock more than 15% above its 20-day average is not newly bought (held ones kept); blocked picks replaced down to rank 20, "
                 f"soft QQQ regime ({n_stocks} stocks)")
     if S.get("score") == "low_vol" and S.get("calendar") == "monthly":
         tag = f"LV-M-U{n_stocks}"
