@@ -262,6 +262,10 @@ STRATEGIES = [
     dict(name="Short-term relative strength, skip stretched", **{**NOW, "score": "rs_short_cool", "sleeve": False}, group="rs",
          rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength, but a stock more than 8% above its 20-day "
               "average can't be bought or kept that day."),
+    dict(name="Short-term relative strength, max 3 per sector", **{**NOW, "score": "rs_short", "sleeve": False},
+         select={**PLAIN, "sector_cap": 0.3}, group="rs",
+         rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength, but at most 3 of the 10 stocks from one sector "
+              "(the next best rank from another sector fills the slot)."),
     dict(name="Half relative strength, half buy the dip", blend=(LIVE_NOW, "Buy the dip"), group="combo",
          rule="Nov 4, 2026 (Chirag): 50% Short-term relative strength + 50% Buy the dip, each half follows its own line."),
     dict(name="Half relative strength, half worst sectors", blend=(LIVE_NOW, "Best stocks in worst sectors (2 months)"),
