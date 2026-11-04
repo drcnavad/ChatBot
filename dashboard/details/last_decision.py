@@ -55,13 +55,15 @@ def last_rebalance(path=None):
 
 
 def decision_table(positions, equity):
-    """(table, last day, rank-now day, next day): Stock, Sector, Last week, Rank then, Rank now, Next, Why."""
+    """(table, last day, rank-now day, next day): Stock, Sector, Held now (live Alpaca positions), Last week (latest
+    action since the last Friday: Buy / Sell / Trim = partial sell, still held / Hold), Rank then, Rank now, Next, Why."""
     import decision_ranks
     import sleeves as sl
     from dashboard.settings import symbol_sector
     held, _ = _positions(positions)
     inp = sl.inputs()
     last, side = last_rebalance()
+    side = {k: v.replace("Sell", "Trim", 1) if k in held else v for k, v in side.items()}   # a partial sell, still held
     col = decision_ranks.RANK_COL[sl.HALVES[0]]
     then = decision_ranks.load(last) if last is not None else None
     then = {} if then is None else dict(zip(then["Symbol"], then[col]))
@@ -79,6 +81,8 @@ def decision_table(positions, equity):
             return f"buy block: {info['no_buy'][s]}"
         if act == "Sell":
             return "not ranked (score <= 0)" if r is None else f"rank {r}: out of the top 10"
+        if act == "Buy" and str(side.get(s, "")).startswith("Sell"):
+            return f"buy back (sold {side[s][5:]}, not held now)"
         if act in ("Buy", "Hold", "Trim", "Add") or s in book:
             return {"Buy": "new pick", "Add": "topped up to equal weight", "Trim": "trimmed to equal weight"}.get(act, "kept")
         if r is None or r > 20:
@@ -104,10 +108,11 @@ def decision_table(positions, equity):
     rows = []
     for s in syms:
         a = act(s)
-        rows.append({"Stock": s, "Sector": symbol_sector.get(s, "—"),
+        rows.append({"Stock": s, "Sector": symbol_sector.get(s, "—"), "Held now": held.get(s, 0.0),
                      "Last week": (side[s] if s in side else "Hold" if s in held else "—"),
                      "Rank then": then.get(s), "Rank now": now.get(s), "Next": a, "Why": why(s, a)})
     t = pd.DataFrame(rows)
+    t["Held now"] = t["Held now"].map(lambda q: f"{q:g} sh" if q else "—")
     for c in ("Rank then", "Rank now"):
         t[c] = pd.array(pd.to_numeric(t[c], errors="coerce").round(), dtype="Int64")
     return t, last, inp["close"].index[-1], d
@@ -136,7 +141,7 @@ def render_last_decision(p):
     st.caption(f"Rank now = the {now_day:%a %b %-d} close. Next = a Friday rebalance at that close through the live plan "
                "(top 10 equal ~9.9%, max 4 per sector, no new buys >15% over the 20-day average or within 5 days of "
                "earnings, replacements to rank 20, half weights when the regime is off). Prices move until Friday.")
-    tone = lambda v: GOOD if v in ("Buy", "Add") else BAD if v in ("Sell", "Trim") or str(v).startswith("Sell") else INK
+    tone = lambda v: GOOD if v in ("Buy", "Add") else BAD if v in ("Sell", "Trim") or str(v).startswith("Trim") or str(v).startswith("Sell") else INK
     sty = toned(toned(t, ["Next"], fn=tone), ["Last week"], fn=lambda v: tone(str(v).split(" ")[0]))
     event = table(sty, fit=True, on_select="rerun", selection_mode="single-row", key="decisions_tbl",
                   cols={"Rank then": st.column_config.NumberColumn("Rank then", width=60),
