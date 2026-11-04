@@ -259,6 +259,11 @@ STRATEGIES = [
               "below rank 20, refilled from the top 10); half 2 = Relative strength, Fridays only. Each half follows its own "
               "line exactly; a stock both pick is held by both, each paying from its own half (no overlap rule). "
               "Value = the average of the two lines."),
+    dict(name="Half relative strength, half buy the dip", blend=(LIVE_NOW, "Buy the dip"), group="combo",
+         rule="Nov 4, 2026 (Chirag): 50% Short-term relative strength + 50% Buy the dip, each half follows its own line."),
+    dict(name="Half relative strength, half worst sectors", blend=(LIVE_NOW, "Best stocks in worst sectors (2 months)"),
+         group="combo", rule="Nov 4, 2026 (Chirag): 50% Short-term relative strength + 50% Best stocks in worst sectors "
+                             "(2 months), each half follows its own line."),
     dict(name="Half low vol, half sector rotation every 2 weeks", combo=dict(legs=(LV, ("sr63", "full", "2week", 0.5))),
          group="combo",
          rule="50/50: low-volatility half monthly + sector-rotation half (63 days) rebalanced every other Friday, no overlap."),
