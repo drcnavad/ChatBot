@@ -89,7 +89,7 @@ fake_rank = pd.Series(range(5, 0, -1), index=["REPL", "ZZZ", "HOLD1", "HOLD2", "
 with mock.patch.object(sleeves, "ranking", return_value=fake_rank):
     out = sleeves.replace_blocked_new_slots(
         "rs_short", pd.Timestamp("2026-10-30"), names2, held2, blocked2, px2,
-        {}, 4, 0.99,
+        {"stretched": pd.DataFrame()}, 4, 0.99,
     )
 check("BAD" not in out, "replace_blocked drops blocked new", out)
 check("REPL" in out, "replace_blocked adds replacement", out)

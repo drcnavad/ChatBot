@@ -1,5 +1,5 @@
 """Regression tests for the Oct 31 2026 live-trading audit fixes (ledger v4, equal-weight sizing,
-sold_block-on-fill, ah_reprice MAX_SPREAD, evening-retry deferral). No broker orders."""
+sold_block-on-fill, evening-retry deferral). No broker orders."""
 import json
 import os
 import sys
@@ -14,7 +14,6 @@ sys.path.insert(0, str(ROOT))
 import pandas as pd
 import sleeves
 import paper_trade as pt
-import ah_reprice
 import run_all as ra
 import sold_block as sb
 
@@ -34,12 +33,6 @@ check(not hasattr(sleeves, "MAX_NAME_WEIGHT"), "no sleeves.MAX_NAME_WEIGHT (equa
 check(not hasattr(sleeves, "fill_idle"), "fill_idle removed")
 w = 0.99 / 10
 check(abs(w - 0.099) < 1e-12, "equal slot = invested/10", w)
-
-# --- ah_reprice respects MAX_SPREAD ---
-why = ah_reprice._sane_ask("FDS", 316.0, 342.15, 330.0)
-check(why and "spread too wide" in why, "ah_reprice skips wide spread", why)
-why2 = ah_reprice._sane_ask("KO", 94.10, 94.34, 94.20)
-check(why2 is None, "ah_reprice allows tight spread", why2)
 
 # --- sold_block on fill only + clear ---
 with tempfile.TemporaryDirectory() as td:

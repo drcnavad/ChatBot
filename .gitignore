@@ -49,3 +49,4 @@ data/fill_history_cache.json.tmp
 data/headlines_cache.json
 data/headlines_cache.json.tmp
 backups/
+data/*.bak*

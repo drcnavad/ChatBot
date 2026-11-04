@@ -14,7 +14,7 @@
 #                                     limit sells from Reports/target_sells_config.json, e.g. CRL @ 387.68; window
 #                                     ~3:00 AM-7:00 PM CT session days; cancels when drop_guard / 2:30 sell the name;
 #                                     fills record sold_block for 5 business days)
-#   com.stockanalysis.drop_guard        every 15 min + at login: drop_guard.py --scheduled (LIVE intraday AI drop guard ~8:30 AM-2:15 PM CT; sells when mid is >=4.1% below prior close and the LLM agrees at >=0.75 confidence; optional replacement buy with proceeds; kill switch + dry_run in Reports/drop_guard_config.json)
+#   (drop_guard is off: its plist lives in launchd_disabled/, not installed)
 #   com.stockanalysis.earningsstop    every 5 min + at login: earnings_stop.py --loop (LIVE earnings-day 5% drop stop;
 #                                     30-second checks only while a held stock is in an earnings-day session, 3:00 AM-
 #                                     7:00 PM CT on trading days; one loop at a time; otherwise exits after a quick look)
