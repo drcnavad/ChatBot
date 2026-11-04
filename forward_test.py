@@ -53,11 +53,12 @@ MON = "Live 50/50, top 10 each half"    # removed Oct 29 rename (Oct 16-era); ke
 # Live rules (Chirag, Oct 27): 100% short-term relative strength. Defensive sleeve off Oct 29. From Fri Nov 6: LIVE_COLD.
 LIVE_NOW = "Short-term relative strength"
 LIVE_COLD = "Short-term relative strength, skip top 2 sectors (1-year)"
+LIVE_COOL = "Short-term relative strength, skip top 2 sectors (1-year) and stretched buys"
 RS_FRIDAYS = "Relative strength, Fridays only"
 NOW_HALVES = (LIVE_NOW, RS_FRIDAYS)   # the 50/50 paper line's two halves
 BLEND = "Half short-term, half Friday relative strength"
-MARKED = LIVE_COLD
-LIVE = LIVE_COLD    # live from Fri Nov 6, 2026 (Chirag); the line the verdict and the dashboard compare against
+MARKED = LIVE_COOL
+LIVE = LIVE_COOL    # live from Fri Nov 6, 2026 (Chirag); the line the verdict and the dashboard compare against
 # Names dropped from the active board (purge_removed). Archives keep their own history; do not reintroduce these.
 REMOVED = {"Short-term reversal", "12-1 month momentum", "RSI pullback in uptrend", "Worst 3 sectors 3M, +10%/-3%",
            "Breakout with volume", "Relative strength only", "MACD cross, weekly", "MA10 & MA30 x MA50",
@@ -286,6 +287,10 @@ STRATEGIES = [
          rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength (Fridays only), but no stock from the 2 sectors "
               "with the best 1-year return (the Home tab sector table: equal-weight mean of each sector's stocks) is bought "
               "or kept; the next ranks fill the 10 slots."),
+    dict(name=LIVE_COOL, **{**NOW, "score": "rs_short_cold", "sleeve": False},
+         select=PLAIN, calendar="weekly", cool_buys=True, group="rs",
+         rule="Nov 4, 2026 (Chirag; live from Fri Nov 6): the line above, and a stock more than 8% above its 20-day average "
+              "is not newly bought (a held one is kept); the next ranks fill the 10 slots."),
     dict(name="Half relative strength, half buy the dip", blend=(LIVE_NOW, "Buy the dip"), group="combo",
          rule="Nov 4, 2026 (Chirag): 50% Short-term relative strength + 50% Buy the dip, each half follows its own line."),
     dict(name="Half relative strength, half worst sectors", blend=(LIVE_NOW, "Best stocks in worst sectors (2 months)"),
@@ -737,9 +742,10 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     y1 = be.window_returns(c[[x for x in cols if x in be.sector_mapping.tradable_symbols]], pd.DateOffset(years=1))
     top2 = y1.T.groupby(sect).mean().T.rank(axis=1, ascending=False, method="first").le(2)      # Date x sector
     hot2 = top2.reindex(columns=sect.to_numpy()).fillna(False).set_axis(cols, axis=1).astype(bool)
+    stretched = (c / c.rolling(20).mean()).gt(1.08)                   # Nov 4: close more than 8% over its 20-day average
     scores = {
         "live": live, "now": f["Strategy_Score"], "tech": tech, "rs": rs, "rs_short": rs_w((10, 21, 63)),
-        "rs_short_cool": rs_w((10, 21, 63)).where((c / c.rolling(20).mean()).le(1.08) | c.isna(), -1.0),  # Nov 4: skip >8% over 20d avg
+        "rs_short_cool": rs_w((10, 21, 63)).where(~stretched, -1.0),   # Nov 4: skip >8% over 20d avg
         "rs_short_cold": rs_w((10, 21, 63)).where(~hot2 | c.isna(), -1.0),   # Nov 4: skip the 2 best 1-year sectors
         "rs_long": rs_w((63, 126, 252)),
         "tech30": 0.3 * tech + 0.7 * rs, "rs_calm": rs.where(calm | rs.isna(), -1.0),   # -1: not picked, sleeve kept
@@ -780,7 +786,7 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
                "trend": _carry(((f["ma_50"] > f["ma_200"]) & eligible).astype(float).div(n, axis=0), weekly)}
     have = bx["vwap_ratio"].notna().any(axis=1)
     qqq = b["QQQ"] if "QQQ" in b else pd.Series(np.nan, index=dates)
-    return {"close": c.ffill(), "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
+    return {"close": c.ffill(), "stretched": stretched, "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
             "bench": b, "up": up, "ma200": f["ma_200"], "ma10": f["ma_10"], "ma30": f["ma_30"], "ma50": f["ma_50"],
             "qqq50": (qqq > qqq.rolling(50).mean()).reindex(dates).fillna(False),
             "weekly": weekly, "live_cal": be.winner_rebalance_days(dates, live=True), "earnings": earnings, "atr": atr,
@@ -873,10 +879,38 @@ def strategy_targets(cfg, inp):
                                    never_buy=be.sector_mapping.do_not_buy if cfg.get("never_buy") else ())
     tgt = tgt.mask(_dnb(inp).reindex(index=tgt.index, columns=tgt.columns, fill_value=False), 0.0)   # its weight: cash
     w = be.live_weights(tgt).reindex(columns=inp["close"].columns).fillna(0.0)
+    if cfg.get("cool_buys"):
+        return cool_buys(w, inp["scores"][cfg["score"]], inp["eligible"] & ~_dnb(inp), inp["stretched"], inp["weekly"],
+                         held=inp.get("held"))
     if not cfg.get("tpsl"):
         return w
     ref = dict(score=inp["scores"][cfg["score"]], ok=inp["eligible"] & ~_dnb(inp)) if cfg.get("refill") else {}
     return tpsl_weights(w, inp["close"], inp["weekly"], *cfg["tpsl"], **ref)
+
+def cool_buys(w, score, ok, stretched, weekly, held=None):
+    """Rebalance days (weekly): a pick not held the day before that is stretched is swapped for the next best eligible,
+    not stretched stock (score > 0); a held stretched pick stays. Other days keep the last rebalance's book. `held`
+    (live: the ledger's symbols) also counts as held on the last day."""
+    W, S = w.to_numpy(float).copy(), score.reindex_like(w).to_numpy(float)
+    E, X = ok.reindex_like(w).fillna(False).to_numpy(bool), stretched.reindex_like(w).fillna(False).to_numpy(bool)
+    reb = weekly.reindex(w.index).fillna(False).to_numpy(bool)
+    for t in range(1, len(W)):
+        if not reb[t]:
+            continue
+        pick = set(np.flatnonzero(W[t] > 0))
+        own = {w.columns.get_loc(s) for s in (held or ()) if s in w.columns} if t == len(W) - 1 else set()
+        new = {j for j in pick if W[t - 1, j] <= 0 and j not in own and X[t, j]}
+        if not new:
+            continue
+        x = W[t, list(pick)].mean()
+        best = [j for j in np.argsort(-np.nan_to_num(S[t], nan=-np.inf), kind="stable")
+                if S[t, j] > 0 and E[t, j] and not X[t, j] and j not in pick]
+        W[t, list(new)] = 0.0
+        W[t, best[:len(new)]] = x
+        k = t + 1
+        while k < len(W) and not reb[k]:
+            W[k] = W[t]; k += 1
+    return pd.DataFrame(W, index=w.index, columns=w.columns)
 
 def tpsl_weights(w, c, weekly, tp, stop, score=None, ok=None):
     """A close +tp / -stop from the entry close sells the holding (closes only); it is not bought back before the next

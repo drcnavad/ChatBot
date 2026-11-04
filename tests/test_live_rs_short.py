@@ -49,9 +49,9 @@ cfg = next(c for c in ft.STRATEGIES if c["name"] == ft.LIVE)
 check(cfg.get("sleeve") is False, "live RS short-term sleeve=False (no defensive)", cfg.get("sleeve"))
 forced = [s for s in sm.defensive if s in w.index and float(w[s]) > 0]
 # a defensive name may still appear if it ranks in the top 10 on its own
-r = sleeves.ranking("rs_short", d, inp)
-top10 = set(r.index[:10])
-check(all(s in top10 for s in forced), "defensive names in targets only if they rank top 10", forced)
+d_reb = inp["weekly"][inp["weekly"] & (inp["weekly"].index <= d)].index[-1]   # the book is set on the last rebalance
+top = set(sleeves.ranking("rs_short", d_reb, inp).index[:20])       # top 10 + fills for stretched picks (Nov 6, 2026)
+check(all(s in top for s in forced), "defensive names in targets only if they rank top 10 (or fill a stretched pick)", forced)
 check(len(w[w > 0]) <= 10 and abs(float(w[w > 0].sum()) - 0.99) < 0.02,
       "at most 10 targets, ~99% invested", (len(w[w > 0]), float(w[w > 0].sum())))
 buys = orders[orders["Side"] == "BUY"].set_index("Symbol")

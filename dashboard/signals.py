@@ -160,7 +160,7 @@ def plan_text(plan, sym):
 
 
 # ----------------------------------------------------------------------------- live Short-term relative strength note
-LIVE_STRATEGY = "Short-term relative strength, skip top 2 sectors (1-year)"
+LIVE_STRATEGY = "Short-term relative strength, skip top 2 sectors (1-year) and stretched buys"
 LIVE_N = 10          # top-N equal weight (forward_test LIVE_NOW / sleeves)
 LIVE_EXIT_BELOW = 20 # Mon-Thu: sell when worse than this rank
 

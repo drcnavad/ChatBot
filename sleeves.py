@@ -34,7 +34,7 @@ REPORTS = os.path.join(ROOT, "Reports")
 LEDGER_JSON = os.environ.get("STOCK_ANALYSIS_SLEEVE_LEDGER") or os.path.join(REPORTS, "sleeve_ledger.json")
 PLAN_CSV = os.environ.get("STOCK_ANALYSIS_SLEEVE_PLAN") or os.path.join(REPORTS, "sleeve_plan.csv")
 HALVES = ("rs_short",)
-STRATEGY = {"rs_short": "Short-term relative strength, skip top 2 sectors (1-year)"}   # Fri Nov 6, 2026 (Chirag)
+STRATEGY = {"rs_short": "Short-term relative strength, skip top 2 sectors (1-year) and stretched buys"}   # Fri Nov 6, 2026 (Chirag)
 LABEL = STRATEGY
 SHORT = STRATEGY  # alias
 VERSION = 4
@@ -92,6 +92,9 @@ def targets(h, inp=None):
     inp = inp or inputs()
     key = (h, id(inp))
     if key not in _TARGETS:
+        if "held" not in inp:                             # live holdings: a held stretched pick is kept (cool_buys)
+            led = load_ledger()
+            inp["held"] = set((led or {}).get("halves", {}).get(h, {}).get("shares", {}))
         _TARGETS[key] = ft.strategy_targets(_cfg(h), inp)
     return _TARGETS[key]
 
@@ -116,6 +119,8 @@ def ranking(h, day, inp=None):
         d = sc.index[sc.index <= d][-1]
     s = sc.loc[d].where(inp["eligible"].loc[d])
     s = s[(s > 0) & ~s.index.isin(sm.do_not_buy) & s.index.isin(set(sm.tradable_symbols))]
+    if _cfg(h).get("cool_buys"):                          # replacements are buys: no stretched stock (Nov 6, 2026)
+        s = s[~inp["stretched"].loc[d].reindex(s.index, fill_value=False)]
     return s.sort_values(ascending=False, kind="stable")
 
 def live_ranks(day=None, inp=None):

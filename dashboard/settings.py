@@ -40,7 +40,7 @@ STRATEGY_NAME = ("Low volatility in uptrend (monthly)" if LOW_VOL and MONTHLY el
 SLEEVES = WINNER.get("sleeves")                                      # the live sleeve (sleeves.py), else None
 HALVES = bool(WINNER.get("halves"))                                 # (Oct 27, 2026) live = RS short-term (weekly + Mon–Thu sells)
 if SLEEVES and HALVES:
-    STRATEGY_NAME = "Live: Short-term relative strength, skip top 2 sectors (1-year)"
+    STRATEGY_NAME = "Live: Short-term relative strength, skip top 2 sectors (1-year) and stretched buys"
 REGIME_OFF = f"{WINNER.get('regime_symbol', 'QQQ')} at or below its 200-day average"   # market filter off
 SCALE = WINNER.get("regime_scale", 0.5) if WINNER.get("use_regime", True) else None
 HALVED = "halved" if SCALE == 0.5 else f"multiplied by {SCALE:g}" if SCALE else "unchanged"
@@ -54,7 +54,7 @@ def halves_rules_text():
     return (f"**Strategy rules: {STRATEGY_NAME} ({STRATEGY_TAG})**\n"
             "- **Whole account** runs forward_test's \"Short-term relative strength, skip top 2 sectors (1-year)\" exactly (from Fri Nov 6, 2026) (Reports/sleeve_ledger.json).\n"
             "- **Score:** relative strength over 10, 21 and 63 trading days (60% stock vs its sector ETF, 40% that ETF vs SPY); "
-            "stocks in the 2 sectors with the best 1-year return (Home tab sector table) skipped; the top 10, equal weights (~9.9% each), 99% invested. No defensive sleeve (removed Oct 29, 2026).\n"
+            "stocks in the 2 sectors with the best 1-year return (Home tab sector table) skipped; a stock more than 8% above its 20-day average not newly bought (held ones kept); the top 10, equal weights (~9.9% each), 99% invested. No defensive sleeve (removed Oct 29, 2026).\n"
             "- **When:** full rebalance every Friday 2:30 PM CT (Thursday when Friday is a holiday); Mon-Thu 2:30 PM a holding "
             "worse than rank 20 is sold and replaced by the next eligible stock ranked 20 or better (earnings within 5 days "
             "skipped). On early-close days (market closes "
