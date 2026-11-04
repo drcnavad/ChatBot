@@ -51,7 +51,6 @@ LOG_DIR = os.path.join(REPORTS, "logs")
 STATE_FILE = os.path.join(REPORTS, "run_state.json")
 CHECKPOINT_FILE = os.path.join(REPORTS, ".pipeline_checkpoint.json")   # watchdog resume point (see pipeline_watchdog.py)
 CT, ET = ZoneInfo("America/Chicago"), ZoneInfo("America/New_York")
-FULL_AFTER = (14, 30)                  # normal-day decision time (== backtest_engine.DECISION_TIME_CT); early-close = 11:00 AM
 
 NEWS_MIN_GAP_H = 24                    # NewsAPI free tier: 100 requests/day, one run = len(news_symbols()) (N_CALLS)
 BAR_FINAL_ET = (16, 30)                # the pipeline treats the daily bar as final after 4:30 PM ET (3:30 PM CT)

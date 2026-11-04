@@ -22,7 +22,7 @@ def _forward_files():
     daily, values = read_report_csv(ft.DAILY_CSV), read_report_csv(ft.STRATEGIES_CSV)
     if values is None or values.empty:
         return daily, values, None
-    key = (*(mtime(f) for f in (ft.DAILY_CSV, ft.STRATEGIES_CSV, BENCH_CSV, ft.HOLDINGS_CSV, ft.FWD_BARS)), int(time.time() // 300))
+    key = (*(mtime(f) for f in (ft.DAILY_CSV, ft.STRATEGIES_CSV, BENCH_CSV, ft.HOLDINGS_CSV)), int(time.time() // 300))
     return daily, values, _board_cached(daily, values, key)
 
 @st.fragment(run_every=300)      # re-reads its (mtime-cached) files: new forward-test days show up in place

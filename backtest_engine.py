@@ -47,7 +47,6 @@ log = logging.getLogger("backtest_engine")
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 REPORTS_DIR = PROJECT_ROOT / "Reports"
-CACHE_DIR = REPORTS_DIR / "cache"
 EASTERN = ZoneInfo("America/New_York")
 # The daily bar counts as final 30 min after the 4 PM ET close (4:30 PM ET = 3:30 PM CT) for every job by default. The two
 # after-close jobs that run at 3:00 PM CT (the non-decision-day refresh and the forward test) take it 5 min after the
@@ -61,7 +60,6 @@ COST = 0.001                 # per side
 MIN_BARS = 200               # a stock is eligible once it has a full ma_200 (handles late IPOs consistently)
 DATA_START = "2023-06-01"    # warm-up for ma_200 and 252-bar rescaling windows (live pipeline)
 LONG_START = "2016-01-01"          # Alpaca SIP daily history floor (~2016)
-LONG_CACHE = "bars_daily"           # legacy name: daily bars now live in SQLite table db.BARS_DAILY (not a pickle)
 BARS_REFRESH_OVERLAP_DAYS = 5       # re-fetch this many calendar days before each symbol's max date (corrections + gaps)
 RS_WINDOWS = (21, 63, 126)
 RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}

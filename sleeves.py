@@ -53,14 +53,10 @@ def full_day(h, day):
 
 def half_day(h, day):
     """True when half h may trade on session `day`: rebalance session only (Nov 4, 2026, Chirag: no Mon-Thu trades)."""
-    import backtest_engine as be
-    d = pd.Timestamp(day).normalize()
-    if not be.is_session(d):
-        return False
-    return full_day(h, d)
+    return full_day(h, day)
 
 def calendar(start, sessions=30):
-    """[(date, halves that rebalance in full)] for the next sessions from `start` (inclusive); rs_short also checks Mon-Thu."""
+    """[(date, halves that rebalance in full)] for the next sessions from `start` (inclusive)."""
     import backtest_engine as be
     d0 = pd.Timestamp(start).normalize()
     days = [d0] + list(be.next_sessions(d0, sessions)) if be.is_session(d0) else list(be.next_sessions(d0, sessions))

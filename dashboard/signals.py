@@ -159,10 +159,6 @@ def plan_text(plan, sym):
     return f"{action} {w:.2f}%" if action in ("Buy", "Keep", "Take over") else (action or "not picked")
 
 
-# ----------------------------------------------------------------------------- live Short-term relative strength note
-LIVE_STRATEGY = "Short-term relative strength, skip stretched buys"
-LIVE_N = 10          # top-N equal weight (forward_test LIVE_NOW / sleeves)
-LIVE_EXIT_BELOW = 20 # blocked-pick replacement cap (no Mon-Thu sells since Nov 4, 2026)
 
 
 def _held_symbols():
@@ -179,7 +175,7 @@ def _held_symbols():
 
 
 def _overlays(sym, held=False):
-    """Extra chips: do_not_sell/buy, sold_block, target limit sell + order status, drop_guard."""
+    """Extra chips: do_not_sell/buy, sold_block, target limit sell + order status."""
     import sector_mapping as sm
     chips = []  # (text, css_class)
     su = str(sym).upper()
@@ -202,23 +198,7 @@ def _overlays(sym, held=False):
             limit = float(entry["limit"])
             st = ts._load_state()
             o = (st.get("orders") or {}).get(su) or {}
-            oid, day = o.get("order_id") or "", o.get("day") or ""
-            if oid:
-                chips.append((f"Limit sell ${limit:,.2f} · order open", "sa-badge-hold"))
-            else:
-                chips.append((f"Limit sell ${limit:,.2f}", "sa-badge-hold"))
-    except Exception:
-        pass
-    try:
-        import json, os
-        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "Reports", "drop_guard_state.json")
-        with open(path) as f:
-            dg = json.load(f)
-        sold = (dg.get("sold_today") or {}).get(su)
-        if sold:
-            chips.append((f"drop_guard sold today ({sold.get('at', '')[:16]})", "sa-badge-bear"))
-        # no "drop_guard armed …" chip — Chirag: keep the note quiet; guard still runs live
+            chips.append((f"Limit sell ${limit:,.2f}" + (" · order open" if o.get("order_id") else ""), "sa-badge-hold"))
     except Exception:
         pass
     return chips

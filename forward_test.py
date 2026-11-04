@@ -124,10 +124,7 @@ OLD_NAMES = {
 # "+mb" = the live manual buy blocks too (Reports/manual_block.json, e.g. KO; Oct 21, 2026) on the live lines only
 PREV_LEGS = (("lowvol+mb", "full", "month", 0.5), ("sr63+mb", "full", "weekstart", 0.5))   # top 10 per half (Oct 19-25)
 LIVE_LEGS = (("lowvol@5+mb", "full", "month", 0.5), ("sr63@5+mb", "full", "week", 0.5))  # top 5 per half, sector half Fridays (Oct 21)
-MON5_LEGS = (LIVE_LEGS[0], ("sr63@5+mb", "full", "weekstart", 0.5))   # the same with the sector half on Mondays
 LV = ("lowvol", "full", "month", 0.5)   # the low vol half of the other 50/50 lines (no manual blocks)
-LIVE_SWITCH = be.FORWARD_START   # Oct 29 restart: live halves start with the rest (was 2026-10-16)
-C6 = "Oct 2 rules (pinned)" # the rules the forward test started with (pinned: MIDWEEK / EXIT_BELOW / EXIT_TO_TOP, 50/50 score)
 # paper_trade's Mon-Thu spare-cash rule (forward_test never imports paper_trade; tests check these equal its constants)
 LIVE_MARK = " · Current strategy (live)"
 ACCOUNT = "My Alpaca account"
@@ -378,7 +375,6 @@ for _c in STRATEGIES:                                     # the limits the code 
 GROUP_OF = {c["name"]: c["group"] for c in STRATEGIES}
 
 STOPS = {"pre": dict(k=3.5, arm_days=7, gap_open=True), "post": dict(k=3.0, after=10)}   # atr_stop_targets settings
-FWD_BARS = os.path.join(REPORTS, "cache", "forward_bars.pkl")  # legacy path; daily bars now live in db.bars_daily
 FWD_BARS_START = "2026-05-01"      # ~100 sessions before the start: the 50-day volume average is full by Oct 2
 _NO_SAVE = datetime(2000, 1, 1, tzinfo=be.EASTERN)   # be.keep_decision_bars(now=this) only reads Reports/decision_bars.csv
 
@@ -1312,8 +1308,6 @@ def verdict(board):
     if float(ranked["Total return %"].iloc[0]) > bar:
         return f"After {weeks} weeks the winner is {top}: it ranks first and beats {LIVE} and QQQ."
     return f"After {weeks} weeks no winner: {top} ranks first but does not beat both {LIVE} and QQQ. Keep the live rules."
-
-LIVE_HALVES = ("Live half: Low vol monthly", "Live half: Sector rotation Mondays (63d)")
 
 def provisional(values, bench=None, hold_path=HOLDINGS_CSV, bars_path=None):
     """Display only, never saved. A trading day is saved by the daily run's after-close step (from 3:05 PM CT) once it

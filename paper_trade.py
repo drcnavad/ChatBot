@@ -561,24 +561,8 @@ def plan_orders(source, account_size, positions=None, picks_csv=PICKS_CSV, signa
     # 'add' and 'hold' statuses come from the latest decision in strategy_changes.csv: both are
     # brought to target (1-point no-trade band); unknown statuses are left as they are.
     statuses = latest_signal_status(as_of=meta["as_of"])
-    ranking = None
-    if meta["source"] == "provisional":
-        try:
-            ranking = latest_ranking(meta["as_of"], signal_csv)
-        except (OSError, KeyError, ValueError) as e:  # no ranking: blocked new picks stay cash (the old behaviour)
-            print(f"WARNING: no ranking for the Friday replacement ({e}) - a blocked new pick's weight stays in cash")
-    check = set(targets["Symbol"].astype(str))
-    if ranking is not None:                         # Friday: also check the possible replacements (ranks up to 20)
-        check |= set(ranking.loc[pd.to_numeric(ranking["Rank"], errors="coerce") <= FRIDAY_SUB_MAX_RANK, "Symbol"].astype(str))
-    blocked = {**earnings_blocked(sorted(check), meta["as_of"]), **earnings_stop_blocked(meta["as_of"]), **no_buy}
-    if ranking is not None:
-        # A new pick blocked by earnings / an earnings-day stop sale: the next eligible stock (rank <= 20) takes its weight.
-        targets, statuses, blocked, subs = substitute_blocked_picks(targets, positions, ranking, blocked, statuses,
-                                                                    prices={**prices, **live_prices})
-        meta["substitutions"] = subs
-        if subs["replaced"]:
-            meta["source"] += "+subs"
-            meta["invested"] = float(pd.to_numeric(targets["Weight"], errors="coerce").fillna(0).sum())
+    blocked = {**earnings_blocked(sorted(set(targets["Symbol"].astype(str))), meta["as_of"]),
+               **earnings_stop_blocked(meta["as_of"]), **no_buy}
     # Held do-not-sell stocks outside the targets stay invested: the targets share what is left of the invested level
     # (e.g. 99% invested, SNOW kept at 10% -> the picks are scaled to 89%).
     w = pd.to_numeric(targets["Weight"], errors="coerce").fillna(0.0)
@@ -635,72 +619,9 @@ def plan_sleeve_orders(source, account_size, positions=None, picks_csv=PICKS_CSV
     meta["invested"] = float(targets["Weight"].sum())
     return orders, meta, targets
 
-def substitute_blocked_picks(targets, positions, ranking, blocked, statuses=None, prices=None, max_rank=None):
-    """Friday rebalance (Chirag, t191u, 2026-10-07): a NEW pick (the account holds none of it) that is blocked - earnings
-    within the earnings window, or no buy back after an earnings-day stop sale (`blocked` {SYMBOL: note}) - does not leave
-    its weight in cash: the next best-ranked eligible stock not already in the targets takes it. Candidates come from the
-    latest ranking (`ranking`, see latest_ranking: score above 0), best rank first, down to rank `max_rank`
-    (FRIDAY_SUB_MAX_RANK, 20), and must not be blocked themselves and must have a price. The replacement gets the skipped
-    pick's weight (already the regime-halved live weight; equal weights); a candidate the
-    account already holds is simply kept and brought to that weight. Blocked picks are taken in rank order. The skipped
-    pick stays in the targets at weight 0 (its SKIP row names the replacement). Held picks with earnings soon are not
-    touched (not topped up, as before). No candidate left -> that weight stays in cash (noted).
-    Returns (targets, statuses, blocked, info) with info = {"replaced": [(skipped, rank, why, replacement, rank, weight)],
-    "unfilled": [(skipped, rank, why)], "max_rank": max_rank, "skipped": [(candidate, why)]}."""
-    max_rank = FRIDAY_SUB_MAX_RANK if max_rank is None else max_rank
-    positions, prices = _clean_positions(positions), prices or {}
-    statuses, blocked = dict(statuses or {}), dict(blocked or {})
-    t = targets.copy().reset_index(drop=True)
-    info = {"replaced": [], "unfilled": [], "max_rank": max_rank, "skipped": []}
-    rank = {str(s).upper(): int(r) for s, r in zip(ranking["Symbol"], pd.to_numeric(ranking["Rank"], errors="coerce")) if r == r}
-    w = pd.to_numeric(t["Weight"], errors="coerce").fillna(0.0)
-    sym = t["Symbol"].astype(str).str.upper()
-    gone = [i for i in t.index[w > 0] if positions.get(sym[i], 0.0) <= 0 and sym[i] in blocked]
-    if not gone:
-        return t, statuses, blocked, info
-    gone.sort(key=lambda i: (rank.get(sym[i], 10 ** 9), sym[i]))
-    in_targets = set(sym[w > 0])
-    cands = []
-    for r in ranking.itertuples():
-        s = str(r.Symbol).upper()
-        if s in in_targets or s in set(sym) or rank.get(s, 10 ** 9) > max_rank:
-            continue
-        if s in blocked:
-            info["skipped"].append((s, f"rank {rank[s]}: {blocked[s]}"))
-            continue
-        px = _safe_number(prices.get(s), default=None) or _safe_number(getattr(r, "Close", None), default=None)
-        if px and px > 0:
-            cands.append((s, float(px)))
-        else:
-            info["skipped"].append((s, f"rank {rank[s]}: no price"))
-    new = []
-    for i in gone:
-        s, why, wt = sym[i], blocked[sym[i]], float(w[i])
-        if not cands:
-            info["unfilled"].append((s, rank.get(s), why))
-            blocked[s] = f"{why}; no eligible stock down to rank {max_rank}, its weight stays in cash"
-            continue
-        rep, px = cands.pop(0)
-        t.loc[i, "Weight"] = 0.0
-        new.append({"Symbol": rep, "Weight": wt, "Price": px})
-        statuses[rep] = "hold" if positions.get(rep, 0.0) > 0 else "add"
-        blocked[s] = f"{why}; replaced by {rep} (rank {rank[rep]})"
-        info["replaced"].append((s, rank.get(s), why, rep, rank[rep], round(wt, 6)))
-    if new:
-        t = pd.concat([t, pd.DataFrame(new).reindex(columns=t.columns)], ignore_index=True)
-    return t, statuses, blocked, info
-
 def kept_text(kept):
     """meta['kept_outside'] {SYMBOL: fraction of equity} as e.g. 'SNOW 10.0%, NVDA 4.2% (14.2% of the account)'."""
     return ", ".join(f"{s} {f:.1%}" for s, f in kept.items()) + f" ({sum(kept.values()):.1%} of the account)"
-
-def substitution_text(info):
-    """One line for meta['substitutions'], e.g. 'GTLB (rank 4, earnings Tue Oct 13, in 4 days) -> MSFT (rank 11) 9.90%'."""
-    if not info or not (info["replaced"] or info["unfilled"]):
-        return ""
-    parts = [f"{s} (rank {rk}, {why}) -> {rep} (rank {rr}) {wt:.2%}" for s, rk, why, rep, rr, wt in info["replaced"]]
-    parts += [f"{s} (rank {rk}, {why}) -> no eligible stock down to rank {info['max_rank']}, cash" for s, rk, why in info["unfilled"]]
-    return "; ".join(parts)
 
 def apply_buying_power_guard(orders, buying_power, fractional=False, cushion=CASH_CUSHION):
     """Cap total BUY spending at the account's BUYING POWER.
@@ -2318,8 +2239,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
       ('add' or 'hold') is brought to Weight * equity (2-decimal shares, rounded down): underweight
       holdings are bought up, overweight ones trimmed, and a holding within 1 percentage point of
       its target is not traded. A pick the account does not own with earnings within 5 days is not
-      bought (earnings rule); its weight goes to the next eligible stock ranked up to 20 that is not already a pick
-      (substitute_blocked_picks, also for an earnings-day stop sale). Non-target stocks are sold entirely (the exact shares held).
+      bought (earnings rule; live: sleeves.replace_blocked_new_slots gives its weight to the next eligible stock up to rank 20).
       With WINNER['sleeves'] (live) the RS short-term line is planned by plan_sleeve_orders; a session that is no decision holds.
     - Caps total BUY spending at Alpaca's BUYING POWER less a 1% cushion via
       apply_buying_power_guard(): buys are scaled down to the part that fits instead of being
@@ -2400,8 +2320,6 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         print(f"  Catch-up in regular hours: sized at current prices ({len(live)} quotes)")
     orders, meta, targets = plan_orders(target, equity, positions, min_value=min_value, fractional=True,
                                         decision=decision, live_prices=live)
-    if meta.get("substitutions") and substitution_text(meta["substitutions"]):
-        print(f"  Friday replacements (new pick blocked): {substitution_text(meta['substitutions'])}")
     if meta.get("kept_outside"):
         print(f"  Kept outside the picks (do-not-sell / in profit + uptrend): {kept_text(meta['kept_outside'])} - the picks share the rest")
     if meta.get("sleeves"):
@@ -2650,9 +2568,6 @@ def main(argv=None):
     print(f"Strategy: {meta['strategy']} | targets = {meta['source']} weights | as of {meta['as_of']} "
           f"(last weekly rebalance {meta['last_rebalance']}, last decision {meta['last_decision']}) | "
           f"invested {f'{inv:.0%}' if inv is not None else 'unchanged (hold)'})")
-    if meta.get("substitutions") is not None:
-        print("FRIDAY REPLACEMENTS (new pick blocked by earnings / stop sale): "
-              + (substitution_text(meta["substitutions"]) or "none needed"))
     if meta.get("kept_outside"):
         print(f"KEPT OUTSIDE THE PICKS (do-not-sell / in profit + uptrend): {kept_text(meta['kept_outside'])} - the picks share the rest")
     if a.passive:

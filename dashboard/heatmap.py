@@ -27,8 +27,6 @@ def _open(sym):
 # Sort by live RS short-term rank only (same sleeves.live_ranks / Strategy_Rank as the stock note and Strategy tab).
 # Do NOT prefer stale signal_board Buy/Hold tags from strategy_changes / pipeline Strategy_Weight — those still
 # said KO was "Hold · top 5, rank 2" and floated it to tile #4 while live RS rank was 51 (Chirag, Oct 29).
-SIGNAL_ORDER = {"Strong Buy": 0, "Buy": 1, "Hold": 2, "Watch": 3, "Sold": 3, "Sell": 3, "Strong Sell": 3,
-                "Not ranked": 4, "Score below 0": 5}  # kept for any caller that still groups by tag
 
 def order(p, syms):
     """Live RS short-term rank ascending (then score); unranked / non-finite last. Same key as live trading."""
