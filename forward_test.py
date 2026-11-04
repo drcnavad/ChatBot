@@ -50,10 +50,11 @@ WEEKS_TO_WIN = 12
 START_CASH = 185_000.0   # each paper strategy starts with this cash on FORWARD_START (Chirag Oct 29 restart; ~account size)
 MON5 = "Live 50/50, top 5, sector on Mondays"   # removed Oct 29 rename (Oct 16-era); kept for REMOVED / tests
 MON = "Live 50/50, top 10 each half"    # removed Oct 29 rename (Oct 16-era); kept for REMOVED / tests
-# Live rules (Chirag, Oct 27): 100% short-term relative strength. Defensive sleeve off Oct 29. From Fri Nov 6: LIVE_COLD.
+# Live rules (Chirag, Oct 27): 100% short-term relative strength. Defensive sleeve off Oct 29. From Fri Nov 6: LIVE_COOL (Chirag t279u).
 LIVE_NOW = "Short-term relative strength"
 LIVE_COLD = "Short-term relative strength, skip top 2 sectors (1-year)"
-LIVE_COOL = "Short-term relative strength, skip top 2 sectors (1-year) and stretched buys"
+COLD_COOL = "Short-term relative strength, skip top 2 sectors (1-year) and stretched buys"
+LIVE_COOL = "Short-term relative strength, skip stretched buys"
 RS_FRIDAYS = "Relative strength, Fridays only"
 NOW_HALVES = (LIVE_NOW, RS_FRIDAYS)   # the 50/50 paper line's two halves
 BLEND = "Half short-term, half Friday relative strength"
@@ -287,10 +288,15 @@ STRATEGIES = [
          rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength (Fridays only), but no stock from the 2 sectors "
               "with the best 1-year return (the Home tab sector table: equal-weight mean of each sector's stocks) is bought "
               "or kept; the next ranks fill the 10 slots."),
-    dict(name=LIVE_COOL, **{**NOW, "score": "rs_short_cold", "sleeve": False},
+    dict(name=COLD_COOL, **{**NOW, "score": "rs_short_cold", "sleeve": False},
          select=PLAIN, calendar="weekly", cool_buys=True, group="rs",
-         rule="Nov 4, 2026 (Chirag; live from Fri Nov 6): the line above, and a stock more than 8% above its 20-day average "
+         rule="Nov 4, 2026 (Chirag): the line above, and a stock more than 8% above its 20-day average "
               "is not newly bought (a held one is kept); the next ranks fill the 10 slots."),
+    dict(name=LIVE_COOL, **{**NOW, "score": "rs_short", "sleeve": False},
+         select=PLAIN, calendar="weekly", cool_buys=True, group="rs",
+         rule="Live from Fri Nov 6, 2026 (Chirag): Short-term relative strength, top 10 equal weight, Fridays only; a stock "
+              "more than 8% above its 20-day average is not newly bought (a held one in the top 10 is kept); the next "
+              "ranks fill the 10 slots. do_not_buy never bought."),
     dict(name="Half relative strength, half buy the dip", blend=(LIVE_NOW, "Buy the dip"), group="combo",
          rule="Nov 4, 2026 (Chirag): 50% Short-term relative strength + 50% Buy the dip, each half follows its own line."),
     dict(name="Half relative strength, half worst sectors", blend=(LIVE_NOW, "Best stocks in worst sectors (2 months)"),

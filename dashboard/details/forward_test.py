@@ -267,7 +267,7 @@ def render_curve(board, values):
 
 HIGHLIGHT_BG = "background-color: #e2e8f0; font-weight: 700"   # subtle slate on the white table
 
-CURRENT = "Live: Short-term relative strength, skip top 2 sectors (1-year) and stretched buys"   # display name of the live strategy's row (forward_test.LIVE stays its id)
+CURRENT = "Live: Short-term relative strength, skip stretched buys"   # display name of the live strategy's row (forward_test.LIVE stays its id)
 
 def tidy_board(board, start):
     """Leaderboard for display, Chirag Oct 29 column order:
