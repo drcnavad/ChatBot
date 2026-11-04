@@ -247,8 +247,8 @@ class AppFake(Fake):
         items = [FL("AAA", "buy", 10, 101, "2026-10-02T20:31:05Z", "id-live-20261002-BUY-AAA-10-10000")][::-1]
         return [] if params.get("page_token") else items
 
-real, real_key = ap.PaperAccount, ap.holdings_refresh_key
-ap.PaperAccount, ap.holdings_refresh_key = AppFake, (lambda now=None: "k1")
+real = ap.PaperAccount
+ap.PaperAccount = AppFake
 os.environ.pop("STOCK_ANALYSIS_LIVE_HOLDINGS", None)
 os.environ["STOCK_ANALYSIS_LAZY_EXPANDERS"] = "off"
 try:
@@ -273,7 +273,7 @@ try:
     check("app: only allow-listed GET paths; /positions read once (the holdings read is reused)",
           set(Fake.calls) <= set(ap.ALLOWED_PATHS) and Fake.calls.count("/positions") == 1, Fake.calls)
 finally:
-    ap.PaperAccount, ap.holdings_refresh_key = real, real_key
+    ap.PaperAccount = real
     st.cache_data.clear()
     st.cache_resource.clear()
 

@@ -345,8 +345,8 @@ class FakeAccount(ap.PaperAccount):
         start = 0 if "page_token" not in params else [a["id"] for a in items].index(params["page_token"]) + 1
         return items[start:start + params["page_size"]]
 
-real, real_key = ap.PaperAccount, ap.holdings_refresh_key
-ap.PaperAccount, ap.holdings_refresh_key = FakeAccount, (lambda now=None: "k1")
+real = ap.PaperAccount
+ap.PaperAccount = FakeAccount
 os.environ.pop("STOCK_ANALYSIS_LIVE_HOLDINGS", None)
 os.environ["STOCK_ANALYSIS_LAZY_EXPANDERS"] = "off"
 try:
@@ -392,7 +392,7 @@ try:
     at.number_input(key="tax_agi").set_value(300000.0).run()
     check("app: editing an input reruns without errors", not at.exception, [str(e) for e in at.exception])
 finally:
-    ap.PaperAccount, ap.holdings_refresh_key = real, real_key
+    ap.PaperAccount = real
     st.cache_data.clear()
     st.cache_resource.clear()
 
