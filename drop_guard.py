@@ -588,13 +588,17 @@ def latest_ranking():
         for i, (sym, score) in enumerate(r.items(), 1):
             px = float(close.at[day, sym]) if sym in close.columns and day in close.index else float("nan")
             ma = float("nan")
-            if "ma_200" in inp and sym in getattr(inp["ma_200"], "columns", []):
+            # sleeves.inputs names it "ma200" (the old "ma_200" lookup never matched: the 200-day check was skipped)
+            ma_df = inp.get("ma200") if "ma200" in inp else inp.get("ma_200")
+            if ma_df is not None and sym in getattr(ma_df, "columns", []):
                 try:
-                    ma = float(inp["ma_200"].at[day, sym])
+                    ma = float(ma_df.at[day, sym])
                 except Exception:
                     ma = float("nan")
+            soon = inp.get("soon")
+            es = bool(soon.at[day, sym]) if soon is not None and day in soon.index and sym in soon.columns else False
             rows.append({"Symbol": sym, "Strategy_Rank": i, "Strategy_Score": float(score),
-                         "Close": px, "ma_200": ma})
+                         "Close": px, "ma_200": ma, "earnings_soon": es})
         if rows:
             return pd.DataFrame(rows)
     except Exception:
@@ -649,10 +653,22 @@ def pick_replacement(sold_sym, proceeds, equity, held, sold_today, cfg, now, pri
         do_not |= set(sold_block.active_blocks())
     except Exception:
         pass
+    try:                                    # manual-sell blocks + earnings-stop no-buy-back, as the 2:30 run uses
+        import paper_trade as pt
+        do_not |= set(pt.manual_list("buy"))
+        do_not |= set(pt.earnings_stop_blocked(pd.Timestamp(now).date().isoformat()))
+    except Exception:
+        pass
     max_w = float(cfg.get("max_weight", 0.20))
+    max_rank = int(cfg.get("max_rank", 20))   # same cap as the Mon-Thu refill (never a stock ranked worse than 20)
     # need SMA200 + prev closes for candidates — use ranking Close + ma_200 when present, else bars
     for _, r in rank.iterrows():
         sym = str(r["Symbol"]).upper()
+        rk = r.get("Strategy_Rank")
+        if pd.notna(rk) and int(rk) > max_rank:
+            break
+        if bool(r.get("earnings_soon", False)):
+            continue
         if sym == sold_sym or sym in held or sym in sold_today or sym in do_not:
             continue
         if sym in ("SPY", "QQQ", "IWM") or sym.endswith("USD"):
