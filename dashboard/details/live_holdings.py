@@ -102,6 +102,22 @@ def render_live_holdings():
         render_positions(table, data)
     render_benchmarks(data)
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _decision_days():
+    """{symbol: As_Of decision date of its latest completed buy of 1+ shares (skips tiny top-ups)} from live_orders_log; {} if unavailable."""
+    try:
+        import sqlite3
+        db = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "stock_analysis.db")
+        with sqlite3.connect(db) as c:
+            o = pd.read_sql("select Symbol, As_Of, Submitted_At_CT from live_orders_log where upper(Side)='BUY' "
+                            "and Status like 'COMPLETED%' and Shares >= 1 and As_Of is not null and As_Of != '' order by Submitted_At_CT", c)
+        return dict(zip(o["Symbol"], pd.to_datetime(o["As_Of"])))
+    except Exception:
+        return {}
+
+def _decision_day(sym):
+    return _decision_days().get(str(sym))
+
 def rank_at_buy(sym, bought):
     """The stock's RS short-term rank at the latest saved decision on or before its first buy (Reports/decision_ranks.csv);
     None when no rank was saved then (ranks are saved from Fri Oct 16, 2026)."""
@@ -114,6 +130,7 @@ def rank_at_buy(sym, bought):
         r = read_report_csv(decision_ranks.RANKS_CSV).assign(Date=lambda d: pd.to_datetime(d["Date"]))
     except Exception:
         return None
+    bought = _decision_day(sym) or bought   # Nov 4, 2026: rank on the latest buy's decision day, not the fill day
     r = r[(r["Symbol"] == sym) & (r["Date"].dt.date <= pd.Timestamp(bought).date())].sort_values("Date")
     if col not in r.columns:
         return None
@@ -163,7 +180,7 @@ def render_positions(table, data):
     show(t, ["P/L $", "P/L %", "Today %"], fit=True,
          cols={"Rank now": st.column_config.NumberColumn(format="%d", help="Live RS short-term rank at the latest close "
                                                      "(Mon-Thu sells below 20); blank = not ranked (score <= 0)"),
-               "Rank": st.column_config.NumberColumn("Rank at buy", format="%d", help="RS short-term rank on the day it was first bought"),
+               "Rank": st.column_config.NumberColumn("Rank at buy", format="%d", help="RS short-term rank on the decision day of its latest buy"),
                "Shares": st.column_config.NumberColumn(format="%.2f"), "P/L %": SPCT, "Today %": SPCT,
                **dict.fromkeys(("Avg price", "Cost basis", "Market value", "P/L $", "Price"), MONEY)})
 
