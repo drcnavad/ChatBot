@@ -94,7 +94,7 @@ WINNER = {
     "cap_soft": False,          # strict sector cap
     "earnings_block_days": None,  # no earnings rule (the forward strategy has none)
     "sleeve": False,            # no defensive sleeve (live dropped it Oct 29, 2026; sector_mapping.defensive remains for other forward Now lines)
-    "earnings_day_stop": False, # earnings_stop.py places no orders (not in the backtest; no Mon-Thu trading)
+    "earnings_day_stop": True,  # earnings_stop.py live: 5% stop on earnings day (Chirag, Nov 4, 2026; not in the backtest)
     "sleeves": {"rs_short": 1.0},
     "halves": True,
     # Rebalance: every pick is brought back to its weight unless it is within 1 point of it (paper_trade.NO_TRADE_BAND = this).

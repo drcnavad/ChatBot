@@ -25,8 +25,8 @@ Keys live in `.env` (`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY`, never prin
 - Decisions use the ~2:30 PM CT bar (Friday = full rebalance; Mon-Thu runs place no orders). A holding within 1 point of its target is not traded. A position in no half of the
   ledger is sold at the next trade run.
 - Never bought: `sector_mapping.do_not_buy`, manual sell blocks (`Reports/manual_block.json`), stocks sold by the
-  earnings-day stop. Never sold: `sector_mapping.do_not_sell`. `earnings_stop.py` is loaded but places no orders
-  (`WINNER['earnings_day_stop'] = False`).
+  earnings-day stop. Never sold: `sector_mapping.do_not_sell`. `earnings_stop.py` is ON: 5% earnings-day stop
+  (`WINNER['earnings_day_stop'] = True`, Chirag Nov 4, 2026; do_not_sell exempt).
 - Orders: sells first, every order a LIMIT at the live quote (buy ask + 0.05%, sell bid - 0.05%; stale / >0.5% spread
   quotes skipped). Market hours: 2-decimal shares; after hours: whole-share extended-hours DAY limits until 7 PM CT. The
   rest goes to `Reports/live_pending_orders.json` and the **9 AM CT fill check** sends it. Client order ids make every
@@ -82,7 +82,7 @@ python manual_trade.py blocks                                   # list active bl
 | `manual_trade.py` | Manual orders, blocks, replacement buys. |
 | `decision_ranks.py` | Rank snapshot per decision (`Reports/decision_ranks.csv`, for the Last decision view). |
 | `alpaca_paper.py` | Read-only Alpaca client (GET only). |
-| `earnings_stop.py`, `trade_audit.py`, `tax_lots.py` | Earnings-day stop (off), trade audit, tax lots. |
+| `earnings_stop.py`, `trade_audit.py`, `tax_lots.py` | Earnings-day stop (on), trade audit, tax lots. |
 | `forward_test.py`, `forward_combos.py` | Forward test of the account and paper strategies since Oct 2, 2026. Includes 2 paper lines "200-day breakout, N days above, exit 2% below" (N = 2, 4; N = 1, 3, 5 removed Oct 21, 2026): buy at the close of the Nth consecutive close above the 200-day SMA after a cross, 10% each (max 10, calmest first); sell at +20% or a close 2%+ below the 200-day (close < 0.98 x SMA200); recorded by the 3:05 PM CT after-close step. Also 5 event lines (same slots): Tech score 80/60 + TP20, Tech score 70/60/90 (percentile of `Technical_Score` among the day's stocks), MA10 x MA30, MA50 x MA200 (golden cross) (fresh crosses, bought on the 2nd close), plus MACD cross, Donchian 20-day breakout, Bollinger mean reversion (20, 2), EMA 9/21 cross, EMA 9/21 + ADX>25 (ADX from closes), Minervini trend template, 52-week high momentum, Dual MA + RSI filter, Golden cross + MACD confirm. "Current Strategy (Live from Oct End)" (added Oct 21, 2026 as "Live 50/50, top 5 each half", from Oct 2) = the live rules from the sector half's Fri Oct 23 and the low vol half's Fri Oct 30 rebalance: the 50/50 with each half holding its top 5 (backtest_engine.WINNER["n"] = 5, sleeves.sector_args; the previous top-10 rules stay as the forward row "Live 50/50, top 10 each half"; leftover-cash next-in-line buys only refill a half holding fewer than 5) (forward_combos leg key "<key>@5"; max 2 per sector). From Oct 19, 2026 no paper strategy buys a `do_not_buy` stock (its weight stays cash). The old "Live 50/50 combined (no overlap)" line was removed Oct 20, 2026; the 8 weakest lines (Short-term reversal, 12-1 month momentum, RSI pullback, Worst 3 sectors 3M, Breakout with volume, Relative strength only, MACD cross weekly, MA10 & MA30 x MA50) on Oct 21, 2026 (a near-duplicate of "Live 50/50, sector rotation on Mondays", the marked live line). |
 | `sector_mapping.py` | The stock list (84 stocks + QQQ), sectors, `do_not_buy` / `do_not_sell`. |
 | `main_signal_analysis.ipynb` (+ 3 support notebooks) | Signals → `Reports/signal_analysis.csv`, `strategy_picks.csv`, ... (Chirag edits these; leave them alone). |

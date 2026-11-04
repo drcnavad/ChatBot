@@ -94,7 +94,7 @@ def rules_text():
                f"already a pick (score above 0, not blocked, down to rank {FRIDAY_SUB_MAX_RANK}) is bought at the blocked "
                "pick's weight, so the account still ends "
                f"with {N_PICKS} stocks; only if none is left does that weight stay in cash.\n" if EARNINGS else "")
-            + "- **Earnings-day stop:** on a held stock's earnings day the price is checked every 30 seconds in the "
+            + "- **Earnings-day stop (ON, Nov 4, 2026; do_not_sell exempt):** on a held stock's earnings day the price is checked every 30 seconds in the "
             "pre-market, regular and after-hours sessions; if it is ever 5% or more below the previous trading day's close, "
             "all whole shares are sold once with a limit at the bid - 0.05% (extended hours allowed; the fraction at the "
             "9 AM CT check). Earnings day = the session where the reaction happens: a before-open report is watched that "
