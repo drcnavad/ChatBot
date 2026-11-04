@@ -266,6 +266,10 @@ STRATEGIES = [
          select={**PLAIN, "sector_cap": 0.3}, group="rs",
          rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength, but at most 3 of the 10 stocks from one sector "
               "(the next best rank from another sector fills the slot)."),
+    dict(name="Short-term relative strength, max 2 per sector", **{**NOW, "score": "rs_short", "sleeve": False},
+         select={**PLAIN, "sector_cap": 0.2}, group="rs",
+         rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength, but at most 2 of the 10 stocks from one sector "
+              "(the next best rank from another sector fills the slot)."),
     dict(name="Half relative strength, half buy the dip", blend=(LIVE_NOW, "Buy the dip"), group="combo",
          rule="Nov 4, 2026 (Chirag): 50% Short-term relative strength + 50% Buy the dip, each half follows its own line."),
     dict(name="Half relative strength, half worst sectors", blend=(LIVE_NOW, "Best stocks in worst sectors (2 months)"),
