@@ -1001,6 +1001,12 @@ def _peer_median(r, symbols, sector_of, min_peers=3, leave_one_out=True):
             out[s] = med.where(peers.notna().sum(axis=1) >= min_peers)
     return pd.DataFrame(out, index=r.index)[symbols]
 
+def window_returns(close_w, offset):
+    """Date x Symbol return of each close vs the last close on or before that date - offset (closes forward-filled; NaN
+    without one). The Home tab sector table (its latest row) and forward_test's 1-year sector rule share it."""
+    c = close_w.sort_index().ffill()
+    return c / c.reindex(c.index - offset, method="ffill").set_axis(c.index) - 1
+
 def relative_strength(close_w, symbols=None, benchmark=None, eligible_w=None, windows=None):
     """Point-in-time relative strength, all -100..100 cross-sectional scores.
 

@@ -7,6 +7,8 @@ ranks sectors by their ETF's 63-day return instead - forward_test.strategy_input
 import pandas as pd
 import streamlit as st
 
+from backtest_engine import window_returns
+
 from dashboard.settings import symbol_sector
 from dashboard.style import PCT_COL, section, table
 
@@ -24,12 +26,7 @@ def sector_returns(df, symbols=None):
     symbols = set(symbols or tradable_symbols)
     c = (df[df["Symbol"].isin(symbols)].pivot_table(index="Date", columns="Symbol", values="Close", aggfunc="last")
          .sort_index().ffill())
-    last = c.index.max()
-    rets = {}
-    for col, off in WINDOWS.items():
-        past = c[c.index <= last - off]
-        rets[col] = (c.loc[last] / past.iloc[-1] - 1) * 100 if len(past) else pd.Series(dtype=float)
-    r = pd.DataFrame(rets)
+    r = pd.DataFrame({col: window_returns(c, off).iloc[-1] * 100 for col, off in WINDOWS.items()})
     r["Sector"] = [symbol_sector.get(s, "—") for s in r.index]
     out = r.groupby("Sector").agg(Stocks=("1 month %", "size"), **{k: (k, "mean") for k in WINDOWS})
     return out.reset_index().sort_values("1 month %", ascending=False, na_position="last").reset_index(drop=True)

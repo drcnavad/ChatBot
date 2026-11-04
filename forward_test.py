@@ -50,13 +50,14 @@ WEEKS_TO_WIN = 12
 START_CASH = 185_000.0   # each paper strategy starts with this cash on FORWARD_START (Chirag Oct 29 restart; ~account size)
 MON5 = "Live 50/50, top 5, sector on Mondays"   # removed Oct 29 rename (Oct 16-era); kept for REMOVED / tests
 MON = "Live 50/50, top 10 each half"    # removed Oct 29 rename (Oct 16-era); kept for REMOVED / tests
-# Live rules (Chirag, Oct 27): 100% short-term relative strength. Defensive sleeve off Oct 29.
+# Live rules (Chirag, Oct 27): 100% short-term relative strength. Defensive sleeve off Oct 29. From Fri Nov 6: LIVE_COLD.
 LIVE_NOW = "Short-term relative strength"
+LIVE_COLD = "Short-term relative strength, skip top 2 sectors (1-year)"
 RS_FRIDAYS = "Relative strength, Fridays only"
 NOW_HALVES = (LIVE_NOW, RS_FRIDAYS)   # the 50/50 paper line's two halves
 BLEND = "Half short-term, half Friday relative strength"
-MARKED = LIVE_NOW
-LIVE = LIVE_NOW     # the line the verdict and the dashboard compare against
+MARKED = LIVE_COLD
+LIVE = LIVE_COLD    # live from Fri Nov 6, 2026 (Chirag); the line the verdict and the dashboard compare against
 # Names dropped from the active board (purge_removed). Archives keep their own history; do not reintroduce these.
 REMOVED = {"Short-term reversal", "12-1 month momentum", "RSI pullback in uptrend", "Worst 3 sectors 3M, +10%/-3%",
            "Breakout with volume", "Relative strength only", "MACD cross, weekly", "MA10 & MA30 x MA50",
@@ -280,7 +281,7 @@ STRATEGIES = [
          rule="Nov 4, 2026 (Chirag): same +5% / -1% exits (checked at the close), but the next trading day the freed cash "
               "buys the best-ranked eligible stock not held (live ranking, positive score, never a do-not-buy or a stock "
               "sold this week). Friday rebalances back to the plain top 10."),
-    dict(name="Short-term relative strength, skip top 2 sectors (1-year)", **{**NOW, "score": "rs_short_cold", "sleeve": False},
+    dict(name=LIVE_COLD, **{**NOW, "score": "rs_short_cold", "sleeve": False},
          select=PLAIN, calendar="weekly", group="rs",
          rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength (Fridays only), but no stock from the 2 sectors "
               "with the best 1-year return (the Home tab sector table: equal-weight mean of each sector's stocks) is bought "
@@ -733,9 +734,7 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     mom_12_1, etf_3m = (c.shift(21) / c.shift(252) - 1) * 100, by_etf(b / b.shift(63) - 1)
     # the dashboard's 1-year sector return (sector_table): equal-weight mean of tradable stocks, close vs the last close a year back
     sect = pd.Series({x: be.sector_mapping.symbol_sector.get(x) for x in cols})
-    c1 = c.ffill()
-    y1 = (c1 / c1.reindex(dates - pd.DateOffset(years=1), method="ffill").set_axis(dates) - 1)[
-        [x for x in cols if x in be.sector_mapping.tradable_symbols]]
+    y1 = be.window_returns(c[[x for x in cols if x in be.sector_mapping.tradable_symbols]], pd.DateOffset(years=1))
     top2 = y1.T.groupby(sect).mean().T.rank(axis=1, ascending=False, method="first").le(2)      # Date x sector
     hot2 = top2.reindex(columns=sect.to_numpy()).fillna(False).set_axis(cols, axis=1).astype(bool)
     scores = {

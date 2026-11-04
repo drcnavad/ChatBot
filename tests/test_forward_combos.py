@@ -84,7 +84,7 @@ fc._CACHE.clear()
 ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)
 v1, h1 = db.read_csv(vp), db.read_csv(hp)
 check(not set(v1["Strategy"]) & ft.REMOVED and not set(h1["Strategy"]) & ft.REMOVED, "removed lines purged from both files")
-check(ft.LIVE == ft.LIVE_NOW and ft.LIVE in set(v1["Strategy"]), "the live line is short-term relative strength")
+check(ft.LIVE == ft.LIVE_COLD and ft.LIVE in set(v1["Strategy"]), "the live line is short-term relative strength")
 check(not ({ft.MON5, ft.MON} & set(v1["Strategy"])), "Oct 16-era live 50/50 lines stay removed")
 new = v1[v1["Strategy"].isin(names)]
 starts = pd.to_datetime(new.groupby("Strategy")["Date"].min())
