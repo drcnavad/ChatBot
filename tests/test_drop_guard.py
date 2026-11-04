@@ -185,7 +185,7 @@ check("dry-run no order id", not out.get("Sell_Order_Id"))
 
 # plist exists
 from pathlib import Path
-pl = Path("launchd/com.stockanalysis.drop_guard.plist")
+pl = Path("launchd_disabled/com.stockanalysis.drop_guard.plist")
 check("plist present", pl.exists())
 import plistlib, re as _re
 pdata = plistlib.loads(_re.sub(rb"<!--.*?-->", b"", pl.read_bytes(), flags=_re.S))
