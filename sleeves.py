@@ -215,8 +215,9 @@ def reconcile(led, positions, prices, equity, shares=None, fills=None, pending=(
     fills / pending: accepted for the old call signature (the residual split covers fills that differ from the plan)."""
     shares = shares or config() or {h: 1 / len(HALVES) for h in HALVES}
     pos = {str(k).upper(): float(v) for k, v in (positions or {}).items() if float(v or 0) > 0}
-    if led is None:
-        return ({h: {"shares": {}, "cash": equity * shares[h]} for h in HALVES}, dict(pos),
+    if led is None:                                     # first run: every position is unowned and plan() folds its value
+        held = sum(q * (_num(prices.get(s)) or 0.0) for s, q in pos.items())   # back in, so cash = equity - holdings
+        return ({h: {"shares": {}, "cash": (equity - held) * shares[h]} for h in HALVES}, dict(pos),
                 {"init": True, "residual": 0.0, "dropped": [], "tags": {}})
     L = {h: {str(s).upper(): float(q or 0) for s, q in (led["halves"][h].get("shares") or {}).items() if float(q or 0) > 0}
          for h in HALVES}
@@ -428,6 +429,10 @@ def plan(day, positions, equity, prices, no_buy=None, no_sell=None, fractional=T
     orders = pd.DataFrame(rows, columns=pt.ORDER_COLUMNS + ["Half"])
     orders["_o"] = orders["Side"].map({"SELL": 0}).fillna(1)
     orders = orders.sort_values(["_o", "Symbol"], kind="stable").drop(columns="_o").reset_index(drop=True)
+    tgt_val = sum(q * (_num(px.get(s)) or 0.0) for h in HALVES for s, q in half_sh[h].items())
+    cap = equity * (0.99 if any(traded.values()) else 1.0) + 1.0   # off-day holds may drift up to the whole equity
+    if tgt_val > cap:
+        raise ValueError(f"sleeve targets ${tgt_val:,.2f} exceed ${cap:,.2f} of equity ${equity:,.2f} - no orders")
     new = {"version": VERSION, "day": d.date().isoformat(), "cash_at": datetime.now(ZoneInfo("UTC")).isoformat(timespec="seconds"),
            "halves": {}}
     for h in HALVES:
