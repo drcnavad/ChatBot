@@ -18,12 +18,9 @@ Keys live in `.env` (`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY`, never prin
   2:30 PM CT only (Thursday on a holiday), no Mon-Thu trades, drop guard off. A stock more than 8% above its 20-day
   average is not newly bought (held ones kept); blocked picks are replaced down to rank 20.
 - No new buy with earnings within 5 days; QQQ below its 200-day average: weights halved. No idle cash: the weight of a
-  blocked or unpriced pick goes pro rata to the names that trade (1% cash reserve). RS standard (Fridays only) and the
-  50/50 blend stay as paper lines on the leaderboard (live Oct 27, 2026 onward: RS short-term only).
-- Oct 16-26, 2026 the live rules were 50% low volatility (monthly) + 50% sector rotation (weekly); that history is the
-  forward line "Old live: Low vol + Sector rotation (Oct 16-26)".
-- Decisions use the ~2:30 PM CT bar (Friday = full rebalance; Mon-Thu runs place no orders). A holding within 1 point of its target is not traded. A position in no half of the
-  ledger is sold at the next trade run.
+  blocked or unpriced pick goes pro rata to the names that trade (1% cash reserve).
+- Decisions use the ~2:30 PM CT bar (Friday = full rebalance; Mon-Thu runs place no orders). A holding within 1 point of
+  its target is not traded. A position the ledger does not own is sold at the next trade run.
 - Never bought: `sector_mapping.do_not_buy`, manual sell blocks (`Reports/manual_block.json`), stocks sold by the
   earnings-day stop. Never sold: `sector_mapping.do_not_sell`. `earnings_stop.py` is ON: 5% earnings-day stop
   (`WINNER['earnings_day_stop'] = True`, Chirag Nov 4, 2026; do_not_sell exempt).
@@ -34,9 +31,7 @@ Keys live in `.env` (`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY`, never prin
 
 **Holdings: one source** (Chirag, Oct 19, 2026): live Alpaca positions, read only through `holdings.py`
 (`get_positions()`, 60 s cache; order code reads fresh through its trading client). Nothing is recorded as owned before a
-fill. `Reports/sleeve_ledger.json` (v3) keeps per half its share count per symbol and its cash; each run splits every live
-position between the halves pro rata to those shares and splits whatever the ledger does not explain (fills vs plan,
-dividends) by value. A queued buy (`Reports/live_pending_orders.json`) shows as "Pending order", never as a
+fill. `Reports/sleeve_ledger.json` keeps the line's share count per symbol and its cash. A queued buy (`Reports/live_pending_orders.json`) shows as "Pending order", never as a
 holding. There is no `my_positions.csv` any more.
 
 **Removing a stock** (Oct 19, 2026): comment it out of `stock_symbols` in `sector_mapping.py`. It leaves the rankings,
@@ -48,27 +43,26 @@ rankings keep only `tradable_symbols`), so it is sold and never rebought; until 
 | Job | When | What | Trades? |
 |---|---|---|---|
 | `com.stockanalysis.support` | Mon 1:00, Tue 1:07, Wed 1:14, Thu 1:21, Fri 1:28 PM | `run_all.py --support --scheduled`: company reports, news sentiment, earnings dates (quota APIs) | no |
-| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled` → `run_all.py`: 2:30 PM signals + decision + orders every session (Friday: both halves' full rebalance; Mon-Thu: RS short-term rank-20 exit check); from 3:05 PM the after-close step (`run_all.daily_step`: signal refresh, `forward_test.py --record`, `manual_trade.py update-blocks`). Never 4:05-4:30 PM. | **yes** (2:30 PM) |
+| `com.stockanalysis.evening` | Mon-Fri 2:30 PM + 3:05 PM, at login, on wake, every 30 min | `pipeline_watchdog.py --trade --scheduled` → `run_all.py`: 2:30 PM signals + decision + orders (orders on Friday only); from 3:05 PM the after-close step (`run_all.daily_step`: signal refresh, `forward_test.py --record`, `manual_trade.py update-blocks`). Never 4:05-4:30 PM. | **yes** (2:30 PM) |
 | `com.stockanalysis.morning` | Mon-Fri 9:00 AM | `pipeline_watchdog.py --fill-check --scheduled`: sends the pending rests | **yes** |
 | `com.stockanalysis.tradeaudit` | Mon-Fri every 30 min 8:30 AM-3:00 PM + 3:45 PM | `refresh_dashboard_data.sh`: `trade_audit.py --write --log` (ledger, round trips, alerts) | no (GET only) |
-| `com.stockanalysis.earningsstop` | every 5 min + at login | `earnings_stop.py --loop` (no-op while the stop is off) | no (off) |
+| `com.stockanalysis.earningsstop` | every 5 min + at login | `earnings_stop.py --loop`: 5% earnings-day stop | **yes** |
 | `com.stockanalysis.dashboard-8502` | always on | `run_dashboard_8502.sh` → `streamlit run app.py`. Restart: `launchctl kickstart -k gui/$(id -u)/com.stockanalysis.dashboard-8502` | no |
 
 ## Manual orders (`manual_trade.py`, separate from the pipeline)
 ```
 python manual_trade.py sell KO [--block-until-drop 10] [--no-replace] [--dry-run]
-python manual_trade.py buy XYZ [--amount 1000] [--dry-run]     # default amount: 10% of equity (one slot, 5 per half)
+python manual_trade.py buy XYZ [--amount 1000] [--dry-run]     # default amount: 10% of equity (one slot)
 python manual_trade.py blocks                                   # list active blocks
 ```
 - Places the order at once on the LIVE account (DAY limit, pipeline pricing); refuses outside market hours. Every
   action (also dry runs / refusals) is appended to `Reports/manual_orders.json`.
-- **Sell:** the stock leaves the sleeve ledger. Once the sell fills, the freed cash buys the **next-in-line stock of the
-  same half** (best-ranked not held / blocked / do-not-buy), limit never above the ask, added to that half
+- **Sell:** the stock leaves the sleeve ledger. Once the sell fills, the freed cash buys the **next-in-line stock** (best-ranked not held / blocked / do-not-buy), limit never above the ask,
   (`--no-replace` keeps the cash).
 - **Block rule:** `--block-until-drop N` adds `Reports/manual_block.json[SYM] = {reference_close, block_until_price =
   close x (1 - N%), added}`. The after-close step sets `reference_close` to that day's official close and removes the
   block once a close is at or below `block_until_price`. The pipeline and the fill check never buy a blocked stock.
-- **Buy:** belongs to no half, so the next pipeline trade run sells it.
+- **Buy:** not in the ledger, so the next pipeline trade run sells it.
 - A pending row with `"at_ask": true` (manual replacement buys) is retried by the 9 AM check at a limit <= the ask.
 
 ## Key files
@@ -83,16 +77,16 @@ python manual_trade.py blocks                                   # list active bl
 | `decision_ranks.py` | Rank snapshot per decision (`Reports/decision_ranks.csv`, for the Last decision view). |
 | `alpaca_paper.py` | Read-only Alpaca client (GET only). |
 | `earnings_stop.py`, `trade_audit.py`, `tax_lots.py` | Earnings-day stop (on), trade audit, tax lots. |
-| `forward_test.py`, `forward_combos.py` | Forward test of the account and paper strategies since Oct 2, 2026. Includes 2 paper lines "200-day breakout, N days above, exit 2% below" (N = 2, 4; N = 1, 3, 5 removed Oct 21, 2026): buy at the close of the Nth consecutive close above the 200-day SMA after a cross, 10% each (max 10, calmest first); sell at +20% or a close 2%+ below the 200-day (close < 0.98 x SMA200); recorded by the 3:05 PM CT after-close step. Also 5 event lines (same slots): Tech score 80/60 + TP20, Tech score 70/60/90 (percentile of `Technical_Score` among the day's stocks), MA10 x MA30, MA50 x MA200 (golden cross) (fresh crosses, bought on the 2nd close), plus MACD cross, Donchian 20-day breakout, Bollinger mean reversion (20, 2), EMA 9/21 cross, EMA 9/21 + ADX>25 (ADX from closes), Minervini trend template, 52-week high momentum, Dual MA + RSI filter, Golden cross + MACD confirm. "Current Strategy (Live from Oct End)" (added Oct 21, 2026 as "Live 50/50, top 5 each half", from Oct 2) = the live rules from the sector half's Fri Oct 23 and the low vol half's Fri Oct 30 rebalance: the 50/50 with each half holding its top 5 (backtest_engine.WINNER["n"] = 5, sleeves.sector_args; the previous top-10 rules stay as the forward row "Live 50/50, top 10 each half"; leftover-cash next-in-line buys only refill a half holding fewer than 5) (forward_combos leg key "<key>@5"; max 2 per sector). From Oct 19, 2026 no paper strategy buys a `do_not_buy` stock (its weight stays cash). The old "Live 50/50 combined (no overlap)" line was removed Oct 20, 2026; the 8 weakest lines (Short-term reversal, 12-1 month momentum, RSI pullback, Worst 3 sectors 3M, Breakout with volume, Relative strength only, MACD cross weekly, MA10 & MA30 x MA50) on Oct 21, 2026 (a near-duplicate of "Live 50/50, sector rotation on Mondays", the marked live line). |
+| `forward_test.py`, `forward_combos.py` | Forward test of the account and every paper strategy (`ft.STRATEGIES`; the live one is `ft.LIVE`), recorded by the 3:05 PM CT after-close step. |
 | `sector_mapping.py` | The stock list (84 stocks + QQQ), sectors, `do_not_buy` / `do_not_sell`. |
 | `main_signal_analysis.ipynb` (+ 3 support notebooks) | Signals → `Reports/signal_analysis.csv`, `strategy_picks.csv`, ... (Chirag edits these; leave them alone). |
 
-State files in `Reports/`: `sleeve_ledger.json` (halves: tags + cash, no shares), `live_pending_orders.json` (9 AM rests), `manual_orders.json`,
+State files in `Reports/`: `sleeve_ledger.json`, `live_pending_orders.json` (9 AM rests), `manual_orders.json`,
 `manual_block.json`, `run_state.json` (decision done / last daily), `earnings_stop_state.json`, `trade_audit_state.json`;
 logs: `run_log.csv`, `live_orders_log.csv`, `logs/`.
 
 Report tables: every `Reports/*.csv` name in the code is a table in SQLite `data/stock_analysis.db` (via `db.py`;
-`db.read_csv` / `db.to_csv` take the old paths). The old CSV files are backed up in `backups/csv_backup_2026-10-26.zip`.
+`db.read_csv` / `db.to_csv` take the old paths).
 
 ## Dashboard (`app.py`, `dashboard/`)
 - **Home:** My notes (`Reports/my_notes.csv`), stock list (Keep / Buy next / Sell next / Next in line / Others, DNB tag;
