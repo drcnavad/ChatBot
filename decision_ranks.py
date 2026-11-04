@@ -1,7 +1,7 @@
 """Each stock's live rank at every decision - Reports/decision_ranks.csv (Oct 27, 2026: RS short-term).
 
 One row per stock per decision day: Date, Symbol, Rank_RS_Short.
-  Rank_RS_Short = the "RS short-term (weekly + Mon–Thu sells)" rank (sleeves.ranking: eligible, score above 0).
+  Rank_RS_Short = the live line's rank (sleeves.ranking: eligible, score above 0).
 Written by the trade run right after it saves the sleeve ledger (paper_trade.auto_trade). Display only."""
 import os
 

@@ -162,7 +162,7 @@ def plan_text(plan, sym):
 # ----------------------------------------------------------------------------- live Short-term relative strength note
 LIVE_STRATEGY = "Short-term relative strength, skip stretched buys"
 LIVE_N = 10          # top-N equal weight (forward_test LIVE_NOW / sleeves)
-LIVE_EXIT_BELOW = 20 # Mon-Thu: sell when worse than this rank
+LIVE_EXIT_BELOW = 20 # blocked-pick replacement cap (no Mon-Thu sells since Nov 4, 2026)
 
 
 def _held_symbols():

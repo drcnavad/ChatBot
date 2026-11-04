@@ -179,7 +179,7 @@ def render_positions(table, data):
     t = table.drop(columns=["Weight %"], errors="ignore")   # equal weights: not shown (Oct 21, 2026)
     show(t, ["P/L $", "P/L %", "Today %"], fit=True,
          cols={"Rank now": st.column_config.NumberColumn(format="%d", help="Live RS short-term rank at the latest close "
-                                                     "(Mon-Thu sells below 20); blank = not ranked (score <= 0)"),
+                                                     "(Friday-only rebalance); blank = not ranked (score <= 0)"),
                "Rank": st.column_config.NumberColumn("Rank at buy", format="%d", help="RS short-term rank on the decision day of its latest buy"),
                "Shares": st.column_config.NumberColumn(format="%.2f"), "P/L %": SPCT, "Today %": SPCT,
                **dict.fromkeys(("Avg price", "Cost basis", "Market value", "P/L $", "Price"), MONEY)})

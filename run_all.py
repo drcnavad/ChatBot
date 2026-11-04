@@ -1,7 +1,7 @@
 """ONE command for the whole pipeline:   python run_all.py   (mode chosen by the US Central clock)
 
-FULL  on a decision day (from Tue Oct 27, 2026 every session: "RS short-term (weekly + Mon–Thu sells)" - Friday rebalance
-      (Thursday if Friday is a holiday) + Mon-Thu exit checks, backtest_engine.next_decision) after its decision slot
+FULL  on a decision day (from Tue Oct 27, 2026 every session: sleeves.STRATEGY - Friday rebalance only from Nov 4, 2026
+      (Thursday if Friday is a holiday; Mon-Thu runs place no orders), backtest_engine.next_decision) after its decision slot
       (2:30 PM CT normally, 11:00 AM CT on early-close days),
       once a day: main (main_signal_analysis.ipynb: Alpaca bars, ranks, picks, mid-week check) -> validate (the report
       files), reading the latest supporting tables.

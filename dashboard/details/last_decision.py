@@ -48,7 +48,7 @@ def sleeve_summary(day, positions, ledger, equity):
         out.append(f"**{sl.LABEL[h]}**: {len(mine[h])} stocks · \\${v:,.0f}"
                    + (f" ({100 * v / equity:.1f}% of the account)" if equity else "")
                    + (f" · next full rebalance {nxt:%a %b %-d}" if nxt is not None else "")
-                   + (" · Mon-Thu: exit check (worse than rank 20)" if h == "rs_short" else ""))
+                   + (" · Fridays only" if h == "rs_short" else ""))
     return out
 
 def half_decision_day(half, path=None):

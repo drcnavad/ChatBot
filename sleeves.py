@@ -1,17 +1,12 @@
 """The live account as one sleeve - backtest_engine.WINNER["sleeves"] = {"rs_short": 1.0}.
 
-Live from the 2:30 PM CT run of Tue Oct 27, 2026 (Chirag, Oct 27, final: "keep it simple and do RS short-term (weekly +
-Mon–Thu sells)"): 100% forward_test.py's "Short-term relative strength" - relative strength over 10/21/63 days,
-top 10 equal weight (defensive sleeve removed Oct 29, 2026), Friday rebalance (the week's last session) and the Mon-Thu
-exit check (a stock worse than rank 20 is sold and replaced by the next eligible stock ranked 20 or better; earnings
-within 5 days skipped), earnings within 5 days not newly bought, soft QQQ regime, do_not_buy never bought, do_not_sell
-never sold.
+Live from Fri Nov 6, 2026 (Chirag; locked ~12 weeks, to ~Jan 29, 2027): 100% forward_test.py's "Short-term relative
+strength, skip stretched buys" - relative strength over 10/21/63 days, top 10 equal weight, Friday rebalance only (the
+week's last session; no Mon-Thu trades since Nov 4). A stock more than 8% above its 20-day average is not newly bought
+(a held one in the top 10 is kept; held = this ledger). Blocked picks (earnings within 5 days, do_not_buy, sold_block)
+are replaced by the next eligible, not stretched stock ranked 20 or better. Soft QQQ regime; do_not_sell never sold.
 
-On every trade day (Friday rebalance and Mon–Thu exit check) the live book is sized with one rule only:
-target = (equity × 0.99) / 10 per stock (equal weight). Exits sold, new names bought, continues trimmed or topped
-to that slot. No per-name weight cap, no fill_idle / scale-adds / renormalize / top-ups (Chirag Oct 31).
-Blocked new picks (e.g. CRL) are replaced from the live ranking; the replacement still gets the same equal slot.
-A held replacement stays on later Mon–Thu plans while its rank is <= 20 (not sold just because the ideal pick is still blocked).
+Sizing: target = (equity × 0.99) / 10 per stock (equal weight); leftover cash stays cash (Chirag Oct 31).
 
 Ledger (Reports/sleeve_ledger.json, version 4): share count per symbol and cash after the planned trades. Next run
 (reconcile): live positions are matched to the ledger; a position the ledger does not claim is sold (do_not_sell kept);
@@ -119,8 +114,6 @@ def ranking(h, day, inp=None):
         d = sc.index[sc.index <= d][-1]
     s = sc.loc[d].where(inp["eligible"].loc[d])
     s = s[(s > 0) & ~s.index.isin(sm.do_not_buy) & s.index.isin(set(sm.tradable_symbols))]
-    if _cfg(h).get("cool_buys"):                          # replacements are buys: no stretched stock (Nov 6, 2026)
-        s = s[~inp["stretched"].loc[d].reindex(s.index, fill_value=False)]
     return s.sort_values(ascending=False, kind="stable")
 
 def live_ranks(day=None, inp=None):
@@ -285,6 +278,7 @@ def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, inve
     taken = set(tw)
     soon = inp.get("soon")
     soon_d = soon.loc[d] if soon is not None and d in soon.index else pd.Series(dtype=bool)
+    cool = inp["stretched"].loc[d] if _cfg(h).get("cool_buys") and d in inp["stretched"].index else None
     skipped = []
     for s in r.index:
         if len(tw) >= int(n_picks):
@@ -295,6 +289,9 @@ def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, inve
             continue
         if s in blocked:
             skipped.append(f"{s} #{rank_of[s]} ({blocked[s]})")
+            continue
+        if cool is not None and bool(cool.get(s, False)):   # skip stretched buys (live from Nov 6, 2026)
+            skipped.append(f"{s} #{rank_of[s]} (more than 8% over its 20-day average)")
             continue
         if bool(soon_d.get(s, False)):   # earnings within 5 days: never a NEW buy (refills skipped it before Nov 3, 2026)
             skipped.append(f"{s} #{rank_of[s]} (earnings within 5 days)")

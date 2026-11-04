@@ -13,15 +13,16 @@ Keys live in `.env` (`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY`, never prin
 ## Live strategy (`backtest_engine.WINNER`, from the 2:30 PM CT run of Tue Oct 27, 2026)
 "Live: RS short-term": one line with its own cash and share counts in `Reports/sleeve_ledger.json` (v4,
 `sleeves.py`), run exactly as its `forward_test.py` line:
-- **100% RS short-term (weekly + Mon–Thu sells):** relative strength over 10/21/63 days, top 10 equal weight (~9.9% each),
-  99% invested (defensive sleeve removed Oct 29, 2026); full rebalance every Friday 2:30 PM CT (Thursday on a holiday);
-  Mon-Thu 2:30 PM a holding worse than rank 20 is sold and refilled by the next eligible stock ranked 20 or better.
+- **From Fri Nov 6, 2026 (locked ~12 weeks, to ~Jan 29, 2027): "Short-term relative strength, skip stretched buys":**
+  relative strength over 10/21/63 days, top 10 equal weight (~9.9% each), 99% invested; full rebalance every Friday
+  2:30 PM CT only (Thursday on a holiday), no Mon-Thu trades, drop guard off. A stock more than 8% above its 20-day
+  average is not newly bought (held ones kept); blocked picks are replaced down to rank 20.
 - No new buy with earnings within 5 days; QQQ below its 200-day average: weights halved. No idle cash: the weight of a
   blocked or unpriced pick goes pro rata to the names that trade (1% cash reserve). RS standard (Fridays only) and the
   50/50 blend stay as paper lines on the leaderboard (live Oct 27, 2026 onward: RS short-term only).
 - Oct 16-26, 2026 the live rules were 50% low volatility (monthly) + 50% sector rotation (weekly); that history is the
   forward line "Old live: Low vol + Sector rotation (Oct 16-26)".
-- Decisions use the ~2:30 PM CT bar (every session: Friday = full RS short-term rebalance, Mon-Thu = its exit check). A holding within 1 point of its target is not traded. A position in no half of the
+- Decisions use the ~2:30 PM CT bar (Friday = full rebalance; Mon-Thu runs place no orders). A holding within 1 point of its target is not traded. A position in no half of the
   ledger is sold at the next trade run.
 - Never bought: `sector_mapping.do_not_buy`, manual sell blocks (`Reports/manual_block.json`), stocks sold by the
   earnings-day stop. Never sold: `sector_mapping.do_not_sell`. `earnings_stop.py` is loaded but places no orders

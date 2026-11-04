@@ -6,7 +6,7 @@
     python paper_trade.py --submit                                      # manual: DAY market orders, sells first
 
 Live rules (backtest_engine.WINNER['sleeves'], from the 2:30 PM CT run of Tue Oct 27, 2026): planned by sleeves.py
-(plan_sleeve_orders) - 100% forward_test's "RS short-term (weekly + Mon–Thu sells)" (Friday rebalance + Mon-Thu exit
+(plan_sleeve_orders) - 100% forward_test's live line (sleeves.STRATEGY; Friday rebalance only from Nov 4, 2026; was + Mon-Thu exit
 checks), exactly as the forward test runs it. do_not_buy, manual sell blocks (manual_trade.py) and earnings-day stop sales
 (earnings_stop.py) are never bought; do_not_sell is never sold. Without sleeves (WINNER['sleeves'] None) plan_orders brings the account to one target
 list: current = Strategy_Weight, provisional = Provisional_Weight, auto = provisional on a rebalance day, else hold.
