@@ -259,6 +259,9 @@ STRATEGIES = [
               "below rank 20, refilled from the top 10); half 2 = Relative strength, Fridays only. Each half follows its own "
               "line exactly; a stock both pick is held by both, each paying from its own half (no overlap rule). "
               "Value = the average of the two lines."),
+    dict(name="Short-term relative strength, skip stretched", **{**NOW, "score": "rs_short_cool", "sleeve": False}, group="rs",
+         rule="Nov 4, 2026 (Chirag): same as live Short-term relative strength, but a stock more than 8% above its 20-day "
+              "average can't be bought or kept that day."),
     dict(name="Half relative strength, half buy the dip", blend=(LIVE_NOW, "Buy the dip"), group="combo",
          rule="Nov 4, 2026 (Chirag): 50% Short-term relative strength + 50% Buy the dip, each half follows its own line."),
     dict(name="Half relative strength, half worst sectors", blend=(LIVE_NOW, "Best stocks in worst sectors (2 months)"),
@@ -706,7 +709,9 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     calm = vol.le(vol.where(eligible).median(axis=1), axis=0)
     mom_12_1, etf_3m = (c.shift(21) / c.shift(252) - 1) * 100, by_etf(b / b.shift(63) - 1)
     scores = {
-        "live": live, "now": f["Strategy_Score"], "tech": tech, "rs": rs, "rs_short": rs_w((10, 21, 63)), "rs_long": rs_w((63, 126, 252)),
+        "live": live, "now": f["Strategy_Score"], "tech": tech, "rs": rs, "rs_short": rs_w((10, 21, 63)),
+        "rs_short_cool": rs_w((10, 21, 63)).where((c / c.rolling(20).mean()).le(1.08) | c.isna(), -1.0),  # Nov 4: skip >8% over 20d avg
+        "rs_long": rs_w((63, 126, 252)),
         "tech30": 0.3 * tech + 0.7 * rs, "rs_calm": rs.where(calm | rs.isna(), -1.0),   # -1: not picked, sleeve kept
         "quant": quant - 50,                                  # > 0 = Quant Score above 50 (the copy's min score)
         "quant_rs": 100 * (0.5 * _pct(quant) + 0.5 * _pct(rs)),
