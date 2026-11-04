@@ -170,10 +170,6 @@ def active_blocks(as_of=None):
     return out
 
 
-def is_blocked(sym, as_of=None):
-    return str(sym).upper() in active_blocks(as_of)
-
-
 def clear_block(sym, reason="cleared", order_id=None, source=None):
     """Remove a buy-block. Returns True if removed.
 
@@ -206,9 +202,3 @@ def clear_block(sym, reason="cleared", order_id=None, source=None):
     return True
 
 
-
-def set_business_days(n):
-    data = _load()
-    data["business_days"] = max(1, int(n))
-    _save(data)
-    return data["business_days"]

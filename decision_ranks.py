@@ -61,17 +61,3 @@ def load(day, path=None):
     for c in COLS[2:]:
         r[c] = pd.to_numeric(r[c], errors="coerce").round().astype("Int64")
     return r
-
-def backfill(start="2026-10-16", path=None, overwrite=False):
-    """Save ranks_on for every session from `start` to the latest close that has no saved rows yet (recomputed from
-    today's signal table with the current rule - display only). Returns the dates written."""
-    path = path or RANKS_CSV
-    import sleeves
-    inp = sleeves.inputs(SIGNAL_CSV)
-    have = set(db.read_csv(path, dtype={"Date": str})["Date"]) if db.exists(path) else set()
-    done = []
-    for d in inp["close"].index[inp["close"].index >= pd.Timestamp(start)]:
-        if overwrite or d.date().isoformat() not in have:
-            save(d, path=path, inp=inp)
-            done.append(d.date().isoformat())
-    return done

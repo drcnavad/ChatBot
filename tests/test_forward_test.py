@@ -226,7 +226,7 @@ full = {c["name"]: ft.strategy_targets(c, inp) for c in ft.STRATEGIES}
 tg = {k: t.loc["2026-10-02":] for k, t in full.items()}
 check(f"registry: {len(ft.STRATEGIES)} strategies with unique names, each with a one-line rule and a color",
       len({c["name"] for c in ft.STRATEGIES}) == len(ft.STRATEGIES) >= 28
-      and all(c.get("rule") and ft.strategy_color(c["name"]) for c in ft.STRATEGIES)
+      and all(c.get("rule") for c in ft.STRATEGIES)
       and any(c["name"] == "Top 10 quant scores" for c in ft.STRATEGIES)
       and any(c["name"] == "Buy deep dips, sell on weak signal" for c in ft.STRATEGIES))
 _combo = {c["name"] for c in ft.STRATEGIES if c.get("combo")}   # forward_combos lines (tests/test_forward_combos.py)

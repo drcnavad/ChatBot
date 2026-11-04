@@ -242,40 +242,6 @@ def daily_bars(symbols, now, lookback=260):
     return bars
 
 
-def minute_bars(symbols, day, data_client=None):
-    """1-minute bars for `day` (ET calendar date) for volume / intraday context. Empty on failure."""
-    from alpaca.data.requests import StockBarsRequest
-    from alpaca.data.timeframe import TimeFrame
-    from alpaca.data.enums import DataFeed
-    client = data_client or be.market_data_client()
-    start = datetime(day.year, day.month, day.day, 9, 30, tzinfo=be.EASTERN)
-    end = datetime(day.year, day.month, day.day, 16, 0, tzinfo=be.EASTERN)
-    now = datetime.now(be.EASTERN)
-    if end > now:
-        end = now
-    out = []
-    syms = list(symbols)
-    for i in range(0, len(syms), 50):
-        chunk = syms[i:i + 50]
-        req = StockBarsRequest(symbol_or_symbols=chunk, timeframe=TimeFrame.Minute,
-                               start=start, end=end, feed=DataFeed.IEX)
-        try:
-            df = client.get_stock_bars(req).df
-        except Exception:
-            continue
-        if df is None or df.empty:
-            continue
-        d = df.reset_index()
-        if "symbol" in d.columns:
-            d = d.rename(columns={"symbol": "Symbol", "timestamp": "ts",
-                                  "open": "Open", "high": "High", "low": "Low",
-                                  "close": "Close", "volume": "Volume"})
-        out.append(d)
-    if not out:
-        return pd.DataFrame(columns=["Symbol", "ts", "Open", "High", "Low", "Close", "Volume"])
-    return pd.concat(out, ignore_index=True)
-
-
 # ----------------------------------------------------------------------------- technical snapshot
 def _ema(s, n):
     return s.ewm(span=n, adjust=False).mean()
@@ -469,16 +435,6 @@ def _todays_buy_fills(now=None, client=None):
     vwap = {s: notional / q for s, (q, notional) in qty_px.items() if q > 0}
     qty = {s: q for s, (q, _n) in qty_px.items() if q > 0}
     return vwap, qty
-
-
-def todays_buy_vwap(now=None, client=None):
-    """{SYMBOL: vwap} of BUY fills today (CT calendar day)."""
-    return _todays_buy_fills(now, client)[0]
-
-
-def todays_buy_qty(now=None, client=None):
-    """{SYMBOL: filled BUY qty today (CT)}."""
-    return _todays_buy_fills(now, client)[1]
 
 
 def quote_mid(q, now):

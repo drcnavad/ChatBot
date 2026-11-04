@@ -377,9 +377,6 @@ for _c in STRATEGIES:                                     # the limits the code 
         raise ValueError(f"{_c['name']}: missing color group")
 GROUP_OF = {c["name"]: c["group"] for c in STRATEGIES}
 
-def strategy_color(name):
-    """CSS color of a strategy's family, or '' for the account and the benchmarks."""
-    return GROUPS.get(GROUP_OF.get(str(name).replace(LIVE_MARK, ""), ""), "")
 STOPS = {"pre": dict(k=3.5, arm_days=7, gap_open=True), "post": dict(k=3.0, after=10)}   # atr_stop_targets settings
 FWD_BARS = os.path.join(REPORTS, "cache", "forward_bars.pkl")  # legacy path; daily bars now live in db.bars_daily
 FWD_BARS_START = "2026-05-01"      # ~100 sessions before the start: the 50-day volume average is full by Oct 2

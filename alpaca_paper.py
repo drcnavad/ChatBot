@@ -152,11 +152,6 @@ class PaperAccount:
                 return out
             params = {**params, "page_token": page[-1]["id"]}
 
-    def net_deposits(self, before=None):
-        """Lifetime deposits minus withdrawals (cash_flows) booked by `before` (UTC Timestamp; None = all), so the
-        strategy's P&L can leave them out."""
-        return sum(f["amount"] for f in self.cash_flows() if before is None or _flow_time(f) <= before)
-
     def snapshot(self):
         """{"equity", "flows", "at"}: the equity now and only the deposits already in it. The balance is read first, then
         the deposits, and a deposit booked after the balance read (Alpaca books them around 4:15 PM CT) is left out until

@@ -121,7 +121,6 @@ cf = fa.cash_flows()
 check("cash_flows: every page, canceled left out, withdrawals negative, date / time / amount",
       len(cf) == 149 and len(fa.calls) == 2 and cf[-1] == {"date": "2026-10-06", "time": "", "amount": -30.0}
       and cf[0] == {"date": "2026-10-05", "time": "2026-10-05T21:15:38Z", "amount": 10.0}, (len(cf), fa.calls[-1:], cf[-1]))
-check("net_deposits = the sum of cash_flows", math.isclose(fa.net_deposits(), 148 * 10 - 30))
 fa.acts.append({"id": "late", "activity_type": "CSD", "date": "2099-01-02", "created_at": "2099-01-02T21:15:00Z",
                 "net_amount": "5000", "status": "executed"})
 sn = fa.snapshot()

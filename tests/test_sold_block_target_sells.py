@@ -52,7 +52,6 @@ with tempfile.TemporaryDirectory() as td:
         check("record through Nov 3", e["through"] == "2026-11-03", e)
         active = sb.active_blocks(as_of=date(2026, 10, 30))
         check("active on Thu same week", "CRL" in active, active)
-        check("is_blocked true while active", sb.is_blocked("CRL", as_of=date(2026, 10, 28)))
         active2 = sb.active_blocks(as_of=date(2026, 11, 3))
         check("still active on through day", "CRL" in active2, active2)
         active3 = sb.active_blocks(as_of=date(2026, 11, 4))
