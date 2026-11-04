@@ -89,6 +89,16 @@ def targets(h, inp=None):
         _TARGETS[key] = ft.strategy_targets(_cfg(h), inp)
     return _TARGETS[key]
 
+def rebalance_inputs(day=None, inp=None):
+    """(day, inputs) with `day` (default: the latest close) treated as a Friday rebalance - the dashboard preview of the next
+    Friday through the same plan() / strategy_targets path (read-only; the live run never uses this)."""
+    inp = inp or inputs()
+    d = pd.Timestamp(day if day is not None else inp["close"].index[-1]).normalize()
+    targets(HALVES[0], inp)                               # sets inp["held"] (the ledger book) first
+    wk = inp["weekly"].copy()
+    wk.loc[d] = True
+    return d, {**inp, "weekly": wk}
+
 def half_weights(h, day, inp=None):
     """Half h's target *membership* on session `day` (Series; >0 = in the book). Live sizing ignores these values and uses equal invested/n."""
     import sector_mapping as sm
@@ -314,13 +324,13 @@ def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, inve
     slot = float(invested) / len(final)
     return {s: slot for s in final}
 
-def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_value):
+def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_value, rebalance=False):
     """One sizing rule on a trade day: each of the 10 book names gets invested/n (equal weight).
     Exits leave the book. Off-day: holds keep shares. No fill_idle / caps / scale-adds / renormalize."""
     import forward_test as ft
     import paper_trade as pt
     w = half_weights(h, d, inp)  # membership only — weight values are not used for sizing
-    trade_today = init or half_day(h, d)
+    trade_today = init or rebalance or half_day(h, d)
     held_v = {s: q * (_num(px.get(s)) or 0.0) for s, q in st["shares"].items()}
     held_w = pd.Series({s: v / value for s, v in held_v.items()}, dtype=float) if value > 0 else pd.Series(dtype=float)
     picks = sorted(w[w > 0].index.tolist())
@@ -353,7 +363,7 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
 
 
 def plan(day, positions, equity, prices, no_buy=None, no_sell=None, fractional=True, ledger="load", min_value=1.0,
-         inp=None, fills=None, pending=(), **_old):
+         inp=None, fills=None, pending=(), rebalance=False, **_old):
     """Orders for session `day` (2:30 PM run): one netted order per symbol. Returns (orders, info); info['ledger'] = the
     ledger to save after the orders are sent."""
     import paper_trade as pt
@@ -387,7 +397,7 @@ def plan(day, positions, equity, prices, no_buy=None, no_sell=None, fractional=T
     for h in HALVES:
         if values[h] <= 0:
             raise ValueError(f"the {LABEL[h]} half is worth ${values[h]:,.2f} - refusing to size its orders")
-        parts[h], tgts[h], traded[h] = half_plan(h, d, state[h], px, values[h], init, inp, no_buy, no_sell, fractional, min_value)
+        parts[h], tgts[h], traded[h] = half_plan(h, d, state[h], px, values[h], init, inp, no_buy, no_sell, fractional, min_value, rebalance)
     # ---- net the halves into one order per symbol
     pos = {str(k).upper(): float(v) for k, v in (positions or {}).items() if float(v or 0) > 0}
     tgt_sh = {}

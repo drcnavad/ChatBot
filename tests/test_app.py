@@ -192,7 +192,7 @@ for sym in cases:
     print(f"   {sym}: {badges[:3]} · rank {live_r} OK")
 import forward_test as ft  # noqa: E402
 # order: Last decision, Forward test first (rules/holdings now hover on the leaderboard); live holdings and latest signals further down
-exp_titles = ["Last decision · portfolio and short-term relative strength ranks",
+exp_titles = ["Decisions · last Friday vs next Friday",
               f"Forward test · {len(ft.STRATEGIES)} strategies vs your account, QQQ and SPY since Oct 29, 2026",
               "Data freshness and settings"]
 at.radio(key="nav").set_value("Strategy").run()

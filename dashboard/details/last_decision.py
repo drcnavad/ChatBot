@@ -1,211 +1,171 @@
-"""Strategy tab, Last decision (live from Oct 27, 2026: "Short-term relative strength", one sleeve = the account; defensive sleeve off Oct 29):
-a summary line (stocks, value, next rebalance), the top-20 ranking at the latest decision (Reports/decision_ranks.csv,
-saved by the trade run) with held stocks marked, then the next decision preview from the latest close. Weights from the
-live Alpaca positions; the ledger is never written here."""
+"""Strategy tab, Decisions (Nov 4, 2026, Chirag): ONE table per stock - the last Friday rebalance (orders in
+Reports/live_orders_log.csv with that As_Of, ranks in Reports/decision_ranks.csv) next to what a Friday rebalance at the
+latest close would do (sleeves.plan through the live code path, read-only: no orders, the ledger is never written)."""
 
 import pandas as pd
 import streamlit as st
 
 from dashboard.page import open_symbol
-from dashboard.style import GOOD, INK, SCORE, table, toned
-
-def _sleeves():
-    import sleeves
-    return sleeves
+from dashboard.style import BAD, GOOD, INK, table, toned
 
 
-def _state(positions, ledger, equity):
-    """(reconciled state {half: {'shares', 'cash'}}, prices, market values) like the bot at trade time (read-only)."""
-    sl = _sleeves()
-    qty = {p["symbol"]: float(p.get("qty") or 0) for p in positions or []}
-    px = {p["symbol"]: float(p.get("current_price") or 0) for p in positions or []}
-    value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
-    state, _, _ = sl.reconcile(ledger, qty, px, equity)
-    return state, px, value
+def _positions(positions):
+    return ({p["symbol"]: float(p.get("qty") or 0) for p in positions or [] if float(p.get("qty") or 0) > 0},
+            {p["symbol"]: float(p.get("current_price") or 0) for p in positions or []})
 
-def half_values(positions, ledger, equity):
-    """{half: $ value} reconciled like the bot (sleeves.reconcile)."""
-    sl = _sleeves()
-    state, px, _ = _state(positions, ledger, equity)
-    return {h: sl.half_value(state[h], px) for h in state}
 
-def _mine(positions, ledger, equity):
-    state, _, value = _state(positions, ledger, equity)
-    return {h: sorted(s for s, q in state[h]["shares"].items() if q > 0 and s in value) for h in state}
+@st.cache_data(ttl=600, show_spinner=False)
+def _preview(key, positions_t, prices_t, equity):
+    """(day, orders, info) of a Friday rebalance at the latest close: sleeves.plan with rebalance=True (the live run's
+    plan, blocks and all - manual / earnings-stop buy blocks, stretched, earnings, sector cap, regime)."""
+    import paper_trade as pt
+    import sleeves as sl
+    d, inp = sl.rebalance_inputs()
+    no_buy = {**pt.manual_list("buy"), **pt.earnings_stop_blocked(d.date().isoformat())}
+    o, info = sl.plan(d, dict(positions_t), equity, dict(prices_t), no_buy=no_buy, no_sell=pt.manual_list("sell"),
+                      inp=inp, rebalance=True)
+    return d, o, {"no_buy": no_buy, "targets": info["targets"]}
 
-def _next_full(after):
-    sl = _sleeves()
-    cal = sl.calendar(pd.Timestamp(after) + pd.Timedelta(days=1), 15)
-    return cal[0][0] if cal else None
 
-def sleeve_summary(day, positions, ledger, equity):
-    """One line per half: its stocks, value, share of the account, next full rebalance."""
-    sl = _sleeves()
-    vals, mine, nxt = half_values(positions, ledger, equity), _mine(positions, ledger, equity), _next_full(day)
-    out = []
-    for h in sl.HALVES:
-        v = vals[h]
-        out.append(f"**{sl.LABEL[h]}**: {len(mine[h])} stocks · \\${v:,.0f}"
-                   + (f" ({100 * v / equity:.1f}% of the account)" if equity else "")
-                   + (f" · next full rebalance {nxt:%a %b %-d}" if nxt is not None else "")
-                   + (" · Fridays only" if h == "rs_short" else ""))
-    return out
+def preview(positions, equity):
+    import sleeves as sl
+    pos, px = _positions(positions)
+    key = str(sl.inputs()["close"].index[-1].date())
+    return _preview(key, tuple(sorted(pos.items())), tuple(sorted(px.items())), float(equity))
 
-def half_decision_day(half, path=None):
-    """The latest day in Reports/decision_ranks.csv on which `half` decided (rs_short: every session)."""
+
+def last_rebalance(path=None):
+    """(day, {SYMBOL: 'Buy Oct 30' | 'Sell ...'}) of the latest Friday rebalance in the order log, plus any trade after it
+    (e.g. the Nov 2 mid-week run), each labelled with its decision day (fill-check rows count as their decision)."""
+    import db
+    import sleeves as sl
+    from paper_trade import ORDER_LOG_CSV
+    path = path or ORDER_LOG_CSV
+    o = db.read_csv(path) if db.exists(path) else None
+    if o is None or o.empty:
+        return None, {}
+    o = o[~o["Status"].astype(str).str.upper().str.startswith(("STAGED", "FAIL", "SKIP", "REFUSED"))]
+    days = sorted({str(x)[:10] for x in o["As_Of"].dropna()}, reverse=True)
+    day = next((pd.Timestamp(x) for x in days if sl.full_day(sl.HALVES[0], x)), None)
+    if day is None:
+        return None, {}
+    o = o.assign(D=pd.to_datetime(o["As_Of"].astype(str).str[:10], errors="coerce"))
+    mine = o[o["D"] >= day]
+    return day, {s: f"{str(g['Side'].iloc[-1]).capitalize()} {g['D'].iloc[-1]:%b %-d}" for s, g in mine.groupby("Symbol")}
+
+
+def decision_table(positions, equity):
+    """(table, last day, rank-now day, next day): Stock, Sector, Last week, Rank then, Rank now, Next, Why."""
     import decision_ranks
-    sl = _sleeves()
-    path = path or decision_ranks.RANKS_CSV
-    from dashboard.data import read_report_csv
-    try:
-        r = read_report_csv(path)
-    except Exception:
-        return None
-    if r is None or "Date" not in r or decision_ranks.RANK_COL[half] not in r.columns:
-        return None
-    days = sorted({str(d)[:10] for d in r["Date"]}, reverse=True)
-    return next((pd.Timestamp(d) for d in days if sl.half_day(half, d)), None)
-
-def _scores(half, day):
-    sl = _sleeves()
-    try:
-        s = sl.ranking(half, day)
-    except Exception:
-        return {}
-    return s.to_dict()
-
-def ranking_table(half, day, positions, ledger, top=20, path=None, values=None, equity=None):
-    """(table, others): Rank, Stock, Sector, Score, Held (✓) for the half's top `top` ranks at `day`; others = the stocks
-    the half holds outside that top."""
-    import decision_ranks
+    import sleeves as sl
     from dashboard.settings import symbol_sector
-    col = decision_ranks.RANK_COL[half]
-    r = decision_ranks.ranks_on(day)[1] if path == "__live__" else decision_ranks.load(day, path=path)
-    r = r.dropna(subset=[col]).sort_values(col) if r is not None else pd.DataFrame(columns=["Symbol", col])
-    eq = equity if equity is not None else sum(float(p.get("market_value") or 0) for p in positions or [])
-    mine = _mine(positions, ledger, eq)
-    score = _scores(half, day)
-    r = r[r[col] <= top]
-    others = sorted(set(mine[half]) - set(r["Symbol"]))
-    t = pd.DataFrame({"Rank": pd.array(pd.to_numeric(r[col], errors="coerce").round(), dtype="Int64"), "Stock": r["Symbol"].to_numpy(),
-                      "Sector": [symbol_sector.get(x, "—") for x in r["Symbol"]],
-                      "Score": [round(float(score.get(x)), 2) if score.get(x) is not None and pd.notna(score.get(x)) else None
-                                for x in r["Symbol"]],
-                      "Held": ["✓" if x in mine[half] else "" for x in r["Symbol"]]})
-    return t, others
+    held, _ = _positions(positions)
+    inp = sl.inputs()
+    last, side = last_rebalance()
+    col = decision_ranks.RANK_COL[sl.HALVES[0]]
+    then = decision_ranks.load(last) if last is not None else None
+    then = {} if then is None else dict(zip(then["Symbol"], then[col]))
+    now = {s: r for s, (r, _) in sl.live_ranks(inp=inp).items()}
+    d, o, info = preview(positions, equity)
+    nxt = {r.Symbol: r.Side for r in o.itertuples()}
+    book = set(info["targets"][sl.HALVES[0]])
+    stretched = inp["stretched_live"].loc[d] if d in inp["stretched_live"].index else pd.Series(dtype=bool)
+    soon = inp["soon"].loc[d] if d in inp["soon"].index else pd.Series(dtype=bool)
+    n_sec = pd.Series([symbol_sector.get(x) for x in book]).value_counts()
+
+    def why(s, act):
+        r = now.get(s)
+        if s in info["no_buy"] and s not in held:
+            return f"buy block: {info['no_buy'][s]}"
+        if act == "Sell":
+            return "not ranked (score <= 0)" if r is None else f"rank {r}: out of the top 10"
+        if act in ("Buy", "Hold", "Trim", "Add") or s in book:
+            return {"Buy": "new pick", "Add": "topped up to equal weight", "Trim": "trimmed to equal weight"}.get(act, "kept")
+        if r is None or r > 20:
+            return ""
+        if bool(stretched.get(s, False)):
+            return "stretched: >15% over its 20-day average"
+        if bool(soon.get(s, False)):
+            return "earnings within 5 days"
+        if n_sec.get(symbol_sector.get(s), 0) >= 4:
+            return f"sector cap: 4 {symbol_sector.get(s)} already"
+        return f"rank {r}: top 10 already filled"
+
+    def act(s):
+        a = str(nxt.get(s, "")).upper()
+        if a == "BUY":
+            return "Add" if s in held else "Buy"
+        if a == "SELL":
+            return "Sell" if s not in book else "Trim"
+        return "Hold" if s in held or s in book else "—"
+
+    syms = sorted(set(held) | set(side) | book | {s for s, r in now.items() if r <= 20},
+                  key=lambda s: (now.get(s, 999), s))
+    rows = []
+    for s in syms:
+        a = act(s)
+        rows.append({"Stock": s, "Sector": symbol_sector.get(s, "—"),
+                     "Last week": (side[s] if s in side else "Hold" if s in held else "—"),
+                     "Rank then": then.get(s), "Rank now": now.get(s), "Next": a, "Why": why(s, a)})
+    t = pd.DataFrame(rows)
+    for c in ("Rank then", "Rank now"):
+        t[c] = pd.array(pd.to_numeric(t[c], errors="coerce").round(), dtype="Int64")
+    return t, last, inp["close"].index[-1], d
+
 
 @st.fragment(run_every=30)
 def render_last_decision(p):
-    """Strategy tab: per-half summary, each half's ranking at its latest decision, then the next decision preview."""
+    """Strategy tab: next run line + the one decisions table (last Friday vs next Friday at the latest close)."""
     from dashboard.page import fresh
-    p = fresh(p)
-    sl = _sleeves()
     from dashboard.details.live_holdings import holdings_this_run
-    led = sl.load_ledger()
+    import sleeves as sl
+    p = fresh(p)
     data, err = holdings_this_run()
     if data is None:
         st.info(f"Last decision: {err} (live positions are the only holdings source)")
         return
-    positions, equity = data["positions"], data["equity"]
-    if led is None:
-        st.info("Short-term relative strength starts at its first full rebalance, Fri Oct 30, 2026 "
-                "2:30 PM CT (Reports/sleeve_ledger.json is written then).")
-    else:
-        for line in sleeve_summary(pd.Timestamp(led["day"]), positions, led, equity):
-            st.markdown(line)
-        cols = st.columns(len(sl.HALVES))
-        for c, half in zip(cols, sl.HALVES):
-            with c:
-                day = half_decision_day(half)
-                if day is None:
-                    st.info(f"{sl.LABEL[half]}: no saved decision ranks yet.")
-                    continue
-                st.markdown(f"**{sl.LABEL[half]}** · ranks at its decision of {day:%a %b %-d}")
-                t, others = ranking_table(half, day, positions, led, equity=equity)
-                sty = toned(t, ["Held"], fn=lambda v: GOOD if v == "✓" else INK)
-                event = table(sty, fit=True, cols={"Score": SCORE}, on_select="rerun", selection_mode="single-row",
-                              key=f"rank_tbl_{half}")
-                if others:
-                    st.caption(f"Held, not in top 20: {', '.join(others)}")
-                open_symbol(t.rename(columns={"Stock": "Symbol"}), event, f"rank_{half}")
-    st.markdown("##### Next decision")
-    render_preview(positions, led, equity)
-
-# ---------------------------------------------------------------- next decision preview (read-only, no orders)
-@st.cache_data(ttl=600, show_spinner=False)
-def _preview_targets(day):
-    """{half: {symbol: target weight in the half}} at the close `day` = sleeves.half_weights (the forward test's own
-    targets; manual buy blocks shown as Blocked). Midweek evolved line — for Friday full use `_friday_pick_targets`.
-    """
-    sl = _sleeves()
-    return {h: {s: float(w) for s, w in sl.half_weights(h, day).items() if w > 0} for h in sl.HALVES}
-
-
-@st.cache_data(ttl=600, show_spinner=False)
-def _friday_pick_targets(day):
-    """Top-N equal-weight picks a Friday full rebalance would take from live RS ranks at `day`.
-
-    half_weights(midweek) is the evolved Mon-Thu line (exit>20, refill), not Friday's top-N reset. When the next
-    run is a full rebalance, Strategy tab labels and stock-note plan use this set so they match live Friday trading.
-    """
-    import paper_trade as pt
-    import forward_test as ft
-    sl = _sleeves()
-    # Live RS short-term is top 10 (PIN["n"]); WINNER["n"] is the pipeline column size (5) — do not use it here.
-    n = int((sl._cfg(sl.HALVES[0]).get("select") or {}).get("n") or ft.PIN.get("n") or 10)
-    invested = float(ft.PIN.get("invested") or 0.99)
-    r = sl.ranking(sl.HALVES[0], day)
-    blocked = set(pt.manual_list("buy"))
-    picks = [s for s in r.index if s not in blocked][:n]
-    if not picks:
-        picks = list(r.head(n).index)
-    w = invested / max(len(picks), 1)
-    return {h: {s: w for s in picks} for h in sl.HALVES}
+    try:
+        slot, kind = next_run(ledger=sl.load_ledger())
+        if slot is not None:
+            st.markdown(f"**Next run: {slot:%a %b %-d, %-I:%M %p} CT** · {kind}")
+        t, last, now_day, d = decision_table(data["positions"], data["equity"])
+    except Exception as e:
+        st.info(f"Decisions unavailable: {str(e)[:150]}")
+        return
+    st.caption(f"Last week = the {last:%a %b %-d} rebalance orders and any trade since (Rank then = {last:%b %-d})." if last is not None else "No rebalance yet.")
+    st.caption(f"Rank now = the {now_day:%a %b %-d} close. Next = a Friday rebalance at that close through the live plan "
+               "(top 10 equal ~9.9%, max 4 per sector, no new buys >15% over the 20-day average or within 5 days of "
+               "earnings, replacements to rank 20, half weights when the regime is off). Prices move until Friday.")
+    tone = lambda v: GOOD if v in ("Buy", "Add") else BAD if v in ("Sell", "Trim") or str(v).startswith("Sell") else INK
+    sty = toned(toned(t, ["Next"], fn=tone), ["Last week"], fn=lambda v: tone(str(v).split(" ")[0]))
+    event = table(sty, fit=True, on_select="rerun", selection_mode="single-row", key="decisions_tbl",
+                  cols={"Rank then": st.column_config.NumberColumn("Rank then", width=60),
+                        "Rank now": st.column_config.NumberColumn("Rank now", width=60)})
+    open_symbol(t.rename(columns={"Stock": "Symbol"}), event, "decisions")
 
 
 def next_plan():
-    """{"asof", "days": {half: next decision}, "targets", "plan": {sym: (action, % of account, day)}} or None.
-    Action: Keep / Buy / Sell / Blocked. Display only. Uses account_core (positions + equity) — not the full
-    holdings read — so build_page / plan chips never wait on fill history.
-
-    When the next 2:30 CT run is a full rebalance, targets are Friday top-N equal weights from live ranks (not
-    midweek half_weights), so held picks say Keep and held non-picks say Sell — matching live Friday code.
-    """
-    import paper_trade as pt
-    sl = _sleeves()
+    """{"asof", "days": {half: next decision}, "plan": {sym: (action, % of account, day)}, "kind"} or None, from the same
+    Friday preview as the Strategy tab (display only)."""
+    import sleeves as sl
     from dashboard.details.live_holdings import account_core
     try:
-        led = sl.load_ledger()
         data, _ = account_core()
         if data is None:
             return None
-        positions, equity = data["positions"], data["equity"]
-        asof = sl.inputs()["close"].index[-1]
-        slot, kind = next_run(ledger=led)
-        t = _friday_pick_targets(asof) if kind == "full rebalance" else _preview_targets(asof)
-        vals = half_values(positions, led, equity)
-        value = {p["symbol"]: float(p.get("market_value") or 0) for p in positions or []}
+        d, o, _ = preview(data["positions"], data["equity"])
+        slot, kind = next_run(ledger=sl.load_ledger())
     except Exception:
         return None
     import backtest_engine as be
-    if slot is not None:
-        nxt = pd.Timestamp(slot).tz_localize(None).normalize() if getattr(slot, "tzinfo", None) else pd.Timestamp(slot).normalize()
-    else:
-        nxt = be.next_sessions(pd.Timestamp.now().normalize() - pd.Timedelta(days=1), 1)[0]
-    days = {h: nxt for h in sl.HALVES}
-    tot = sum(vals.values()) or 1.0
-    blocked = set(pt.manual_list("buy"))
+    nxt = next((x for x in [d, *be.next_sessions(d, 6)] if x > d and sl.full_day(sl.HALVES[0], x)), None)
     plan = {}
-    for h in sl.HALVES:
-        for s, w in t[h].items():
-            a, pct, d = plan.get(s, ("Keep" if s in value else "Buy", 0.0, days[h]))
-            plan[s] = (a, pct + 100 * w * vals[h] / tot, min(d, days[h]) if d is not None and days[h] is not None else d)
-    for s in value:
-        plan.setdefault(s, ("Sell", 0.0, nxt))
-    for s in blocked:
-        if s in plan and plan[s][0] == "Buy":
-            plan[s] = ("Blocked", 0.0, plan[s][2])
-    return {"asof": asof, "days": days, "targets": t, "plan": plan, "kind": kind}
+    for _, r in o.iterrows():
+        held, tgt = float(r["Current_Shares"] or 0) > 0, float(r["Target_Shares"] or 0)
+        if not held and tgt <= 0:
+            continue
+        plan[r["Symbol"]] = ("Sell" if tgt <= 0 else "Keep" if held else "Buy", float(r["Target_Weight_%"] or 0), nxt)
+    return {"asof": d, "days": {h: nxt for h in sl.HALVES}, "plan": plan, "kind": kind}
 
 
 def next_run(now=None, ledger=None):
@@ -230,119 +190,16 @@ def next_run(now=None, ledger=None):
     return slot, kind
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def _dry_plan(key, positions_t, equity):
-    """The trade step's own plan (paper_trade.plan_orders, read-only, no broker calls, no orders) at the latest close."""
-    import paper_trade as pt
-    orders, meta, targets = pt.plan_orders("provisional", equity, positions=dict(positions_t), fractional=True)
-    return orders, targets
 
 def plan_frames(positions, equity):
-    """(orders table, targets table, cash after) for the next decision from the current dry-run plan."""
-    pos = tuple(sorted((p["symbol"], float(p.get("qty") or 0)) for p in positions or []))
-    key = str(_sleeves().inputs()["close"].index[-1].date())
-    orders, targets = _dry_plan(key, pos, float(equity))
-    o = orders[orders["Side"].isin(["buy", "sell", "BUY", "SELL"])].copy() if len(orders) else orders
+    """(orders table, targets table, cash after) of the next Friday rebalance preview (chatbot)."""
+    _, orders, _ = preview(positions, equity)
+    o = orders[orders["Side"].isin(["BUY", "SELL"])].copy()
     o = o.assign(Side=o["Side"].str.capitalize())
     o = o[["Side", "Symbol", "Shares", "Price", "Est_Value", "Current_Shares", "Target_Shares"]].rename(
         columns={"Est_Value": "Value $", "Current_Shares": "Now shares", "Target_Shares": "Target shares"})
     o = o.sort_values(["Side", "Value $"], ascending=[False, False]).reset_index(drop=True)
-    t = targets.assign(**{"Target %": targets["Weight"] * 100})[["Symbol", "Target %"]].sort_values(
-        "Target %", ascending=False).reset_index(drop=True)
-    cash = float(equity) * (1 - float(targets["Weight"].sum()))
+    t = orders[orders["Target_Weight_%"].fillna(0) > 0][["Symbol", "Target_Weight_%"]].rename(
+        columns={"Target_Weight_%": "Target %"}).sort_values("Target %", ascending=False).reset_index(drop=True)
+    cash = float(equity) * (1 - t["Target %"].sum() / 100)
     return o, t, cash
-
-def render_preview(positions, led, equity):
-    """Next run (date/time CT, kind), the rule schedule, and the planned trades from the trade step's dry-run plan."""
-    try:
-        slot, kind = next_run(ledger=led)
-    except Exception as e:
-        slot, kind = None, f"unavailable ({str(e)[:80]})"
-    if slot is not None:
-        st.markdown(f"**Next run: {slot:%a %b %-d, %-I:%M %p} CT** · {kind}")
-    try:
-        o, t, cash = plan_frames(positions, equity)
-    except Exception as e:
-        st.info(f"Planned trades unavailable: {str(e)[:150]}")
-        return
-    sl = _sleeves()
-    day = sl.inputs()["close"].index[-1]
-    sells, buys = o[o.Side == "Sell"]["Value $"].sum(), o[o.Side == "Buy"]["Value $"].sum()
-    st.markdown(f"Sell \\${sells:,.0f} · Buy \\${buys:,.0f} · Cash after \\${cash:,.0f}")
-    from dashboard.settings import symbol_sector
-    held = {p_["symbol"] for p_ in positions or [] if float(p_.get("qty") or 0) > 0}
-    # Friday full rebalance preview: label against Friday top-N picks (not midweek half_weights / provisional dry plan).
-    fri_full = (kind == "full rebalance")
-    dry_side = dict(zip(o["Symbol"], o["Side"])) if len(o) else {}
-    if fri_full:
-        fri = _friday_pick_targets(day)
-        tgt = {s: 100.0 * w for h in fri for s, w in fri[h].items()}
-        side = {}
-        for x in held:
-            if x not in tgt:
-                side[x] = "Sell"
-        for x in tgt:
-            if x not in held:
-                side[x] = "Buy"
-            elif dry_side.get(x) == "Buy":
-                side[x] = "Buy"  # underweight / spare-cash top-up live Friday would place → Add
-    else:
-        tgt = dict(zip(t["Symbol"], t["Target %"]))
-        side = dict(dry_side)
-    def earn_soon(syms):
-        """{SYMBOL: 'Oct 28'} for names with earnings within the 5-day rule (the engine's own check: not newly bought)."""
-        try:
-            import backtest_engine as be, forward_test as ft
-            inp = sl.inputs()
-            a = be.earnings_days_ahead([day], list(syms), inp["earnings"], ft.EARN_DAYS).iloc[0].dropna()
-            return {k: f"{day + pd.offsets.BDay(int(v)):%b %-d}" for k, v in a.items()}
-        except Exception:
-            return {}
-    def plan(x):
-        """Keep held picks; Buy only unheld picks; Add only if bot would buy more of a held pick; Sell held non-picks."""
-        if x not in tgt:
-            if x in held:
-                return f"Sell: earn {earn[x]}" if x in earn else "Sell"
-            return f"— · earn {earn[x]}" if x in earn else "—"
-        if x in held:
-            if side.get(x) == "Buy" or (not fri_full and dry_side.get(x) == "Buy"):
-                return "Add"
-            if side.get(x) == "Sell" or dry_side.get(x) == "Sell":
-                return "Sell"
-            return "Keep"
-        return "Buy"
-
-    for half in sl.HALVES:
-        tab, _ = ranking_table(half, day, positions, led, path="__live__", equity=equity)
-        tab = tab.drop(columns=["Held"])
-        earn = earn_soon(tab["Stock"])
-        mv = {p_["symbol"]: float(p_.get("market_value") or 0) for p_ in positions or []}
-        try:
-            from dashboard.data import index_quotes
-            qq = index_quotes(tuple(tab["Stock"])) or {}
-        except Exception:
-            qq = {}
-        tab["Weight now"] = [round(100 * mv[x] / equity, 1) if x in mv and equity else None for x in tab["Stock"]]
-        tab["Today %"] = [round(float(qq[x][1]), 2) if x in qq and qq[x][1] == qq[x][1] else None for x in tab["Stock"]]
-        tab.insert(1, "Plan", [plan(x) for x in tab["Stock"]])
-        from dashboard.style import BAD
-        tone_ = lambda v: (GOOD if v > 0 else BAD if v < 0 else INK) if isinstance(v, (int, float)) and v == v else INK
-        sty = toned(tab, ["Plan"], fn=lambda v: GOOD if str(v).startswith(("Buy", "Add")) else BAD if str(v).startswith("Sell") else INK)
-        sty = toned(sty, ["Today %"], fn=tone_)
-        table(sty, fit=True, key=f"preview_{half}",
-              cols={"Score": SCORE, "Rank": st.column_config.NumberColumn("#", width=30),
-                    "Plan": st.column_config.TextColumn(width=96), "Stock": st.column_config.TextColumn(width=52),
-                    "Sector": st.column_config.TextColumn(width=110),
-                    "Weight now": st.column_config.NumberColumn("Weight now", format="%.1f%%", width=62),
-                    "Today %": st.column_config.NumberColumn("Today %", format="%+.2f", width=58)})
-        extra = [x for x in tgt if x not in set(tab["Stock"])]
-        if extra:
-            st.caption("Also targeted (outside the top 20): "
-                       + ", ".join(f"{x} ({symbol_sector.get(x, '—')}) {plan(x)}" for x in extra))
-        if fri_full:
-            sells = sorted(x for x in held if x not in tgt)
-            st.markdown("Would sell: " + (", ".join(f"{x} ({symbol_sector.get(x, '—')})" for x in sells) if sells else "nothing"))
-        else:
-            sold = o[(o.Side == "Sell") & ~o.Symbol.isin(set(tgt))]
-            st.markdown("Would sell: " + (", ".join(f"{r.Symbol} ({symbol_sector.get(r.Symbol, '—')}) \\${r[4]:,.0f}"
-                                                      for r in sold.itertuples(index=False)) if len(sold) else "nothing"))

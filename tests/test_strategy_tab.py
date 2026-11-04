@@ -1,5 +1,5 @@
 """Strategy tab (Chirag, Oct 16, 2026), pure functions with fake Alpaca data - no network, no orders:
-  - Last decision (dashboard/details/last_decision.ranking_table): the RS short-term top 20 at its own decision, held marked
+  - Decisions table (dashboard/details/last_decision): last Friday from the order log, next Friday via sleeves.plan(rebalance=True)
   - decision_ranks.save / load round trip (temp file)
   - Home tab sector performance (dashboard/sector_table.sector_returns): equal-weight average per sector
 Run: python tests/run_tests.py  (or python tests/test_strategy_tab.py)"""
@@ -21,24 +21,25 @@ def check(name, ok, info=""):
         FAIL.append(name)
 
 import decision_ranks  # noqa: E402
-# ---------------------------------------------------------------- Last decision: one ranking table per half
-from dashboard.details.last_decision import half_decision_day, ranking_table  # noqa: E402
-REAL_RANKS = os.path.join(ROOT, "Reports", "decision_ranks.csv")   # the runner points decision_ranks at a temp file
-for half in ("rs_short",):
-    day = half_decision_day(half, path=REAL_RANKS)
-    if day is None:
-        continue
-    col = decision_ranks.RANK_COL[half]
-    ranks = decision_ranks.load(day, path=REAL_RANKS)
-    top = ranks.dropna(subset=[col]).sort_values(col)["Symbol"].tolist()
-    held = top[:1] + ["ZZZ"]                                      # one ranked holding, one unranked
-    led = {"version": 3, "halves": {h: {"shares": {x: 1.0 for x in held} if h == half else {}, "cash": 100.0}
-                                    for h in ("rs_short",)}}
-    pos = [{"symbol": x, "qty": "1", "current_price": "450", "market_value": "450"} for x in held]
-    t, others = ranking_table(half, day, pos, led, path=REAL_RANKS, equity=1100.0)
-    check(f"{half}: ranks 1..n, at most 20", list(t["Rank"]) == list(range(1, len(t) + 1)) and len(t) <= 20, list(t["Rank"]))
-    check(f"{half}: held stock marked", str(t.iloc[0]["Held"]).startswith("✓"), t.iloc[0].to_dict())
-    check(f"{half}: an unranked holding is listed separately", others == ["ZZZ"], others)
+# ---------------------------------------------------------------- Decisions table: last Friday from the order log
+from dashboard.details.last_decision import last_rebalance  # noqa: E402
+log = os.path.join(tempfile.mkdtemp(), "orders.csv")
+pd.DataFrame([{"Symbol": "AAA", "Side": "BUY", "Status": "FILLED", "As_Of": "2026-10-30"},
+              {"Symbol": "BBB", "Side": "SELL", "Status": "FILLED", "As_Of": "2026-10-30"},
+              {"Symbol": "CCC", "Side": "BUY", "Status": "STAGED", "As_Of": "2026-10-30"},
+              {"Symbol": "DDD", "Side": "BUY", "Status": "FILLED", "As_Of": "2026-11-02"}]).to_csv(log, index=False)
+day, side = last_rebalance(log)
+check("last rebalance = the latest Friday As_Of (+ a later Monday trade); staged rows ignored",
+      day == pd.Timestamp("2026-10-30") and side == {"AAA": "Buy Oct 30", "BBB": "Sell Oct 30", "DDD": "Buy Nov 2"}, (day, side))
+# Next decision preview: sleeves.plan(rebalance=True) on a weekday = the Friday book (real data, no orders)
+import sleeves  # noqa: E402
+d, inp = sleeves.rebalance_inputs()
+o, info = sleeves.plan(d, {}, 100000.0, {}, inp=inp, rebalance=True)
+buys = o[o["Side"] == "BUY"]["Symbol"].tolist()
+from sector_mapping import symbol_sector as _ss  # noqa: E402
+check("rebalance preview: up to 10 buys, max 4 per sector", 0 < len(buys) <= 10
+      and pd.Series([_ss.get(x) for x in buys]).value_counts().max() <= 4, buys)
+check("rebalance preview leaves the live inputs alone", not bool(sleeves.inputs()["weekly"].get(d, False)) or d.weekday() == 4)
 
 # ---------------------------------------------------------------- decision_ranks round trip (temp file, real saved data)
 import decision_ranks  # noqa: E402
