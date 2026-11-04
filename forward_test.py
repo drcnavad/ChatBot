@@ -943,7 +943,7 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
     old = _read(path, parse_dates=["Date"])
     old_h = _read(hold_path, parse_dates=["Date"])
     rows, hold = [], []
-    for cfg in STRATEGIES:
+    for cfg in sorted(STRATEGIES, key=lambda c: bool(c.get("blend"))):   # blends after the lines they average
         name = cfg["name"]
         mine = old[old["Strategy"] == name] if old is not None else pd.DataFrame(columns=["Date"])
         last = mine["Date"].max() if len(mine) else None

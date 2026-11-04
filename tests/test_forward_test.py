@@ -266,8 +266,8 @@ now = {c["name"]: full[c["name"]] for c in ft.STRATEGIES if c.get("score") in ("
        and c.get("exit")}
 _nb = [s_ for s_ in sector_mapping.do_not_buy if s_ in full[ft.LIVE]]
 _chg = lambda t: set(t.index[(t.diff().abs().sum(axis=1) > 1e-12).to_numpy()].dayofweek)
-check("Now strategies: 6 (Oct 19: near-duplicates removed), do_not_buy never held, trades on Tue / Thu checks too, all different",
-      len(now) == 6 and all((t[_nb].to_numpy() == 0).all() for t in now.values())
+check("Now strategies: 11 (Nov 4: + sector caps, 5%/1% exits, old live), do_not_buy never held, trades on Tue / Thu checks too, all different",
+      len(now) == 11 and all((t[_nb].to_numpy() == 0).all() for t in now.values())
       and {1, 3} <= set().union(*(_chg(t) for t in now.values()))
       and len({t.round(6).to_numpy().tobytes() for t in now.values()}) >= 5,     # fake data: no sleeve stocks
       (_nb, sorted(set().union(*(_chg(t) for t in now.values())))))
