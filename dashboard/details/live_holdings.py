@@ -156,17 +156,27 @@ def _computed_ranks(day):
 def _computed_rank(sym, day):
     return _computed_ranks(day).get(sym)
 
-@st.cache_data(ttl=300, show_spinner=False)
-def _rank_now():
-    """{symbol: rank} of the live RS short-term ranking at the latest close (sleeves.live_ranks); {} if unavailable."""
+@st.cache_data(ttl=900, show_spinner=False)
+def _rank_now_full():
+    """(as-of text, {symbol: rank}): the live score re-ranked on the latest FINAL close (rank_close, fresh Alpaca daily
+    bars); falls back to sleeves.live_ranks (the signal table's last bar = the 2:30 PM decision price)."""
     try:
-        import sleeves
-        return {s: int(v[0]) for s, v in sleeves.live_ranks().items()}
+        import rank_close
+        d, r = rank_close.close_ranks()
+        return f"{d:%a %b %-d} close", {s: int(v[0]) for s, v in r.items()}
     except Exception:
-        return {}
+        try:
+            import sleeves
+            d = sleeves.inputs()["close"].index[-1]
+            return f"{d:%a %b %-d} 2:30 PM", {s: int(v[0]) for s, v in sleeves.live_ranks().items()}
+        except Exception:
+            return "", {}
+
+def _rank_now():
+    return _rank_now_full()[1]
 
 def rank_now(sym):
-    """Today's live RS short-term rank (None = not ranked: score <= 0, not eligible or do_not_buy)."""
+    """Live RS short-term rank at the latest close (None = not ranked: score <= 0, not eligible or do_not_buy)."""
     return _rank_now().get(str(sym))
 
 def render_positions(table, data):
@@ -176,10 +186,13 @@ def render_positions(table, data):
     table.insert(1, "Rank now", pd.array([rank_now(s) if not str(s).startswith("Total") else None
                                           for s in table["Stock"]], dtype="Int64"))
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
+    asof = _rank_now_full()[0]
     t = table.drop(columns=["Weight %"], errors="ignore")   # equal weights: not shown (Oct 21, 2026)
     show(t, ["P/L $", "P/L %", "Today %"], fit=True,
-         cols={"Rank now": st.column_config.NumberColumn(format="%d", help="Live RS short-term rank at the latest close "
-                                                     "(Friday-only rebalance); blank = not ranked (score <= 0)"),
+         cols={"Rank now": st.column_config.NumberColumn(f"Rank now ({asof})" if asof else "Rank now", format="%d",
+                                                     help=f"Live RS short-term rank (10/21/63-day, 63 doubled) at the "
+                                                     f"latest completed close: {asof or 'n/a'}. Refreshed from Alpaca "
+                                                     "daily bars; Friday-only rebalance; blank = not ranked (score <= 0)"),
                "Rank": st.column_config.NumberColumn("Rank at buy", format="%d", help="RS short-term rank on the decision day of its latest buy"),
                "Shares": st.column_config.NumberColumn(format="%.2f"), "P/L %": SPCT, "Today %": SPCT,
                **dict.fromkeys(("Avg price", "Cost basis", "Market value", "P/L $", "Price"), MONEY)})
