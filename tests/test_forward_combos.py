@@ -67,25 +67,17 @@ for legs, label in combos:
     check(abs(rows[0]["Value"] - 1.0) < 1e-12 and abs(sum(h["Shares"] * h["Price"] for h in hold if h["Date"] == rows[0]["Date"])
                                                      + rows[0]["Cash"] - 1.0) < 1e-9, f"{label}: 1.0 at the start close after its buys")  # line_rows still unit-normalized; update_strategies scales to START_CASH
 
-# update_strategies on temp copies: new lines appended, the old live name migrated, saved days kept
+# update_strategies on temp copies: new lines appended, saved days kept
 tmp = tempfile.mkdtemp()
 vp, hp = os.path.join(tmp, "v.csv"), os.path.join(tmp, "h.csv")
 v0 = db.read_csv(ft.STRATEGIES_CSV)
 h0 = db.read_csv(ft.HOLDINGS_CSV)
-removed = sorted(ft.REMOVED)[0]
-# inject a REMOVED name so purge is exercised (bars currently end before FORWARD_START, so do not strip
-# combo rows that cannot be rebuilt until volume catches up)
-seed = v0[v0["Strategy"] == ft.LIVE].head(1)
-extra = seed.assign(Strategy=removed) if len(seed) else v0.head(1).assign(Strategy=removed)
-v0 = pd.concat([v0, extra], ignore_index=True)
 names = [c["name"] for c in ft.STRATEGIES if c.get("combo")]
 v0.pipe(db.to_csv, vp, index=False); h0.pipe(db.to_csv, hp, index=False)
 fc._CACHE.clear()
 ft.update_strategies(sig=sig, bars=bars, path=vp, hold_path=hp)
 v1, h1 = db.read_csv(vp), db.read_csv(hp)
-check(not set(v1["Strategy"]) & ft.REMOVED and not set(h1["Strategy"]) & ft.REMOVED, "removed lines purged from both files")
 check(ft.LIVE == ft.LIVE_COOL and ft.LIVE in set(v1["Strategy"]), "the live line is short-term relative strength")
-check(not ({ft.MON5, ft.MON} & set(v1["Strategy"])), "Oct 16-era live 50/50 lines stay removed")
 new = v1[v1["Strategy"].isin(names)]
 starts = pd.to_datetime(new.groupby("Strategy")["Date"].min())
 check(len(names) and set(starts.dt.strftime("%Y-%m-%d")) == {str(be.FORWARD_START)[:10]},

@@ -48,8 +48,6 @@ EARN_DAYS = 5
 BAND = be.WINNER.get("rebalance_band") or 0.0   # a holding within 1 point of its new target is not traded (live band)
 WEEKS_TO_WIN = 12
 START_CASH = 185_000.0   # each paper strategy starts with this cash on FORWARD_START (Chirag Oct 29 restart; ~account size)
-MON5 = "Live 50/50, top 5, sector on Mondays"   # removed Oct 29 rename (Oct 16-era); kept for REMOVED / tests
-MON = "Live 50/50, top 10 each half"    # removed Oct 29 rename (Oct 16-era); kept for REMOVED / tests
 # Live rules (Chirag, Oct 27): 100% short-term relative strength. Defensive sleeve off Oct 29. From Fri Nov 6: LIVE_COOL (Chirag t279u).
 LIVE_NOW = "Short-term relative strength"
 LIVE_COLD = "Short-term relative strength, skip top 2 sectors (1-year)"
@@ -60,66 +58,6 @@ NOW_HALVES = (LIVE_NOW, RS_FRIDAYS)   # the 50/50 paper line's two halves
 BLEND = "Half short-term, half Friday relative strength"
 MARKED = LIVE_COOL
 LIVE = LIVE_COOL    # live from Fri Nov 6, 2026 (Chirag); the line the verdict and the dashboard compare against
-# Names dropped from the active board (purge_removed). Archives keep their own history; do not reintroduce these.
-REMOVED = {"Short-term reversal", "12-1 month momentum", "RSI pullback in uptrend", "Worst 3 sectors 3M, +10%/-3%",
-           "Breakout with volume", "Relative strength only", "MACD cross, weekly", "MA10 & MA30 x MA50",
-           "Live 50/50 combined (no overlap)", "Live rules (C6)", "MACD cross + TP20", "Friday only",
-           "Live 50/50, sector rotation on Fridays", "50/50: Low vol + SR weekly 63d (live combo from Oct 2)",
-           "200-day breakout, 1 day above, exit 2% below", "200-day breakout, 3 days above, exit 2% below",
-           "200-day breakout, 5 days above, exit 2% below",
-           "Top 20 rank-weighted (70/30)",
-           "Old live: Low vol + Sector rotation (Oct 16-26)",
-           # Oct 29 rename cleanup (Chirag): drop the dated Oct 2 / Oct 16 rule lines and the never-traded ATR duplicate
-           "Oct 2 rules (pinned)",
-           "Live half: Low vol monthly", "Live half: Sector rotation Mondays (63d)",
-           MON5, MON,
-           "ATR dip buy (top 10)"}
-# Renamed lines: saved rows take the new name (migrate_names). Archives keep old labels.
-OLD_NAMES = {
-    "C6, 4 per sector, no earnings skip": "Half tech half strength, max 4 per sector",
-    "Technical score only": "Top technical scores",
-    "Quant Score top 10": "Top 10 quant scores",
-    "Quant Score top 5": "Top 5 quant scores",
-    "Quant + relative strength": "Quant plus relative strength",
-    "Company fundamentals": "Best company fundamentals",
-    "Monthly": "Half tech half strength, monthly",
-    "Trend following 50/200": "Above both 50-day and 200-day averages",
-    "Volatility-adjusted momentum": "Momentum per unit of risk",
-    "200-day high": "Closest to 200-day highs",
-    "Quality + momentum": "Quality plus momentum",
-    "Earnings drift": "Post-earnings winners",
-    "Sector rotation": "Best stocks in hottest sectors",
-    "ATR dip buy, sell on signal": "Buy deep dips, sell on weak signal",
-    "RS standard (Fridays only)": RS_FRIDAYS,
-    "Now: top 15": "Relative strength, top 15",
-    "RS short-term (weekly + Mon–Thu sells)": LIVE_NOW,
-    "Now: longer RS (63/126/252 days)": "Longer-term relative strength",
-    "Now: 30% technical + 70% RS": "Mostly relative strength plus technical",
-    "Now: RS, calmer half of the list": "Relative strength among calm stocks",
-    "50/50: RS short-term + RS Fridays": BLEND,
-    "50/50: Low vol + SR every 2 weeks 63d": "Half low vol, half sector rotation every 2 weeks",
-    "50/50: Low vol + SR Friday swap, keep top 10": "Half low vol, half sector Friday swap",
-    "50/50: Low vol + Vol-adjusted momentum weekly": "Half low vol, half risk-adjusted momentum",
-    "50/50: Low vol + Calmer half weekly": "Half low vol, half calm relative strength",
-    "200-day breakout, 2 days above, exit 2% below": "Break above 200-day average (2 days)",
-    "200-day breakout, 4 days above, exit 2% below": "Break above 200-day average (4 days)",
-    "Tech score 80/60 + TP20": "Technical surge with 20% take-profit",
-    "Tech score 70/60/90": "Technical rise, exit if extreme",
-    "MA10 x MA30": "10-day average crosses above 30-day",
-    "MA50 x MA200 (golden cross)": "Golden cross (50-day above 200-day)",
-    "MACD cross": "MACD bullish cross above 200-day",
-    "Donchian 20-day breakout": "New 20-day high breakout",
-    "Bollinger mean reversion": "Bounce from lower Bollinger band",
-    "EMA 9/21 cross": "Fast EMA crosses above slow EMA",
-    "EMA 9/21 + ADX>25": "EMA cross in a strong trend",
-    "Minervini trend template": "Minervini uptrend template",
-    "52-week high momentum": "Near 52-week highs",
-    "Dual MA + RSI filter": "Uptrend with healthy RSI",
-    "Worst 3 sectors 14d, +10%/-3%": "Best stocks in worst sectors (2 weeks)",
-    "Worst 3 sectors 1M, +10%/-3%": "Best stocks in worst sectors (1 month)",
-    "Worst 3 sectors 2M, +10%/-3%": "Best stocks in worst sectors (2 months)",
-    "Golden cross + MACD confirm": "Golden cross confirmed by MACD",
-}
 # the live 50/50 (be.WINNER "sleeves", from the Oct 16, 2026 switch): forward_combos legs, low-volatility half first
 # "+mb" = the live manual buy blocks too (Reports/manual_block.json, e.g. KO; Oct 21, 2026) on the live lines only
 PREV_LEGS = (("lowvol+mb", "full", "month", 0.5), ("sr63+mb", "full", "weekstart", 0.5))   # top 10 per half (Oct 19-25)
@@ -953,14 +891,6 @@ def combo_weights(cfg, inp, through=None):
         w.loc[hp.index, hp.columns.intersection(w.columns)] = hp[hp.columns.intersection(w.columns)].fillna(0.0)
     return w
 
-def migrate_names(*paths):
-    """Saved rows of a renamed line (OLD_NAMES) take its new name; REMOVED rows are dropped. Archives keep their own history."""
-    for p in paths:
-        df = _read(p)
-        if df is not None and len(df) and df["Strategy"].isin(list(OLD_NAMES) + list(REMOVED)).any():
-            df = df[~df["Strategy"].isin(REMOVED)]
-            df.assign(Strategy=df["Strategy"].replace(OLD_NAMES)).pipe(db.to_csv, p, index=False)
-
 def rebalance_days(cfg, inp):
     """Days on which every holding is brought back to its target (unless within 1 point of it), like the live Friday
     rebalance: the strategy's calendar (Fridays / month ends); the trend rule on Fridays; the dip and threshold rules
@@ -985,7 +915,6 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
     if inp.get("through") is not None and len(days) and days[-1] > inp["through"]:
         print(f"waiting for volume bars after {inp['through']:%b %-d} (days after it are added on a later run)")
         days = days[days <= inp["through"]]
-    migrate_names(path, hold_path)
     old = _read(path, parse_dates=["Date"])
     old_h = _read(hold_path, parse_dates=["Date"])
     rows, hold = [], []
