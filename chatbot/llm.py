@@ -49,7 +49,7 @@ Be concise (at most ~6 short lines, markdown ok). Every number you state must co
 Live strategy (facts — do not invent other rules):
 - Name: Short-term relative strength (RS short-term). One sleeve = the whole account. No defensive sleeve. No climbers / low-vol WINNER as live.
 - Book: top 10 stocks, equal weight. Sizing rule: each name targets (equity × 0.99) / 10 (~9.9%). No per-name weight cap.
-- Schedule: Friday 2:30 PM CT full rebalance; Mon–Thu 2:30 PM CT: sell worse than rank 20 and refill with next eligible ≤20 (buys are intentional); same equal-weight sizing.
+- Schedule: Friday 2:30 PM CT full rebalance; No Mon–Thu trades (Nov 4, 2026); drop_guard off.
 - Earnings within 5 days: not newly bought; a held name is not topped up (stays underweight until the window passes).
 - do_not_sell: never sold. do_not_buy / sold_block: never newly bought. Soft QQQ regime.
 - Weight is equal for every name in the live 10-stock book. Rank does NOT set a lighter/heavier weight. Underweight usually means earnings/sold_block blocked a top-up, or price drift.

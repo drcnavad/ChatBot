@@ -139,7 +139,7 @@ def _strategy_text():
     return (
         "**Live: Short-term relative strength (RS short-term)** — one sleeve = the whole account.\n"
         "- Top **10** stocks, **equal weight**: each targets `(equity × 0.99) / 10` (~9.9%). No per-name weight cap; no defensive sleeve.\n"
-        "- **Friday 2:30 PM CT**: full rebalance. **Mon–Thu 2:30 PM CT**: sell worse than rank 20 and refill with next eligible ≤20 (buys intentional); same equal-weight sizing.\n"
+        "- **Friday 2:30 PM CT**: full rebalance. No Mon–Thu trades and drop_guard off (Nov 4, 2026).\n"
         "- Earnings within **5 days**: not newly bought; a held name is **not topped up** (can look underweight).\n"
         f"- **do_not_sell** (never sold): {dns}\n"
         f"- **do_not_buy** (never newly bought): {dnb}\n"

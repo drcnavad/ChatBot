@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/anaconda3/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>STOCK_ANALYSIS_PYTHON</key>
+		<string>/opt/anaconda3/bin/python3</string>
+	</dict>
+	<key>Label</key>
+	<string>com.stockanalysis.drop_guard</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/anaconda3/bin/python3</string>
+		<string>/Users/drcnavad/Stock Analysis/drop_guard.py</string>
+		<string>--scheduled</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/drcnavad/Stock Analysis/Reports/logs/launchd_drop_guard.err</string>
+	<key>StandardOutPath</key>
+	<string>/Users/drcnavad/Stock Analysis/Reports/logs/launchd_drop_guard.log</string>
+	<key>StartInterval</key>
+	<integer>900</integer>
+	<key>WorkingDirectory</key>
+	<string>/Users/drcnavad/Stock Analysis</string>
+</dict>
+</plist>
