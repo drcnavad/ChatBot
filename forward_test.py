@@ -868,30 +868,31 @@ def strategy_targets(cfg, inp):
 
 def tpsl_weights(w, c, weekly, tp, stop, score=None, ok=None):
     """A close +tp / -stop from the entry close sells the holding (closes only); it is not bought back before the next
-    rebalance day (weekly). Its cash waits for that day, or (score / ok given: refill) buys the best-scored eligible
-    stock not held at the next close (score > 0). Entries count from be.FORWARD_START."""
+    rebalance day (weekly). Its cash waits for that day, or (score / ok given: refill) each exit buys its own next-best
+    eligible stock not held, at the sold weight, at the next close (score > 0). Entries count from be.FORWARD_START."""
     W, C = w.to_numpy(float), c.reindex_like(w).to_numpy(float)
     reb = weekly.reindex(w.index).fillna(False).to_numpy(bool)
     S = score.reindex_like(w).to_numpy(float) if score is not None else None
     E = ok.reindex_like(w).fillna(False).to_numpy(bool) if ok is not None else None
-    out, entry, extra, cash = np.zeros_like(W), {}, {}, 0.0
+    out, entry, extra, cash = np.zeros_like(W), {}, {}, []
     sold = set()
     for t in range(int(np.searchsorted(w.index.values, np.datetime64(pd.Timestamp(be.FORWARD_START)))), len(W)):
         if reb[t]:
-            sold.clear(); extra.clear(); cash = 0.0
+            sold.clear(); extra.clear(); cash = []
         pos = {j: W[t, j] for j in np.flatnonzero(W[t] > 0) if j not in sold} | extra
-        if S is not None and cash > 0:                    # refill: yesterday's exit cash -> best eligible stock not held
-            for j in np.argsort(-np.nan_to_num(S[t], nan=-np.inf), kind="stable"):
-                if S[t, j] > 0 and E[t, j] and j not in pos and j not in sold:
-                    pos[j] = extra[j] = cash; break
-            cash = 0.0
+        if S is not None and cash:                        # refill: each of yesterday's exits -> its own next-best stock
+            best = [j for j in np.argsort(-np.nan_to_num(S[t], nan=-np.inf), kind="stable")
+                    if S[t, j] > 0 and E[t, j] and j not in pos and j not in sold]
+            for j, x in zip(best, cash):
+                pos[j] = extra[j] = x
+            cash = []
         for j in list(entry):
             if j not in pos:
                 del entry[j]
         for j, x in list(pos.items()):
             e = entry.setdefault(j, C[t, j])
             if C[t, j] >= e * (1 + tp) or C[t, j] <= e * (1 - stop):
-                del pos[j], entry[j]; extra.pop(j, None); sold.add(j); cash += x
+                del pos[j], entry[j]; extra.pop(j, None); sold.add(j); cash.append(x)
         out[t, list(pos)] = list(pos.values())
     return pd.DataFrame(out, index=w.index, columns=w.columns)
 
