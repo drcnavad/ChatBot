@@ -112,6 +112,9 @@ NOW = dict(score="rs", midweek={"enter_top": None, "exit_below": None, "days": M
            never_buy=True)
 EQ = PLAIN                                                # (equal weight is now the only sizing)
 SIMPLE = dict(select=PLAIN, earnings=None)                # a plain top-10 strategy: no rank-20 limit, no earnings skip
+# the live line's config (Fri Nov 6, 2026); the Nov 4 variants below change one knob each
+LIVE_CFG = dict(**{**NOW, "score": "rs_short_63", "sleeve": False}, select=PLAIN, calendar="weekly", cool_buys=True,
+                stretch="stretched_live", group="rs")
 STRATEGIES = [
     dict(name="Half tech half strength, max 4 per sector", select=PLAIN, earnings=None, group="blend",
          rule="Half technical score, half relative strength, top 10, Friday rebalance and Mon-Thu checks, with two "
@@ -227,11 +230,16 @@ STRATEGIES = [
          select=PLAIN, calendar="weekly", cool_buys=True, group="rs",
          rule="Nov 4, 2026 (Chirag): the line above, and a stock more than 8% above its 20-day average "
               "is not newly bought (a held one is kept); the next ranks fill the 10 slots."),
-    dict(name=LIVE_COOL, **{**NOW, "score": "rs_short", "sleeve": False},
-         select=PLAIN, calendar="weekly", cool_buys=True, stretch="stretched_live", group="rs",
-         rule="Live from Fri Nov 6, 2026 (Chirag): Short-term relative strength, top 10 equal weight, Fridays only; a stock "
+    dict(name=LIVE_COOL, **LIVE_CFG,
+         rule="Live from Fri Nov 6, 2026 (Chirag): Short-term relative strength over 10/21/63 days with the 63-day counted double, top 10 equal weight (max 4 per sector), Fridays only; a stock "
               "more than 15% (8% until Nov 4, 2026) above its 20-day average is not newly bought (a held one in the top 10 is kept); the next "
               "ranks fill the 10 slots. do_not_buy never bought."),
+    dict(name="Live, score-weighted", **LIVE_CFG, score_weight=True,
+         rule="Nov 4, 2026 (Chirag): the live line (63-day heavy), but each Friday the 10 picks are weighted by their score instead of equally."),
+    dict(name="Live, 8 stocks", **{**LIVE_CFG, "select": {**PLAIN, "n": 8}},
+         rule="Nov 4, 2026 (Chirag): the live line (63-day heavy) with 8 stocks (max 3 per sector) instead of 10."),
+    dict(name="Live until Nov 5 (10/21/63 equal)", **{**LIVE_CFG, "score": "rs_short"},
+         rule="Nov 4, 2026 (Chirag): the live line as it was through Thu Nov 5 - 10/21/63-day relative strength weighted equally."),
     dict(name="Half relative strength, half buy the dip", blend=(LIVE_NOW, "Buy the dip"), group="combo",
          rule="Nov 4, 2026 (Chirag): 50% Short-term relative strength + 50% Buy the dip, each half follows its own line."),
     dict(name="Half relative strength, half worst sectors", blend=(LIVE_NOW, "Best stocks in worst sectors (2 months)"),
@@ -684,6 +692,7 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
     stretched_live = ma20.gt(1.15)              # live (LIVE_COOL) from Nov 4, 2026 (Chirag t285s1180): more than 15%
     scores = {
         "live": live, "now": f["Strategy_Score"], "tech": tech, "rs": rs, "rs_short": rs_w((10, 21, 63)),
+        "rs_short_63": rs_w((10, 21, 63, 63)),                        # Nov 4: 63-day weighted double (1:1:2)
         "rs_short_cool": rs_w((10, 21, 63)).where(~stretched, -1.0),   # Nov 4: skip >8% over 20d avg
         "rs_short_cold": rs_w((10, 21, 63)).where(~hot2 | c.isna(), -1.0),   # Nov 4: skip the 2 best 1-year sectors
         "rs_long": rs_w((63, 126, 252)),
@@ -819,12 +828,26 @@ def strategy_targets(cfg, inp):
     tgt = tgt.mask(_dnb(inp).reindex(index=tgt.index, columns=tgt.columns, fill_value=False), 0.0)   # its weight: cash
     w = be.live_weights(tgt).reindex(columns=inp["close"].columns).fillna(0.0)
     if cfg.get("cool_buys"):
-        return cool_buys(w, inp["scores"][cfg["score"]], inp["eligible"] & ~_dnb(inp), inp[cfg.get("stretch", "stretched")], inp["weekly"],
-                         held=inp.get("held"))
+        w = cool_buys(w, inp["scores"][cfg["score"]], inp["eligible"] & ~_dnb(inp), inp[cfg.get("stretch", "stretched")], inp["weekly"],
+                      held=inp.get("held"))
+        return score_weights(w, inp["scores"][cfg["score"]]) if cfg.get("score_weight") else w
     if not cfg.get("tpsl"):
         return w
     ref = dict(score=inp["scores"][cfg["score"]], ok=inp["eligible"] & ~_dnb(inp)) if cfg.get("refill") else {}
     return tpsl_weights(w, inp["close"], inp["weekly"], *cfg["tpsl"], **ref)
+
+def score_weights(w, score):
+    """The same names and total weight per day, split in proportion to score + 101 (scores are -100..100) as of each
+    change of the book (a rebalance); held unchanged in between."""
+    W, S = w.to_numpy(float).copy(), score.reindex_like(w).to_numpy(float)
+    for t in range(len(W)):
+        on = W[t] > 0
+        if t and np.array_equal(on, W[t - 1] > 0) and np.allclose(W[t], w.iloc[t - 1].to_numpy()):
+            W[t] = W[t - 1]; continue
+        if on.any():
+            x = np.nan_to_num(S[t, on], nan=0.0) + 101
+            W[t, on] = W[t, on].sum() * x / x.sum()
+    return pd.DataFrame(W, index=w.index, columns=w.columns)
 
 def cool_buys(w, score, ok, stretched, weekly, held=None):
     """Rebalance days (weekly): a pick not held the day before that is stretched is swapped for the next best eligible,

@@ -139,7 +139,8 @@ def _strategy_text():
     return (
         "**Live: Short-term relative strength, skip stretched buys** (from Fri Nov 6, 2026) — one sleeve = the whole account.\n"
         "- A stock more than **15% above its 20-day average** is not newly bought (held ones kept); the next ranks fill in.\n"
-        "- Top **10** stocks, **equal weight**: each targets `(equity × 0.99) / 10` (~9.9%). No per-name weight cap; no defensive sleeve.\n"
+        "- Score: relative strength over 10/21/63 days, the **63-day counted double** (from Fri Nov 6, 2026).\n"
+        "- Top **10** stocks (at most **4 per sector**), **equal weight**: each targets `(equity × 0.99) / 10` (~9.9%). No per-name weight cap; no defensive sleeve.\n"
         "- **Friday 2:30 PM CT**: full rebalance. No Mon–Thu trades and drop_guard off (Nov 4, 2026).\n"
         "- Earnings within **5 days**: not newly bought; a held name is **not topped up** (can look underweight).\n"
         f"- **do_not_sell** (never sold): {dns}\n"

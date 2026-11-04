@@ -1,7 +1,7 @@
 """The live account as one sleeve - backtest_engine.WINNER["sleeves"] = {"rs_short": 1.0}.
 
 Live from Fri Nov 6, 2026 (Chirag; locked ~12 weeks, to ~Jan 29, 2027): 100% forward_test.py's "Short-term relative
-strength, skip stretched buys" - relative strength over 10/21/63 days, top 10 equal weight, Friday rebalance only (the
+strength, skip stretched buys" - relative strength over 10/21/63 days (63-day x2 from Nov 6), top 10 equal weight (max 4 per sector), Friday rebalance only (the
 week's last session; no Mon-Thu trades since Nov 4). A stock more than 15% above its 20-day average is not newly bought
 (a held one in the top 10 is kept; held = this ledger). Blocked picks (earnings within 5 days, do_not_buy, sold_block)
 are replaced by the next eligible, not stretched stock ranked 20 or better. Soft QQQ regime; do_not_sell never sold.

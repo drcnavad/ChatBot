@@ -14,7 +14,7 @@ Keys live in `.env` (`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY`, never prin
 "Live: RS short-term": one line with its own cash and share counts in `Reports/sleeve_ledger.json` (v4,
 `sleeves.py`), run exactly as its `forward_test.py` line:
 - **From Fri Nov 6, 2026 (locked ~12 weeks, to ~Jan 29, 2027): "Short-term relative strength, skip stretched buys":**
-  relative strength over 10/21/63 days, top 10 equal weight (~9.9% each), 99% invested; full rebalance every Friday
+  relative strength over 10/21/63 days (63-day counted double from Fri Nov 6, 2026), max 4 per sector, top 10 equal weight (~9.9% each), 99% invested; full rebalance every Friday
   2:30 PM CT only (Thursday on a holiday), no Mon-Thu trades, drop guard off. A stock more than 15% above its 20-day
   average is not newly bought (held ones kept); blocked picks are replaced down to rank 20.
 - No new buy with earnings within 5 days; QQQ below its 200-day average: weights halved. No idle cash: the weight of a
