@@ -66,21 +66,3 @@ def render_trade_audit():
     shown = trips.assign(**{c: [f"{x:%b %-d, %Y}" if x == x else "" for x in trips[c]] for c in ("Bought_CT", "Sold_CT")})
     cfg = {"Buy_Price": MONEY, "Sell_Price": MONEY, "P/L $": MONEY, "P/L %": SPCT, "Days_Held": INT, "Shares": SHARES}
     table(shown.round(2), ["P/L $", "P/L %"], max_h=300, cols=cfg)
-    total = pd.DataFrame([{c: None for c in shown.columns}]).astype(object)     # its own table: never sorted with the rows
-    cost = float((trips["Shares"] * trips["Buy_Price"]).sum())
-    proc = float((trips["Shares"] * trips["Sell_Price"]).sum())
-    pl = float(trips["P/L $"].sum())
-    total.loc[0, shown.columns[0]] = f"Total ({len(trips)} sales)"
-    total.loc[0, "Shares"] = round(float(trips["Shares"].sum()), 2)
-    total.loc[0, "Buy_Price"] = round(cost, 2)          # total cost of all sold shares
-    total.loc[0, "Sell_Price"] = round(proc, 2)         # total proceeds
-    total.loc[0, "P/L $"] = round(pl, 2)
-    total.loc[0, "P/L %"] = round(pl / cost * 100, 2) if cost else None
-    total.loc[0, "Days_Held"] = round(float(trips["Days_Held"].mean()), 1)
-    for c in ("Shares", "Buy_Price", "Sell_Price", "P/L $", "P/L %", "Days_Held"):   # object dtype renders blank in number columns
-        total[c] = pd.to_numeric(total[c], errors="coerce")
-    total = total.drop(columns=[c for c in ("Bought_CT", "Sold_CT") if c in total.columns])
-    total = total.rename(columns={"Buy_Price": "Total cost", "Sell_Price": "Total proceeds", "Days_Held": "Avg days held"})
-    win = (trips["P/L $"] > 0).mean() * 100
-    caption_text(f"Average P/L per sale: ${trips['P/L $'].mean():,.2f} · average P/L %: {trips['P/L %'].mean():.2f}% · win rate: {win:.0f}%")
-    table(total, ["P/L $", "P/L %"], cols={**cfg, "Total cost": MONEY, "Total proceeds": MONEY, "Avg days held": INT}, key="trade_audit_total")
