@@ -67,7 +67,7 @@ def decision_table(positions, equity):
     col = decision_ranks.RANK_COL[sl.HALVES[0]]
     then = decision_ranks.load(last) if last is not None else None
     then = {} if then is None else dict(zip(then["Symbol"], then[col]))
-    now = {s: r for s, (r, _) in sl.live_ranks(inp=inp).items()}
+    now = {s: r for s, (r, _) in sl.live_ranks(inp=inp, all_stocks=True).items()}
     d, o, info = preview(positions, equity)
     nxt = {r.Symbol: r.Side for r in o.itertuples()}
     book = set(info["targets"][sl.HALVES[0]])

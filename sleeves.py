@@ -122,13 +122,31 @@ def ranking(h, day, inp=None):
     s = s[(s > 0) & ~s.index.isin(sm.do_not_buy) & s.index.isin(set(sm.tradable_symbols))]
     return s.sort_values(ascending=False, kind="stable")
 
-def live_ranks(day=None, inp=None):
+def display_ranking(h, day, inp=None):
+    """DISPLAY ONLY (Chirag, Nov 5, 2026: rank every stock): ranking(h, day) first - the exact trading order, score
+    above 0 - then every other buyable tradable stock by score, best first (score <= 0, ineligible, no score last),
+    continuing the numbering. Dashboard views only; trading, news, chatbot and forward tests keep ranking()."""
+    import sector_mapping as sm
+    inp = inp or inputs()
+    r = ranking(h, day, inp)
+    sc = inp["scores"][_cfg(h).get("score", "live")]
+    d = pd.Timestamp(day).normalize()
+    if d not in sc.index:
+        d = sc.index[sc.index <= d][-1]
+    row = sc.loc[d]
+    dnb = set(sm.do_not_buy)
+    rest = [s for s in sm.tradable_symbols if s not in dnb and s not in r.index]
+    rs = pd.Series({s: (float(row[s]) if s in row.index else float("nan")) for s in rest}, dtype=float)
+    rs = rs.sort_values(ascending=False, kind="stable", na_position="last")
+    return pd.concat([r.astype(float), rs]) if len(rs) else r
+
+def live_ranks(day=None, inp=None, all_stocks=False):
     """{symbol: (rank, score)} of the live line (RS short-term) at `day` (default: the latest close) - display only. The
     pipeline's Strategy_Rank / Strategy_Score columns are a forward-test input with the old selection fields, so the
     dashboard and the chatbot show these instead (Oct 27, 2026)."""
     inp = inp or inputs()
     day = inp["close"].index[-1] if day is None else day
-    r = ranking(HALVES[0], day, inp)
+    r = (display_ranking if all_stocks else ranking)(HALVES[0], day, inp)   # all_stocks: dashboard only (score <= 0 too)
     return {s: (i + 1, float(v)) for i, (s, v) in enumerate(r.items())}
 
 # ----------------------------------------------------------------------------- ledger

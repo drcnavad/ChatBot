@@ -17,7 +17,7 @@ from dashboard.style import esc, show_html
 def _live_ranks_cached(signal_mtime):
     """Home board ranks from sleeves; keyed on signal table mtime so we do not rebuild strategy_targets every rerun."""
     import sleeves
-    return sleeves.live_ranks()
+    return sleeves.live_ranks(all_stocks=True)
 
 
 def build_page():

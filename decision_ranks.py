@@ -1,7 +1,7 @@
 """Each stock's live rank at every decision - Reports/decision_ranks.csv (Oct 27, 2026: RS short-term).
 
 One row per stock per decision day: Date, Symbol, Rank_RS_Short.
-  Rank_RS_Short = the live line's rank (sleeves.ranking: eligible, score above 0).
+  Rank_RS_Short = display rank (sleeves.display_ranking: score above 0 first, then the rest by score). Trading uses sleeves.ranking.
 Written by the trade run right after it saves the sleeve ledger (paper_trade.auto_trade). Display only."""
 import os
 
@@ -20,7 +20,7 @@ def ranks_on(day=None, signal_csv=SIGNAL_CSV, inp=None):
     inp = inp or sleeves.inputs(signal_csv)
     idx = inp["close"].index
     d = idx[-1] if day is None else pd.Timestamp(day).normalize()
-    r = {h: (sleeves.ranking(h, d, inp).rank(ascending=False, method="first") if d in idx else pd.Series(dtype=float))
+    r = {h: (pd.Series(range(1, len(_r := sleeves.display_ranking(h, d, inp)) + 1), index=_r.index, dtype=float) if d in idx else pd.Series(dtype=float))
          for h in sleeves.HALVES}
     syms = sorted(set().union(*[set(x.index) for x in r.values()]))
     out = pd.DataFrame({"Symbol": syms, **{RANK_COL[h]: [r[h].get(x) for x in syms] for h in sleeves.HALVES}})

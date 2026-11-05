@@ -162,13 +162,13 @@ def _rank_now_full():
     bars); falls back to sleeves.live_ranks (the signal table's last bar = the 2:30 PM decision price)."""
     try:
         import rank_close
-        d, r = rank_close.close_ranks()
+        d, r = rank_close.close_ranks(all_stocks=True)
         return f"{d:%a %b %-d} close", {s: int(v[0]) for s, v in r.items()}
     except Exception:
         try:
             import sleeves
             d = sleeves.inputs()["close"].index[-1]
-            return f"{d:%a %b %-d} 2:30 PM", {s: int(v[0]) for s, v in sleeves.live_ranks().items()}
+            return f"{d:%a %b %-d} 2:30 PM", {s: int(v[0]) for s, v in sleeves.live_ranks(all_stocks=True).items()}
         except Exception:
             return "", {}
 

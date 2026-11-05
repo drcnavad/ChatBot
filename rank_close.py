@@ -14,7 +14,7 @@ import pandas as pd
 WINDOWS = {"rs_short": (10, 21, 63), "rs_short_63": (10, 21, 63, 63)}
 
 
-def close_ranks(now=None, inp=None, bars=None):
+def close_ranks(now=None, inp=None, bars=None, all_stocks=False):
     """(as_of Timestamp, {symbol: (rank, score)}) on the latest final daily close."""
     import backtest_engine as be
     import sector_mapping as sm
@@ -33,8 +33,10 @@ def close_ranks(now=None, inp=None, bars=None):
     if now.hour * 60 + now.minute < 16 * 60 + 5:          # today's bar not final yet
         c = c[c.index < today]
     rs = be.relative_strength(c, cols, windows=list(windows)).iloc[-1]
-    rs = rs[(rs > 0) & ~rs.index.isin(sm.do_not_buy) & rs.index.isin(set(sm.tradable_symbols))]
-    rs = rs.sort_values(ascending=False, kind="stable")
+    rs = rs[~rs.index.isin(sm.do_not_buy) & rs.index.isin(set(sm.tradable_symbols))]
+    pos = rs[rs > 0].sort_values(ascending=False, kind="stable")
+    rs = pd.concat([pos, rs[~(rs > 0)].sort_values(ascending=False, kind="stable", na_position="last")]) if all_stocks else pos
+    # all_stocks (dashboard only, Nov 5, 2026): score <= 0 continue the numbering after the positive ranks
     return c.index[-1], {s: (i + 1, float(v)) for i, (s, v) in enumerate(rs.items())}
 
 
