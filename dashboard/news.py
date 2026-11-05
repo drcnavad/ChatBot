@@ -215,7 +215,7 @@ def _recent(items, fallback_hours):
             uniq.append(it)
     now = datetime.now(timezone.utc)
     today = [i for i in uniq if i["time"].astimezone(NY).date() == now.astimezone(NY).date()]
-    if today:
+    if len(today) >= 10:          # just after midnight ET "today" has only 1-2 items; use the last N hours then
         return today, "today"
     return [i for i in uniq if now - i["time"] <= timedelta(hours=fallback_hours)], f"last {fallback_hours} hours"
 
