@@ -80,6 +80,9 @@ _TRANSIENT_RES = [   # matched against the LOWERCASED tail: keep every pattern l
     r"name resolution", r"\bssl\b", r"eof occurred", r"urlerror",
     r"http (500|502|503|504)", r"internal server error", r"service unavailable", r"bad gateway",
 ]
+_QUOTA_RES = [   # a daily API quota (lowercase): retrying only burns more calls - never retried (Nov 4, 2026)
+    r"ratelimited", r"daily limit", r"attempt cap", r"news_daily_limit", r"quota",
+]
 _MISSING_FILE_RES = [
     r"FileNotFoundError.*?([\w\-]+\.csv)",
     r"No such file[^\n]*?([\w\-]+\.csv)",
@@ -103,6 +106,8 @@ def classify_failure(text):
             if step:
                 return "missing_upstream", step
     low = text.lower()
+    if any(re.search(rx, low) for rx in _QUOTA_RES):
+        return "quota", None
     if any(re.search(rx, low) for rx in _TRANSIENT_RES):
         return "transient", None
     return "unknown", None
@@ -288,6 +293,10 @@ def handle_failure(tail, checkpoint):
     log("FAILED at step '%s' (phase %s) - classified as: %s%s", step, phase, kind,
         f" -> {detail}" if detail else "")
 
+    if kind == "quota":
+        log("step '%s' hit an API daily limit - no retry (it would burn more calls); the next scheduled run continues", step)
+        run_all.log_event("Watchdog", "warning", "no", f"Step '{step}' hit an API daily limit - not retried. Nothing to do.")
+        return 1
     if kind == "transient":
         return "retry_transient", step
     if kind == "missing_upstream":

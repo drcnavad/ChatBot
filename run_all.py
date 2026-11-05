@@ -1254,7 +1254,8 @@ def _pipeline(a, now, run_id, saved_argv, mode, why, steps, skip, state, log_pat
         ran.append((name, rc == 0, time.time() - t0))
         ckpt_write(run_id, saved_argv, mode, [n for n, ok, _ in ran if ok],
                    failed_step=name if rc != 0 else None, phase="steps")
-        if name == "sentiment" and rc == 0:
+        if name == "sentiment" and (rc == 0 or read_calls(calls_file).get("newsapi", 0) > 0):
+            # (Nov 4, 2026) a failed run that already spent NewsAPI calls is stamped too, so no same-day retry re-spends them
             # Stamp the NewsAPI 24 h guard on success. The notebook only stamps when run by hand
             # (PIPELINE_NEWS_APPROVED=1 under the pipeline, so it never stamps there) - without this,
             # last_news_at goes stale and the guard can't skip a same-day retry, burning 97 NewsAPI calls.
