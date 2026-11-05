@@ -76,24 +76,71 @@ STEPS = [
 ]
 import sector_mapping  # noqa: E402  the stock list (single source of truth) -> the per-run API call counts
 
-def news_symbols(held=None):
-    """Symbols the sentiment step queries (NewsAPI + Finnhub).
+NEWS_TOP, NEWS_BOTTOM, NEWS_CAP = 45, 45, 99   # Chirag, Nov 5, 2026: NewsAPI free tier is 100 calls/day
+LEDGER_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Reports", "sleeve_ledger.json")
 
-    Tradable list minus do_not_buy (they cannot be bought, so no news needed), plus QQQ when it is in
-    stock_symbols, plus any do_not_buy name that is currently held (still needs news). `held` = iterable of
-    symbols currently in the account; None = none held (the support job does not read the brokerage).
+
+def saved_holdings(path=None):
+    """Symbols held per the last saved sleeve ledger (written by each trade run). The support job never reads the
+    brokerage; a missing / unreadable ledger = no holdings (the top/bottom ranks still cover most of them)."""
+    try:
+        with open(path or LEDGER_JSON) as f:
+            led = json.load(f)
+        return sorted({str(s).upper() for h in (led.get("halves") or {}).values()
+                       for s, q in (h.get("shares") or {}).items() if float(q or 0) > 0})
+    except Exception:
+        return []
+
+
+def news_order(scores=None):
+    """Buyable stocks (tradable minus do_not_buy) best first by the live RS score: ranked first (sleeves.ranking),
+    then unranked / score <= 0 by score (no score last). scores: optional {symbol: score} (tests). None when
+    ranks cannot be read."""
+    buy = [s for s in sector_mapping.tradable_symbols if s not in set(sector_mapping.do_not_buy)]
+    try:
+        if scores is None:
+            import sleeves
+            inp = sleeves.inputs()
+            d = inp["close"].index[-1]
+            ranked = list(sleeves.ranking(sleeves.HALVES[0], d, inp).index)
+            sc = inp["scores"][sleeves._cfg(sleeves.HALVES[0]).get("score", "live")]
+            row = sc.loc[sc.index[sc.index <= d][-1]]
+            scores = {s: float(row[s]) for s in buy if s in row.index and row[s] == row[s]}
+        else:
+            ranked = sorted([s for s in buy if scores.get(s, 0) > 0], key=lambda s: -scores[s])
+        rest = [s for s in buy if s not in set(ranked)]
+        rest.sort(key=lambda s: (s not in scores, -scores.get(s, 0)))
+        return [s for s in ranked if s in set(buy)] + rest
+    except Exception as e:
+        print(f"news_order: live ranks unavailable ({type(e).__name__}: {e}) - fixed cap of {NEWS_CAP}")
+        return None
+
+
+def news_symbols(held=None, scores=None, use_ranks=True):
+    """Symbols the sentiment step queries (NewsAPI + Finnhub), in priority order (a rate limit skips the tail).
+
+    Holdings + QQQ (always kept), then the top NEWS_TOP and bottom NEWS_BOTTOM buyable stocks by live RS rank,
+    deduped and capped at NEWS_CAP (the bottom-end names drop first). held: symbols held; None = the saved sleeve
+    ledger. No ranks -> holdings + QQQ + buyable stocks in list order, capped at NEWS_CAP.
     """
-    held = {str(s).upper() for s in (held or [])}
-    dnb = {str(s).upper() for s in sector_mapping.do_not_buy}
+    held = [str(s).upper() for s in (saved_holdings() if held is None else held)]
+    qqq = ["QQQ"] if "QQQ" in sector_mapping.stock_symbols else []
+    order = news_order(scores) if use_ranks else None
+    if order is None:
+        body, tail = [s for s in sector_mapping.tradable_symbols if s not in set(sector_mapping.do_not_buy)], []
+    else:
+        body, tail = order[:NEWS_TOP], order[NEWS_TOP:][-NEWS_BOTTOM:][::-1]   # tail: worst first
     out = []
-    for s in sector_mapping.stock_symbols:
-        u = str(s).upper()
-        if u in dnb and u not in held:
-            continue
-        out.append(s)
+    for s in held + qqq + body + tail:
+        if s not in out:
+            out.append(s)
+    keep = set(held) | set(qqq)
+    while len(out) > NEWS_CAP:   # drop from the end (bottom-45 best-of-the-worst first, then the lower top names)
+        k = max(i for i, s in enumerate(out) if s not in keep) if any(s not in keep for s in out) else len(out) - 1
+        out.pop(k)
     return out
 
-N_CALLS = len(news_symbols())                 # NewsAPI + Finnhub per news_symbols() (skips do_not_buy)
+N_CALLS = NEWS_CAP                            # NewsAPI + Finnhub per run: news_symbols() is capped at NEWS_CAP
 NEWS_DAILY_LIMIT = 100                        # NewsAPI free tier
 EXPECTED_CALLS = {"fundamentals": "Alpha Vantage <= 24", "sentiment": f"NewsAPI {N_CALLS} + Finnhub {N_CALLS}",
                   "earnings": f"Finnhub {len(sector_mapping.tradable_symbols)}"}   # earnings: tradable stocks (no QQQ)

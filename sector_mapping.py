@@ -35,6 +35,7 @@ stock_symbols = [
     # Oct 28, 2026 (Chirag): strong momentum, reasonable valuation
     'CRL', 'RVTY', 'HAS', 'COP', 'LH', 'EL', 'ACN', 'PTC', 'ULTA', 'IT', 'MPC', 'PPG', 'FDS', 'EXPD', 'ALLE',
     'SWK', 'FDX', 'GWW', 'DE',   # Industrials, strong 1y/6m momentum (Chirag, Nov 4, 2026)
+    'SPOT', 'ROKU', 'VZ', 'AMZN', 'TGT', 'MDLZ', 'JPM', 'GS', 'MS', 'BLK', 'ICE', 'LLY', 'NUE', 'NEM', 'ECL', 'RS',   # Chirag, Nov 5, 2026
     'QQQ'
 ]
 
@@ -147,6 +148,7 @@ symbol_sector = {
     'LYB': 'Materials', 'MOS': 'Materials', 'SW': 'Materials', 'CORZ': 'Technology', 'HIMX': 'Technology', 'LUNR': 'Industrials',
     'CRL': 'Health Care', 'RVTY': 'Health Care', 'HAS': 'Consumer Discretionary', 'LH': 'Health Care', 'EL': 'Consumer Staples', 'ACN': 'Technology', 'PTC': 'Technology', 'ULTA': 'Consumer Discretionary', 'PPG': 'Materials', 'FDS': 'Financials', 'EXPD': 'Industrials', 'ALLE': 'Industrials',
     'SWK': 'Industrials', 'FDX': 'Industrials', 'GWW': 'Industrials', 'DE': 'Industrials',
+    'SPOT': 'Communication Services', 'ROKU': 'Communication Services', 'VZ': 'Communication Services', 'AMZN': 'Consumer Discretionary', 'JPM': 'Financials', 'GS': 'Financials', 'MS': 'Financials', 'ICE': 'Financials', 'RS': 'Materials',
 }
 
 # Company names (dashboard and news search).
@@ -273,6 +275,7 @@ symbol_name = {
     'MOS': 'The Mosaic Company', 'SW': 'Smurfit Westrock plc', 'CORZ': 'Core Scientific, Inc.', 'HIMX': 'Himax Technologies, Inc.', 'LUNR': 'Intuitive Machines, Inc.',
     'CRL': "Charles River Laboratories International, Inc.", 'RVTY': "Revvity, Inc.", 'HAS': "Hasbro, Inc.", 'LH': "Labcorp Holdings Inc.", 'EL': "The Est\u00e9e Lauder Companies Inc.", 'ACN': "Accenture plc", 'PTC': "PTC Inc.", 'ULTA': "Ulta Beauty, Inc.", 'PPG': "PPG Industries, Inc.", 'FDS': "FactSet Research Systems Inc.", 'EXPD': "Expeditors International of Washington, Inc.", 'ALLE': "Allegion plc",
     'SWK': "Stanley Black & Decker, Inc.", 'FDX': "FedEx Corporation", 'GWW': "W.W. Grainger, Inc.", 'DE': "Deere & Company",
+    'SPOT': "Spotify Technology S.A.", 'ROKU': "Roku, Inc.", 'VZ': "Verizon Communications Inc.", 'AMZN': "Amazon.com, Inc.", 'JPM': "JPMorgan Chase & Co.", 'GS': "The Goldman Sachs Group, Inc.", 'MS': "Morgan Stanley", 'ICE': "Intercontinental Exchange, Inc.", 'RS': "Reliance, Inc.",
 }
 
 # First usable bar date per symbol (earlier vendor bars belong to a different business or a trading halt).
@@ -288,8 +291,8 @@ tradable_symbols = [s for s in stock_symbols if s not in BENCHMARK_SYMBOLS]
 # tradable stocks plus these.
 fundamentals_extra = [
     'ABNB', 'ASML', 'AXON', 'BAC', 'BBAI', 'CDW', 'CELH', 'CRSP', 'CRWD', 'CVX', 'DDOG', 'DUOL',
-    'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'KLAC', 'KVYO', 'LLY',
-    'MELI', 'MNDY', 'NEE', 'NEM', 'NET', 'NKE', 'NVO', 'PATH', 'PAYX', 'PCTY',
+    'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'KLAC', 'KVYO',
+    'MELI', 'MNDY', 'NEE', 'NET', 'NKE', 'NVO', 'PATH', 'PAYX', 'PCTY',
     'PLTR', 'POOL', 'RTX', 'SYM', 'TMO', 'TOST', 'TTD', 'WDAY', 'XOM', 'ZBRA', 'ZENA',
 ]
 fundamentals_symbols = sorted(set(tradable_symbols) | set(fundamentals_extra))
