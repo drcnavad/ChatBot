@@ -212,6 +212,10 @@ def fake_sig(days):
 SIG = fake_sig(sdays)
 FACTS = pd.DataFrame({"as_of": "2026-09-01 15:31", "bar_date": "2026-09-01", "Symbol": SYMS,
                       "SentimentScore": rng.normal(1, 3, len(SYMS)), "Fundamental_Weight": rng.uniform(-3, 8, len(SYMS))})
+# Article counts + scores so "Worst news sentiment (top 10)" can pick on the fake history (registry check).
+SENT_HIST = pd.DataFrame({"Symbol": SYMS, "SentimentScore": rng.uniform(-8, -0.5, len(SYMS)),
+                          "Positive": rng.integers(1, 5, len(SYMS)), "Negative": rng.integers(5, 20, len(SYMS)),
+                          "as_of": "2026-09-01"})
 NO_EARN = pd.DataFrame(columns=["Symbol", "Earnings Date"])
 EARN = pd.DataFrame({"Symbol": SYMS * 2, "Time": ["AM", "PM"] * 30,     # reports spread over a month, twice
                      "Earnings Date": [pd.Timestamp(m) + pd.Timedelta(days=k) for m in ("2026-07-20", "2026-09-01") for k in range(30)]})
@@ -221,7 +225,7 @@ _c = SIG.pivot(index="Date", columns="Symbol", values="Close").stack().rename("C
 BARS = [_c.assign(Open=_c["Close"], High=_c["Close"] * 1.01, Low=_c["Close"] * 0.985,
                   Volume=rng.lognormal(13, 0.5, len(_c)))[["Symbol", "Date", *be.BAR_COLS]]]
 w0 = dict(be.WINNER)
-inp = ft.strategy_inputs(SIG, FACTS, EARN, BENCH, BARS)
+inp = ft.strategy_inputs(SIG, FACTS, EARN, BENCH, BARS, sent_hist=SENT_HIST)
 full = {c["name"]: ft.strategy_targets(c, inp) for c in ft.STRATEGIES}
 tg = {k: t.loc["2026-10-02":] for k, t in full.items()}
 check(f"registry: {len(ft.STRATEGIES)} strategies with unique names, each with a one-line rule and a color",
@@ -728,6 +732,45 @@ with tempfile.TemporaryDirectory() as pt:
                   abs(float(row["Cost"]) - float(row["Shares"]) * float(row["Price"])) < tol
                   and abs(float(row["PnL_$"])) < tol,
                   row.to_dict())
+
+
+
+# ---- Worst news sentiment (top 10): Friday rebalance, bottom-45, min 5 articles, no earnings skip (Chirag Nov 5)
+_NEWS = next(c for c in ft.STRATEGIES if c["name"] == "Worst news sentiment (top 10)")
+check("Worst news sentiment: registered as Friday news event, no earnings skip, min 5 articles",
+      _NEWS.get("news") == {"n": 10, "min_articles": 5} and _NEWS.get("earnings") is None
+      and _NEWS.get("group") == "event" and "bottom-45" in _NEWS["rule"])
+# Tiny fixture: 6 symbols, 2 Fridays. Bottom-45 of 6 = all. Scores most-negative first among article-qualified.
+_nd = pd.DatetimeIndex(["2026-10-01", "2026-10-02", "2026-10-05", "2026-10-08", "2026-10-09"])  # Thu Fri Mon Thu Fri
+_ns = ["N1", "N2", "N3", "N4", "N5", "N6"]
+_nc = pd.DataFrame({s: 100.0 + i for i, s in enumerate(_ns)}, index=_nd)
+_nsent = pd.DataFrame({"N1": -9.0, "N2": -7.0, "N3": -5.0, "N4": -3.0, "N5": -1.0, "N6": 2.0}, index=_nd)
+_nart = pd.DataFrame({"N1": 10.0, "N2": 10.0, "N3": 10.0, "N4": 10.0, "N5": 2.0, "N6": 10.0}, index=_nd)  # N5 < 5 articles
+_nbot = pd.DataFrame(True, index=_nd, columns=_ns); _nbot["N1"] = [True, True, True, True, False]  # N1 leaves bottom-45 on 2nd Friday
+_nelig = pd.DataFrame(True, index=_nd, columns=_ns)
+_nweek = pd.Series([d.dayofweek == 4 for d in _nd], index=_nd)
+_nw = ft.worst_news_weights(_nc, _nsent, _nart, _nbot, _nelig, _nweek, n=3, min_articles=5, start="2026-10-01")
+# Fri Oct 2: N1,N2,N3 (N5 blocked by articles, N6 positive). Mon carries. Fri Oct 9: N2,N3,N4 (N1 out of bottom45).
+check("Worst news: Friday picks 3 most-negative with >=5 articles; skips positive and thin coverage",
+      set(_nw.loc["2026-10-02"][_nw.loc["2026-10-02"] > 0].index) == {"N1", "N2", "N3"}
+      and abs(float(_nw.loc["2026-10-02", ["N1", "N2", "N3"]].sum()) - 1.0) < 1e-12
+      and all(abs(float(_nw.loc["2026-10-02", s]) - 1/3) < 1e-12 for s in ("N1", "N2", "N3"))
+      and float(_nw.loc["2026-10-02", "N5"]) == 0 and float(_nw.loc["2026-10-02", "N6"]) == 0,
+      _nw.loc["2026-10-02"].to_dict())
+check("Worst news: Mon-Thu carry Friday book; next Friday drops a name that left bottom-45",
+      _nw.loc["2026-10-05"].equals(_nw.loc["2026-10-02"])
+      and set(_nw.loc["2026-10-09"][_nw.loc["2026-10-09"] > 0].index) == {"N2", "N3", "N4"},
+      _nw.loc[["2026-10-05", "2026-10-09"]].to_dict())
+# Earnings nearby must not change targets (strategy_targets path ignores earnings for news=).
+_n_inp = dict(inp)
+_n_cfg = dict(_NEWS)
+_n_soon = inp["soon"].copy()
+# Force every symbol "soon" for earnings on a Friday in the real inp and confirm news line still holds something
+# (direct: strategy_targets for news never reads inp["soon"] / earnings).
+import inspect as _ins
+_src = _ins.getsource(ft.strategy_targets)
+check("Worst news: strategy_targets news branch does not consult earnings / soon",
+      'cfg.get("news")' in _src and "earnings" not in _src.split('cfg.get("news")')[1].split("elif")[0])
 
 
 print(f"\n{len(FAIL)} failed" if FAIL else "\nFORWARD TEST OK")

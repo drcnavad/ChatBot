@@ -36,6 +36,7 @@ BENCH_CSV = os.path.join(REPORTS, "benchmark_prices.csv")
 ORDERS_CSV = os.path.join(REPORTS, "live_orders_log.csv")
 SIGNAL_CSV = os.path.join(REPORTS, "signal_analysis.csv")
 FACTOR_CSV = os.path.join(REPORTS, "factor_history.csv")
+SENT_HIST_CSV = os.path.join(REPORTS, "sentiment_history.csv")  # Positive/Negative article counts for worst-news
 CT = ZoneInfo("America/Chicago")
 DAILY_COLS = ["Date", "Time_CT", "Equity", "Cash", "Net_Deposits", "Positions", "Closed_Picks", "Winning_Picks",
               "Traded_USD", "Cost_USD"]
@@ -295,6 +296,14 @@ STRATEGIES = [
          rule="Each day, find the 3 sectors (sector_mapping.py) with the worst average stock return over the last 2 months (42 sessions); hold the top 10 stocks across them by Strategy_Score (the signal-analysis score), 10% each. Sell at +10% or -3% from the entry close; freed cash buys the best unheld stock of the current 3 worst sectors (not one sold that same day) (fewer than 10 eligible: the rest stays cash). Skips do-not-buy and manual buy blocks (KO). Checked at the close."),
     dict(name="Golden cross confirmed by MACD", event=dict(kind="golden_macd"), earnings=None, group="event",
          rule="Buy when the SMA50 is above the SMA200 and MACD is above its signal; sell when MACD falls below the signal (10% each, at most 10, calmest first; checked at the close)."),
+    dict(name="Worst news sentiment (top 10)", news=dict(n=10, min_articles=5), earnings=None, group="event",
+         rule="Every Friday, hold the 10 stocks with the most negative news SentimentScore from that day's bottom-45 "
+              "news universe (the same buyable order as run_all.news_symbols: positive RS ranks first, then unranked / "
+              "score <= 0; historically reconstructed from the saved RS score when the exact news-run list was not stored). "
+              "A stock needs at least 5 labeled articles (Positive+Negative in sentiment_history) and a SentimentScore < 0 "
+              "to qualify; equal weight 10% each, cash if fewer than 10. No earnings skip. Skips do_not_buy and manual buy "
+              "blocks. Sentiment comes from the Friday support job (factor_history / sentiment_history); the strategy "
+              "starts on the first Friday with enough scores and never invents fake scores."),
 ]
 
 def _common_rules(c):
@@ -305,7 +314,7 @@ def _common_rules(c):
         return ""
     if c.get("event") or c.get("b200") or c.get("weights"):
         return " do_not_buy stocks are never held."
-    if c.get("worst"):
+    if c.get("worst") or c.get("news"):
         return ""
     sel = {**PIN, **(c.get("select") or {})}
     cap = int(np.floor(sel["sector_cap"] * sel["n"] + 1e-9))
@@ -651,7 +660,7 @@ def atr_dip_weights(signal, priority, hold=10, n=10, room=None, taken=None, sell
         out[t, list(held)] = 1 / n
     return pd.DataFrame(out, index=signal.index, columns=signal.columns)
 
-def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
+def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None, sent_hist=None):
     """Everything the strategies rank on, as Date x Symbol frames, from saved data only: `sig` = signal_analysis.csv rows
     (SIG_COLS), `facts` = factor_history.csv (the daily snapshot of news sentiment and the company-report score; each day
     uses the latest snapshot on or before it), `bench` = benchmark_prices.csv (SPY, QQQ, sector ETFs), `bars` =
@@ -668,6 +677,18 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
             fa = facts.assign(bar_date=pd.to_datetime(facts["bar_date"])).sort_values("as_of")
             w = _wide(fa.drop_duplicates(["bar_date", "Symbol"], keep="last"), col, index="bar_date").reindex(columns=cols)
             snap[col] = w.reindex(w.index.union(dates)).ffill().reindex(dates)
+    # Labeled article counts (Positive+Negative) from sentiment_history; each day uses the latest as_of on or before it.
+    articles = pd.DataFrame(index=dates, columns=cols, dtype=float)
+    if sent_hist is not None and len(sent_hist):
+        sh = sent_hist.copy()
+        sh["as_of"] = pd.to_datetime(sh["as_of"]).dt.normalize()
+        sh["Articles"] = sh["Positive"].astype(float) + sh["Negative"].astype(float)
+        aw = _wide(sh.drop_duplicates(["as_of", "Symbol"], keep="last"), "Articles", index="as_of").reindex(columns=cols)
+        articles = aw.reindex(aw.index.union(dates)).ffill().reindex(dates)
+        # Prefer sentiment_history's SentimentScore when present (same Friday run as article counts).
+        sw = _wide(sh.drop_duplicates(["as_of", "Symbol"], keep="last"), "SentimentScore", index="as_of").reindex(columns=cols)
+        sw = sw.reindex(sw.index.union(dates)).ffill().reindex(dates)
+        snap["SentimentScore"] = sw.combine_first(snap["SentimentScore"])
     b = pd.DataFrame(index=dates) if bench is None else \
         bench.assign(Date=pd.to_datetime(bench["Date"])).set_index("Date").sort_index()
     b = b.reindex(b.index.union(dates)).ffill().reindex(dates)
@@ -734,6 +755,8 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
                "trend": _carry(((f["ma_50"] > f["ma_200"]) & eligible).astype(float).div(n, axis=0), weekly)}
     have = bx["vwap_ratio"].notna().any(axis=1)
     qqq = b["QQQ"] if "QQQ" in b else pd.Series(np.nan, index=dates)
+    # bottom-45 news universe (reconstructed): same order as run_all.news_order on the live RS/score blend
+    bottom45 = bottom_news_mask(live.where(eligible), n=45)
     return {"close": c.ffill(), "stretched": stretched, "stretched_live": stretched_live, "scores": scores, "weights": weights, "eligible": eligible, "vol": vol, "regime": regime,
             "bench": b, "up": up, "ma200": f["ma_200"], "ma10": f["ma_10"], "ma30": f["ma_30"], "ma50": f["ma_50"],
             "qqq50": (qqq > qqq.rolling(50).mean()).reindex(dates).fillna(False),
@@ -741,7 +764,8 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None):
             "open": bx["open_ratio"] * c,
             "soon": soon.reindex(index=dates, columns=cols).fillna(False),          # earnings within 5 days (E5)
             "monthly": pd.Series([be.next_sessions(d, 1)[0].month != d.month for d in dates], index=dates),
-            "through": have[have].index.max() if have.any() else pd.Timestamp(0)}
+            "through": have[have].index.max() if have.any() else pd.Timestamp(0),
+            "sentiment": snap["SentimentScore"], "sentiment_articles": articles, "bottom45": bottom45}
 
 def worst_sector_weights(c, score, eligible, look, tp=0.10, stop=0.03, n=10, k=3, start=None):
     """Worst sectors (Chirag, Oct 21, 2026): each close, the k sectors with the lowest mean stock return over `look` sessions;
@@ -767,6 +791,42 @@ def worst_sector_weights(c, score, eligible, look, tp=0.10, stop=0.03, n=10, k=3
             for j in ok[:n - len(held)]:
                 held[j] = C[t, j]
         out[t, list(held)] = 1 / n
+    return pd.DataFrame(out, index=c.index, columns=c.columns)
+
+
+def bottom_news_mask(score, n=45):
+    """Date x Symbol True for the n worst buyable names by the same order as run_all.news_order / news_symbols bottom-45:
+    positive scores first (highest first), then score <= 0 (higher first). Matches NEWS_BOTTOM=45."""
+    S = score.to_numpy(float)
+    out = np.zeros(S.shape, bool)
+    for t in range(len(S)):
+        idx = [j for j in range(S.shape[1]) if np.isfinite(S[t, j])]
+        pos = sorted([j for j in idx if S[t, j] > 0], key=lambda j: -S[t, j])
+        rest = sorted([j for j in idx if S[t, j] <= 0], key=lambda j: -S[t, j])
+        for j in (pos + rest)[-n:]:
+            out[t, j] = True
+    return pd.DataFrame(out, index=score.index, columns=score.columns)
+
+def worst_news_weights(c, sentiment, articles, bottom, eligible, weekly, n=10, min_articles=5, start=None):
+    """Worst news sentiment (Chirag, Nov 5, 2026): each Friday, the n most-negative SentimentScore stocks among the
+    bottom-45 news universe with at least `min_articles` labeled articles and SentimentScore < 0; 1/n each (cash if
+    fewer). Holdings stay put until the next Friday. Entries only from `start`."""
+    Sent = sentiment.reindex_like(c).to_numpy(float)
+    Art = articles.reindex_like(c).to_numpy(float)
+    Bot = bottom.reindex_like(c).fillna(False).to_numpy(bool)
+    E = eligible.reindex_like(c).fillna(False).to_numpy(bool)
+    reb = weekly.reindex(c.index).fillna(False).to_numpy(bool)
+    out, held = np.zeros(c.shape, float), []
+    t0 = int(np.searchsorted(c.index.values, np.datetime64(pd.Timestamp(start)))) if start is not None else 0
+    for t in range(len(c)):
+        if t >= t0 and reb[t]:
+            ok = [j for j in range(c.shape[1])
+                  if E[t, j] and Bot[t, j] and np.isfinite(Sent[t, j]) and np.isfinite(Art[t, j])
+                  and Art[t, j] >= min_articles and Sent[t, j] < 0]
+            ok.sort(key=lambda j: (Sent[t, j], j))          # most negative first
+            held = ok[:n]
+        if held:
+            out[t, held] = 1 / n
     return pd.DataFrame(out, index=c.index, columns=c.columns)
 
 def _mblock(inp):
@@ -807,6 +867,10 @@ def strategy_targets(cfg, inp):
     elif cfg.get("worst"):                             # worst sector lines (Oct 21): only entries / exits trade
         tgt = worst_sector_weights(inp["close"], inp["scores"]["now"], inp["eligible"] & ~_dnb(inp) & ~_mblock(inp),
                                    start=be.FORWARD_START, **cfg["worst"])
+    elif cfg.get("news"):                              # worst news sentiment (Nov 5): Friday-only, bottom-45 universe
+        tgt = worst_news_weights(inp["close"], inp["sentiment"], inp["sentiment_articles"], inp["bottom45"],
+                                 inp["eligible"] & ~_dnb(inp) & ~_mblock(inp), inp["weekly"],
+                                 start=be.FORWARD_START, **cfg["news"])
     elif cfg.get("b200"):                              # 200-day breakout family (no calendar: only entries / exits trade)
         tgt = breakout200_weights(inp["close"], inp["ma200"], inp["eligible"] & ~_dnb(inp), inp["vol"], start=be.FORWARD_START, **cfg["b200"])
     elif cfg.get("weights"):
@@ -922,6 +986,8 @@ def rebalance_days(cfg, inp):
     never (only the names they buy or sell trade). None when the inputs carry no calendar."""
     if cfg.get("b200") or cfg.get("event"):                # breakouts / event lines: only their entries / exits trade (10% at entry)
         return None
+    if cfg.get("news"):                                    # Friday-only news sentiment book
+        return inp.get("weekly")
     key = {"trend": "weekly"}.get(cfg["weights"]) if cfg.get("weights") else \
         {"mwf": "weekly"}.get(cfg.get("calendar", "mwf"), cfg.get("calendar"))
     return inp.get(key) if key else None
@@ -934,7 +1000,8 @@ def update_strategies(sig=None, facts=None, earnings=None, bench=None, bars=None
     sig = _read(SIGNAL_CSV, usecols=SIG_COLS, parse_dates=["Date"]) if sig is None else sig
     facts = _read(FACTOR_CSV) if facts is None else facts
     bench = _read(BENCH_CSV) if bench is None else bench
-    inp = strategy_inputs(sig, facts, earnings, bench, bars)
+    sent_hist = _read(SENT_HIST_CSV) if db.exists(SENT_HIST_CSV) else None
+    inp = strategy_inputs(sig, facts, earnings, bench, bars, sent_hist=sent_hist)
     close = inp["close"]
     days = close.index[close.index >= pd.Timestamp(start)]
     if inp.get("through") is not None and len(days) and days[-1] > inp["through"]:
