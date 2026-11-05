@@ -26,6 +26,23 @@ def _read_audit(hour_key, _positions, _fills=()):
             return list(fills) if after is None else acct.fills(after=after, max_pages=max_pages)
     return ta.report(ta.fetch(_Acct(), positions=list(_positions)))
 
+def _by_stock_day(trips):
+    """Merge FIFO lots sold on the same day: total shares, share-weighted avg buy/sell price, summed P/L $,
+    P/L % on cost, earliest buy date, share-weighted days held."""
+    t = trips.copy()
+    t["_day"] = pd.to_datetime(t["Sold_CT"]).dt.date
+    t["_cost"] = t["Shares"] * t["Buy_Price"]
+    t["_proc"] = t["Shares"] * t["Sell_Price"]
+    t["_dh"] = t["Shares"] * t["Days_Held"]
+    g = t.groupby(["Symbol", "_day"], sort=False).agg(
+        Shares=("Shares", "sum"), Bought_CT=("Bought_CT", "min"), _cost=("_cost", "sum"),
+        Sold_CT=("Sold_CT", "max"), _proc=("_proc", "sum"), **{"P/L $": ("P/L $", "sum")}, _dh=("_dh", "sum")).reset_index()
+    g["Buy_Price"] = g["_cost"] / g["Shares"]
+    g["Sell_Price"] = g["_proc"] / g["Shares"]
+    g["P/L %"] = (g["P/L $"] / g["_cost"] * 100).where(g["_cost"] > 0)
+    g["Days_Held"] = (g["_dh"] / g["Shares"]).round()
+    return g[["Symbol", "Shares", "Bought_CT", "Buy_Price", "Sold_CT", "Sell_Price", "P/L $", "P/L %", "Days_Held"]]
+
 def render_trade_audit():
     """Trading Account tab: each sale with its purchase (FIFO) and its gain / loss, plus a fixed Total row below
     (trade_audit.py; read-only, hourly). Oct 21, 2026 (Chirag): the alerts, cards and order ledger were removed."""
@@ -45,6 +62,7 @@ def render_trade_audit():
     if not len(trips):
         caption_text("No sales yet.")
         return
+    trips = _by_stock_day(trips)            # one row per stock per sell day (Chirag, Nov 4)
     shown = trips.assign(**{c: [f"{x:%b %-d, %Y}" if x == x else "" for x in trips[c]] for c in ("Bought_CT", "Sold_CT")})
     cfg = {"Buy_Price": MONEY, "Sell_Price": MONEY, "P/L $": MONEY, "P/L %": SPCT, "Days_Held": INT, "Shares": SHARES}
     table(shown.round(2), ["P/L $", "P/L %"], max_h=300, cols=cfg)
