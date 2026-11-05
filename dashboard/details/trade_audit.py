@@ -66,3 +66,13 @@ def render_trade_audit():
     shown = trips.assign(**{c: [f"{x:%b %-d, %Y}" if x == x else "" for x in trips[c]] for c in ("Bought_CT", "Sold_CT")})
     cfg = {"Buy_Price": MONEY, "Sell_Price": MONEY, "P/L $": MONEY, "P/L %": SPCT, "Days_Held": INT, "Shares": SHARES}
     table(shown.round(2), ["P/L $", "P/L %"], max_h=300, cols=cfg)
+    caption_text("By stock: every sale of each stock added up.")
+    t = trips.assign(_cost=trips["Shares"] * trips["Buy_Price"], _proc=trips["Shares"] * trips["Sell_Price"])
+    g = t.groupby("Symbol").agg(Sales=("Symbol", "size"), Shares=("Shares", "sum"), _cost=("_cost", "sum"),
+                                _proc=("_proc", "sum"), **{"P/L $": ("P/L $", "sum")}).reset_index()
+    g["Avg_Buy"] = g["_cost"] / g["Shares"]
+    g["Avg_Sell"] = g["_proc"] / g["Shares"]
+    g["P/L %"] = (g["P/L $"] / g["_cost"] * 100).where(g["_cost"] > 0)
+    g = g[["Symbol", "Sales", "Shares", "Avg_Buy", "Avg_Sell", "P/L $", "P/L %"]].sort_values("P/L $")
+    table(g.round(2), ["P/L $", "P/L %"], max_h=300, key="trade_audit_by_stock",
+          cols={"Avg_Buy": MONEY, "Avg_Sell": MONEY, "P/L $": MONEY, "P/L %": SPCT, "Shares": SHARES, "Sales": INT})
