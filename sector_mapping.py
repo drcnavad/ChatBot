@@ -35,7 +35,7 @@ stock_symbols = [
     # Oct 28, 2026 (Chirag): strong momentum, reasonable valuation
     'CRL', 'RVTY', 'HAS', 'COP', 'LH', 'EL', 'ACN', 'PTC', 'ULTA', 'IT', 'MPC', 'PPG', 'FDS', 'EXPD', 'ALLE',
     'SWK', 'FDX', 'GWW', 'DE',   # Industrials, strong 1y/6m momentum (Chirag, Nov 4, 2026)
-    'SPOT', 'ROKU', 'VZ', 'AMZN', 'TGT', 'MDLZ', 'JPM', 'GS', 'MS', 'BLK', 'ICE', 'LLY', 'NUE', 'NEM', 'ECL', 'RS',   # Chirag, Nov 5, 2026
+    'SPOT', 'ROKU', 'VZ', 'AMZN', 'TGT', 'MDLZ', 'JPM', 'GS', 'MS', 'BLK', 'ICE', 'NUE', 'NEM', 'ECL', 'RS',   # Chirag, Nov 5, 2026
     'QQQ'
 ]
 
@@ -291,7 +291,7 @@ tradable_symbols = [s for s in stock_symbols if s not in BENCHMARK_SYMBOLS]
 # tradable stocks plus these.
 fundamentals_extra = [
     'ABNB', 'ASML', 'AXON', 'BAC', 'BBAI', 'CDW', 'CELH', 'CRSP', 'CRWD', 'CVX', 'DDOG', 'DUOL',
-    'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'KLAC', 'KVYO',
+    'ELF', 'GLW', 'HD', 'HUBS', 'INTC', 'ISRG', 'KLAC', 'KVYO', 'LLY',
     'MELI', 'MNDY', 'NEE', 'NET', 'NKE', 'NVO', 'PATH', 'PAYX', 'PCTY',
     'PLTR', 'POOL', 'RTX', 'SYM', 'TMO', 'TOST', 'TTD', 'WDAY', 'XOM', 'ZBRA', 'ZENA',
 ]
