@@ -34,6 +34,7 @@ stock_symbols = [
     # 'JPM', 'GS', 'C', 'MS', 'SMCI', 'NU', 'UPST', 'WULF', 'AMZN', 'BA', 'ORCL',
     # Oct 28, 2026 (Chirag): strong momentum, reasonable valuation
     'CRL', 'RVTY', 'HAS', 'COP', 'LH', 'EL', 'ACN', 'PTC', 'ULTA', 'IT', 'MPC', 'PPG', 'FDS', 'EXPD', 'ALLE',
+    'SWK', 'FDX', 'GWW', 'DE',   # Industrials, strong 1y/6m momentum (Chirag, Nov 4, 2026)
     'QQQ'
 ]
 
@@ -46,7 +47,7 @@ stock_symbols = [
 # Oct 28, 2026 (Chirag): high valuation, LYV fwd P/E ~91, TSLA fwd P/E ~188.
 # Oct 28, 2026 (Chirag): ALAB and MRVL unblocked (top RS short-term winners).
 # Oct 30, 2026 (Chirag): WULF, SMCI, ORCL dropped from universe (cash-flow screen) — removed from do_not_buy too.
-do_not_buy = ['AMD', 'ARM', 'PANW', 'SHOP', 'VRT', 'BE', 'LYV', 'TSLA']
+do_not_buy = ['PANW', 'SHOP', 'LYV']   # AMD, ARM, BE, TSLA, VRT removed by Chirag Nov 4, 2026
 do_not_sell = []  # APA removed Nov 4, 2026 (Chirag); the list stays for later use
 # Defensive sleeve of Oct 15, 2026 (LMT, NOC, ABBV, KO; PFE dropped Oct 19). Live RS short-term dropped it Oct 29, 2026
 # (Chirag: top 10 only). Kept only for the other pinned forward-test 'Now' paper lines (forward_test NOW sleeve=True).
@@ -145,6 +146,7 @@ symbol_sector = {
     'URI': 'Industrials', 'PH': 'Industrials', 'TDG': 'Industrials',
     'LYB': 'Materials', 'MOS': 'Materials', 'SW': 'Materials', 'CORZ': 'Technology', 'HIMX': 'Technology', 'LUNR': 'Industrials',
     'CRL': 'Health Care', 'RVTY': 'Health Care', 'HAS': 'Consumer Discretionary', 'LH': 'Health Care', 'EL': 'Consumer Staples', 'ACN': 'Technology', 'PTC': 'Technology', 'ULTA': 'Consumer Discretionary', 'PPG': 'Materials', 'FDS': 'Financials', 'EXPD': 'Industrials', 'ALLE': 'Industrials',
+    'SWK': 'Industrials', 'FDX': 'Industrials', 'GWW': 'Industrials', 'DE': 'Industrials',
 }
 
 # Company names (dashboard and news search).
@@ -270,6 +272,7 @@ symbol_name = {
     'TDG': 'TransDigm Group Incorporated', 'LYB': 'LyondellBasell Industries N.V.',
     'MOS': 'The Mosaic Company', 'SW': 'Smurfit Westrock plc', 'CORZ': 'Core Scientific, Inc.', 'HIMX': 'Himax Technologies, Inc.', 'LUNR': 'Intuitive Machines, Inc.',
     'CRL': "Charles River Laboratories International, Inc.", 'RVTY': "Revvity, Inc.", 'HAS': "Hasbro, Inc.", 'LH': "Labcorp Holdings Inc.", 'EL': "The Est\u00e9e Lauder Companies Inc.", 'ACN': "Accenture plc", 'PTC': "PTC Inc.", 'ULTA': "Ulta Beauty, Inc.", 'PPG': "PPG Industries, Inc.", 'FDS': "FactSet Research Systems Inc.", 'EXPD': "Expeditors International of Washington, Inc.", 'ALLE': "Allegion plc",
+    'SWK': "Stanley Black & Decker, Inc.", 'FDX': "FedEx Corporation", 'GWW': "W.W. Grainger, Inc.", 'DE': "Deere & Company",
 }
 
 # First usable bar date per symbol (earlier vendor bars belong to a different business or a trading halt).
