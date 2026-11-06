@@ -74,9 +74,8 @@ function makeReader(name, bandSel, KEY, queue) {
   if (P.localStorage.getItem(KEY) === "on") setTimeout(() => set(true), 800);
   return {attach, set, state: () => on, queue: () => [...said], current: () => cur};
 }
-if (!P.saVoice) P.saVoice = P.saReaders.live = makeReader("live", ".sa-news:not(.sa-latest)", "saNewsVoice", false);
-if (!P.saLatestVoice) P.saLatestVoice = P.saReaders.latest = makeReader("latest", ".sa-news.sa-latest", "saLatestVoice", true);
-window.addEventListener("message", e => { if (e.data.type === "streamlit:render") { [P.saVoice, P.saLatestVoice].forEach(r => { r.attach(); setTimeout(r.attach, 500); }); } });
+if (!P.saVoice) P.saVoice = P.saReaders.live = makeReader("live", ".sa-news", "saNewsVoice", false);
+window.addEventListener("message", e => { if (e.data.type === "streamlit:render") { [P.saVoice].forEach(r => { r.attach(); setTimeout(r.attach, 500); }); } });
 send("streamlit:componentReady", {apiVersion: 1});
 send("streamlit:setFrameHeight", {height: 0});
 </script></body></html>
