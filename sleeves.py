@@ -460,7 +460,8 @@ def plan(day, positions, equity, prices, no_buy=None, no_sell=None, fractional=T
     orders["_o"] = orders["Side"].map({"SELL": 0}).fillna(1)
     orders = orders.sort_values(["_o", "Symbol"], kind="stable").drop(columns="_o").reset_index(drop=True)
     tgt_val = sum(q * (_num(px.get(s)) or 0.0) for h in HALVES for s, q in half_sh[h].items())
-    cap = equity * (0.99 if any(traded.values()) else 1.0) + 1.0   # off-day holds may drift up to the whole equity
+    has_buys = any(r.Side == "BUY" for r in orders.itertuples())
+    cap = equity * (0.995 if has_buys else 1.0) + 1.0   # off-day / hold-only holds may drift up to the whole equity
     if tgt_val > cap:
         raise ValueError(f"sleeve targets ${tgt_val:,.2f} exceed ${cap:,.2f} of equity ${equity:,.2f} - no orders")
     new = {"version": VERSION, "day": d.date().isoformat(), "cash_at": datetime.now(ZoneInfo("UTC")).isoformat(timespec="seconds"),
