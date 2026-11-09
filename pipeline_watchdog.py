@@ -71,7 +71,6 @@ UPSTREAM_STEP = {
     "signal_analysis.csv": "main",
     "strategy_picks.csv": "main",
     "strategy_changes.csv": "main",
-    "strategy_holdings.csv": "main",
 }
 
 _TRANSIENT_RES = [   # matched against the LOWERCASED tail: keep every pattern lowercase

@@ -1756,11 +1756,18 @@ def next_decision(latest, days=None):
     Weekly rebalance = last session of an ISO week; mid-week check = first session on/after each check day (live: Mon-Thu)
     that is not the week's last session (same rules as weekly_rebalance_days / midweek_check_days)."""
     mw = WINNER.get("midweek_swap")
-    if days is None and WINNER.get("halves"):                  # (Oct 27, 2026) RS short-term: every session decides
+    if days is None and WINNER.get("halves"):                  # RS short-term (sleeves.py)
         latest = pd.Timestamp(latest).normalize()
-        sess = list(next_sessions(latest, 3))
-        kind = "full rebalance" if sess[0].isocalendar()[:2] != sess[1].isocalendar()[:2] else "mid-week check"
-        return sess[0], kind, sess[1]
+        sess = list(next_sessions(latest, 12))
+        if mw:                                                # Mon-Thu checks on: every session decides (Oct 27 - Nov 8, 2026)
+            kind = "full rebalance" if sess[0].isocalendar()[:2] != sess[1].isocalendar()[:2] else "mid-week check"
+            return sess[0], kind, sess[1]
+        # (Chirag, Nov 8, 2026) Friday only: the week's last session (Thursday when Friday is a holiday) is the one
+        # decision; Mon-Thu 2:30 PM runs place no orders and sell nothing (run_all treats them as non-decision days).
+        for i in range(len(sess) - 1):
+            if sess[i].isocalendar()[:2] != sess[i + 1].isocalendar()[:2]:
+                return sess[i], "full rebalance", sess[i + 1]
+        return sess[0], "full rebalance", sess[1]
     if days is None and WINNER.get("calendar") == "monthly":     # monthly: the next rebalance day, no mid-week checks
         latest = pd.Timestamp(latest).normalize()
         sess = list(next_sessions(latest, 70))
@@ -1854,32 +1861,6 @@ def last_complete_session(t):
     if is_session(d) and ((et.hour, et.minute) >= (16, 30) or decision_bar_ready(t)):
         return d
     return pd.Timestamp(pd.date_range(end=d - pd.Timedelta(days=1), periods=1, freq=NYSE_SESSION)[0])
-
-
-def holding_details(weights, open_w, close_w, vol_w):
-    """Per current holding: entry (fill) date, entry price (next open after the decision), days held,
-    P&L since entry and 63d annualized volatility (Reports/strategy_holdings.csv).
-
-    Restored Oct 30 2026 — still called by main_signal_analysis.ipynb (was removed as
-    'unused' in 69d286c).
-    """
-    last = weights.index[-1]
-    rows = []
-    for sym in weights.columns[weights.loc[last] > 0]:
-        w = weights[sym]
-        off = w[w <= 0]
-        run_start = w.index[w.index > off.index[-1]][0] if len(off) else w.index[0]
-        fills = open_w.index[open_w.index > run_start]
-        fill = fills[0] if len(fills) else None
-        entry = float(open_w.at[fill, sym]) if fill is not None and pd.notna(open_w.at[fill, sym]) else np.nan
-        close = float(close_w.at[last, sym])
-        since = close_w.loc[fill:, sym] if fill is not None else pd.Series(dtype=float)
-        rows.append({"Symbol": sym, "Weight": float(w.loc[last]),
-                     "Entry_Date": fill.date() if fill is not None else None, "Entry_Price": entry,
-                     "Close": close, "PnL_%": (close / entry - 1) * 100 if entry == entry else np.nan,
-                     "Days_Held": int(len(since)) if len(since) else 0,
-                     "Vol_63d_%": float(vol_w.at[last, sym]) * np.sqrt(252) * 100 if sym in vol_w else np.nan})
-    return pd.DataFrame(rows)
 
 
 # ----------------------------------------------------------------------------- per-stock forward test (dashboard)

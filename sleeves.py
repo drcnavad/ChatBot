@@ -6,7 +6,8 @@ week's last session; no Mon-Thu trades since Nov 4). A stock more than 15% above
 (a held one in the top 10 is kept; held = this ledger). Blocked picks (earnings within 5 days, do_not_buy)
 are replaced by the next eligible, not stretched stock ranked 20 or better. Soft QQQ regime; do_not_sell never sold.
 
-Sizing: target = (equity × 0.99) / 10 per stock (equal weight); leftover cash stays cash (Chirag Oct 31).
+Sizing: target = (equity × 0.99 × regime) / 10 per stock (equal weight; regime = 0.5 when QQQ closes at or below its
+200-day average on the decision day, else 1 - Chirag, Nov 8, 2026); leftover cash stays cash (Chirag Oct 31).
 
 Ledger (Reports/sleeve_ledger.json, version 4): share count per symbol and cash after the planned trades. Next run
 (reconcile): live positions are matched to the ledger; a position the ledger does not claim is sold (do_not_sell kept);
@@ -175,11 +176,9 @@ def save_ledger(led, path=None):
     return path
 
 def write_strategy_picks(day, path=None, inp=None, led=None):
-    """Rewrite Reports/strategy_picks.csv from the live RS short-term sleeve (top-n equal weight).
-
-    The notebook still writes a WINNER-n=5 / low_vol picks file for display columns; live trading
-    and trade_audit must follow the sleeve. Called after a successful ledger save.
-    """
+    """Write Reports/strategy_picks.csv = the live RS short-term book on session `day` (forward-test weights: 9.9% each,
+    4.95% when the QQQ filter is off). Written by main_signal_analysis.ipynb every run (the trade step's freshness check
+    reads As_Of) and again by paper_trade after a successful trade (led = the saved ledger: Held)."""
     import sector_mapping as sm
     path = path or os.path.join(REPORTS, "strategy_picks.csv")
     inp = inp or inputs()
@@ -190,6 +189,11 @@ def write_strategy_picks(day, path=None, inp=None, led=None):
     close = inp["close"]
     soon = inp.get("soon")
     tags = set((led or {}).get("halves", {}).get(HALVES[0], {}).get("tags") or [])
+    wk = inp["weekly"]
+    reb = wk[wk & (wk.index <= d)].index
+    last_reb = reb[-1].date().isoformat() if len(reb) else d.date().isoformat()   # the book was set on the last Friday
+    reg = inp.get("regime")
+    regime_on = int(bool(reg.get(d, False))) if reg is not None else 0
     rows = []
     for s, wt in w.items():
         rank = int(r.index.get_loc(s)) + 1 if s in r.index else None
@@ -200,10 +204,10 @@ def write_strategy_picks(day, path=None, inp=None, led=None):
             earn = "within_5d"
         rows.append({
             "As_Of": d.date().isoformat(),
-            "Last_Rebalance": (led or {}).get("day") or d.date().isoformat(),
-            "Last_Decision": d.date().isoformat(),
+            "Last_Rebalance": last_reb,
+            "Last_Decision": last_reb,
             "Strategy": STRATEGY[HALVES[0]],
-            "Regime_On": 1,
+            "Regime_On": regime_on,
             "Symbol": s,
             "Sector": (sm.symbol_sector.get(s, "") if hasattr(sm, "symbol_sector") else ""),
             "Held": 1 if s in tags else 0,
@@ -342,6 +346,18 @@ def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, inve
     slot = float(invested) / len(final)
     return {s: slot for s in final}
 
+def regime_scale(d, inp):
+    """Soft QQQ market filter, as the forward test applies it (backtest_engine.rank_targets): WINNER['regime_scale'] (0.5)
+    when QQQ closed at or below its 200-day average on session d (or the day is missing), else 1.0. Live from Nov 13, 2026
+    (Chirag, Nov 8): a regime-off Friday invests 99% x 0.5 = 49.5% (equal slots of 4.95%); the rest stays cash."""
+    import backtest_engine as be
+    W = be.WINNER
+    if not W.get("use_regime") or W.get("regime_scale") is None:
+        return 1.0
+    r = inp.get("regime")
+    on = bool(r.get(pd.Timestamp(d).normalize(), False)) if r is not None else False
+    return 1.0 if on else float(W["regime_scale"])
+
 def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_value, rebalance=False):
     """One sizing rule on a trade day: each of the 10 book names gets invested/n (equal weight).
     Exits leave the book. Off-day: holds keep shares. No fill_idle / caps / scale-adds / renormalize."""
@@ -370,7 +386,7 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
             blocked.setdefault(s, "no live price")
     if trade_today:
         n_picks = int((_cfg(h).get("select") or {}).get("n") or ft.PIN.get("n") or 10)
-        invested = float(ft.PIN.get("invested") or 0.99)
+        invested = float(ft.PIN.get("invested") or 0.99) * regime_scale(d, inp)   # QQQ below its 200-day: half invested
         held_set = {s for s in names if hw[s] > 0}
         tw = replace_blocked_new_slots(h, d, list(tw), held_set, blocked, px, inp, n_picks, invested)
     tg = pd.DataFrame({"Symbol": list(tw), "Weight": [tw[s] for s in tw], "Price": [px.get(s) for s in tw]})

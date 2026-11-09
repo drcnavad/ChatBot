@@ -53,7 +53,6 @@ SIGNAL_CSV = os.path.join(REPORTS, "signal_analysis.csv")
 EARNINGS_CSV = os.path.join(REPORTS, "earnings_date.csv")
 PICKS_CSV = os.path.join(REPORTS, "strategy_picks.csv")
 CHANGES_CSV = os.path.join(REPORTS, "strategy_changes.csv")
-HOLDINGS_CSV = os.path.join(REPORTS, "strategy_holdings.csv")
 DECISIONS_CSV = os.path.join(REPORTS, "strategy_decisions.csv")
 BENCH_CSV = os.path.join(REPORTS, "benchmark_prices.csv")
 DRAWINGS_DIR = os.path.join(ROOT, "data", "drawings")   # your chart lines, one JSON per stock

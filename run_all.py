@@ -1,9 +1,9 @@
 """ONE command for the whole pipeline:   python run_all.py   (mode chosen by the US Central clock)
 
-FULL  on a decision day (from Tue Oct 27, 2026 every session: sleeves.STRATEGY - Friday rebalance only from Nov 4, 2026
-      (Thursday if Friday is a holiday; Mon-Thu runs place no orders), backtest_engine.next_decision) after its decision slot
+FULL  on a decision day (sleeves.STRATEGY: from Nov 9, 2026 only the Friday rebalance - Thursday if Friday is a holiday;
+      Mon-Thu are not decision days, so their 2:30 PM runs idle and sell nothing; backtest_engine.next_decision) after its decision slot
       (2:30 PM CT normally, 11:00 AM CT on early-close days),
-      once a day: main (main_signal_analysis.ipynb: Alpaca bars, ranks, picks, mid-week check) -> validate (the report
+      once a day: main (main_signal_analysis.ipynb: Alpaca bars, ranks, live picks) -> validate (the report
       files), reading the latest supporting tables.
 SUPPORT (--support, launchd com.stockanalysis.support, Mon 1:00 PM CT +7 min each weekday): fundamentals
       (company_report_autofetch.py, Alpha Vantage, max 24 calls, once a day) -> processing (company_report_processing.ipynb)
@@ -191,7 +191,6 @@ REQUIRED = {
                             "Strategy_Rank", "Strategy_Weight", "Provisional_Weight", "Regime_On", "Rebalance_Day"],
     "strategy_picks.csv": ["As_Of", "Last_Rebalance", "Strategy", "Symbol", "Strategy_Weight", "Provisional_Weight", "Close"],
     "strategy_changes.csv": ["Date", "Symbol", "Status", "Reason", "Rank", "Score", "Sector", "Old_Weight", "New_Weight", "View"],
-    "strategy_holdings.csv": ["Symbol", "Weight", "Entry_Date", "Entry_Price", "Close", "PnL_%", "Days_Held", "Vol_63d_%"],
     "strategy_decisions.csv": ["Date", "Symbol", "Status", "Reason", "Rank", "Score", "Old_Weight", "New_Weight", "Regime_On"],
     "strategy_midweek_check.csv": ["As_Of", "Event", "Event_Date", "Applies_To_Open", "Action", "Sell", "Buy", "Message",
                                    "Next_Message", "Rules"],
@@ -329,10 +328,11 @@ def is_trading_day(d):
     return be.is_session(d)
 
 def decision_day(d):
-    """'full rebalance' / 'mid-week check' when date d is a strategy decision session, else None.
+    """'full rebalance' when date d is a strategy decision session, else None.
 
-    Same calendar as the strategy (backtest_engine.next_decision): the rebalance is the week's last session (Thursday
-    when Friday is a holiday) and a check is the first session Mon-Thu that is not the week's last."""
+    Same calendar as the strategy (backtest_engine.next_decision): the week's last session (Thursday when Friday is a
+    holiday). No Mon-Thu decisions since Nov 9, 2026 (WINNER['midweek_swap'] None): those days only get the after-close
+    signal refresh."""
     import backtest_engine as be
     return be.decision_kind(d)
 
@@ -687,7 +687,7 @@ def daily_idle(now_ct, state):
 def daily_step(now_ct, run=subprocess.run):
     """The after-close part of the one daily run (the evening job: Mon-Fri 3:05 PM CT, plus its wake / 30-min starts):
       1. the signal refresh, run_all.py --quick --scheduled: main_signal_analysis.ipynb with today's final bar on a
-         trading day that is not a decision day (none while Mon-Fri are all decision days; no paid APIs, never orders). On a decision day the
+         trading day that is not a decision day (Mon-Thu since Nov 9, 2026; no paid APIs, never orders). On a decision day the
          2:30 PM run already wrote the day's rows, so it idles;
       2. the forward test, forward_test.py --record: the paper strategies' day + the account row (read-only GETs, never
          orders), after the refresh, so both read the same Reports/signal_analysis.csv;

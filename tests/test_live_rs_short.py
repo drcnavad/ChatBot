@@ -35,7 +35,8 @@ kinds = {d.date().isoformat(): be.decision_kind(d) for d in days if be.decision_
 fulls = sorted(k for k, v in kinds.items() if v == "full rebalance")
 check(fulls[:6] == ["2026-10-30", "2026-11-06", "2026-11-13", "2026-11-20", "2026-11-27", "2026-12-04"],
       "full rebalance every Friday (Thanksgiving week: Fri Nov 27)", fulls)
-check(kinds.get("2026-10-27") == "mid-week check" and "2026-10-31" not in kinds, "Mon-Thu = exit check, weekends nothing", kinds)
+check(set(kinds.values()) == {"full rebalance"} and "2026-11-10" not in kinds and "2026-10-31" not in kinds,
+      "Friday only (Nov 8, 2026): Mon-Thu and weekends are no decision", kinds)
 
 inp = sleeves.inputs()
 d = inp["close"].index[-1]
@@ -52,8 +53,13 @@ forced = [s for s in sm.defensive if s in w.index and float(w[s]) > 0]
 d_reb = inp["weekly"][inp["weekly"] & (inp["weekly"].index <= d)].index[-1]   # the book is set on the last rebalance
 top = set(sleeves.ranking("rs_short", d_reb, inp).index[:20])       # top 10 + fills for stretched picks (Nov 6, 2026)
 check(all(s in top for s in forced), "defensive names in targets only if they rank top 10 (or fill a stretched pick)", forced)
-check(len(w[w > 0]) <= 10 and abs(float(w[w > 0].sum()) - 0.99) < 0.02,
-      "at most 10 targets, ~99% invested", (len(w[w > 0]), float(w[w > 0].sum())))
+inv = 0.99 * sleeves.regime_scale(d_reb, inp)                       # QQQ at/below its 200-day on the rebalance: 49.5%
+check(len(w[w > 0]) <= 10 and abs(float(w[w > 0].sum()) - inv) < 0.02,
+      f"at most 10 targets, ~{inv:.1%} invested (99% x the QQQ regime)", (len(w[w > 0]), float(w[w > 0].sum())))
+check(sleeves.regime_scale(d, {"regime": pd.Series({d: True})}) == 1.0
+      and sleeves.regime_scale(d, {"regime": pd.Series({d: False})}) == 0.5
+      and sleeves.regime_scale(d, {"regime": pd.Series(dtype=bool)}) == 0.5,
+      "regime_scale: 1 when QQQ is above its 200-day, 0.5 at/below it or with no data")
 buys = orders[orders["Side"] == "BUY"].set_index("Symbol")
 check(set(buys.index) == set(w[w > 0].index) and all(abs(buys.at[s, "Est_Value"] - 100000 * w[s]) < 0.02 * 100000 * 0.15
       for s in buys.index), "buys = the forward-test weights x equity", buys["Est_Value"].to_dict())
