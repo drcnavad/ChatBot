@@ -67,8 +67,8 @@ CT = ZoneInfo("America/Chicago")
 FRESHNESS = {
     "signal_analysis.csv": ("prices, signals, strategy weights", 3),
     "strategy_picks.csv": ("current / provisional portfolio", 3),
-    "strategy_decisions.csv": ("decision history: weekly rebalances + mid-week replacements/exits (chart markers)", 3),
-    "strategy_midweek_check.csv": ("this week's decisions: Friday rebalance + Mon-Thu checks", 3),
+    "strategy_decisions.csv": ("pipeline decision history: rebalances (chart markers; Mon-Thu checks retired Nov 4, 2026)", 3),
+    "strategy_midweek_check.csv": ("pipeline summary: last rebalance + next decision (run log)", 3),
     "benchmark_prices.csv": ("SPY / QQQ / sector ETF closes (RS lines)", 3),
     "weighted_sentiment.csv": ("news sentiment scores", 7),
     "news_cleaned_df.csv": ("news articles for AI summaries", 7),

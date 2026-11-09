@@ -91,8 +91,10 @@ Report tables: every `Reports/*.csv` name in the code is a table in SQLite `data
 ## Dashboard (`app.py`, `dashboard/`)
 - **Home:** My notes (`Reports/my_notes.csv`), stock list (Keep / Buy next / Sell next / Next in line / Others, DNB tag;
   `dashboard/stock_groups.py`), stock view (signal_analysis.csv + live quote), sector performance table.
-- **Strategy:** Last decision (Alpaca fills + ledger + decision_ranks.csv), Live vs benchmark (Alpaca portfolio history vs
-  QQQ/SPY), Forward test (forward_*.csv), Strategy rules and paper holdings, Data freshness, What each strategy does. The next-rebalance plan compares picks with the live Alpaca positions and marks a do-not-buy or manually blocked new buy as Blocked.
+- **Strategy:** Decisions table (one row per stock: rank at the last Friday decision from the saved snapshot in
+  `decision_ranks.csv`, rank at the next decision as a preview at the latest close, the previewed next action via
+  `sleeves.plan(rebalance=True)` read-only; needs only Alpaca positions + equity, the ranks show even without them),
+  Forward test (forward_*.csv: Top 5 consensus, current holdings, chart, leaderboard), Data freshness and settings.
 - **Trading Account:** Live holdings (Alpaca, read-only), Trade audit (live_trade_ledger.csv), Tax view (tax_lots), rules.
 
 ## Tests and setup

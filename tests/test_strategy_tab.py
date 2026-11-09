@@ -54,6 +54,29 @@ check("decision_ranks: an unsaved day -> None", decision_ranks.load("2020-01-02"
 sv = live.dropna(subset=["Rank_RS_Short"])["Rank_RS_Short"]
 check("Rank_RS_Short = 1..n", sorted(sv.tolist()) == list(range(1, len(sv) + 1)), sorted(sv.tolist())[:5])
 
+# ---------------------------------------------------------------- Nov 8, 2026: the rank table never disappears
+import dashboard.details.last_decision as ld  # noqa: E402
+from datetime import datetime  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+t, last_d, now_d, prev_d, err = ld.decision_table(None, 0.0)          # no live account read at all
+check("decisions: no live account -> the rank columns still show (saved snapshot + latest close)",
+      len(t) > 0 and t[ld.RANK_NEXT].notna().any() and (t[ld.NEXT] == "—").all() and prev_d is None and err is None,
+      (len(t), err))
+_real = ld.preview
+ld.preview = lambda *a, **k: (_ for _ in ()).throw(ValueError("targets exceed equity"))
+try:
+    t2, *_rest, err2 = ld.decision_table([{"symbol": "AAA", "qty": 1, "current_price": 1.0}], 1000.0)
+finally:
+    ld.preview = _real
+check("decisions: a failing preview keeps the table and reports why", len(t2) > 0 and "targets exceed equity" in (err2 or ""), err2)
+_ct = ZoneInfo("America/Chicago")
+check("next rebalance after Sun Nov 8, 2026 = Fri Nov 13 2:30 PM CT",
+      ld.next_rebalance_slot(datetime(2026, 11, 8, 21, 0, tzinfo=_ct)) == datetime(2026, 11, 13, 14, 30, tzinfo=_ct))
+check("next rebalance after Fri Nov 13 2:30 PM = Fri Nov 20 (not the Mon-Thu runs)",
+      ld.next_rebalance_slot(datetime(2026, 11, 13, 14, 31, tzinfo=_ct)) == datetime(2026, 11, 20, 14, 30, tzinfo=_ct))
+check("Thanksgiving week: Fri Nov 27 is an early close -> 11:00 AM CT",
+      ld.next_rebalance_slot(datetime(2026, 11, 23, 9, 0, tzinfo=_ct)) == datetime(2026, 11, 27, 11, 0, tzinfo=_ct))
+
 # ---------------------------------------------------------------- Home tab: sector performance (equal weight per sector)
 from dashboard.sector_table import WINDOWS, sector_returns  # noqa: E402
 import sector_mapping as sm  # noqa: E402

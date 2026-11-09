@@ -1,12 +1,20 @@
-"""Strategy tab, Decisions (Nov 4, 2026, Chirag): ONE table per stock - the last Friday rebalance (orders in
-Reports/live_orders_log.csv with that As_Of, ranks in Reports/decision_ranks.csv) next to what a Friday rebalance at the
-latest close would do (sleeves.plan through the live code path, read-only: no orders, the ledger is never written)."""
+"""Strategy tab, Decisions (Nov 4, 2026, Chirag): ONE table per stock - its rank at the last Friday rebalance (the saved
+snapshot in Reports/decision_ranks.csv, orders in Reports/live_orders_log.csv with that As_Of) next to its rank for the
+next Friday decision as a PREVIEW at the latest close (sleeves.plan through the live code path, read-only: no orders,
+the ledger is never written).
+
+Nov 8, 2026 (Chirag: "I don't see the table that showed rank at last decision and next decision"): the table no longer
+depends on the full Alpaca holdings read (positions + ~2000 fill pages + portfolio history). It reads positions and
+equity only (account_core), and the two rank columns are drawn from saved data even when Alpaca or the preview fails;
+only the Held now / Next decision columns need the live account."""
 
 import pandas as pd
 import streamlit as st
 
 from dashboard.page import open_symbol
 from dashboard.style import BAD, GOOD, INK, table, toned
+
+RANK_LAST, RANK_NEXT, NEXT = "Rank at last decision", "Rank at next decision (preview)", "Next decision (preview)"
 
 
 def _positions(positions):
@@ -17,7 +25,7 @@ def _positions(positions):
 @st.cache_data(ttl=600, show_spinner=False)
 def _preview(key, positions_t, prices_t, equity):
     """(day, orders, info) of a Friday rebalance at the latest close: sleeves.plan with rebalance=True (the live run's
-    plan, blocks and all - manual / earnings-stop buy blocks, stretched, earnings, sector cap, regime)."""
+    plan, blocks and all - manual / earnings-stop buy blocks, stretched, earnings, sector cap)."""
     import paper_trade as pt
     import sleeves as sl
     d, inp = sl.rebalance_inputs()
@@ -55,30 +63,42 @@ def last_rebalance(path=None):
 
 
 def decision_table(positions, equity):
-    """(table, last day, rank-now day, next day): Stock, Sector, Held now (live Alpaca positions), Last week (latest
-    action since the last Friday: Buy / Sell / Trim = partial sell, still held / Hold), Rank then, Rank now, Next, Why."""
+    """(table, last day, rank-now day, preview day, preview error) - one row per stock: Stock, Sector, Held now (live
+    Alpaca positions), Last week (latest action since the last Friday: Buy / Sell / Trim = partial sell, still held /
+    Hold), Rank at last decision (saved snapshot), Rank at next decision (preview at the latest close), Next decision
+    (preview), Why. positions=None (no live read): the two rank columns only, Held now / Next decision empty."""
     import decision_ranks
     import sleeves as sl
     from dashboard.settings import symbol_sector
+    live = positions is not None
     held, _ = _positions(positions)
     inp = sl.inputs()
     last, side = last_rebalance()
-    side = {k: v.replace("Sell", "Trim", 1) if k in held else v for k, v in side.items()}   # a partial sell, still held
+    book_now = held if live else set(((sl.load_ledger() or {}).get("halves", {}).get(sl.HALVES[0], {}).get("shares") or {}))
+    side = {k: v.replace("Sell", "Trim", 1) if k in book_now else v for k, v in side.items()}   # a partial sell, still held
     col = decision_ranks.RANK_COL[sl.HALVES[0]]
     then = decision_ranks.load(last) if last is not None else None
     then = {} if then is None else dict(zip(then["Symbol"], then[col]))
     now = {s: r for s, (r, _) in sl.live_ranks(inp=inp, all_stocks=True).items()}
-    d, o, info = preview(positions, equity)
-    nxt = {r.Symbol: r.Side for r in o.itertuples()}
+    d, o, info, err = None, None, {"no_buy": {}, "targets": {sl.HALVES[0]: {}}}, None
+    if live:
+        try:
+            d, o, info = preview(positions, equity)
+        except Exception as e:                      # the ranks still show; the preview columns say why they are empty
+            err = f"{type(e).__name__}: {str(e)[:200]}"
+    nxt = {} if o is None else {r.Symbol: r.Side for r in o.itertuples()}
     book = set(info["targets"][sl.HALVES[0]])
-    stretched = inp["stretched_live"].loc[d] if d in inp["stretched_live"].index else pd.Series(dtype=bool)
-    soon = inp["soon"].loc[d] if d in inp["soon"].index else pd.Series(dtype=bool)
+    day = d if d is not None else inp["close"].index[-1]
+    stretched = inp["stretched_live"].loc[day] if day in inp["stretched_live"].index else pd.Series(dtype=bool)
+    soon = inp["soon"].loc[day] if day in inp["soon"].index else pd.Series(dtype=bool)
     n_sec = pd.Series([symbol_sector.get(x) for x in book]).value_counts()
 
     def why(s, act):
         r = now.get(s)
         if s in info["no_buy"] and s not in held:
             return f"buy block: {info['no_buy'][s]}"
+        if o is None:                               # no preview: only the facts that need no live account
+            return ""
         if act == "Sell":
             return "not ranked (score <= 0)" if r is None else f"rank {r}: out of the top 10"
         if act == "Buy" and str(side.get(s, "")).startswith("Sell"):
@@ -96,6 +116,8 @@ def decision_table(positions, equity):
         return f"rank {r}: top 10 already filled"
 
     def act(s):
+        if o is None:
+            return "—"
         a = str(nxt.get(s, "")).upper()
         if a == "BUY":
             return "Add" if s in held else "Buy"
@@ -103,49 +125,80 @@ def decision_table(positions, equity):
             return "Sell" if s not in book else "Trim"
         return "Hold" if s in held or s in book else "—"
 
-    syms = sorted(set(held) | set(side) | book | {s for s, r in now.items() if r <= 20},
+    syms = sorted(set(book_now) | set(side) | book | {s for s, r in now.items() if r <= 20},
                   key=lambda s: (now.get(s, 999), s))
     rows = []
     for s in syms:
         a = act(s)
-        rows.append({"Stock": s, "Sector": symbol_sector.get(s, "—"), "Held now": held.get(s, 0.0),
-                     "Last week": (side[s] if s in side else "Hold" if s in held else "—"),
-                     "Rank then": then.get(s), "Rank now": now.get(s), "Next": a, "Why": why(s, a)})
-    t = pd.DataFrame(rows)
-    t["Held now"] = t["Held now"].map(lambda q: f"{q:g} sh" if q else "—")
-    for c in ("Rank then", "Rank now"):
+        rows.append({"Stock": s, "Sector": symbol_sector.get(s, "—"), "Held now": held.get(s, 0.0) if live else None,
+                     "Last week": (side[s] if s in side else "Hold" if s in book_now else "—"),
+                     RANK_LAST: then.get(s), RANK_NEXT: now.get(s), NEXT: a, "Why": why(s, a)})
+    t = pd.DataFrame(rows, columns=["Stock", "Sector", "Held now", "Last week", RANK_LAST, RANK_NEXT, NEXT, "Why"])
+    t["Held now"] = t["Held now"].map(lambda q: "?" if q is None or q != q else f"{q:g} sh" if q else "—")
+    for c in (RANK_LAST, RANK_NEXT):
         t[c] = pd.array(pd.to_numeric(t[c], errors="coerce").round(), dtype="Int64")
-    return t, last, inp["close"].index[-1], d
+    return t, last, inp["close"].index[-1], d, err
+
+
+def next_rebalance_slot(now=None):
+    """The next Friday rebalance slot (tz-aware CT; Thursday when Friday is a holiday, 11:00 AM CT on early-close days)
+    strictly after `now`, or None - the only decision that trades (Nov 4, 2026: no Mon-Thu trades)."""
+    import backtest_engine as be
+    import sleeves as sl
+    now = now or pd.Timestamp.now(tz=be.CENTRAL).to_pydatetime()
+    d = pd.Timestamp(now.astimezone(be.CENTRAL).date())
+    for _ in range(be.DECISION_SEARCH_DAYS):
+        if sl.full_day(sl.HALVES[0], d) and be.decision_slot(d) > now:
+            return be.decision_slot(d)
+        d += pd.Timedelta(days=1)
+    return None
 
 
 @st.fragment(run_every=30)
 def render_last_decision(p):
-    """Strategy tab: next run line + the one decisions table (last Friday vs next Friday at the latest close)."""
+    """Strategy tab: the next rebalance / next run lines + the one decisions table (rank at the last Friday decision vs
+    the preview for the next Friday at the latest close)."""
     from dashboard.page import fresh
-    from dashboard.details.live_holdings import holdings_this_run
+    from dashboard.details.live_holdings import account_core
     import sleeves as sl
     p = fresh(p)
-    data, err = holdings_this_run()
-    if data is None:
-        st.info(f"Last decision: {err} (live positions are the only holdings source)")
-        return
+    data, err = account_core()                      # positions + equity only (not the fills / history read)
     try:
+        reb = next_rebalance_slot()
         slot, kind = next_run(ledger=sl.load_ledger())
-        if slot is not None:
-            st.markdown(f"**Next run: {slot:%a %b %-d, %-I:%M %p} CT** · {kind}")
-        t, last, now_day, d = decision_table(data["positions"], data["equity"])
+        if reb is not None:
+            line = f"**Next decision (rebalance): {reb:%a %b %-d, %-I:%M %p} CT**"
+            if slot is not None and slot < reb:
+                kind = "no rebalance Mon-Thu" if kind == "mid-week check" else kind
+                line += f" · next scheduled run {slot:%a %b %-d, %-I:%M %p} CT ({kind})"
+            st.markdown(line)
+        t, last, now_day, d, perr = decision_table(data["positions"] if data else None, data["equity"] if data else 0.0)
     except Exception as e:
-        st.info(f"Decisions unavailable: {str(e)[:150]}")
+        st.info(f"Decisions unavailable: {type(e).__name__}: {str(e)[:150]}")
         return
-    st.caption(f"Last week = the {last:%a %b %-d} rebalance orders and any trade since (Rank then = {last:%b %-d})." if last is not None else "No rebalance yet.")
-    st.caption(f"Rank now = the {now_day:%a %b %-d} close. Next = a Friday rebalance at that close through the live plan "
-               "(top 10 equal ~9.9%, max 4 per sector, no new buys >15% over the 20-day average or within 5 days of "
-               "earnings, replacements to rank 20, half weights when the regime is off). Prices move until Friday.")
+    if data is None:
+        st.info(f"Last decision: {err} The two rank columns below come from saved data; Held now and Next decision "
+                "need the live account.")
+    elif perr:
+        st.info(f"Next decision preview unavailable ({perr}); the ranks below are still current.")
+    if last is not None:
+        saved = t[RANK_LAST].notna().any()
+        st.caption(f"Last week = the {last:%a %b %-d} rebalance orders and any trade since. {RANK_LAST} = the snapshot "
+                   f"saved at the {last:%a %b %-d} decision" + ("." if saved else " (not saved for that day: shown as empty)."))
+    else:
+        st.caption("No rebalance yet.")
+    st.caption(f"{RANK_NEXT} = ranks at the {now_day:%a %b %-d} close; {NEXT} = a Friday rebalance at that close through "
+               "the live plan (top 10 equal ~9.9%, max 4 per sector, no new buys >15% over the 20-day average or within "
+               "5 days of earnings, replacements to rank 20). A preview: prices move until Friday.")
     tone = lambda v: GOOD if v in ("Buy", "Add") else BAD if v in ("Sell", "Trim") or str(v).startswith("Trim") or str(v).startswith("Sell") else INK
-    sty = toned(toned(t, ["Next"], fn=tone), ["Last week"], fn=lambda v: tone(str(v).split(" ")[0]))
+    sty = toned(toned(t, [NEXT], fn=tone), ["Last week"], fn=lambda v: tone(str(v).split(" ")[0]))
     event = table(sty, fit=True, on_select="rerun", selection_mode="single-row", key="decisions_tbl",
-                  cols={"Rank then": st.column_config.NumberColumn("Rank then", width=60),
-                        "Rank now": st.column_config.NumberColumn("Rank now", width=60)})
+                  cols={RANK_LAST: st.column_config.NumberColumn(
+                            f"Rank at last decision ({last:%b %-d})" if last is not None else RANK_LAST,
+                            help="Saved snapshot of the live RS short-term rank at that decision (Reports/decision_ranks.csv)"),
+                        RANK_NEXT: st.column_config.NumberColumn(
+                            RANK_NEXT, help=f"Live RS short-term rank at the {now_day:%b %-d} close - what the next Friday "
+                                            "decision would use if prices did not move (preview)")})
     open_symbol(t.rename(columns={"Stock": "Symbol"}), event, "decisions")
 
 

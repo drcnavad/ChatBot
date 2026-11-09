@@ -25,7 +25,7 @@ FEEDS += [("Nasdaq", "https://www.nasdaq.com/feed/rssoutbound?category=Markets")
           ("MarketWatch", "https://feeds.content.dowjones.io/public/rss/mw_marketpulse")]
 NASDAQ_STOCK_FEED = "https://www.nasdaq.com/feed/rssoutbound?symbol={sym}"   # mixes in market stories: tagged by title
 BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129 Safari/537.36"
-MAX_ITEMS, PER_STOCK, PER_PAGE, SECONDS = 30, 2, 3, 15   # banner: 3 headline rows at a time, 15 s each
+MAX_ITEMS, PER_PAGE, SECONDS = 30, 3, 15   # banner: 3 headline rows at a time, 15 s each
 NY = ZoneInfo("America/New_York")
 
 def _one_line(p):

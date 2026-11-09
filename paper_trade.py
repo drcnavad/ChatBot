@@ -2054,8 +2054,6 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
     _print_header("MORNING LIVE FILL CHECK COMPLETE")
     return results
 
-LIVE_ENTRY = {}   # {SYMBOL: avg entry price} from the last get_live_positions_and_equity() read
-
 def get_live_positions_and_equity():
     """(positions dict, equity float, cash float, buying power float) from the Alpaca LIVE account.
 
@@ -2067,11 +2065,9 @@ def get_live_positions_and_equity():
     client = paper_trading_client()
     acct = client.get_account()
     positions = {}
-    LIVE_ENTRY.clear()                              # avg entry prices of this read (the spare-cash rule's in-profit test)
     import holdings
     for sym, p in holdings.get_positions(client).items():
         positions[sym] = p["qty"]
-        LIVE_ENTRY[sym] = _safe_number(p["avg_entry_price"], default=None)
     return positions, float(acct.equity), float(acct.cash), float(acct.buying_power)
 
 EVENING_SUBMIT_CUTOFF_CT = "19:00"  # extended hours end 7:00 PM CT - later runs stage orders for the morning

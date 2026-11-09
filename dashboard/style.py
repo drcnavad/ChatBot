@@ -330,7 +330,7 @@ def usd(v, sign=True):
 
 MONEY = st.column_config.NumberColumn(format="dollar")
 SPCT, INT = st.column_config.NumberColumn(format="%+.2f%%"), st.column_config.NumberColumn(format="%d")
-SCORE, SHARES = st.column_config.NumberColumn(format="%.1f"), st.column_config.NumberColumn(format="%.4g")
+SHARES = st.column_config.NumberColumn(format="%.4g")
 
 def table(df, tone=(), fit=False, max_h=None, cols=None, **kw):
     """Every dashboard table: st.dataframe (sortable, searchable) with no index, full width, `tone` columns colored,

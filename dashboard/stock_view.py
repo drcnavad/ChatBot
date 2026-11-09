@@ -6,9 +6,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from dashboard.ai import ai_analysis_dialog
-from dashboard.data import (company_metrics, last_next_earnings, live_quote, load_company,
-    row_for)
-from dashboard.settings import CT, HOLDINGS_CSV, symbol_sector
+from dashboard.data import company_metrics, last_next_earnings, live_quote, load_company
+from dashboard.settings import CT, symbol_sector
 from dashboard.signals import PLAN_BADGE, SIGNAL_BADGE, live_stock_note
 from dashboard.style import (BAD, GOOD, INK, MA_COLS, esc, fmt, num, score_tone,
     show_html, tone)
@@ -73,7 +72,6 @@ def render_stock_section(p, ticker, tdata):
                 f'{lts.tz_convert(CT).strftime("%I:%M %p")} CT</span></div>'
             )
     score = num(latest.get('Strategy_Score'))
-    weight = num(latest.get('Strategy_Weight')) or 0.0
     # Live Short-term relative strength note (not the Oct-16 pipeline strategy_changes board)
     note = live_stock_note(ticker, p)
     status, why = note["status"], note["why"]
@@ -97,12 +95,9 @@ def render_stock_section(p, ticker, tdata):
         ("Strength vs sector/SPY", fmt(num(latest.get('RS_Score')), ".1f"), score_tone(num(latest.get('RS_Score')))),
         ("Next earnings", pd.Timestamp(next_ed).strftime("%b %d") if next_ed else "—", INK),
     ]
-    hold = row_for(HOLDINGS_CSV, ticker) if weight > 0 else None
-    if hold is not None:
-        stats += [
-            ("Held since", f"{pd.Timestamp(hold['Entry_Date']):%b %-d}" if pd.notna(hold['Entry_Date']) else "—", INK),
-            ("P&L since entry", fmt(num(hold['PnL_%']), "+.1f", suffix="%"), tone(num(hold['PnL_%']))),
-        ]
+    # (Nov 8, 2026) No "Held since / P&L since entry" here any more: it came from strategy_holdings.csv, the pipeline's
+    # legacy low-volatility book (KO, LIN, ROKU ... "held" though the live account never bought them). Real cost and
+    # P/L of live positions: Trading Account tab.
     close = num(latest['Close'])
     ma_stats = [(ma.upper().replace('_', ' '), fmt(num(latest[ma]), ",.2f", "$"),     # green = the close is above it
                  tone(close - num(latest[ma])) if close and num(latest[ma]) else INK) for ma in MA_COLS]

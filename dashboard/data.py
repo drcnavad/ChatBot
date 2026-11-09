@@ -60,12 +60,6 @@ def load_benchmarks():
     b = read_report_csv(BENCH_CSV, dates=("Date",))
     return None if b is None else b.set_index("Date")
 
-def row_for(path, symbol):
-    """First row of a Reports CSV for one symbol, or None."""
-    t = read_report_csv(path)
-    row = None if t is None else t[t["Symbol"] == symbol]
-    return None if row is None or row.empty else row.iloc[0]
-
 def data_freshness(latest_bar):
     """One row per Reports file: last update (CT), age and a stale flag."""
     now = datetime.now(tz=CT)
