@@ -154,8 +154,30 @@ def pending_leftovers(path=None):
     return [o for o in (pend.get("orders") or []) if isinstance(o, dict)]
 
 
+def _naive_ct(series_or_ts):
+    """Naive Chicago timestamps for run_log comparisons."""
+    if isinstance(series_or_ts, pd.Series):
+        t = pd.to_datetime(series_or_ts, errors="coerce")
+        try:
+            if getattr(t.dt, "tz", None) is not None:
+                return t.dt.tz_convert(CT).dt.tz_localize(None)
+        except (TypeError, AttributeError, ValueError):
+            pass
+        return t
+    now_ts = pd.Timestamp(series_or_ts)
+    if now_ts.tzinfo is not None:
+        return now_ts.tz_convert(CT).tz_localize(None)
+    return now_ts
+
+
 def failed_money_runs(days=14, now=None, path=None):
-    """run_log rows in the last `days` days whose run is a money-moving job and status is failed."""
+    """Unresolved failed money-moving rows in the last `days` days.
+
+    A failed row is hidden once a later successful run of the same name exists, or
+    once it is older than the most recent successful Friday rebalance (so a Watchdog
+    failure is cleared by the next good Friday, even though Watchdog itself rarely
+    logs an ok row).
+    """
     path = path or RUN_LOG
     cols = ["time_ct", "run", "status", "money_moved", "message"]
     empty = pd.DataFrame(columns=cols)
@@ -167,23 +189,32 @@ def failed_money_runs(days=14, now=None, path=None):
         return empty
     if log is None or not len(log):
         return empty
-    t = pd.to_datetime(log["time_ct"], errors="coerce")
-    try:
-        if getattr(t.dt, "tz", None) is not None:
-            t = t.dt.tz_convert(CT).dt.tz_localize(None)
-    except (TypeError, AttributeError, ValueError):
-        t = pd.to_datetime(log["time_ct"], errors="coerce")
-    now_ts = pd.Timestamp(now) if now is not None else pd.Timestamp(datetime.now(CT))
-    if now_ts.tzinfo is not None:
-        now_ts = now_ts.tz_convert(CT).tz_localize(None)
-    else:
-        now_ts = now_ts.tz_localize(None) if now_ts.tzinfo else now_ts
+    t = _naive_ct(log["time_ct"])
+    now_ts = _naive_ct(now if now is not None else datetime.now(CT))
     cutoff = now_ts - pd.Timedelta(days=int(days))
     run = log["run"].astype(str).str.strip()
     status = log["status"].astype(str).str.strip().str.lower()
-    mask = run.isin(MONEY_RUNS) & status.eq("failed") & t.ge(cutoff)
+    failed = run.isin(MONEY_RUNS) & status.eq("failed") & t.ge(cutoff)
+    if not failed.any():
+        return empty
+    # Later success of the same run name, or any later successful Friday rebalance.
+    ok = status.eq("ok")
+    last_ok_by_run = {}
+    for name, times in t[ok].groupby(run[ok], sort=False):
+        last_ok_by_run[name] = times.max()
+    reb_ok = t[ok & run.eq("Fri rebalance")]
+    last_reb = reb_ok.max() if len(reb_ok) else pd.NaT
+    keep_idx = []
+    for i in log.index[failed]:
+        when, name = t.at[i], run.at[i]
+        later_same = last_ok_by_run.get(name)
+        if later_same is not None and pd.notna(later_same) and later_same > when:
+            continue
+        if pd.notna(last_reb) and when < last_reb:
+            continue
+        keep_idx.append(i)
     keep = [c for c in cols if c in log.columns]
-    return log.loc[mask, keep].copy()
+    return log.loc[keep_idx, keep].copy() if keep_idx else empty
 
 
 def ops_issues(days=14, now=None, run_log=None, pending_path=None):

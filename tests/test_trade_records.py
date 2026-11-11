@@ -128,32 +128,46 @@ try:
 finally:
     tr.after_ledger_save = real
 
-# --- ops banner: clean when empty; shows failed money jobs and leftovers; ignores trade-audit ---
+# --- ops banner: clean when empty; hides resolved failures; leftovers still show ---
 check(tr.ops_banner_lines(now="2026-11-11 12:00:00") == [], "banner is empty when the log and pending file are empty")
 # write a fake run log as a plain CSV (temp path is outside the project, so db keeps it as a file)
 pd.DataFrame([
+    {"time_ct": "2026-10-30 14:30:15", "run": "Fri rebalance", "status": "failed", "money_moved": "no",
+     "message": "The Fri Oct 30 trade was not placed.", "details": ""},
+    {"time_ct": "2026-10-30 14:32:15", "run": "Watchdog", "status": "failed", "money_moved": "no",
+     "message": "Step main failed.", "details": ""},
+    {"time_ct": "2026-11-06 14:30:26", "run": "Fri rebalance", "status": "ok", "money_moved": "yes",
+     "message": "Fri rebalance done 2:30 PM.", "details": ""},
     {"time_ct": "2026-11-10 09:00:00", "run": "Fill check", "status": "failed", "money_moved": "no",
      "message": "Not traded: FDS 41.", "details": ""},
     {"time_ct": "2026-11-10 09:30:00", "run": "Trade audit", "status": "failed", "money_moved": "no",
      "message": "API outage", "details": ""},
-    {"time_ct": "2026-10-20 14:30:00", "run": "Fri rebalance", "status": "failed", "money_moved": "no",
-     "message": "too old", "details": ""},
-    {"time_ct": "2026-11-06 14:30:15", "run": "Fri rebalance", "status": "failed", "money_moved": "no",
-     "message": "The Fri Nov 6 trade was not placed.", "details": ""},
     {"time_ct": "2026-11-10 15:00:00", "run": "Fill check", "status": "ok", "money_moved": "yes",
      "message": "Filled.", "details": ""},
+    {"time_ct": "2026-10-20 14:30:00", "run": "Fri rebalance", "status": "failed", "money_moved": "no",
+     "message": "too old", "details": ""},
+    {"time_ct": "2026-11-11 09:00:00", "run": "Fill check", "status": "failed", "money_moved": "no",
+     "message": "Not traded: XYZ 10.", "details": ""},
 ]).to_csv(tr.RUN_LOG, index=False)
 lines = tr.ops_banner_lines(days=14, now="2026-11-11 12:00:00")
 text = "\n".join(lines)
-check(any("Fill check failed" in x and "FDS" in x for x in lines), "banner shows a recent failed Fill check", lines)
-check(any("Fri rebalance failed" in x for x in lines), "banner shows a recent failed Fri rebalance", lines)
+check(all("Oct 30" not in x and "Watchdog" not in x for x in lines),
+      "banner hides Oct 30 Fri rebalance / Watchdog failures after a later successful Friday", lines)
+check(all("FDS" not in x for x in lines),
+      "banner hides a Fill check failure once a later Fill check succeeds", lines)
+check(any("Fill check failed" in x and "XYZ 10" in x for x in lines),
+      "banner still shows an unresolved recent Fill check failure", lines)
 check("Trade audit" not in text, "banner ignores trade-audit failures", lines)
 check("too old" not in text, "banner ignores failures older than 14 days", lines)
+# No leftover pending file yet: only the unresolved fill check should show
+check(len(lines) == 1, "banner has only the unresolved Fill check when there are no leftovers", lines)
 with open(tr.PENDING_JSON, "w") as f:
     json.dump({"evening_date": "2026-11-06", "orders": [{"symbol": "V", "side": "SELL", "qty": 42.04}]}, f)
 lines2 = tr.ops_banner_lines(days=14, now="2026-11-11 12:00:00")
 check(any("Pending leftover" in x and "SELL V" in x for x in lines2),
       "banner mentions leftover pending orders", lines2)
+check(any("XYZ 10" in x for x in lines2),
+      "unresolved failure still shows alongside leftover orders", lines2)
 
 # --- plan-vs-fill recap from fixtures (offline) ---
 plan_path = os.path.join(TMP, "plan.csv")
