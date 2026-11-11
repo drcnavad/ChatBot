@@ -21,6 +21,11 @@ _ISOLATE = (
     ("STOCK_ANALYSIS_MANUAL_ORDERS", "manual_orders.json"),
     ("STOCK_ANALYSIS_MANUAL_BLOCK", "manual_block.json"),
     ("STOCK_ANALYSIS_TARGET_SELLS", "target_sells.json"),
+    ("STOCK_ANALYSIS_DECISION_SKIPS", "decision_skips.csv"),
+    ("STOCK_ANALYSIS_LEDGER_HISTORY", "ledger_history"),
+    ("STOCK_ANALYSIS_FILL_RECAP", "fill_recap.csv"),
+    ("STOCK_ANALYSIS_FILL_RECAP_SUMMARY", "fill_recap_summary.csv"),
+    ("STOCK_ANALYSIS_PENDING_ORDERS", "live_pending_orders.json"),
 )
 
 def _env_for_test():

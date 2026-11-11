@@ -134,6 +134,13 @@ def decision_table(positions, equity):
                      "Last week": (side[s] if s in side else "Hold" if s in book_now else "—"),
                      RANK_LAST: then.get(s), RANK_NEXT: now.get(s), NEXT: a, "Why": why(s, a)})
     t = pd.DataFrame(rows, columns=["Stock", "Sector", "Held now", "Last week", RANK_LAST, RANK_NEXT, NEXT, "Why"])
+    try:
+        from dashboard.data import last_next_earnings
+        ed = last_next_earnings(t["Stock"].tolist())
+        nxt = dict(zip(ed["Symbol"].astype(str), ed["Next ED"])) if ed is not None and len(ed) else {}
+        t["Next earnings"] = [nxt.get(s) or "—" for s in t["Stock"]]
+    except Exception:
+        pass
     t["Held now"] = t["Held now"].map(lambda q: "?" if q is None or q != q else f"{q:g} sh" if q else "—")
     for c in (RANK_LAST, RANK_NEXT):
         t[c] = pd.array(pd.to_numeric(t[c], errors="coerce").round(), dtype="Int64")
@@ -200,6 +207,35 @@ def render_last_decision(p):
                             RANK_NEXT, help=f"Live RS short-term rank at the {now_day:%b %-d} close - what the next Friday "
                                             "decision would use if prices did not move (preview)")})
     open_symbol(t.rename(columns={"Stock": "Symbol"}), event, "decisions")
+    _render_skips_and_recap(last)
+
+
+def _render_skips_and_recap(last):
+    """Saved Friday skip reasons and the latest plan-vs-fill recap (display only)."""
+    try:
+        import trade_records as tr
+        from dashboard.style import caption_text, table as show
+    except Exception:
+        return
+    try:
+        skips = tr.load_skips(last) if last is not None else tr.load_skips()
+        if skips is not None and len(skips):
+            shown = skips.copy()
+            shown["Date"] = pd.to_datetime(shown["Date"], errors="coerce").dt.strftime("%b %-d, %Y")
+            day = f" at the {last:%a %b %-d} rebalance" if last is not None else ""
+            st.caption(f"Skipped (not newly bought){day}: stretched, earnings, sector cap, or rank worse than 20.")
+            show(shown[["Symbol", "Rank", "Reason"]], fit=True, key="decision_skips")
+    except Exception:
+        pass
+    try:
+        detail, summary = tr.load_fill_recap(last)
+        if summary:
+            st.caption("Plan vs fill" + (f" ({summary.get('As_Of')})" if summary.get("As_Of") else "") + ": " +
+                       str(summary.get("Message") or ""))
+        if detail is not None and len(detail):
+            show(detail.drop(columns=["As_Of"], errors="ignore"), fit=True, key="fill_recap")
+    except Exception:
+        pass
 
 
 def next_plan():

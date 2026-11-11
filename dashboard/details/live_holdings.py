@@ -101,6 +101,10 @@ def render_live_holdings():
     else:
         render_positions(table, data)
     render_benchmarks(data)
+    try:
+        _render_contribution(data)
+    except Exception:
+        pass
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _decision_days():
@@ -188,6 +192,14 @@ def render_positions(table, data):
     table["First bought"] = [f"{d:%a %b %-d, %Y}" if d is not None and d == d else "" for d in table["First bought"]]
     asof = _rank_now_full()[0]
     t = table.drop(columns=["Weight %"], errors="ignore")   # equal weights: not shown (Oct 21, 2026)
+    try:
+        from dashboard.data import last_next_earnings
+        stocks = [s for s in t["Stock"] if not str(s).startswith("Total")]
+        ed = last_next_earnings(stocks)
+        nxt = dict(zip(ed["Symbol"].astype(str), ed["Next ED"])) if ed is not None and len(ed) else {}
+        t.insert(len(t.columns), "Next earnings", ["" if str(s).startswith("Total") else (nxt.get(s) or "—") for s in t["Stock"]])
+    except Exception:
+        pass
     show(t, ["P/L $", "P/L %", "Today %"], fit=True,
          cols={"Rank now": st.column_config.NumberColumn(f"Rank now ({asof})" if asof else "Rank now", format="%d",
                                                      help=f"Live RS short-term rank (10/21/63-day, 63 doubled) at the "
@@ -211,3 +223,32 @@ def render_benchmarks(data):
     show(live_row(toned(table, ["Return %", "Gain $", "Account ahead by (pts)"]), "Compared with", "Your account"), fit=True,
          cols={"Return %": SPCT, "Value now": MONEY, "Gain $": MONEY,
                "Account ahead by (pts)": st.column_config.NumberColumn(format="%+.2f")})
+
+
+def _render_contribution(data):
+    """This week and since Oct 29 contribution of current holdings vs QQQ (display only)."""
+    import trade_records as tr
+    from dashboard.style import MONEY, SPCT, caption_text
+    positions = data.get("positions") or []
+    first = {}
+    try:
+        fills = data.get("fills") or []
+        import alpaca_paper as ap
+        first = {str(k).upper(): v for k, v in (ap.first_buy_dates(fills) or {}).items()}
+    except Exception:
+        first = {}
+    as_of = data.get("as_of")
+    hold, sec = tr.contribution_from_store(positions, as_of=as_of, first_bought=first)
+    if hold is None or not len(hold):
+        return
+    section("This week and since Oct 29 vs QQQ (current book)")
+    cfg = {"This week $": MONEY, "Since Oct 29 $": MONEY, "This week %": SPCT, "Since Oct 29 %": SPCT,
+           "vs QQQ this week pp": SPCT, "vs QQQ since Oct 29 pp": SPCT, "Price": MONEY, "Shares": st.column_config.NumberColumn(format="%.2f")}
+    show(hold, ["This week $", "Since Oct 29 $", "vs QQQ this week pp", "vs QQQ since Oct 29 pp"], fit=True,
+         key="contrib_hold", cols=cfg)
+    if sec is not None and len(sec):
+        show(sec, ["This week $", "Since Oct 29 $"], fit=True, key="contrib_sector",
+             cols={"This week $": MONEY, "Since Oct 29 $": MONEY})
+    caption_text("P/L of the current holdings from the last Friday rebalance (this week) and from Oct 29, 2026, "
+                 "vs QQQ over the same window for each name. Names bought mid-period start from their first close "
+                 "after the purchase. Display only; this does not change trades.")

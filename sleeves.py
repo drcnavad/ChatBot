@@ -30,6 +30,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 REPORTS = os.path.join(ROOT, "Reports")
 LEDGER_JSON = os.environ.get("STOCK_ANALYSIS_SLEEVE_LEDGER") or os.path.join(REPORTS, "sleeve_ledger.json")
 PLAN_CSV = os.environ.get("STOCK_ANALYSIS_SLEEVE_PLAN") or os.path.join(REPORTS, "sleeve_plan.csv")
+SKIP_CSV = os.environ.get("STOCK_ANALYSIS_DECISION_SKIPS") or os.path.join(REPORTS, "decision_skips.csv")
+LEDGER_HISTORY = os.environ.get("STOCK_ANALYSIS_LEDGER_HISTORY") or os.path.join(REPORTS, "ledger_history")
 HALVES = ("rs_short",)
 STRATEGY = {"rs_short": "Short-term relative strength, skip stretched buys"}   # Fri Nov 6, 2026 (Chirag)
 LABEL = STRATEGY
@@ -166,13 +168,18 @@ def load_ledger(path=None):
         raise ValueError(f"{path} is not a valid sleeve ledger - fix or remove it (no orders until then)")
     return led
 
-def save_ledger(led, path=None):
+def save_ledger(led, path=None, skipped=None):
     path = path or LEDGER_JSON
     led = {**led, "saved_at": datetime.now(CT).strftime("%Y-%m-%d %H:%M:%S CT")}
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(led, f, indent=1, sort_keys=True)
     os.replace(tmp, path)
+    try:  # record keeping only: a failure here must never break a trade
+        import trade_records as tr
+        tr.after_ledger_save(led, path, skipped=skipped)
+    except Exception as e:
+        print(f"  decision records not saved (display only): {type(e).__name__}: {e}")
     return path
 
 def ledger_book_weights(led, close):
@@ -434,7 +441,7 @@ def _sector_key(s):
 
 
 def finalize_book(names, held, rank_of, blocked, stretched, soon, priced, n_picks, invested,
-                  max_rank=20, sector_cap=0.4, max_weight=None):
+                  max_rank=20, sector_cap=0.4, max_weight=None, skipped_out=None):
     """Shared membership + sizing for live replace_blocked_new_slots and forward_test.cool_buys.
 
     Keep a held name even if it is stretched or ranked worse than max_rank. Drop an unheld starting pick if it is
@@ -453,6 +460,13 @@ def finalize_book(names, held, rank_of, blocked, stretched, soon, priced, n_pick
     held_set, blocked, stretched, soon, priced = set(held or ()), dict(blocked or {}), set(stretched or ()), set(soon or ()), set(priced or ())
     rank_of = dict(rank_of or {})
     skipped = []
+
+    def note(s, why):
+        """Print/log a skip; also append a structured row when the caller asked for one."""
+        rank = rank_of.get(s)
+        skipped.append(f"{s} #{rank if rank is not None else '?'} ({why})")
+        if skipped_out is not None:
+            skipped_out.append({"Symbol": s, "Rank": None if rank is None else int(rank), "Reason": why})
 
     def reason_unheld(s):
         if rank_of.get(s, 10 ** 9) > max_rank:
@@ -485,11 +499,11 @@ def finalize_book(names, held, rank_of, blocked, stretched, soon, priced, n_pick
             continue
         why = reason_unheld(s)
         if why:
-            skipped.append(f"{s} #{rank_of.get(s, '?')} ({why})")
+            note(s, why)
             continue
         sec = _sector_key(s)
         if counts.get(sec, 0) >= cap_n:
-            skipped.append(f"{s} #{rank_of.get(s, '?')} (sector cap {cap_n})")
+            note(s, f"sector cap {cap_n}")
             continue
         add(s)
         counts[sec] = counts.get(sec, 0) + 1
@@ -509,11 +523,11 @@ def finalize_book(names, held, rank_of, blocked, stretched, soon, priced, n_pick
             continue
         why = reason_unheld(s)
         if why:
-            skipped.append(f"{s} #{rank_of[s]} ({why})")
+            note(s, why)
             continue
         sec = _sector_key(s)
         if counts.get(sec, 0) >= cap_n:
-            skipped.append(f"{s} #{rank_of[s]} (sector cap {cap_n})")
+            note(s, f"sector cap {cap_n}")
             continue
         add(s)
         counts[sec] = counts.get(sec, 0) + 1
@@ -529,7 +543,7 @@ def finalize_book(names, held, rank_of, blocked, stretched, soon, priced, n_pick
     return {s: slot for s in book}
 
 
-def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, invested):
+def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, invested, skipped_out=None):
     """`n_picks` slots via finalize_book (sector cap, rank-20 new buys, 15% weight cap). Held names stay even if
     stretched or ranked worse than 20; new / swapped-in names must pass the same gates as the forward test."""
     import backtest_engine as be
@@ -552,7 +566,8 @@ def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, inve
     except Exception:
         sector_cap = be.WINNER.get("sector_cap", 0.4)
     return finalize_book(names, held, rank_of, blocked, stretched, soon_set, priced, n_picks, invested,
-                         max_rank=exit_rank(h), sector_cap=sector_cap, max_weight=getattr(be, "MAX_WEIGHT", 0.15))
+                         max_rank=exit_rank(h), sector_cap=sector_cap, max_weight=getattr(be, "MAX_WEIGHT", 0.15),
+                         skipped_out=skipped_out)
 
 def regime_scale(d, inp):
     """Soft QQQ market filter, as the forward test applies it (backtest_engine.rank_targets): WINNER['regime_scale'] (0.5)
@@ -580,6 +595,7 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
     hw = held_w.reindex(names).fillna(0.0)
     soon = inp.get("soon")
     soon_d = (soon.loc[d] if soon is not None and d in soon.index else pd.Series(False, index=w.index)).reindex(names).fillna(False)
+    skipped = []
     if not trade_today:
         tw = {s: float(hw[s]) for s in names if hw[s] > 0}
     else:
@@ -596,12 +612,14 @@ def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_v
         n_picks = int((_cfg(h).get("select") or {}).get("n") or ft.PIN.get("n") or 10)
         invested = float(ft.PIN.get("invested") or 0.99) * regime_scale(d, inp)   # QQQ below its 200-day: half invested
         held_set = {s for s in names if hw[s] > 0}
-        tw = replace_blocked_new_slots(h, d, list(tw), held_set, blocked, px, inp, n_picks, invested)
+        skipped = []
+        tw = replace_blocked_new_slots(h, d, list(tw), held_set, blocked, px, inp, n_picks, invested,
+                                       skipped_out=skipped)
     tg = pd.DataFrame({"Symbol": list(tw), "Weight": [tw[s] for s in tw], "Price": [px.get(s) for s in tw]})
     stat = {s: ("hold" if s in st["shares"] else "add") for s in tw}
     o = pt.build_orders(tg, value, st["shares"], px, min_value=min_value, fractional=fractional, statuses=stat,
                         blocked=blocked, keep=no_sell)
-    return o, dict(tw), bool(trade_today and len(tw) > 0)
+    return o, dict(tw), bool(trade_today and len(tw) > 0), skipped
 
 
 def plan(day, positions, equity, prices, no_buy=None, no_sell=None, fractional=True, ledger="load", min_value=1.0,
@@ -635,11 +653,12 @@ def plan(day, positions, equity, prices, no_buy=None, no_sell=None, fractional=T
     if unowned_mv > 0:
         for h in HALVES:
             values[h] += unowned_mv * float(shares.get(h, 0.0) or 0.0)
-    parts, tgts, traded = {}, {}, {}
+    parts, tgts, traded, skipped = {}, {}, {}, []
     for h in HALVES:
         if values[h] <= 0:
             raise ValueError(f"the {LABEL[h]} half is worth ${values[h]:,.2f} - refusing to size its orders")
-        parts[h], tgts[h], traded[h] = half_plan(h, d, state[h], px, values[h], init, inp, no_buy, no_sell, fractional, min_value, rebalance)
+        parts[h], tgts[h], traded[h], skipped_h = half_plan(h, d, state[h], px, values[h], init, inp, no_buy, no_sell, fractional, min_value, rebalance)
+        skipped.extend(skipped_h)
     # ---- net the halves into one order per symbol
     pos = {str(k).upper(): float(v) for k, v in (positions or {}).items() if float(v or 0) > 0}
     tgt_sh = {}
@@ -696,7 +715,7 @@ def plan(day, positions, equity, prices, no_buy=None, no_sell=None, fractional=T
                             "tags": sorted(half_sh[h]), "cash": round(values[h] - hv, 2), "value": round(values[h], 2),
                             "rebalanced": bool(traded[h])}
     info.update(day=d.date().isoformat(), values=values, targets=tgts, traded=traded, unowned=unowned, ledger=new,
-                orders=orders, half_orders=parts, half_shares=half_sh, transfers=[])
+                orders=orders, half_orders=parts, half_shares=half_sh, transfers=[], skipped=skipped)
     return orders, info
 
 def plan_table(info, orders=None):

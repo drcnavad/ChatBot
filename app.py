@@ -33,7 +33,7 @@ from chatbot.ui import render_chat  # noqa: E402
 from dashboard.details.live_holdings import new_run  # noqa: E402
 from dashboard.notes import render_notes  # noqa: E402
 from dashboard.news import render_news_banner, render_stock_news  # noqa: E402
-from dashboard.page import build_page, render_kpis, render_ticker, render_top_bar  # noqa: E402
+from dashboard.page import build_page, render_kpis, render_ops_banner, render_ticker, render_top_bar  # noqa: E402
 from dashboard.sector_table import render_sector_table  # noqa: E402
 from dashboard.short_stock import render_short_stock  # noqa: E402
 from dashboard.stock_chart import render_stock_chart  # noqa: E402
@@ -111,6 +111,10 @@ def main():
     if "_pending_ticker" in st.session_state:                # a link or a row click: show the stock
         st.session_state["nav"] = "Stock Analysis"
     ticker_box = render_top_bar(p)
+    try:
+        render_ops_banner()
+    except Exception:
+        pass
     auto_refresh()
     page = st.session_state.get("nav") or "Home"             # only the selected page is drawn (no tab reset on reruns)
     if page == "Home":

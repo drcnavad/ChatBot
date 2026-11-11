@@ -75,6 +75,7 @@ python manual_trade.py blocks                                   # list active bl
 | `backtest_engine.py` | The live engine despite its name: rules (`WINNER`), scores, ranking, NYSE calendar, and the simulator the forward test uses. Backtest-only code, tests and pins were removed Oct 19, 2026 (forward testing only). |
 | `manual_trade.py` | Manual orders, blocks, replacement buys. |
 | `decision_ranks.py` | Rank snapshot per decision (`Reports/decision_ranks.csv`, for the Last decision view). |
+| `trade_records.py` | Record keeping only (no orders): Friday skip reasons, ledger snapshots, plan-vs-fill recap, ops banner, contribution vs QQQ. |
 | `alpaca_paper.py` | Read-only Alpaca client (GET only). |
 | `earnings_stop.py`, `trade_audit.py`, `tax_lots.py` | Earnings-day stop (on), trade audit, tax lots. |
 | `forward_test.py`, `forward_combos.py` | Forward test of the account and every paper strategy (`ft.STRATEGIES`; the live one is `ft.LIVE`), recorded by the 3:05 PM CT after-close step. |
@@ -82,7 +83,9 @@ python manual_trade.py blocks                                   # list active bl
 | `main_signal_analysis.ipynb` (+ 3 support notebooks) | Signals → `Reports/signal_analysis.csv`, `strategy_picks.csv`, ... (Chirag edits these; leave them alone). |
 
 State files in `Reports/`: `sleeve_ledger.json`, `live_pending_orders.json` (9 AM rests), `manual_orders.json`,
-`manual_block.json`, `run_state.json` (decision done / last daily), `earnings_stop_state.json`, `trade_audit_state.json`;
+`manual_block.json`, `run_state.json` (decision done / last daily), `earnings_stop_state.json`, `trade_audit_state.json`,
+`decision_skips.csv` (why a Friday pick was not newly bought), `ledger_history/` (dated ledger copies),
+`fill_recap.csv` / `fill_recap_summary.csv` (plan vs fill after the 9 AM check);
 logs: `run_log.csv`, `live_orders_log.csv`, `logs/`.
 
 Report tables: every `Reports/*.csv` name in the code is a table in SQLite `data/stock_analysis.db` (via `db.py`;

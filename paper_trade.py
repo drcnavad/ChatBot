@@ -2051,6 +2051,17 @@ def complete_unfilled_orders(pending_path=PENDING_ORDERS_JSON, log_csv=ORDER_LOG
             print("\n  !! A traded symbol is off target - see Reports/run_log.csv, check Alpaca.")
         else:
             print("\n  Traded symbols match strategy targets (within 1 percentage point).")
+    try:  # record keeping only: never fail the fill check because a recap could not be written
+        import trade_records as tr
+        as_of = pend.get("as_of") or pend.get("evening_date")
+        kw = {"as_of": as_of, "pending_path": pending_path}
+        if log_csv:
+            kw["log_path"] = log_csv
+        _detail, summary = tr.write_fill_recap(**kw)
+        if summary:
+            print("  Fill recap: " + str(summary.get("Message") or ""))
+    except Exception as e:
+        print(f"  fill recap not saved (display only): {type(e).__name__}: {e}")
     _print_header("MORNING LIVE FILL CHECK COMPLETE")
     return results
 
@@ -2363,7 +2374,7 @@ def auto_trade(target="auto", min_value=1.0, log_csv=ORDER_LOG_CSV, decision=Non
         # Crash-safe: run_all must NOT mark last_decision if this save fails.
         import sleeves
         try:
-            sleeves.save_ledger(meta["sleeve_ledger"])
+            sleeves.save_ledger(meta["sleeve_ledger"], skipped=(meta.get("sleeves") or {}).get("skipped"))
             sleeves.plan_table(meta["sleeves"]).pipe(db.to_csv, sleeves.PLAN_CSV, index=False)
             try:
                 sleeves.write_strategy_picks(meta["sleeve_ledger"].get("day"), led=meta["sleeve_ledger"],

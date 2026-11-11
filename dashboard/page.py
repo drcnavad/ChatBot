@@ -153,6 +153,20 @@ def render_top_bar(p):
             st.rerun()
     return ticker
 
+
+def render_ops_banner():
+    """Failed Trade / Fill check / Watchdog / Fri rebalance rows (last 14 days) and leftover pending orders.
+    Hidden when everything is clean. Not the old trade-audit alert feed."""
+    try:
+        import trade_records as tr
+        lines = tr.ops_banner_lines(days=14)
+    except Exception:
+        return
+    if not lines:
+        return
+    st.warning("\n\n".join(lines))
+
+
 INDEXES = {"QQQ": "Nasdaq 100", "SPY": "S&P 500", "DIA": "Dow", "IWM": "Russell 2000", "CL=F": "US Crude", "BTC-USD": "Bitcoin"}
 SECTORS = {"XLK": "Technology", "XLF": "Financials", "XLV": "Health Care", "XLY": "Cons. Discretionary", "XLP": "Cons. Staples",
            "XLE": "Energy", "XLI": "Industrials", "XLB": "Materials", "XLU": "Utilities", "XLRE": "Real Estate",
