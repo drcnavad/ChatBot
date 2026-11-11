@@ -37,7 +37,7 @@ with mock.patch.object(sleeves, "ranking",
                                             {s: 10.0 for s in ["HOLD1", "HOLD2", "NEW1", "BAD", "REPL"]},
                                             {"stretched": pd.DataFrame()}, 4, 0.99)
 check("BAD" not in out and "REPL" in out, "replace_blocked swaps the blocked new pick", out)
-check(len(out) == 4 and all(abs(v - 0.99 / 4) < 1e-12 for v in out.values()), "replace_blocked equal weight", out)
+check(len(out) == 4 and all(abs(v - 0.15) < 1e-12 for v in out.values()), "replace_blocked equal weight capped at 15%", out)
 with mock.patch.object(sleeves, "ranking", return_value=pd.Series(
         [10, 9, 8, 7, 6, 5, 4], index=["X1", "BLK1", "H2", "BLK2", "SUB1", "SUB2", "H1"], dtype=float)), \
         mock.patch.object(sleeves, "_cfg", return_value={"exit": (20, 10), "select": {"n": 4}}):

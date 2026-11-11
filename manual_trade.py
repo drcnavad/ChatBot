@@ -33,7 +33,7 @@ REPORTS = os.path.join(ROOT, "Reports")
 ORDERS_JSON = os.environ.get("STOCK_ANALYSIS_MANUAL_ORDERS") or os.path.join(REPORTS, "manual_orders.json")
 BLOCK_JSON = os.environ.get("STOCK_ANALYSIS_MANUAL_BLOCK") or os.path.join(REPORTS, "manual_block.json")
 FILL_WAIT_SECS = 30        # a manual sell is polled this long for its fill before the replacement buy
-DEFAULT_PCT = 0.10          # buy size without --amount: 10% of equity = one slot with 5 stocks per half (Chirag, Oct 21, 2026; was 5%)
+DEFAULT_PCT = 0.10          # buy size without --amount: 10% of equity (near one live equal slot of ~9.9% with 10 names; live cap is 15%)
 CT = ZoneInfo("America/Chicago")
 
 def _now():

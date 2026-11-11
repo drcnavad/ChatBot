@@ -63,34 +63,35 @@ LONG_START = "2016-01-01"          # Alpaca SIP daily history floor (~2016)
 BARS_REFRESH_OVERLAP_DAYS = 5       # re-fetch this many calendar days before each symbol's max date (corrections + gaps)
 RS_WINDOWS = (21, 63, 126)
 RS_WEIGHTS = {"stock_vs_sector": 0.6, "sector_vs_spy": 0.4}
+# Live short-term RS (from Fri Nov 6, 2026): 10/21/63-day windows, 63-day counted twice (1:1:2).
+RS_SHORT_WINDOWS = (10, 21, 63, 63)
+MAX_WEIGHT = 0.15   # per-stock cap of equity (excess stays cash); paper_trade.MAX_ORDER_PCT matches this
 
 # The live rules. The daily pipeline (main_signal_analysis.ipynb), the trade step (paper_trade.py) and the dashboard all
 # read this one dict.
 # Change a rule here, then run `python run_all.py`.
 WINNER = {
-    # LIVE from the 2:30 PM CT run of Tue Oct 27, 2026 (Chirag, Oct 27, final): 100% forward_test's "RS short-term (weekly +
-    # Mon–Thu sells)", exactly as the forward test runs it (sleeves.py, one sleeve, Reports/sleeve_ledger.json).
-    # The selection fields below are NOT the live rules: they only drive the pipeline's Strategy_Score / Strategy_Rank
-    # columns (a forward-test input; unchanged so rules_version / saved scores stay comparable). Oct 16-26 the live rules
-    # were 50% low volatility (monthly) + 50% sector rotation (weekly) - forward_test's "Old live: Low vol + Sector rotation".
-    "n": 5,                 # Strategy_Score selection size (pipeline column only)
-    "score": "low_vol",     # winner_score: 1 / 63-day volatility (calmest first) while above the 200-day average, else -1
+    # Live from Fri Nov 6, 2026 (locked ~12 weeks, to ~Jan 29, 2027): 100% "Short-term relative strength, skip stretched
+    # buys" (sleeves.py, one sleeve, Reports/sleeve_ledger.json), Friday rebalance only. These fields are the live rules
+    # (pipeline Strategy_Score / Strategy_Rank, the trade step, and the dashboard).
+    "n": 10,                # top 10 equal weight (~9.9% each at 99% invested; 4.95% when the QQQ filter is off)
+    "score": "rs_short",    # 10/21/63-day relative strength, 63-day counted twice (RS_SHORT_WINDOWS)
     "use_regime": True,     # soft market regime (below)
     "regime_symbol": "QQQ", # regime is on while QQQ closes above its 200-day average
     "regime_scale": 0.5,    # regime off at a rebalance -> every weight is halved
-    "min_score": 0.0,       # only stocks with a score above 0 can be picked (low_vol: above the 200-day)
-    "sector_cap": 0.4,      # max floor(0.4 x n) per sector = 2 with 5 stocks (forward_test EQ = PLAIN + equal weight)
-    # (Oct 21, 2026, Chirag) always equal weight: 1/n per stock (5 x 20% of a half x 99% invested); no vol sizing, no cap
+    "min_score": 0.0,       # only stocks with a score above 0 can be picked
+    "sector_cap": 0.4,      # max floor(0.4 x n) per sector = 4 with 10 stocks (replacements too)
+    # Equal weight 1/n per stock, then MAX_WEIGHT (15% of equity); leftover cash stays cash.
     "buffer_rank": None,    # no rank buffer
-    "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF (tiebreak only)
-    "calendar": "monthly",  # rebalance on the last trading day of each month (forward_test "monthly") ...
-    "switch_days": ["2026-10-16"],   # ... plus the one-off switch rebalance Fri Oct 16, 2026
-    "midweek_swap": None,   # no Mon-Thu checks: the 2:30 PM runs between rebalances place no orders
+    "rs_benchmark": "etf",  # relative strength vs the stock's sector ETF
+    "calendar": "weekly",   # last session of the ISO week (Thursday when Friday is a holiday)
+    "switch_days": [],
+    "midweek_swap": None,   # no Mon-Thu trades (Nov 8, 2026)
     "midweek_exit_below": None,
     "midweek_exit_to_top": None,
-    "max_pick_rank": None,      # no rank gate
+    "max_pick_rank": None,      # initial walk is uncapped; replacements / new names are limited to rank 20 in sleeves.finalize_book
     "cap_soft": False,          # strict sector cap
-    "earnings_block_days": None,  # no earnings rule (the forward strategy has none)
+    "earnings_block_days": 5,   # no new buys with earnings within 5 days (held: not topped up)
     "sleeve": False,            # no defensive sleeve (live dropped it Oct 29, 2026; sector_mapping.defensive remains for other forward Now lines)
     "earnings_day_stop": True,  # earnings_stop.py live: 5% stop on earnings day (Chirag, Nov 4, 2026; not in the backtest)
     "sleeves": {"rs_short": 1.0},
@@ -187,10 +188,12 @@ def winner_rank_args(regime):
                 **(dict(sleeve=list(sector_mapping.defensive)) if S.get("sleeve") else {}))
 
 def winner_score(rs, close, ma_200, vol):
-    """The live score (WINNER["score"]). "low_vol": 1 / 63-day volatility (calmest first) while the close is above its
-    200-day average, else -1 (below min_score: never picked) - the same picks as forward_test's low_vol score.
-    "rs": relative strength."""
-    return rs if WINNER.get("score", "rs") == "rs" else (1 / vol).where(close > ma_200, -1.0)
+    """The live score (WINNER["score"]). "rs_short" / "rs": the relative-strength frame passed in (`rs` should already
+    use RS_SHORT_WINDOWS when the live rules are on). "low_vol": 1 / 63-day volatility (calmest first) while the close
+    is above its 200-day average, else -1 (below min_score: never picked)."""
+    if WINNER.get("score", "rs") == "low_vol":
+        return (1 / vol).where(close > ma_200, -1.0)
+    return rs
 
 def winner_rebalance_days(dates, live=True):
     """The live rebalance calendar (WINNER["calendar"]): "monthly" = the last trading day of each month (forward_test's
@@ -206,6 +209,8 @@ WINNER["tag"], WINNER["name"] = winner_label(scored_stock_count())
 def rules_version():
     """Rules version stored in signal_analysis.csv (older rows of the same version keep their BUY/SELL/HOLD)."""
     S, mw = WINNER, WINNER.get("midweek_swap")
+    if S.get("halves") or S.get("score") in ("rs_short", "rs_short_63"):
+        return "v7-rs-s" + (f"-e{S['earnings_block_days']}" if S.get("earnings_block_days") else "")
     if S.get("score") == "low_vol":
         return "v6-lv-" + str(S.get("calendar", "weekly"))
     v = f"v5-x{S.get('midweek_exit_below') or 0}" if mw else "v3"      # v5-x20r10-ns-e5: Mon-Thu exit rule, no swap
@@ -344,41 +349,73 @@ def drop_partial_last_bar(bars, now=None, close_buffer_min=None):
 DECISION_BARS_CSV = REPORTS_DIR / "decision_bars.csv"   # each decision day's 2:30 PM bar, as ratios (keep_decision_bars)
 BAR_COLS = ["Open", "High", "Low", "Close", "Volume"]
 
+def _apply_decision_bar_ratios(bars, saved):
+    """Rebuild decision-day OHLCV from stored ratios x the previous session. Pure (does not write)."""
+    if saved is None or not len(saved):
+        return bars
+    prev = bars.groupby("Symbol")[["Close", "Volume"]].shift(1)
+    base = np.column_stack([prev["Close"]] * 4 + [prev["Volume"]]).astype(float)
+    r = bars[["Date", "Symbol"]].merge(saved, on=["Date", "Symbol"], how="left")[BAR_COLS].to_numpy(float)
+    fix = np.isfinite(r) & np.isfinite(base)
+    if not fix.any():
+        return bars
+    vals = bars[BAR_COLS].to_numpy(float)
+    vals[fix] = (r * base)[fix]
+    return bars.assign(**dict(zip(BAR_COLS, vals.T)))
+
+
+def _keep_decision_bars_once(bars, now=None, path=DECISION_BARS_CSV, state_path=REPORTS_DIR / "run_state.json"):
+    """One attempt: maybe save today's 2:30 bar as ratios, then rebuild stored decision days. Raises on failure."""
+    now = now or datetime.now(EASTERN)
+    et = now.astimezone(EASTERN) if now.tzinfo else now
+    today, path = pd.Timestamp(et.date()), Path(path)
+    prev = bars.groupby("Symbol")[["Close", "Volume"]].shift(1)
+    base = np.column_stack([prev["Close"]] * 4 + [prev["Volume"]]).astype(float)
+    saved = db.read_csv(path, parse_dates=["Date"]) if db.exists(path) else pd.DataFrame(columns=["Date", "Symbol", *BAR_COLS])
+    state = json.loads(Path(state_path).read_text()) if Path(state_path).exists() else {}
+    traded = str(state.get("last_decision") or "") >= str(today.date())
+    live = bars["Date"].eq(today) & (decision_bar_ready(now) and et.hour * 60 + et.minute < 16 * 60 + 30 and not traded)
+    if live.any():   # the 2:30 run: save today's bar (it is the bar being traded, so it is used as is)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = bars.loc[live, BAR_COLS].to_numpy(float) / base[live.to_numpy()]
+        new = bars.loc[live, ["Date", "Symbol"]].assign(**dict(zip(BAR_COLS, ratio.T)))
+        saved = pd.concat([saved[saved["Date"] != today], new]) if len(saved) else new
+        saved.pipe(db.to_csv, path, index=False)          # one SQLite transaction (all or nothing)
+        saved = saved[saved["Date"] != today]
+    return _apply_decision_bar_ratios(bars, saved)
+
+
 def keep_decision_bars(bars, now=None, path=DECISION_BARS_CSV, state_path=REPORTS_DIR / "run_state.json"):
     """Every decision day keeps the bar its 2:30 PM CT run traded on, not the final close, so later runs rebuild the same
     decision and the strategy record matches the account. The 2:30 run (today's bar before the close, decision not traded
     yet) saves today's bar as ratios to the previous session: prices / previous close, volume / previous volume. Ratios stay
-    right after splits and dividends. Every run rebuilds the saved days from them. Never raises: on a problem the bars are
-    returned unchanged."""
+    right after splits and dividends. Every run rebuilds the saved days from them.
+
+    Retries twice after a failure. Still failing: logs a loud ERROR, does not rewrite the stored ratio file, and tries
+    once more to apply whatever ratios are already stored. If that apply also fails, returns `bars` unchanged (the 2:30
+    run still has today's live bar in `bars`, so Friday trading is not blocked). Official closes are never written over
+    the stored decision-day file."""
+    last_err = None
+    for attempt in range(1, 4):
+        try:
+            return _keep_decision_bars_once(bars, now=now, path=path, state_path=state_path)
+        except Exception as e:
+            last_err = e
+            log.warning("decision bars attempt %s/3 failed: %s", attempt, e)
+    msg = (f"ERROR: decision bars ({path}) failed after 3 tries ({type(last_err).__name__}: {last_err}). "
+           "Not rewriting the stored decision-day file. Trying to rebuild from the ratios already stored.")
+    log.error(msg)
+    print(msg, flush=True)
     try:
-        now = now or datetime.now(EASTERN)
-        et = now.astimezone(EASTERN) if now.tzinfo else now
-        today, path = pd.Timestamp(et.date()), Path(path)
-        prev = bars.groupby("Symbol")[["Close", "Volume"]].shift(1)
-        base = np.column_stack([prev["Close"]] * 4 + [prev["Volume"]]).astype(float)
-        saved = db.read_csv(path, parse_dates=["Date"]) if db.exists(path) else pd.DataFrame(columns=["Date", "Symbol", *BAR_COLS])
-        state = json.loads(Path(state_path).read_text()) if Path(state_path).exists() else {}
-        traded = str(state.get("last_decision") or "") >= str(today.date())
-        live = bars["Date"].eq(today) & (decision_bar_ready(now) and et.hour * 60 + et.minute < 16 * 60 + 30 and not traded)
-        if live.any():   # the 2:30 run: save today's bar (it is the bar being traded, so it is used as is)
-            with np.errstate(divide="ignore", invalid="ignore"):
-                ratio = bars.loc[live, BAR_COLS].to_numpy(float) / base[live.to_numpy()]
-            new = bars.loc[live, ["Date", "Symbol"]].assign(**dict(zip(BAR_COLS, ratio.T)))
-            saved = pd.concat([saved[saved["Date"] != today], new]) if len(saved) else new
-            saved.pipe(db.to_csv, path, index=False)          # one SQLite transaction (all or nothing)
-            saved = saved[saved["Date"] != today]
-        if not len(saved):
-            return bars
-        r = bars[["Date", "Symbol"]].merge(saved, on=["Date", "Symbol"], how="left")[BAR_COLS].to_numpy(float)
-        fix = np.isfinite(r) & np.isfinite(base)
-        if not fix.any():
-            return bars
-        vals = bars[BAR_COLS].to_numpy(float)
-        vals[fix] = (r * base)[fix]
-        return bars.assign(**dict(zip(BAR_COLS, vals.T)))
+        saved = db.read_csv(path, parse_dates=["Date"]) if db.exists(path) else None
+        if saved is not None and len(saved):
+            return _apply_decision_bar_ratios(bars, saved)
     except Exception as e:
-        log.warning("decision bars (Reports/decision_bars.csv) not used: %s", e)
-        return bars
+        msg2 = (f"ERROR: could not apply stored decision-day ratios ({type(e).__name__}: {e}). "
+                "Returning input bars unchanged (Friday trading is not blocked).")
+        log.error(msg2)
+        print(msg2, flush=True)
+    return bars
 
 def load_long_bars(symbols=None, start=None, end=None):
     """Daily OHLCV from the SQLite bars_daily table (single source of truth). Same columns as fetch_daily_bars."""

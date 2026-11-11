@@ -35,7 +35,14 @@ def trend_deltas_text(ticker_df, windows=(14, 50, 200)):
     return text
 
 def _tone(value, high, mid):
-    return "strong" if value > high else "mixed" if value >= mid else "weak"
+    """Describe a saved score. Missing / non-finite values are 'unknown', not 'weak'."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "unknown"
+    if v != v:          # NaN
+        return "unknown"
+    return "strong" if v > high else "mixed" if v >= mid else "weak"
 
 def ai_stock_summary(ticker, ticker_df, signal, why):
     """A short read of one ticker from the saved scores. No model call."""
@@ -48,9 +55,9 @@ def ai_stock_summary(ticker, ticker_df, signal, why):
     rec = {"Buy": "BULLISH", "Hold": "HOLD", "Sold": "BEARISH"}.get(signal, "HOLD")
     return (f"{ticker} is {signal}{why_bit} on the weekly strategy. "
             f"The close is above {above} of the 5 moving averages. "
-            f"Technicals look {_tone(float(latest['Technical_Score']), 40, 0)}, "
-            f"the balance sheet looks {_tone(float(latest['Fundamental_Weight']), 5, 2)}, "
-            f"and the saved news tone looks {_tone(float(latest['SentimentScore']), 0, 0)}. "
+            f"Technicals look {_tone(latest.get('Technical_Score'), 40, 0)}, "
+            f"the balance sheet looks {_tone(latest.get('Fundamental_Weight'), 5, 2)}, "
+            f"and the saved news tone looks {_tone(latest.get('SentimentScore'), 0, 0)}. "
             f"{recent}\n\n"
             f"Recommendation: {rec}. This follows the strategy signal already in force, read with the trend and those scores.")
 

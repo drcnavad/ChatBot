@@ -6,8 +6,9 @@ week's last session; no Mon-Thu trades since Nov 4). A stock more than 15% above
 (a held one in the top 10 is kept; held = this ledger). Blocked picks (earnings within 5 days, do_not_buy)
 are replaced by the next eligible, not stretched stock ranked 20 or better. Soft QQQ regime; do_not_sell never sold.
 
-Sizing: target = (equity × 0.99 × regime) / 10 per stock (equal weight; regime = 0.5 when QQQ closes at or below its
-200-day average on the decision day, else 1 - Chirag, Nov 8, 2026); leftover cash stays cash (Chirag Oct 31).
+Sizing: equal weight (equity × 0.99 × regime) / n per stock, then capped at 15% of equity (backtest_engine.MAX_WEIGHT);
+regime = 0.5 when QQQ closes at or below its 200-day average on the decision day, else 1 (Chirag, Nov 8, 2026).
+Excess over 15% and unfilled slots stay cash.
 
 Ledger (Reports/sleeve_ledger.json, version 4): share count per symbol and cash after the planned trades. Next run
 (reconcile): live positions are matched to the ledger; a position the ledger does not claim is sold (do_not_sell kept);
@@ -142,9 +143,8 @@ def display_ranking(h, day, inp=None):
     return pd.concat([r.astype(float), rs]) if len(rs) else r
 
 def live_ranks(day=None, inp=None, all_stocks=False):
-    """{symbol: (rank, score)} of the live line (RS short-term) at `day` (default: the latest close) - display only. The
-    pipeline's Strategy_Rank / Strategy_Score columns are a forward-test input with the old selection fields, so the
-    dashboard and the chatbot show these instead (Oct 27, 2026)."""
+    """{symbol: (rank, score)} of the live line (RS short-term) at `day` (default: the latest close) - display only.
+    The pipeline's Strategy_Rank / Strategy_Score columns are the same live short-term RS rules (WINNER["score"])."""
     inp = inp or inputs()
     day = inp["close"].index[-1] if day is None else day
     r = (display_ranking if all_stocks else ranking)(HALVES[0], day, inp)   # all_stocks: dashboard only (score <= 0 too)
@@ -175,27 +175,162 @@ def save_ledger(led, path=None):
     os.replace(tmp, path)
     return path
 
+def ledger_book_weights(led, close):
+    """{symbol: weight} of the last completed decision, from the live ledger (shares x that day's close / sleeve value).
+    These are what was actually traded, not a later preview that may have been rescaled (e.g. a QQQ-filter rewrite)."""
+    if not led:
+        return {}
+    st = ((led.get("halves") or {}).get(HALVES[0]) or {})
+    shares = st.get("shares") or {}
+    value = float(st.get("value") or 0.0)
+    if value <= 0 or not shares:
+        return {}
+    d_led = pd.Timestamp(led["day"]).normalize()
+    out = {}
+    for s, q in shares.items():
+        q = float(q or 0.0)
+        if q <= 0:
+            continue
+        px = None
+        if close is not None and s in getattr(close, "columns", []) and d_led in close.index:
+            px = _num(close.at[d_led, s])
+        if px:
+            out[s] = q * px / value
+    return out
+
+
+def _completed_orders(day):
+    """({bought}, {sold outright}) from the live order log on `day` (completed rows only)."""
+    path = os.path.join(REPORTS, "live_orders_log.csv")
+    if not db.exists(path):
+        return set(), set()
+    try:
+        log = db.read_csv(path)
+    except Exception:
+        return set(), set()
+    if log is None or not len(log):
+        return set(), set()
+    col = "As_Of" if "As_Of" in log.columns else ("Date" if "Date" in log.columns else None)
+    if not col:
+        return set(), set()
+    day_s = pd.Timestamp(day).date().isoformat()
+    asof = pd.to_datetime(log[col], errors="coerce").dt.strftime("%Y-%m-%d")
+    rows = log[asof.eq(day_s)]
+    if "Status" in rows.columns:
+        rows = rows[rows["Status"].astype(str).str.contains("COMPLETED", case=False, na=False)]
+    if not len(rows) or "Side" not in rows.columns:
+        return set(), set()
+    bought = set(rows.loc[rows["Side"].astype(str).str.upper().eq("BUY"), "Symbol"].astype(str))
+    sold = set(rows.loc[rows["Side"].astype(str).str.upper().eq("SELL"), "Symbol"].astype(str))
+    return bought, sold
+
+
+def write_midweek_summary(day, path=None, inp=None, led=None):
+    """Write Reports/strategy_midweek_check.csv: last completed decision from the live ledger (and order log), plus a
+    labeled preview of the next Friday. Does not rewrite the traded book as a later target list."""
+    import backtest_engine as be
+    path = path or os.path.join(REPORTS, "strategy_midweek_check.csv")
+    inp = inp or inputs()
+    d = pd.Timestamp(day).normalize()
+    H = HALVES[0]
+    close = inp.get("close")
+    led_w = ledger_book_weights(led, close)
+    last = pd.Timestamp(led["day"]).normalize() if led and led.get("day") else None
+    names = ", ".join(sorted(led_w) or ((led or {}).get("halves") or {}).get(H, {}).get("tags") or [])
+    invested = sum(led_w.values()) if led_w else 0.0
+    bought, sold = _completed_orders(last) if last is not None else (set(), set())
+    held = set(led_w) or set(((led or {}).get("halves") or {}).get(H, {}).get("shares") or {})
+    sold_out = sorted(sold - held)
+    bought = sorted(bought)
+
+    def _day(x):
+        t = pd.Timestamp(x)
+        return f"{t:%a %b} {t.day}"
+
+    if last is not None:
+        f0 = be.next_sessions(last, 1)[0]
+        trade_bit = ""
+        if sold_out or bought:
+            bits = []
+            if sold_out:
+                bits.append("sold " + ", ".join(sold_out))
+            if bought:
+                bits.append("bought " + ", ".join(bought))
+            trade_bit = " Traded that day: " + "; ".join(bits) + "."
+        msg = (f"{STRATEGY[H]}: last completed decision {_day(last)} (from the live ledger): "
+               f"held {names} ({len(led_w) or len(held)} names, {invested:.1%} invested).{trade_bit} "
+               f"These are the names and weights that were actually traded, not a later preview.")
+        event_date, applies = last, f0
+        action = "REBALANCE"
+        sell, buy = ", ".join(sold_out), ", ".join(bought)
+        nxt_d, nxt_kind, nxt_fill = be.next_decision(last)
+    else:
+        nxt_d, nxt_kind, nxt_fill = be.next_decision(d)
+        msg = f"{STRATEGY[H]}: no sleeve ledger yet; nothing to record as a completed decision."
+        event_date, applies = d, d
+        action, sell, buy = "NONE", "", ""
+
+    preview_for, _, preview_fill = (nxt_d, nxt_kind, nxt_fill)
+    _, p_inp = rebalance_inputs(d, inp)
+    pw = half_weights(H, d, p_inp)
+    pw = pw[pw > 0]
+    prev_names = ", ".join(sorted(pw.index))
+    prev_inv = float(pw.sum()) if len(pw) else 0.0
+    next_msg = (f"Preview for next Friday {_day(preview_for)} {be.slot_text(preview_for)} "
+                f"(not yet traded; ranks as of {_day(d)}): {prev_names} ({len(pw)} names, {prev_inv:.1%} invested). "
+                f"Orders would go out {_day(preview_for)} at {be.slot_text(preview_for)}, any rest "
+                f"{_day(preview_fill)} at 9 AM CT.")
+    import backtest_engine as be2
+    row = {
+        "As_Of": d.date().isoformat(),
+        "Event": "full rebalance" if last is not None else "none",
+        "Event_Date": pd.Timestamp(event_date).date().isoformat(),
+        "Applies_To_Open": pd.Timestamp(applies).date().isoformat(),
+        "Action": action,
+        "Sell": sell,
+        "Buy": buy,
+        "Message": msg,
+        "Is_Latest": 1,
+        "Next_Message": next_msg,
+        "Rules": be2.WINNER.get("tag", ""),
+        "Preview_For": pd.Timestamp(preview_for).date().isoformat(),
+    }
+    pd.DataFrame([row]).pipe(db.to_csv, path, index=False)
+    return path
+
+
 def write_strategy_picks(day, path=None, inp=None, led=None):
-    """Write Reports/strategy_picks.csv = the live RS short-term book on session `day` (forward-test weights: 9.9% each,
-    4.95% when the QQQ filter is off). Written by main_signal_analysis.ipynb every run (the trade step's freshness check
-    reads As_Of) and again by paper_trade after a successful trade (led = the saved ledger: Held)."""
+    """Write Reports/strategy_picks.csv. Strategy_Weight = the last completed decision from the live ledger (what was
+    actually traded). Provisional_Weight = a preview of the next Friday, through the same finalize_book path, labeled
+    Preview_For. As_Of is the latest session (the trade step's freshness check reads it). Written by
+    main_signal_analysis.ipynb every run and again by paper_trade after a successful trade."""
+    import backtest_engine as be
     import sector_mapping as sm
     path = path or os.path.join(REPORTS, "strategy_picks.csv")
     inp = inp or inputs()
     d = pd.Timestamp(day).normalize()
-    w = half_weights(HALVES[0], d, inp)
-    w = w[w > 0].sort_values(ascending=False)
-    r = ranking(HALVES[0], d, inp)
     close = inp["close"]
     soon = inp.get("soon")
+    r = ranking(HALVES[0], d, inp)
     tags = set((led or {}).get("halves", {}).get(HALVES[0], {}).get("tags") or [])
-    wk = inp["weekly"]
-    reb = wk[wk & (wk.index <= d)].index
-    last_reb = reb[-1].date().isoformat() if len(reb) else d.date().isoformat()   # the book was set on the last Friday
+    shares = set(((led or {}).get("halves") or {}).get(HALVES[0], {}).get("shares") or [])
+    held = tags | shares
+    led_w = ledger_book_weights(led, close)
+    last_reb = pd.Timestamp(led["day"]).date().isoformat() if led and led.get("day") else d.date().isoformat()
+    if led and led.get("day"):
+        preview_for = be.next_decision(pd.Timestamp(led["day"]).normalize())[0]
+    else:
+        preview_for = be.next_decision(d)[0]
+    _, p_inp = rebalance_inputs(d, inp)
+    pw = half_weights(HALVES[0], d, p_inp)
+    pw = pw[pw > 0]
     reg = inp.get("regime")
     regime_on = int(bool(reg.get(d, False))) if reg is not None else 0
+    symbols = list(dict.fromkeys(list(led_w) + list(pw.index)))
     rows = []
-    for s, wt in w.items():
+    for s in symbols:
+        wt = float(led_w.get(s, 0.0) or 0.0)
+        pwt = float(pw.get(s, 0.0) or 0.0)
         rank = int(r.index.get_loc(s)) + 1 if s in r.index else None
         score = float(r.get(s)) if s in r.index else None
         px = float(close.at[d, s]) if s in close.columns and d in close.index and _num(close.at[d, s]) else None
@@ -206,13 +341,14 @@ def write_strategy_picks(day, path=None, inp=None, led=None):
             "As_Of": d.date().isoformat(),
             "Last_Rebalance": last_reb,
             "Last_Decision": last_reb,
+            "Preview_For": pd.Timestamp(preview_for).date().isoformat(),
             "Strategy": STRATEGY[HALVES[0]],
             "Regime_On": regime_on,
             "Symbol": s,
             "Sector": (sm.symbol_sector.get(s, "") if hasattr(sm, "symbol_sector") else ""),
-            "Held": 1 if s in tags else 0,
-            "Strategy_Weight": round(float(wt), 4),
-            "Provisional_Weight": round(float(wt), 4),
+            "Held": 1 if s in held else 0,
+            "Strategy_Weight": round(wt, 4),
+            "Provisional_Weight": round(pwt, 4),
             "Strategy_Score": None if score is None else round(score, 4),
             "Strategy_Rank": rank,
             "Technical_Score": None,
@@ -221,6 +357,8 @@ def write_strategy_picks(day, path=None, inp=None, led=None):
             "Next_Earnings": earn,
         })
     out = pd.DataFrame(rows)
+    if len(out):
+        out = out.sort_values(["Strategy_Weight", "Provisional_Weight"], ascending=False)
     out.pipe(db.to_csv, path, index=False)
     return path
 
@@ -288,63 +426,133 @@ def exit_rank(h):
         pass
     return 20
 
-def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, invested):
-    """`n_picks` slots at equal weight invested/n. Drop NEW blocked picks; fill from the live ranking.
-    Held blocked names stay (build_orders freezes top-ups). Held replacements for blocked ideal
-    picks (e.g. MA/V standing in for earlier blocked picks) stay when still ranked <= exit_below
-    (live Mon–Thu rule); they used to be marked taken and sold on the next plan."""
-    held_set = set(held)
-    tw = {s: 0.0 for s in names if s not in blocked or s in held_set}
-    r = ranking(h, d, inp)
-    # exit=(20, 10) on the live RS short-term strategy: keep a held stand-in while rank <= 20
-    exit_below = exit_rank(h)
-    rank_of = {s: i + 1 for i, s in enumerate(r.index)}
-    for s in held_set:
-        if s in tw or s in blocked or not _num(px.get(s)):
-            continue
-        if rank_of.get(s, 10**9) <= exit_below:
-            tw[s] = 0.0
-    taken = set(tw)
-    soon = inp.get("soon")
-    soon_d = soon.loc[d] if soon is not None and d in soon.index else pd.Series(dtype=bool)
-    sk = _cfg(h).get("stretch", "stretched")
-    cool = inp[sk].loc[d] if _cfg(h).get("cool_buys") and sk in inp and d in inp[sk].index else None
-    pct = 15 if sk == "stretched_live" else 8
+def _sector_key(s):
+    """Sector for the cap. A missing mapping is unique per symbol so fake test tickers are not clumped as 'Other'."""
+    import sector_mapping as sm
+    sec = sm.symbol_sector.get(s) if hasattr(sm, "symbol_sector") else None
+    return sec if sec else f"_{s}"
+
+
+def finalize_book(names, held, rank_of, blocked, stretched, soon, priced, n_picks, invested,
+                  max_rank=20, sector_cap=0.4, max_weight=None):
+    """Shared membership + sizing for live replace_blocked_new_slots and forward_test.cool_buys.
+
+    Keep a held name even if it is stretched or ranked worse than max_rank. Drop an unheld starting pick if it is
+    ranked worse than max_rank, stretched, blocked, soon to report earnings, unpriced, or would break the sector cap
+    (floor(sector_cap * n_picks); missing sector = unique per symbol). Fill remaining slots from rank order with the
+    same gates. If the book is longer than n_picks, keep the best-ranked n (a held name worse than max_rank stays when
+    the book is already exactly n; it drops only if more than n names are present and n better-ranked ones exist).
+    Each slot is min(invested / len(book), max_weight); leftover cash stays cash.
+    """
+    import backtest_engine as be
+    n_picks = int(n_picks)
+    max_rank = int(max_rank) if max_rank else 10 ** 9
+    cap = float(sector_cap) if sector_cap is not None else 0.4
+    cap_n = n_picks if cap >= 1 else max(1, int(math.floor(cap * n_picks + 1e-9)))
+    max_w = float(max_weight if max_weight is not None else getattr(be, "MAX_WEIGHT", 0.15))
+    held_set, blocked, stretched, soon, priced = set(held or ()), dict(blocked or {}), set(stretched or ()), set(soon or ()), set(priced or ())
+    rank_of = dict(rank_of or {})
     skipped = []
-    for s in r.index:
-        if len(tw) >= int(n_picks):
-            break
-        if rank_of[s] > exit_below:      # never refill with a stock ranked worse than exit_below (LIN #21, Nov 3, 2026)
-            break
-        if s in taken:
-            continue
+
+    def reason_unheld(s):
+        if rank_of.get(s, 10 ** 9) > max_rank:
+            return f"rank {rank_of.get(s, '?')} > {max_rank}"
         if s in blocked:
-            skipped.append(f"{s} #{rank_of[s]} ({blocked[s]})")
+            return str(blocked[s])
+        if s in stretched:
+            return "stretched"
+        if s in soon:
+            return "earnings within 5 days"
+        if s not in priced:
+            return "no price"
+        return None
+
+    book, seen = [], set()
+
+    def add(s):
+        if s not in seen:
+            book.append(s)
+            seen.add(s)
+
+    # Starting names, best rank first so a sector-cap drop prefers the worse unheld name
+    start = list(names or [])
+    start.sort(key=lambda s: rank_of.get(s, 10 ** 9))
+    counts = {}
+    for s in start:
+        if s in held_set:
+            add(s)
+            counts[_sector_key(s)] = counts.get(_sector_key(s), 0) + 1
             continue
-        if cool is not None and bool(cool.get(s, False)):   # skip stretched buys (live from Nov 6, 2026)
-            skipped.append(f"{s} #{rank_of[s]} (more than {pct}% over its 20-day average)")
+        why = reason_unheld(s)
+        if why:
+            skipped.append(f"{s} #{rank_of.get(s, '?')} ({why})")
             continue
-        if bool(soon_d.get(s, False)):   # earnings within 5 days: never a NEW buy (refills skipped it before Nov 3, 2026)
-            skipped.append(f"{s} #{rank_of[s]} (earnings within 5 days)")
+        sec = _sector_key(s)
+        if counts.get(sec, 0) >= cap_n:
+            skipped.append(f"{s} #{rank_of.get(s, '?')} (sector cap {cap_n})")
             continue
-        if not _num(px.get(s)):
-            skipped.append(f"{s} #{rank_of[s]} (no price)")
+        add(s)
+        counts[sec] = counts.get(sec, 0) + 1
+    for s in held_set:
+        if s in seen:
             continue
-        tw[s] = 0.0
-        taken.add(s)
-    if skipped:
-        print(f"  Refill candidates skipped (rank <= {exit_below}): " + "; ".join(skipped))
-    if len(tw) < int(n_picks):
-        print(f"  Only {len(tw)} of {int(n_picks)} slots filled with stocks ranked <= {exit_below}; the rest stays in cash")
-    final = [s for s in tw if (s not in blocked or s in held_set) and (_num(px.get(s)) or s in held_set)]
-    if not final:
+        if s in priced or s in start:
+            add(s)
+            counts[_sector_key(s)] = counts.get(_sector_key(s), 0) + 1
+    ranked = sorted(rank_of, key=lambda s: rank_of[s])
+    for s in ranked:
+        if len(book) >= n_picks:
+            break
+        if rank_of[s] > max_rank:
+            break
+        if s in seen:
+            continue
+        why = reason_unheld(s)
+        if why:
+            skipped.append(f"{s} #{rank_of[s]} ({why})")
+            continue
+        sec = _sector_key(s)
+        if counts.get(sec, 0) >= cap_n:
+            skipped.append(f"{s} #{rank_of[s]} (sector cap {cap_n})")
+            continue
+        add(s)
+        counts[sec] = counts.get(sec, 0) + 1
+    if skipped and (book or names or held_set):
+        print(f"  Refill candidates skipped (rank <= {max_rank}, max {cap_n}/sector): " + "; ".join(skipped))
+    if len(book) < n_picks and (book or names or held_set):
+        print(f"  Only {len(book)} of {n_picks} slots filled with stocks ranked <= {max_rank}; the rest stays in cash")
+    if len(book) > n_picks:
+        book = sorted(book, key=lambda s: rank_of.get(s, 10 ** 9))[:n_picks]
+    if not book:
         return {}
-    # Prefer n_picks names: if we kept too many holds + ideal picks, drop worst-ranked extras
-    # that are not needed (should be rare). Equal weight the final book.
-    if len(final) > int(n_picks):
-        final = sorted(final, key=lambda s: rank_of.get(s, 10**9))[:int(n_picks)]
-    slot = float(invested) / len(final)
-    return {s: slot for s in final}
+    slot = min(float(invested) / len(book), max_w)
+    return {s: slot for s in book}
+
+
+def replace_blocked_new_slots(h, d, names, held, blocked, px, inp, n_picks, invested):
+    """`n_picks` slots via finalize_book (sector cap, rank-20 new buys, 15% weight cap). Held names stay even if
+    stretched or ranked worse than 20; new / swapped-in names must pass the same gates as the forward test."""
+    import backtest_engine as be
+    r = ranking(h, d, inp)
+    rank_of = {s: i + 1 for i, s in enumerate(r.index)}
+    d = pd.Timestamp(d).normalize()
+    soon = inp.get("soon") if inp is not None else None
+    soon_d = soon.loc[d] if soon is not None and d in soon.index else pd.Series(dtype=bool)
+    try:
+        sk = _cfg(h).get("stretch", "stretched")
+        cool = inp[sk].loc[d] if inp is not None and _cfg(h).get("cool_buys") and sk in inp and d in inp[sk].index else None
+    except Exception:
+        cool = None
+    stretched = {s for s in (cool.index if cool is not None else []) if bool(cool.get(s, False))}
+    soon_set = {s for s in soon_d.index if bool(soon_d.get(s, False))}
+    priced = {s for s, v in (px or {}).items() if _num(v)}
+    try:
+        sel = (_cfg(h).get("select") or {})
+        sector_cap = sel.get("sector_cap", be.WINNER.get("sector_cap", 0.4))
+    except Exception:
+        sector_cap = be.WINNER.get("sector_cap", 0.4)
+    return finalize_book(names, held, rank_of, blocked, stretched, soon_set, priced, n_picks, invested,
+                         max_rank=exit_rank(h), sector_cap=sector_cap, max_weight=getattr(be, "MAX_WEIGHT", 0.15))
 
 def regime_scale(d, inp):
     """Soft QQQ market filter, as the forward test applies it (backtest_engine.rank_targets): WINNER['regime_scale'] (0.5)
@@ -359,8 +567,8 @@ def regime_scale(d, inp):
     return 1.0 if on else float(W["regime_scale"])
 
 def half_plan(h, d, st, px, value, init, inp, no_buy, no_sell, fractional, min_value, rebalance=False):
-    """One sizing rule on a trade day: each of the 10 book names gets invested/n (equal weight).
-    Exits leave the book. Off-day: holds keep shares. No fill_idle / caps / scale-adds / renormalize."""
+    """One sizing rule on a trade day: finalize_book (equal weight invested/n, then the 15% per-stock cap).
+    Exits leave the book. Off-day: holds keep shares. No fill_idle / scale-adds / renormalize."""
     import forward_test as ft
     import paper_trade as pt
     w = half_weights(h, d, inp)  # membership only — weight values are not used for sizing

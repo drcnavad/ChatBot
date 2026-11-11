@@ -27,7 +27,7 @@ check(be.winner_label(90)[0] == "RS-S-U90" and be.winner_label(90)[1].startswith
 names = {c["name"] for c in ft.STRATEGIES}
 check(ft.LIVE == sleeves.STRATEGY["rs_short"] and {ft.LIVE, ft.RS_FRIDAYS, ft.BLEND} <= names,
       "the live line is RS short-term; RS Fridays and the 50/50 stay as paper lines")
-check(pt.MAX_ORDER_PCT == 0.20, "order backstop = 20% of equity (above equal ~9.9%)")
+check(pt.MAX_ORDER_PCT == 0.15, "order backstop = 15% of equity (matches MAX_WEIGHT)")
 check(sleeves.LEDGER_JSON.startswith(tempfile.gettempdir()) or "tmp" in sleeves.LEDGER_JSON, "test ledger is a temp file")
 
 days = pd.date_range("2026-10-26", "2026-12-04")
@@ -43,26 +43,35 @@ d = inp["close"].index[-1]
 px = {s: float(inp["close"].at[d, s]) for s in inp["close"].columns if pd.notna(inp["close"].at[d, s])}
 orders, info = sleeves.plan(d, {}, 100000.0, px, ledger=None, inp=inp)
 check(abs(info["values"]["rs_short"] - 100000) < 1, "switch: the sleeve = the whole equity", info["values"])
-w = sleeves.half_weights("rs_short", d, inp)
 # Oct 29, 2026: live line has no defensive sleeve — top 10 only (~9.9% each after 99% scale)
 import sector_mapping as sm
 cfg = next(c for c in ft.STRATEGIES if c["name"] == ft.LIVE)
 check(cfg.get("sleeve") is False, "live RS short-term sleeve=False (no defensive)", cfg.get("sleeve"))
+_d, preview_inp = sleeves.rebalance_inputs(d, inp)
+w = sleeves.half_weights("rs_short", _d, preview_inp)
 forced = [s for s in sm.defensive if s in w.index and float(w[s]) > 0]
 # a defensive name may still appear if it ranks in the top 10 on its own
-d_reb = inp["weekly"][inp["weekly"] & (inp["weekly"].index <= d)].index[-1]   # the book is set on the last rebalance
-top = set(sleeves.ranking("rs_short", d_reb, inp).index[:20])       # top 10 + fills for stretched picks (Nov 6, 2026)
+top = set(sleeves.ranking("rs_short", _d, preview_inp).index[:20])
 check(all(s in top for s in forced), "defensive names in targets only if they rank top 10 (or fill a stretched pick)", forced)
-inv = 0.99 * sleeves.regime_scale(d_reb, inp)                       # QQQ at/below its 200-day on the rebalance: 49.5%
+inv = 0.99 * sleeves.regime_scale(_d, preview_inp)                  # QQQ at/below its 200-day on the rebalance: 49.5%
 check(len(w[w > 0]) <= 10 and abs(float(w[w > 0].sum()) - inv) < 0.02,
       f"at most 10 targets, ~{inv:.1%} invested (99% x the QQQ regime)", (len(w[w > 0]), float(w[w > 0].sum())))
 check(sleeves.regime_scale(d, {"regime": pd.Series({d: True})}) == 1.0
       and sleeves.regime_scale(d, {"regime": pd.Series({d: False})}) == 0.5
       and sleeves.regime_scale(d, {"regime": pd.Series(dtype=bool)}) == 0.5,
       "regime_scale: 1 when QQQ is above its 200-day, 0.5 at/below it or with no data")
+# A midweek first-run plan re-finalizes the carried Friday book; the next-Friday preview starts from a
+# fresh winner_targets row, so membership can differ. Buys must follow the plan's own targets, and
+# replace_blocked must be idempotent on that Friday preview (live and FT share finalize_book).
 buys = orders[orders["Side"] == "BUY"].set_index("Symbol")
-check(set(buys.index) == set(w[w > 0].index) and all(abs(buys.at[s, "Est_Value"] - 100000 * w[s]) < 0.02 * 100000 * 0.15
-      for s in buys.index), "buys = the forward-test weights x equity", buys["Est_Value"].to_dict())
+tw = info["targets"]["rs_short"]
+check(set(buys.index) == set(tw) and all(abs(buys.at[s, "Est_Value"] - 100000 * tw[s]) < 0.02 * 100000 * 0.15
+      for s in buys.index), "buys follow the plan targets x equity", buys["Est_Value"].to_dict())
+held = set(preview_inp.get("held") or [])
+rb = sleeves.replace_blocked_new_slots("rs_short", _d, list(w[w > 0].index), held, {}, px, preview_inp,
+                                       10, float(w[w > 0].sum()))
+check(set(rb) == set(w[w > 0].index) and all(abs(rb[s] - float(w[s])) < 1e-9 for s in rb),
+      "replace_blocked is idempotent on the FT Friday preview (live and FT match)", (sorted(rb), sorted(w[w > 0].index)))
 led = info["ledger"]
 check(led["version"] == 4 and list(led["halves"]) == ["rs_short"] and led["halves"]["rs_short"]["cash"] >= -1, "v4 ledger, not overspent", led["halves"])
 # do_not_sell / do_not_buy
@@ -76,7 +85,7 @@ check(blk not in set(o3[o3["Side"] == "BUY"]["Symbol"]), "do_not_buy: never boug
 o4, i4 = sleeves.plan(d, {}, 100000.0, px, ledger=None, inp=inp, no_buy={blk: "x"})
 b4 = o4[o4["Side"] == "BUY"]["Est_Value"].sum()
 check(abs(b4 - orders[orders["Side"] == "BUY"]["Est_Value"].sum()) < 300, "blocked pick: its cash is spread over the other buys", b4)
-# equal-weight slot: invested/n (no fill_idle / name cap)
+# equal-weight slot, then the 15% per-stock cap (excess stays cash)
 from unittest import mock as _mock
 _fake = __import__("pandas").Series([3.0, 2.0, 1.0], index=["A", "B", "D"])
 with _mock.patch.object(sleeves, "ranking", return_value=_fake):
@@ -84,8 +93,8 @@ with _mock.patch.object(sleeves, "ranking", return_value=_fake):
         "rs_short", d, ["A", "B", "C"], set(), {"C": "x"},
         {"A": 1, "B": 1, "C": 1, "D": 1}, inp, 3, 0.99)
 check("C" not in slot and "D" in slot, "blocked new replaced", slot)
-check(len(slot) == 3 and all(abs(v - 0.33) < 1e-12 for v in slot.values()),
-      "replace_blocked: equal slots invested/n", slot)
+check(len(slot) == 3 and all(abs(v - 0.15) < 1e-12 for v in slot.values()),
+      "replace_blocked: equal slots capped at MAX_WEIGHT 15%", slot)
 check(not hasattr(sleeves, "fill_idle"), "fill_idle removed")
 
 print("LIVE RS SHORT-TERM OK" if not FAIL else f"LIVE RS SHORT-TERM FAILURES ({len(FAIL)}): {FAIL}")

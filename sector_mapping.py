@@ -52,7 +52,7 @@ do_not_buy = ['PANW', 'SHOP', 'LYV']   # AMD, ARM, BE, TSLA, VRT removed by Chir
 do_not_sell = []  # APA removed Nov 4, 2026 (Chirag); the list stays for later use
 # Defensive sleeve of Oct 15, 2026 (LMT, NOC, ABBV, KO; PFE dropped Oct 19). Live RS short-term dropped it Oct 29, 2026
 # (Chirag: top 10 only). Kept only for the other pinned forward-test 'Now' paper lines (forward_test NOW sleeve=True).
-defensive = [s for s in ['LMT', 'NOC', 'ABBV', 'PFE', 'KO'] if s in stock_symbols]
+defensive = [s for s in ['LMT', 'NOC', 'ABBV', 'PFE', 'KO'] if s in stock_symbols]  # 4 names: PFE is not in the universe
 
 # SPDR sector ETFs: each stock's relative strength is measured against its sector's ETF.
 sector_etfs = {

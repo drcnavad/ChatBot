@@ -102,7 +102,7 @@ GROUP_LABEL = {
 # the defensive sleeve (sector_mapping.defensive; paper lines only — live RS short-term dropped it Oct 29, 2026),
 # Mon-Thu sell worse than rank 20 refilled from the top 10 / next eligible rank <= 20, do_not_buy never bought;
 # "exit" = (sell below, refill from top), "regime" = another market filter; no spare-cash buys.
-PLAIN = {"max_pick_rank": None, "cap_soft": False, "sector_cap": 0.4}  # walk every rank, strict max 4/sector (pinned; live is now 1.0)
+PLAIN = {"max_pick_rank": None, "cap_soft": False, "sector_cap": 0.4}  # walk every rank, strict max 4/sector (live too; replacements use the same cap)
 # The mid-week rules every C6 "mwf" strategy started with on Oct 2, 2026 (live until 2026-10-07), pinned here so a later
 # live change (t187u: no top-3 swap, exit below 20) never alters a forward-test strategy: top-3 swap below rank 15,
 # exit below rank 30 refilled from the best non-held top 10. Days Mon-Thu like live (Chirag, Oct 15; Mon/Wed before).
@@ -712,7 +712,10 @@ def strategy_inputs(sig, facts=None, earnings=None, bench=None, bars=None, sent_
     stretched = ma20.gt(1.08)                   # Nov 4: close more than 8% over its 20-day average (the comparison lines)
     stretched_live = ma20.gt(1.15)              # live (LIVE_COOL) from Nov 4, 2026 (Chirag t285s1180): more than 15%
     scores = {
-        "live": live, "now": f["Strategy_Score"], "tech": tech, "rs": rs, "rs_short": rs_w((10, 21, 63)),
+        "live": live,
+        # "now" stays the old pipeline low-vol score so paper lines that still read it do not jump to live RS
+        # when Strategy_Score in signal_analysis.csv becomes the live short-term RS.
+        "now": (1 / vol).where(up), "tech": tech, "rs": rs, "rs_short": rs_w((10, 21, 63)),
         "rs_short_63": rs_w((10, 21, 63, 63)),                        # Nov 4: 63-day weighted double (1:1:2)
         "rs_short_cool": rs_w((10, 21, 63)).where(~stretched, -1.0),   # Nov 4: skip >8% over 20d avg
         "rs_short_cold": rs_w((10, 21, 63)).where(~hot2 | c.isna(), -1.0),   # Nov 4: skip the 2 best 1-year sectors
@@ -892,18 +895,24 @@ def strategy_targets(cfg, inp):
     tgt = tgt.mask(_dnb(inp).reindex(index=tgt.index, columns=tgt.columns, fill_value=False), 0.0)   # its weight: cash
     w = be.live_weights(tgt).reindex(columns=inp["close"].columns).fillna(0.0)
     if cfg.get("cool_buys"):
+        sel = {**PIN, **(cfg.get("select") or {})}
+        soon = inp.get("soon") if cfg.get("earnings", EARN_DAYS) is not None else None
         w = cool_buys(w, inp["scores"][cfg["score"]], inp["eligible"] & ~_dnb(inp), inp[cfg.get("stretch", "stretched")], inp["weekly"],
-                      held=inp.get("held"))
+                      held=inp.get("held"), n_picks=int(sel.get("n") or 10),
+                      sector_cap=float(sel.get("sector_cap") if sel.get("sector_cap") is not None else 0.4),
+                      soon=soon, close=inp.get("close"), max_rank=20)
         return score_weights(w, inp["scores"][cfg["score"]]) if cfg.get("score_weight") else w
     if not cfg.get("tpsl"):
         return w
     ref = dict(score=inp["scores"][cfg["score"]], ok=inp["eligible"] & ~_dnb(inp)) if cfg.get("refill") else {}
     return tpsl_weights(w, inp["close"], inp["weekly"], *cfg["tpsl"], **ref)
 
-def score_weights(w, score):
+def score_weights(w, score, max_weight=None):
     """The same names and total weight per day, split in proportion to score + 101 (scores are -100..100) as of each
-    change of the book (a rebalance); held unchanged in between."""
+    change of the book (a rebalance); held unchanged in between. Each name is then capped at max_weight (live 15%);
+    the excess stays cash."""
     W, S = w.to_numpy(float).copy(), score.reindex_like(w).to_numpy(float)
+    cap = float(max_weight if max_weight is not None else be.MAX_WEIGHT)
     for t in range(len(W)):
         on = W[t] > 0
         if t and np.array_equal(on, W[t - 1] > 0) and np.allclose(W[t], w.iloc[t - 1].to_numpy()):
@@ -911,31 +920,54 @@ def score_weights(w, score):
         if on.any():
             x = np.nan_to_num(S[t, on], nan=0.0) + 101
             W[t, on] = W[t, on].sum() * x / x.sum()
+        W[t] = np.minimum(W[t], cap)
     return pd.DataFrame(W, index=w.index, columns=w.columns)
 
-def cool_buys(w, score, ok, stretched, weekly, held=None):
-    """Rebalance days (weekly): a pick not held the day before that is stretched is swapped for the next best eligible,
-    not stretched stock (score > 0); a held stretched pick stays. Other days keep the last rebalance's book. `held`
-    (live: the ledger's symbols) also counts as held on the last day."""
-    W, S = w.to_numpy(float).copy(), score.reindex_like(w).to_numpy(float)
-    E, X = ok.reindex_like(w).fillna(False).to_numpy(bool), stretched.reindex_like(w).fillna(False).to_numpy(bool)
+def cool_buys(w, score, ok, stretched, weekly, held=None, n_picks=10, sector_cap=0.4, soon=None,
+              close=None, max_rank=20, max_weight=None):
+    """Rebalance days (including the first): rebuild the book with sleeves.finalize_book so the forward-test live line
+    matches live sizing (rank-20 new buys, sector cap on swapped-in slots, 15% weight cap, drop unheld starting picks
+    worse than rank 20). A held name (previous day's book, plus `held` on the last day — live: the ledger) is kept even
+    if stretched or ranked worse than max_rank. Other days keep the last rebalance's book."""
+    import sleeves
+    W = w.to_numpy(float).copy()
+    cols = list(w.columns)
+    S = score.reindex_like(w).to_numpy(float)
+    E = ok.reindex_like(w).fillna(False).to_numpy(bool)
+    X = stretched.reindex_like(w).fillna(False).to_numpy(bool)
     reb = weekly.reindex(w.index).fillna(False).to_numpy(bool)
-    for t in range(1, len(W)):
+    soon_a = soon.reindex_like(w).fillna(False).to_numpy(bool) if soon is not None else np.zeros(W.shape, bool)
+    C = close.reindex_like(w).to_numpy(float) if close is not None else np.ones(W.shape)
+    for t in range(len(W)):
         if not reb[t]:
             continue
-        pick = set(np.flatnonzero(W[t] > 0))
-        own = {w.columns.get_loc(s) for s in (held or ()) if s in w.columns} if t == len(W) - 1 else set()
-        new = {j for j in pick if W[t - 1, j] <= 0 and j not in own and X[t, j]}
-        if not new:
+        if float(np.nansum(W[t])) <= 0 and not (t == len(W) - 1 and held):
             continue
-        x = W[t, list(pick)].mean()
-        best = [j for j in np.argsort(-np.nan_to_num(S[t], nan=-np.inf), kind="stable")
-                if S[t, j] > 0 and E[t, j] and not X[t, j] and j not in pick]
-        W[t, list(new)] = 0.0
-        W[t, best[:len(new)]] = x
+        order = np.argsort(-np.nan_to_num(S[t], nan=-np.inf), kind="stable")
+        rank_of, k = {}, 1
+        for j in order:
+            if S[t, j] > 0 and E[t, j]:
+                rank_of[cols[j]] = k
+                k += 1
+        start = [cols[j] for j in np.flatnonzero(W[t] > 0)]
+        prev_held = [cols[j] for j in np.flatnonzero(W[t - 1] > 0)] if t else []
+        if t == len(W) - 1 and held:
+            prev_held = list(set(prev_held) | set(held))
+        stretched_set = {cols[j] for j in np.flatnonzero(X[t])}
+        soon_set = {cols[j] for j in np.flatnonzero(soon_a[t])}
+        priced = {cols[j] for j in range(len(cols)) if np.isfinite(C[t, j]) and C[t, j] > 0}
+        invested = float(np.nansum(W[t]))
+        book = sleeves.finalize_book(start, prev_held, rank_of, {}, stretched_set, soon_set, priced,
+                                     n_picks, invested, max_rank=max_rank, sector_cap=sector_cap,
+                                     max_weight=max_weight)
+        row = np.zeros(W.shape[1])
+        for s, wt in book.items():
+            row[w.columns.get_loc(s)] = wt
+        W[t] = row
         k = t + 1
         while k < len(W) and not reb[k]:
-            W[k] = W[t]; k += 1
+            W[k] = row
+            k += 1
     return pd.DataFrame(W, index=w.index, columns=w.columns)
 
 def tpsl_weights(w, c, weekly, tp, stop, score=None, ok=None):
